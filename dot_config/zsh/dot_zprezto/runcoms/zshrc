@@ -1,0 +1,84 @@
+#
+# Executes commands at the start of an interactive session.
+#
+# Authors:
+#   Sorin Ionescu <sorin.ionescu@gmail.com>
+#
+
+# Source Prezto.
+if [[ -s "${ZDOTDIR:-$HOME}/.zprezto/init.zsh" ]]; then
+  source "${ZDOTDIR:-$HOME}/.zprezto/init.zsh"
+fi
+
+# up arrow for substring search
+bindkey '^[[A' history-substring-search-up
+bindkey '^[[B' history-substring-search-down
+
+# google-cloud-sdk
+source "$(brew --prefix)/share/google-cloud-sdk/path.zsh.inc"
+
+# Autocomplete
+autoload -Uz compinit && compinit
+
+source <(kubectl completion zsh)
+source <(docker completion zsh)
+source <(helm completion zsh)
+source "/opt/homebrew/share/google-cloud-sdk/completion.zsh.inc"
+complete -o nospace -C /opt/homebrew/bin/terraform terraform
+# complete -C "/opt/homebrew/bin/aws_completer" aws
+
+# Functions
+catcopy() {
+    command cat "$@" | pbcopy
+    command cat "$@"
+}
+
+pwdcopy() {
+    command pwd "$@" | tr -d '\n' | pbcopy
+    command pwd "$@"
+}
+
+postgres() {
+    if [[ $1 == "up" ]]; then
+        kubectl apply -f /Users/polo/Documents/kubernetes/postgres/postgres.yml
+    elif [[ $1 == "down" ]]; then
+        kubectl delete -f /Users/polo/Documents/kubernetes/postgres/postgres.yml
+    else
+        echo "Unsupported command: $1"
+    fi
+}
+
+
+# aliases
+# docker
+alias dt="docker build -t test .&&docker run -d --rm -p 80:80 -p 443:443 -p 8080:8080 -p 3000:3000 --name test test"
+alias dst="docker stop test"
+# tool replacement
+alias cat="catcopy"
+alias cd="z"
+alias pwd="pwdcopy"
+alias ls="eza --group-directories-first -a --icons"
+alias vim="nvim"
+# shortend commands
+alias bat="bat -p"
+alias brewup="brew update && brew upgrade && brew cleanup"
+alias c="code ."
+alias caffee="caffeinate -d"
+alias cr="code -r ."
+alias cls="clear"
+alias k="kubectl"
+alias o="open ."
+alias p="poetry"
+alias pa="poetry add"
+alias st="tmux source-file ${XDG_CONFIG_HOME:-$HOME}/tmux/tmux.conf"
+alias sz="source ${ZDOTDIR:-$HOME}/.zshrc"
+alias tf="terraform"
+# other
+alias backup="/Users/polo/Documents/backups/backup.sh"
+alias pretty="npx prettier-init"
+alias setenv='echo '\''{ "venvPath": ".", "venv": ".venv" }'\'' > pyrightconfig.json'
+
+# other tools
+source <(fzf --zsh)
+eval "$(oh-my-posh init zsh --config $HOME/.config/ohmyposh/config.yaml)"
+eval "$(zoxide init zsh)"
