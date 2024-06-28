@@ -195,6 +195,8 @@ return { -- LSP Configuration & Plugins
             format = {
               enabled = false,
             },
+            -- To add other schema shebang other than pattern below define below
+            -- # yaml-language-server: $schema={SchemaURL}
             schemas = {
               -- kubernetes
               kubernetes = { '*.yaml', '*.yml' },
@@ -211,7 +213,7 @@ return { -- LSP Configuration & Plugins
               ['https://raw.githubusercontent.com/compose-spec/compose-spec/master/schema/compose-spec.json'] = { 'docker-compose.yaml', 'docker-compose.yml' },
 
               --- Disable yaml schema validation
-              ['https://json-schema.org/draft-07/schema#'] = { 'values.yaml', 'values.yml', 'ingressroute.yaml' },
+              ['https://json.schemastore.org/yamllint.json'] = { 'values.yaml', 'values.yml', 'ingressroute.yaml' },
             },
           },
         },
