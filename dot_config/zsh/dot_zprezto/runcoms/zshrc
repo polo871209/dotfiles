@@ -28,57 +28,40 @@ complete -o nospace -C /opt/homebrew/bin/terraform terraform
 # complete -C "/opt/homebrew/bin/aws_completer" aws
 
 # Functions
-catcopy() {
-    command cat "$@" | pbcopy
-    command cat "$@"
-}
-
 pwdcopy() {
     command pwd "$@" | tr -d '\n' | pbcopy
     command pwd "$@"
 }
 
-postgres() {
-    if [[ $1 == "up" ]]; then
-        kubectl apply -f /Users/polo/Documents/kubernetes/postgres/postgres.yml
-    elif [[ $1 == "down" ]]; then
-        kubectl delete -f /Users/polo/Documents/kubernetes/postgres/postgres.yml
-    else
-        echo "Unsupported command: $1"
-    fi
-}
-
-
 # aliases
 # docker
-alias dt="docker build -t test .&&docker run -d --rm -p 80:80 -p 443:443 -p 8080:8080 -p 3000:3000 --name test test"
+alias dt="docker build -t test .&&docker run -d --rm -p 80:80 -p 443:443 -p 8080:8080 --name test test"
 alias dst="docker stop test"
 # tool replacement
-alias cat="catcopy"
 alias cd="z"
 alias pwd="pwdcopy"
 alias ls="eza --group-directories-first -a --icons"
 alias vim="nvim"
-# shortend commands
-alias bat="bat -p"
-alias brewup="brew update && brew upgrade && brew cleanup"
+# shortened commands
+alias cat="bat -p"
+alias brewup="zsh ~/.config/homebrew/brewup.sh"
 alias c="code ."
 alias caffee="caffeinate -d"
-alias cr="code -r ."
 alias cls="clear"
 alias k="kubectl"
+alias lg="lazygit"
 alias o="open ."
 alias p="poetry"
 alias pa="poetry add"
+alias tf="terraform"
+# Source
 alias st="tmux source-file ${XDG_CONFIG_HOME:-$HOME}/tmux/tmux.conf"
 alias sz="source ${ZDOTDIR:-$HOME}/.zshrc"
-alias tf="terraform"
-# other
-alias backup="/Users/polo/Documents/backups/backup.sh"
+# Editor
 alias pretty="npx prettier-init"
 alias setenv='echo '\''{ "venvPath": ".", "venv": ".venv" }'\'' > pyrightconfig.json'
 
-# other tools
+# Tools initialization
 source <(fzf --zsh)
 eval "$(oh-my-posh init zsh --config $HOME/.config/ohmyposh/config.yaml)"
 eval "$(zoxide init zsh)"
