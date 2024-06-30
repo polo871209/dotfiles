@@ -24,7 +24,7 @@ source <(kubectl completion zsh)
 source <(docker completion zsh)
 source <(helm completion zsh)
 source "/opt/homebrew/share/google-cloud-sdk/completion.zsh.inc"
-complete -o nospace -C /opt/homebrew/bin/terraform terraform
+# complete -o nospace -C /opt/homebrew/bin/terraform terraform
 # complete -C "/opt/homebrew/bin/aws_completer" aws
 
 # Functions

@@ -162,6 +162,7 @@ return { -- LSP Configuration & Plugins
       -- Programming language
       pyright = {},
       gopls = {},
+      bashls = {},
       lua_ls = {
         -- cmd = {...},
         -- filetypes = { ...},
