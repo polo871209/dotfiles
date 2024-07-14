@@ -8,6 +8,7 @@ return {
       config = function()
         require('notify').setup {
           background_colour = '#000000', -- Ensure this configuration is set
+          level = 'error',
         }
       end,
     },

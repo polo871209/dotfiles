@@ -152,3 +152,11 @@ vim.api.nvim_create_autocmd('TextYankPost', {
     vim.highlight.on_yank()
   end,
 })
+
+-- New line at the end
+vim.cmd [[
+  augroup AddNewlineOnSave
+    autocmd!
+    autocmd BufWritePre * :exec "normal ma" | %s/\n\+\%$//e | silent! exec "normal! Go\<esc>`a"
+  augroup END
+]]

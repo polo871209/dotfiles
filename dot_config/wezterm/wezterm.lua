@@ -15,7 +15,7 @@ config.font = wezterm.font("MesloLGS NF")
 config.font_size = 16
 config.hide_tab_bar_if_only_one_tab = true
 config.scrollback_lines = 5000
-config.window_background_opacity = 0.95
+-- config.window_background_opacity = 0.95
 config.window_close_confirmation = "NeverPrompt"
 config.window_decorations = "RESIZE"
 
@@ -46,6 +46,9 @@ config.keys = {
 	-- This are my sofle keyboard specific settings
 	{ key = "LeftArrow", mods = "OPT", action = wezterm.action({ SendString = "\x1bb" }) },
 	{ key = "RightArrow", mods = "OPT", action = wezterm.action({ SendString = "\x1bf" }) },
+
+	-- Unbind keys
+	-- { key = "w", mods = "CMD", action = nil },
 }
 
 -- and finally, return the configuration to wezterm

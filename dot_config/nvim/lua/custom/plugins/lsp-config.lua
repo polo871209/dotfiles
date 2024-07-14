@@ -189,7 +189,7 @@ return { -- LSP Configuration & Plugins
 
             -- disable the schema store
             schemaStore = {
-              enable = false,
+              enable = true,
               url = '',
             },
             -- Disable formatting if not needed
@@ -205,9 +205,9 @@ return { -- LSP Configuration & Plugins
 
               -- others
               ['http://json.schemastore.org/github-workflow'] = '.github/workflows/*',
-              ['https://json.schemastore.org/cloudbuild.json'] = { 'cloudbuild.yaml', 'cloudbuild.yml' },
+              ['https://json.schemastore.org/cloudbuild.json'] = '*/cloudbuild.yaml',
               ['https://json.schemastore.org/prometheus.json'] = { 'prometheus.yaml', 'prometheus.yml' },
-              ['https://gitlab.com/gitlab-org/gitlab/-/raw/master/app/assets/javascripts/editor/schema/ci.json'] = { '.gitlab-ci.yaml', '.gitlab-ci.yml' },
+              ['https://gitlab.com/gitlab-org/gitlab/-/raw/master/app/assets/javascripts/editor/schema/ci.json'] = { '*.gitlab-ci.yaml', '*.gitlab-ci.yml' },
               ['https://gitlab.com/gitlab-org/cluster-integration/gitlab-agent/-/raw/master/pkg/agentcfg/agentcfg_schemas/ConfigurationFile.json'] = {
                 '.gitlab/agents/*/config.yaml',
               },

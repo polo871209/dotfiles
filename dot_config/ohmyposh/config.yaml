@@ -59,7 +59,6 @@ blocks:
         style: plain
         properties:
           threshold: 5000
-    overflow: hide
   # NEW LINE
   - type: prompt
     alignment: left
@@ -89,7 +88,7 @@ tooltips:
       - gcloud
     foreground: p:google_yellow
     background: transparent
-    template: "  {{.Project}}:{{.Region}}::{{.Account}} "
+    template: " {{.Project}}:{{.Region}}"
 transient_prompt:
   foreground: p:pacman_blue
   background: transparent
