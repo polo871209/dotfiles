@@ -200,7 +200,7 @@ return { -- LSP Configuration & Plugins
             -- # yaml-language-server: $schema={SchemaURL}
             schemas = {
               -- kubernetes
-              kubernetes = { '*.yaml', '*.yml' },
+              kubernetes = { 'deploy.yaml', 'deploy.yml' },
               ['https://json.schemastore.org/kustomization.json'] = { 'kustomization.yaml', 'kustomization.yml', 'Kustomization' },
 
               -- others

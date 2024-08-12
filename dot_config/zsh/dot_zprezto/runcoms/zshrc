@@ -26,6 +26,7 @@ source <(helm completion zsh)
 source "/opt/homebrew/share/google-cloud-sdk/completion.zsh.inc"
 # complete -o nospace -C /opt/homebrew/bin/terraform terraform
 # complete -C "/opt/homebrew/bin/aws_completer" aws
+export FUNCNEST=100
 
 # Functions
 pwdcopy() {
@@ -56,14 +57,16 @@ alias o="open ."
 alias p="poetry"
 alias pa="poetry add"
 alias tf="terraform"
+alias url="tmux capture-pane -J -p | grep -oE '(https?):\/\/.*[^>]' | fzf-tmux -d20 --multi --bind alt-a:select-all,alt-d:deselect-all | xargs open"
 # Source
 alias st="tmux source-file ${XDG_CONFIG_HOME:-$HOME}/tmux/tmux.conf"
 alias sz="source ${ZDOTDIR:-$HOME}/.zshrc"
 # Editor
 alias pretty="npx prettier-init"
 alias setenv='echo '\''{ "venvPath": ".", "venv": ".venv" }'\'' > pyrightconfig.json'
-
 # Tools initialization
 source <(fzf --zsh)
 eval "$(oh-my-posh init zsh --config $HOME/.config/ohmyposh/config.yaml)"
 eval "$(zoxide init zsh)"
+eval "$(atuin init zsh)"
+

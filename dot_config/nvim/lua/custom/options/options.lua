@@ -29,6 +29,7 @@ vim.opt.clipboard = 'unnamedplus'
 -- Disable copy when delete
 vim.api.nvim_set_keymap('n', 'd', '"_d', { noremap = true, silent = true })
 vim.api.nvim_set_keymap('v', 'd', '"_d', { noremap = true, silent = true })
+vim.api.nvim_set_keymap('n', 'c', '"_c', { noremap = true, silent = true })
 
 -- Enable break indent
 vim.opt.breakindent = true
@@ -132,12 +133,12 @@ vim.api.nvim_set_keymap('n', '<leader>oa', ':lua OpenFileWithAbsolutePath()<CR>'
 -- Add file type Detection.
 --  See `:help filetype`
 -- Add *-dockerfile to Dockerfile
-vim.cmd [[
-    augroup DockerfileDetection
-    autocmd!
-    autocmd BufRead,BufNewFile *-dockerfile set filetype=dockerfile
-    augroup END
-  ]]
+-- vim.cmd [[
+--     augroup DockerfileDetection
+--     autocmd!
+--     autocmd BufRead,BufNewFile *-dockerfile set filetype=dockerfile
+--     augroup END
+--   ]]
 
 -- [[ Basic Autocommands ]]
 --  See `:help lua-guide-autocommands`
