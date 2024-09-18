@@ -40,3 +40,6 @@ k9s:
     memory:
       critical: 90
       warn: 70
+logger:
+  tail: 200
+  buffer: 5000
