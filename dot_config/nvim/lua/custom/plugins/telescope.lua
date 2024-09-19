@@ -107,3 +107,4 @@ return { -- Fuzzy Finder (files, lsp, etc)tele
     end, { desc = '[S]earch [N]eovim files' })
   end,
 }
+

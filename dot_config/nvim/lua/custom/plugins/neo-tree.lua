@@ -11,7 +11,7 @@ return {
   },
   cmd = 'Neotree',
   keys = {
-    { '\\', ':Neotree reveal<CR>', { desc = 'NeoTree reveal' } },
+    { '\\', ':Neotree reveal<CR>', desc = 'NeoTree reveal', silent = true },
   },
   opts = {
     filesystem = {
@@ -22,7 +22,6 @@ return {
         hide_by_name = {
           '.git',
           '.DS_Store',
-          -- 'thumbs.db',
         },
       },
       window = {
@@ -41,7 +40,4 @@ return {
       },
     },
   },
-  config = function(_, opts)
-    require('neo-tree').setup(opts)
-  end,
 }

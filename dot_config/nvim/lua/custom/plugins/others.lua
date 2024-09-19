@@ -5,6 +5,5 @@ return {
   -- "gc" to comment visual regions/lines
   { 'numToStr/Comment.nvim', opts = {} },
 
-  -- dockerfile syntax highlighting
-  { 'ekalinin/Dockerfile.vim' },
+  { 'Bilal2453/luvit-meta', lazy = true },
 }

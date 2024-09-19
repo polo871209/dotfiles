@@ -65,7 +65,6 @@ return { -- Autocompletion
         -- Accept ([y]es) the completion.
         --  This will auto-import if your LSP supports it.
         --  This will expand snippets if the LSP sent a snippet.
-        ['<C-y>'] = cmp.mapping.confirm { select = true },
         ['<Tab>'] = cmp.mapping.confirm { select = true },
 
         -- If you prefer more traditional completion keymaps,
@@ -102,6 +101,11 @@ return { -- Autocompletion
         --    https://github.com/L3MON4D3/LuaSnip?tab=readme-ov-file#keymaps
       },
       sources = {
+        {
+          name = 'lazydev',
+          -- set group index to 0 to skip loading LuaLS completions as lazydev recommends it
+          group_index = 0,
+        },
         { name = 'nvim_lsp' },
         { name = 'luasnip' },
         { name = 'path' },
