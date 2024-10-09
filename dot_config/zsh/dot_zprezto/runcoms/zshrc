@@ -42,6 +42,7 @@ pwdcopy() {
 alias cd="z"
 alias pwd="pwdcopy"
 alias ls="eza --group-directories-first -a --icons"
+alias vi="nvim"
 alias vim="nvim"
 # shortened commands
 alias brewup="zsh ~/.config/homebrew/brewup.sh"
