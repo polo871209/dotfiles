@@ -18,6 +18,7 @@ config.scrollback_lines = 5000
 -- config.window_background_opacity = 0.95
 config.window_close_confirmation = "NeverPrompt"
 config.window_decorations = "RESIZE"
+config.front_end = "WebGpu"
 
 -- keybinding
 config.keys = {

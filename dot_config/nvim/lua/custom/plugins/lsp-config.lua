@@ -175,6 +175,7 @@ return {
       -- Configuration language
       taplo = {},
       jsonls = {},
+      nil_ls = {},
       yamlls = {
         settings = {
           yaml = {

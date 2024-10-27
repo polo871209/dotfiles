@@ -14,19 +14,12 @@ fi
 bindkey '^[[A' history-substring-search-up
 bindkey '^[[B' history-substring-search-down
 
-# google-cloud-sdk
-source "$(brew --prefix)/share/google-cloud-sdk/path.zsh.inc"
-
 # Autocomplete
-autoload -Uz compinit && compinit
+autoload -U compinit; compinit
 
 source <(kubectl completion zsh)
-# source <(docker completion zsh)
+source <(docker completion zsh)
 source <(helm completion zsh)
-source "/opt/homebrew/share/google-cloud-sdk/completion.zsh.inc"
-# complete -o nospace -C /opt/homebrew/bin/terraform terraform
-# complete -C "/opt/homebrew/bin/aws_completer" aws
-export FUNCNEST=100
 
 # Functions
 pwdcopy() {
@@ -34,38 +27,43 @@ pwdcopy() {
     command pwd "$@"
 }
 
-# aliases
-# docker
-# alias dt="docker build -t test .&&docker run -d --rm -p 80:80 -p 443:443 -p 8080:8080 --name test test"
-# alias dst="docker stop test"
-# tool replacement
+# Aliases for Tool Replacements
 alias cd="z"
 alias pwd="pwdcopy"
 alias ls="eza --group-directories-first -a --icons"
 alias vi="nvim"
 alias vim="nvim"
-# shortened commands
-alias brewup="zsh ~/.config/homebrew/brewup.sh"
-alias c="code ."
-alias caffee="caffeinate -d"
 alias cat="bat -p"
-alias cz="chezmoi"
+
+# Shortened Commands
+alias c="code ."
+alias cafe="caffeinate -d"
 alias cls="clear"
-alias fz="fzf --preview='cat {}' | pbcopy"
+alias ff="fzf --preview='cat {}' | pbcopy"
 alias k="kubectl"
 alias lg="lazygit"
 alias o="open ."
 alias p="poetry"
 alias pa="poetry add"
 alias tf="terraform"
+
+# Command Updates & Rebuilds
+alias brewup="zsh ~/.config/homebrew/brewup.sh"
+alias nixup="nix flake update --flake $NIX_HOME && darwin-rebuild switch --flake $NIX_HOME && cz add $NIX_HOME"
+
+# URL Copying
 alias url="tmux capture-pane -J -p | grep -oE '(https?):\/\/.*[^>]' | fzf-tmux -d20 --multi --bind alt-a:select-all,alt-d:deselect-all | xargs open"
-# Source
+
+# Configuration Reloads
 alias st="tmux source-file ${XDG_CONFIG_HOME:-$HOME}/tmux/tmux.conf"
 alias sz="source ${ZDOTDIR:-$HOME}/.zshrc"
-# Editor
+
+# Editor & Formatter
 alias pretty="npx prettier-init"
+alias cz="chezmoi"
 alias setenv='echo '\''{ "venvPath": ".", "venv": ".venv" }'\'' > pyrightconfig.json'
-# Tools initialization
+
+# Interactive sessions
 source <(fzf --zsh)
 eval "$(oh-my-posh init zsh --config $HOME/.config/ohmyposh/config.yaml)"
 eval "$(zoxide init zsh)"
