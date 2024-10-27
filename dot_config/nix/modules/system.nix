@@ -43,21 +43,26 @@
     defaults = {
       menuExtraClock.Show24Hour = true;  
 
-        finder = {
-          AppleShowAllExtensions = true;
-          AppleShowAllFiles = true;
-          CreateDesktop = false;
-          FXDefaultSearchScope = "SCcf";
-          FXEnableExtensionChangeWarning = false;
-          FXPreferredViewStyle = "Nlsv";
-          ShowPathbar = true;
-          ShowStatusBar = true;
-        };
-        dock = {
-          autohide = true;
-          show-recents = false;
-          tilesize = 1;
-        };
+      finder = {
+        AppleShowAllExtensions = true;
+        AppleShowAllFiles = true;
+        CreateDesktop = false;
+        FXDefaultSearchScope = "SCcf";
+        FXEnableExtensionChangeWarning = false;
+        FXPreferredViewStyle = "Nlsv";
+        ShowPathbar = true;
+        ShowStatusBar = true;
+      };
+      dock = {
+        autohide = true;
+        show-recents = false;
+        tilesize = 1;
+      };
+      
+      WindowManager = {
+        StandardHideDesktopIcons = true;
+      };
+         
 
       NSGlobalDomain = {
         AppleInterfaceStyle = "Dark";  # dark mode
@@ -68,7 +73,7 @@
         # sets how long it takes before it starts repeating.
         InitialKeyRepeat = 15;  # normal minimum is 15 (225 ms), maximum is 120 (1800 ms)
         # sets how fast it repeats once it starts. 
-        KeyRepeat = 3;  # normal minimum is 2 (30 ms), maximum is 120 (1800 ms)
+        KeyRepeat = 2;  # normal minimum is 2 (30 ms), maximum is 120 (1800 ms)
       };
     };
   };

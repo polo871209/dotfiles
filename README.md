@@ -1,5 +1,5 @@
 # Init New Mac
 
 ```
-chezmoi init --apply git@github.com:polo871209/dotfiles.git
+chezmoi init --apply https://github.com/polo871209/dotfiles.git 
 ```

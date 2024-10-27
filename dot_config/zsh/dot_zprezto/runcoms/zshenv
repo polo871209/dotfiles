@@ -1,11 +1,13 @@
 # Defines environment variables.
 
+export BBAT_THEME="OneHalfDark"
 export CLOUDSDK_CONFIG="$HOME/.gcloud"
 export DOCKER_DEFAULT_PLATFORM=linux/amd64
 export FUNCNEST=300
 export GOOGLE_APPLICATION_CREDENTIALS="$CLOUDSDK_CONFIG/application_default_credentials.json"
 export GOPATH=~/go
 export KUBE_EDITOR=vim
+export MANPAGER="sh -c 'col -bx | bat -l man -p'"
 export NIX_HOME="$XDG_CONFIG_HOME/nix"
 export PATH=$PATH:$GOPATH/bin
 export POETRY_VIRTUALENVS_IN_PROJECT=true

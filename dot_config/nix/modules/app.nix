@@ -30,6 +30,7 @@
     # CLI Utilities & Tools
     eza
     bat
+    bat-extras.batgrep
     fzf
     git
     just

@@ -16,16 +16,9 @@ bindkey '^[[B' history-substring-search-down
 
 # Autocomplete
 autoload -U compinit; compinit
-
 source <(kubectl completion zsh)
 source <(docker completion zsh)
 source <(helm completion zsh)
-
-# Functions
-pwdcopy() {
-    command pwd "$@" | tr -d '\n' | pbcopy
-    command pwd "$@"
-}
 
 # Aliases for Tool Replacements
 alias cd="z"
@@ -33,13 +26,13 @@ alias pwd="pwdcopy"
 alias ls="eza --group-directories-first -a --icons"
 alias vi="nvim"
 alias vim="nvim"
-alias cat="bat -p"
+alias cat="bat --color=always"
 
 # Shortened Commands
 alias c="code ."
 alias cafe="caffeinate -d"
 alias cls="clear"
-alias ff="fzf --preview='cat {}' | pbcopy"
+alias ff='fzf --preview "bat --color=always --style=numbers --line-range=:500 {}" | pbcopy'
 alias k="kubectl"
 alias lg="lazygit"
 alias o="open ."
@@ -62,6 +55,20 @@ alias sz="source ${ZDOTDIR:-$HOME}/.zshrc"
 alias pretty="npx prettier-init"
 alias cz="chezmoi"
 alias setenv='echo '\''{ "venvPath": ".", "venv": ".venv" }'\'' > pyrightconfig.json'
+
+# Functions
+# Colorize help function
+alias bathelp='bat --plain --language=help'
+alias -g -- -h='-h 2>&1 | bat --language=help --style=plain'
+alias -g -- --help='--help 2>&1 | bat --language=help --style=plain'
+h() {
+    "$@" --help 2>&1 | bathelp
+}
+
+pwdcopy() {
+    command pwd "$@" | tr -d '\n' | pbcopy
+    command pwd "$@"
+}
 
 # Interactive sessions
 source <(fzf --zsh)

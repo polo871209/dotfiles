@@ -24,7 +24,7 @@ if [[ -z "$VISUAL" ]]; then
   export VISUAL='nvim'
 fi
 if [[ -z "$PAGER" ]]; then
-  export PAGER='less'
+  export PAGER='bat'
 fi
 
 #
