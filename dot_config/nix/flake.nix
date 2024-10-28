@@ -3,7 +3,7 @@
 
   ##################################################################################################################
   #
-  # Ref: https://github.com/ryan4yin/nix-darwin-kickstarter 
+  # Ref: https://github.com/ryan4yin/nix-darwin-kickstarter
   #      https://www.youtube.com/watch?v=Z8BL8mdzWHI&t=1303s
   #
   ##################################################################################################################
@@ -42,8 +42,14 @@
 
     username = "polo";
     useremail = "qazh0123@gmail.com";
-    system = "aarch64-darwin"; 
+    system = "aarch64-darwin";
     hostname = "polohi";
+
+    # username = "po.locp";
+    # useremail = "qazh0123@gmail.com";
+    # system = "aarch64-darwin";
+    # hostname = "KJ9NCMV04M";
+
 
     specialArgs =
       inputs
