@@ -49,7 +49,7 @@ return { -- Fuzzy Finder (files, lsp, etc)tele
       --  All the info you're looking for is in `:help telescope.setup()`
       --
       defaults = {
-        file_ignore_patterns = { 'node_modules', '.git/', '.DS_Store' },
+        file_ignore_patterns = { 'node_modules', '.git/', '.DS_Store', '.terraform/' },
       },
       pickers = {
         find_files = {
@@ -107,4 +107,3 @@ return { -- Fuzzy Finder (files, lsp, etc)tele
     end, { desc = '[S]earch [N]eovim files' })
   end,
 }
-

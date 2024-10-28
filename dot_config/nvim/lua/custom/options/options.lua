@@ -135,12 +135,12 @@ vim.api.nvim_set_keymap('n', '<leader>oa', ':lua OpenFileWithAbsolutePath()<CR>'
 -- Add file type Detection.
 --  See `:help filetype`
 -- Add *-dockerfile to Dockerfile
--- vim.cmd [[
---     augroup DockerfileDetection
---     autocmd!
---     autocmd BufRead,BufNewFile *-dockerfile set filetype=dockerfile
---     augroup END
---   ]]
+vim.cmd [[
+    augroup DockerfileDetection
+    autocmd!
+    autocmd BufRead,BufNewFile *-dockerfile set filetype=dockerfile
+    augroup END
+  ]]
 
 -- [[ Basic Autocommands ]]
 --  See `:help lua-guide-autocommands`

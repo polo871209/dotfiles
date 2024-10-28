@@ -22,6 +22,7 @@ return {
         hide_by_name = {
           '.git',
           '.DS_Store',
+          '.terraform',
         },
       },
       window = {
