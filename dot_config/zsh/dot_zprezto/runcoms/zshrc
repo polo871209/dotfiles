@@ -41,7 +41,6 @@ alias pa="poetry add"
 alias tf="terraform"
 
 # Command Updates & Rebuilds
-alias brewup="zsh ~/.config/homebrew/brewup.sh"
 alias nixup="nix flake update --flake $NIX_HOME && darwin-rebuild switch --flake $NIX_HOME && cz add $NIX_HOME"
 
 # URL Copying
