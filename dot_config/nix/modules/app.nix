@@ -37,6 +37,7 @@
     unixtools.watch
     fastfetch
     tcping-go
+    terraform
     tree
     wget
     jq
@@ -49,10 +50,11 @@
     # Cloud, DevOps, & Infrastructure
     awscli2
     docker-client
-    google-cloud-sdk
+    (google-cloud-sdk.withExtraComponents [google-cloud-sdk.components.gke-gcloud-auth-plugin])
     kubectl
     kubernetes-helm
     kubectx
+    kustomize
     k9s
     colima
     docker-slim
@@ -99,7 +101,7 @@
     # otherwise Apple Store will refuse to install them.
     # For details, see https://github.com/mas-cli/mas
     masApps = {
-      # Xcode = 497799835;
+      Xnip = 1221250572;
     };
 
     taps = [
@@ -108,6 +110,7 @@
 
     # `brew install`
     brews = [
+      "mas"
       "zsh-completions"
     ];
 
@@ -118,7 +121,7 @@
       "betterdisplay"
       "chatgpt"
       "hiddenbar"
-      "hyper"
+      "hyperkey"
       "raycast"
     ];
   };
