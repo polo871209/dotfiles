@@ -147,7 +147,7 @@ let light_theme = {
 
 # The default config record. This is where much of your global configuration is setup.
 $env.config = {
-    show_banner: true # true or false to enable or disable the welcome banner at startup
+    show_banner: false # true or false to enable or disable the welcome banner at startup
 
     ls: {
         use_ls_colors: true # use the LS_COLORS environment variable to colorize output
@@ -896,6 +896,50 @@ $env.config = {
         }
     ]
 }
+
+
+# Aliases for Tool Replacements
+alias pwd = pwdcopy
+alias ls = eza --group-directories-first -a --icons
+alias vi = nvim
+alias vim = nvim
+alias cat = bat --color=always
+
+# Shortened Commands
+alias c = code .
+alias cafe = caffeinate -d
+alias cls = clear
+alias ff = fzf --preview "bat --color=always --style=numbers --line-range=:500 {}" | pbcopy
+alias k = kubectl
+alias kctx = kubectx
+alias kns = kubens
+alias lg = lazygit
+alias o = open .
+alias p = poetry
+alias pa = poetry add
+alias tf = terraform
+
+# Command Updates & Rebuilds
+alias nixup = nu -c 'nix flake update --flake $env.NIX_HOME && darwin-rebuild switch --flake $env.NIX_HOME && cz add $env.NIX_HOME'
+
+# URL Copying
+alias url = nu -c 'tmux capture-pane -J -p | grep -oE "(https?):\/\/.*[^>]" | fzf-tmux -d20 --multi --bind alt-a:select-all,alt-d:deselect-all | xargs open'
+
+# Configuration Reloads
+alias st = nu -c 'tmux source-file ${env.XDG_CONFIG_HOME:-$env.HOME}/tmux/tmux.conf'
+
+# Editor & Formatter
+alias pretty = npx prettier-init
+alias cz = chezmoi
+alias setenv = nu -c 'echo "{ "venvPath": ".", "venv": ".venv" }" > pyrightconfig.json'
+
+# Function for copying pwd output to clipboard
+def pwdcopy [] {
+    pwd | str trim | clip
+    pwd
+}
+
+source ~/.cache/carapace/init.nu
 source ~/.oh-my-posh.nu
 source ~/.zoxide.nu
 source ~/.local/share/atuin/init.nu

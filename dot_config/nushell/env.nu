@@ -46,16 +46,6 @@ $env.PROMPT_INDICATOR_VI_INSERT = {|| ": " }
 $env.PROMPT_INDICATOR_VI_NORMAL = {|| "> " }
 $env.PROMPT_MULTILINE_INDICATOR = {|| "::: " }
 
-alias k = kubectl
-alias cd = z
-alias vim = nvim
-alias cls = clear
-
-# Define a custom command to get 'item' from 'kubectl get xxx' in JSON
-def kget [resource: string] {
-    kubectl get $resource -o json | from json | get items | flatten
-}
-
 # If you want previously entered commands to have a different prompt from the usual one,
 # you can uncomment one or more of the following lines.
 # This can be useful if you have a 2-line prompt and it's taking up a lot of space
@@ -107,8 +97,34 @@ $env.NU_PLUGIN_DIRS = [
 # path add ($env.HOME | path join ".local" "bin")
 # $env.PATH = ($env.PATH | uniq)
 
+$env.EDITOR = "nvim"
+
+$env.CLOUDSDK_CONFIG = "$env.HOME/.gcloud"
+$env.GOOGLE_APPLICATION_CREDENTIALS = "$env.CLOUDSDK_CONFIG/application_default_credentials.json"
+
+$env.BAT_THEME = "OneHalfDark"
+$env.EDITOR = "nvim"
+$env.PAGER = "bat --paging=always"
+$env.MANPAGER = "sh -c 'col -bx | bat -l man -p'"
+$env.KUBE_EDITOR = "vim"
+
+$env.NIX_HOME = "$env.XDG_CONFIG_HOME/nix"
+$env.DOCKER_DEFAULT_PLATFORM = "linux/amd64"
+$env.POETRY_VIRTUALENVS_IN_PROJECT = "true"
+$env.TERM = "xterm-256color"
+$env.HISTFILE = "$env.HOME/.zsh_history"
+
 # To load from a custom file you can use:
 # source ($nu.default-config-dir | path join 'custom.nu')
+
+# Autocompletion
+$env.CARAPACE_BRIDGES = 'zsh,fish,bash,inshellisense' # optional
+mkdir ~/.cache/carapace
+carapace _carapace nushell | save --force ~/.cache/carapace/init.nu
+
+# Other tools
 oh-my-posh init nu
 zoxide init nushell | save -f ~/.zoxide.nu
+mkdir ~/.local/share/atuin/
 atuin init nu | save -f ~/.local/share/atuin/init.nu
+

@@ -67,6 +67,7 @@ blocks:
       - type: text
         style: plain
         foreground_templates:
+          - "{{if .Env.POSH_VI_MODE}}p:google_yellow{{end}}"
           - "{{if gt .Code 0}}p:pacman_red{{end}}"
           - "{{if eq .Code 0}}p:pacman_blue{{end}}"
         background: transparent

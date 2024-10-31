@@ -13,7 +13,6 @@ source $BREW_PREFIX/zsh-autosuggestions/zsh-autosuggestions.zsh
 source $BREW_PREFIX/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 
 # Aliases for Tool Replacements
-alias cd="z"
 alias pwd="pwdcopy"
 alias ls="eza --group-directories-first -a --icons"
 alias vi="nvim"

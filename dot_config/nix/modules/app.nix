@@ -28,8 +28,9 @@
     qmk
 
     # CLI Utilities & Tools
-    eza
     bat
+    carapace
+    eza
     fzf
     git
     goose
@@ -46,6 +47,7 @@
     wezterm
     wget
     jq
+    yazi
     yq
     zip
     zsh-completions
@@ -54,6 +56,7 @@
     awscli2
     direnv
     docker-client
+    docker-slim
     (google-cloud-sdk.withExtraComponents [google-cloud-sdk.components.gke-gcloud-auth-plugin])
     kubectl
     kubernetes-helm
@@ -61,7 +64,6 @@
     kustomize
     k9s
     colima
-    docker-slim
 
     # Productivity & Workflow
     alttab
