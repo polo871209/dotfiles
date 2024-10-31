@@ -32,23 +32,26 @@
     bat
     fzf
     git
+    goose
     just
     ripgrep
     unixtools.watch
     fastfetch
+    mkalias
+    sqlc
     tcping-go
     terraform
     tree
+    wezterm
     wget
     jq
     yq
     zip
-    # completions
-    nix-zsh-completions
     zsh-completions
 
     # Cloud, DevOps, & Infrastructure
     awscli2
+    direnv
     docker-client
     (google-cloud-sdk.withExtraComponents [google-cloud-sdk.components.gke-gcloud-auth-plugin])
     kubectl
@@ -75,11 +78,10 @@
     # Fonts & Aesthetic
     nerdfonts
 
-    # Miscellaneousß
-    wezterm
-    mkalias
+    # Languages
+    nodejs_22
     python3
-    goose
+    go
   ];
   environment.variables.EDITOR = "nvim";
 
@@ -111,7 +113,8 @@
     # `brew install`
     brews = [
       "mas"
-      "zsh-completions"
+      "zsh-autosuggestions"
+      "zsh-syntax-highlighting"
     ];
 
     # `brew install --cask`

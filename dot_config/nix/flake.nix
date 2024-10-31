@@ -20,7 +20,7 @@
   # This is the standard format for flake.nix. `inputs` are the dependencies of the flake,
   # Each item in `inputs` will be passed as a parameter to the `outputs` function after being pulled and built.
   inputs = {
-    nixpkgs-darwin.url = "github:nixos/nixpkgs/nixpkgs-24.05-darwin";
+    nixpkgs-darwin.url = "github:nixos/nixpkgs/nixpkgs-unstable";
     darwin = {
       url = "github:lnl7/nix-darwin";
       inputs.nixpkgs.follows = "nixpkgs-darwin";
@@ -36,7 +36,6 @@
     self,
     nixpkgs,
     darwin,
-    home-manager,
     ...
   }: let
 
@@ -74,4 +73,4 @@
     darwinPackages = self.darwinConfigurations."polohi".pkgs;
     formatter.${system} = nixpkgs.legacyPackages.${system}.alejandra;
   };
-}
+} 
