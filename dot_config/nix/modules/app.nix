@@ -46,6 +46,7 @@
     wezterm
     wget
     jq
+    yazi
     yq
     zip
     zsh-completions
