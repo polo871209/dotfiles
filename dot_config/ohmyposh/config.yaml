@@ -77,6 +77,8 @@ tooltips:
     tips:
       - k
       - kubectl
+      - kctx
+      - kns
     foreground: p:kubernetes
     background: transparent
     template: " ﴱ {{.Context}}{{if .Namespace}}:{{.Namespace}}{{end}}"
