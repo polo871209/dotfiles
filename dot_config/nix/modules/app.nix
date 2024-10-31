@@ -38,6 +38,7 @@
     unixtools.watch
     fastfetch
     mkalias
+    nushell
     sqlc
     tcping-go
     terraform

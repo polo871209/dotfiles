@@ -8,6 +8,7 @@ compinit
 source <(kubectl completion zsh)
 
 export BREW_PREFIX="/opt/homebrew/share"
+export PATH="/opt/homebrew/bin:$PATH"
 source $BREW_PREFIX/zsh-autosuggestions/zsh-autosuggestions.zsh
 source $BREW_PREFIX/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 
