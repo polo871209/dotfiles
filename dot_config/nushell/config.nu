@@ -2,6 +2,10 @@
 #
 # version = "0.99.1"
 
+# To set Nushell as the default shell, use: chsh -s $BIN
+# Add this to $nu.config-path to load the default configuration on startup:
+# source ~/.config/nushell/config.nu
+
 # For more information on defining custom themes, see
 # https://www.nushell.sh/book/coloring_and_theming.html
 # And here is the theme collection
@@ -897,7 +901,6 @@ $env.config = {
     ]
 }
 
-
 # Aliases for Tool Replacements
 alias pwd = pwdcopy
 alias ls = eza --group-directories-first -a --icons
@@ -926,6 +929,7 @@ alias nixup = nu -c 'nix flake update --flake $env.NIX_HOME && darwin-rebuild sw
 alias url = nu -c 'tmux capture-pane -J -p | grep -oE "(https?):\/\/.*[^>]" | fzf-tmux -d20 --multi --bind alt-a:select-all,alt-d:deselect-all | xargs open'
 
 # Configuration Reloads
+alias sn = nu -c 'source ${env.XDG_CONFIG_HOME:-$env.HOME}/nu/config.nu'
 alias st = nu -c 'tmux source-file ${env.XDG_CONFIG_HOME:-$env.HOME}/tmux/tmux.conf'
 
 # Editor & Formatter
