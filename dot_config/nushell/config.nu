@@ -929,8 +929,8 @@ alias nixup = nu -c 'nix flake update --flake $env.NIX_HOME && darwin-rebuild sw
 alias url = nu -c 'tmux capture-pane -J -p | grep -oE "(https?):\/\/.*[^>]" | fzf-tmux -d20 --multi --bind alt-a:select-all,alt-d:deselect-all | xargs open'
 
 # Configuration Reloads
-alias sn = nu -c 'source ${env.XDG_CONFIG_HOME:-$env.HOME}/nu/config.nu'
-alias st = nu -c 'tmux source-file ${env.XDG_CONFIG_HOME:-$env.HOME}/tmux/tmux.conf'
+alias sn = nu -c 'source $env.XDG_CONFIG_HOME/nushell/config.nu'
+alias st = nu -c 'tmux source-file $env.XDG_CONFIG_HOME/tmux/tmux.conf'
 
 # Editor & Formatter
 alias pretty = npx prettier-init
