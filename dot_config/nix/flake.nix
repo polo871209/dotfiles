@@ -73,4 +73,4 @@
     darwinPackages = self.darwinConfigurations."polohi".pkgs;
     formatter.${system} = nixpkgs.legacyPackages.${system}.alejandra;
   };
-} 
+}
