@@ -20,12 +20,18 @@
     neovim
     vscode
     tmux
+    tmuxp
     cargo
     go
     lazygit
     poetry
     sqlc
     qmk
+
+    # Languages
+    nodejs_22
+    python3
+    go
 
     # CLI Utilities & Tools
     bat
@@ -55,6 +61,7 @@
     # Cloud, DevOps, & Infrastructure
     awscli2
     direnv
+    dive
     docker-client
     docker-slim
     (google-cloud-sdk.withExtraComponents [google-cloud-sdk.components.gke-gcloud-auth-plugin])
@@ -66,7 +73,6 @@
     colima
 
     # Productivity & Workflow
-    alttab
     atuin
     chezmoi
     obsidian
@@ -74,18 +80,12 @@
     slack
     zoxide
 
-    # Database & Networking
-    dbeaver-bin
-    postman
-
-    # Fonts & Aesthetic
+    # Miscellaneous
+    # dbeaver-bin
+    bruno
     nerdfonts
-
-    # Languages
-    nodejs_22
-    python3
-    go
   ];
+
   environment.variables.EDITOR = "nvim";
 
   # TODO To make this work, homebrew need to be installed manually, see https://brew.sh
