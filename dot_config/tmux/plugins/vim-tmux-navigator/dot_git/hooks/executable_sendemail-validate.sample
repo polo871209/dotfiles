@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/nix/store/rj7zvmif800bgg3sbznq6g5g438jx104-bash-5.2p37/bin/bash
 
 # An example hook script to validate a patch (and/or patch series) before
 # sending it via email.

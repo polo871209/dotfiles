@@ -111,12 +111,36 @@ bind-key -T copy-mode-vi 'C-\' select-pane -l
 
 #### TPM
 
-If you'd prefer, you can use the Tmux Plugin Manager ([TPM][]) instead of
+If you prefer, you can use the Tmux Plugin Manager ([TPM][]) instead of
 copying the snippet.
 When using TPM, add the following lines to your ~/.tmux.conf:
 
 ``` tmux
 set -g @plugin 'christoomey/vim-tmux-navigator'
+```
+
+To set a different key-binding, use the plugin configuration settings
+(remember to update your vim config accordingly).
+Multiple key bindings are possible, use a space to separate.
+
+``` tmux
+set -g @vim_navigator_mapping_left "C-Left C-h"  # use C-h and C-Left
+set -g @vim_navigator_mapping_right "C-Right C-l"
+set -g @vim_navigator_mapping_up "C-k"
+set -g @vim_navigator_mapping_down "C-j"
+set -g @vim_navigator_mapping_prev ""  # removes the C-\ binding
+```
+
+To disable the automatic mapping of `<prefix> C-l` to `send C-l` (which is
+intended to restore the "clear screen" functionality):
+
+```tmux
+set -g @vim_navigator_prefix_mapping_clear_screen ""
+```
+
+Don't forget to run tpm:
+
+``` tmux
 run '~/.tmux/plugins/tpm/tpm'
 ```
 

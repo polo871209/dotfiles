@@ -42,6 +42,7 @@
     goose
     just
     ripgrep
+    superfile
     unixtools.watch
     fastfetch
     mkalias
@@ -53,7 +54,6 @@
     wezterm
     wget
     jq
-    yazi
     yq
     zip
     zsh-completions
@@ -81,7 +81,6 @@
     zoxide
 
     # Miscellaneous
-    # dbeaver-bin
     bruno
     nerdfonts
   ];
@@ -126,6 +125,7 @@
       "arc"
       "betterdisplay"
       "chatgpt"
+      "dbeaver-community"
       "hiddenbar"
       "hyperkey"
       "raycast"

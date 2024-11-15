@@ -60,6 +60,9 @@ vim.opt.splitbelow = true
 -- Disable line wrap
 vim.opt.wrap = false
 
+-- Disable status line at the bottom
+vim.opt.laststatus = 0
+
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et
 

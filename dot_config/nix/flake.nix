@@ -64,13 +64,11 @@
           ./modules/nix-core.nix
           ./modules/system.nix
           ./modules/app.nix
-          ./modules/homebrew-mirror.nix
           ./modules/host-users.nix
       ];
     };
 
-    # Expose the package set, including overlays, for convenience.
-    darwinPackages = self.darwinConfigurations."polohi".pkgs;
+    # nix code formatter
     formatter.${system} = nixpkgs.legacyPackages.${system}.alejandra;
   };
 }
