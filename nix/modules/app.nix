@@ -74,7 +74,6 @@
 
     # Productivity & Workflow
     atuin
-    chezmoi
     obsidian
     oh-my-posh
     slack
