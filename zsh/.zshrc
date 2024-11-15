@@ -45,13 +45,12 @@ alias tf="terraform"
 alias url="tmux capture-pane -J -p | grep -oE '(https?):\/\/.*[^>]' | fzf-tmux -d20 --multi --bind alt-a:select-all,alt-d:deselect-all | xargs open"
 
 # Configuration Reloads & Updates
-alias nixup="nix flake update --flake $NIX_HOME && darwin-rebuild switch --flake $NIX_HOME && cz add $NIX_HOME"
+alias nixup="nix flake update --flake $HOME/dotfiles/nix && darwin-rebuild switch --flake $HOME/dotfiles/nix"
 alias st="tmux source-file ${XDG_CONFIG_HOME:-$HOME}/tmux/tmux.conf"
 alias sz="source ${ZDOTDIR:-$HOME}/.zshrc"
 
 # Editor & Formatter
 alias pretty="npx prettier-init"
-alias cz="chezmoi"
 alias setenv='echo '\''{ "venvPath": ".", "venv": ".venv" }'\'' > pyrightconfig.json'
 
 # Help

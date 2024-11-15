@@ -10,7 +10,6 @@ export KUBE_EDITOR=vim
 export GOPATH=$HOME/go
 export PATH=$PATH:$GOPATH/bin
 
-export NIX_HOME="$XDG_CONFIG_HOME/nix"
 export DOCKER_DEFAULT_PLATFORM=linux/amd64
 export POETRY_VIRTUALENVS_IN_PROJECT=true
 export TERM=xterm-256color
