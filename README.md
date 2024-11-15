@@ -1,7 +1,10 @@
 # Init New Mac
 
-```
-sh -c "$(curl -fsLS get.chezmoi.io)" -- -b $HOME/Downloads && \
-$HOME/Downloads/chezmoi init --apply https://github.com/polo871209/dotfiles.git && \
-rm -rf $HOME/Downloads/chezmoi
+```bash
+git clone https://github.com/polo871209/dotfiles.git
+sh <(curl -L https://nixos.org/nix/install)
+nix run nix-darwin --extra-experimental-features "nix-command flakes" -- switch --flake ~/dotfiles/nix
+darwin-rebuild switch --extra-experimental-features "nix-command flakes"  --flake ~/dotfiles/nix
+cat ~/dotfiles/dot_zshenv >| ~/.zshenv
+stow .
 ```
