@@ -1,18 +1,13 @@
 {
   description = "Polohi Darwin system flake";
 
-  ##################################################################################################################
-  #
   # Ref: https://github.com/ryan4yin/nix-darwin-kickstarter
-  #      https://www.youtube.com/watch?v=Z8BL8mdzWHI&t=1303s
-  #
-  ##################################################################################################################
 
   # This is the standard format for flake.nix. `inputs` are the dependencies of the flake,
   # Each item in `inputs` will be passed as a parameter to the `outputs` function after being pulled and built.
-  # To install a specific version of a package, find its hash at: https://www.nixhub.io
   inputs = {
     nixpkgs-darwin.url = "github:nixos/nixpkgs/nixpkgs-unstable";
+    # To install a specific version of a package, find its hash at: https://www.nixhub.io
     nixpkgs-neovim.url = "github:nixos/nixpkgs/5ed627539ac84809c78b2dd6d26a5cebeb5ae269";
     darwin = {
       url = "github:lnl7/nix-darwin";
