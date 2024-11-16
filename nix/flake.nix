@@ -8,19 +8,12 @@
   #
   ##################################################################################################################
 
-  # the nixConfig here only affects the flake itself, not the system configuration!
-  nixConfig = {
-    substituters = [
-      # Query the mirror of USTC first, and then the official cache.
-      "https://mirrors.ustc.edu.cn/nix-channels/store"
-      "https://cache.nixos.org"
-    ];
-  };
-
   # This is the standard format for flake.nix. `inputs` are the dependencies of the flake,
   # Each item in `inputs` will be passed as a parameter to the `outputs` function after being pulled and built.
+  # To install a specific version of a package, find its hash at: https://www.nixhub.io
   inputs = {
     nixpkgs-darwin.url = "github:nixos/nixpkgs/nixpkgs-unstable";
+    nixpkgs-neovim.url = "github:nixos/nixpkgs/5ed627539ac84809c78b2dd6d26a5cebeb5ae269";
     darwin = {
       url = "github:lnl7/nix-darwin";
       inputs.nixpkgs.follows = "nixpkgs-darwin";
@@ -35,6 +28,7 @@
   outputs = inputs @ {
     self,
     nixpkgs,
+    nixpkgs-neovim,
     darwin,
     ...
   }: let
@@ -43,6 +37,7 @@
     useremail = "qazh0123@gmail.com";
     system = "aarch64-darwin";
     hostname = "polohi";
+    pkgs-neovim = nixpkgs-neovim.legacyPackages.${system};
 
     # username = "po.locp";
     # useremail = "qazh0123@gmail.com";
@@ -52,7 +47,7 @@
     specialArgs =
       inputs
       // {
-        inherit username useremail hostname;
+        inherit username useremail hostname pkgs-neovim;
       };
   in
   {

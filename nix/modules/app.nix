@@ -1,4 +1,4 @@
-{ pkgs, ... }: {
+{ pkgs, pkgs-neovim,  ... }: {
 
   ##########################################################################
   #
@@ -15,73 +15,73 @@
   #
   # Related Discussion: https://discourse.nixos.org/t/darwin-again/29331
   nixpkgs.config.allowUnfree = true;
-  environment.systemPackages = with pkgs; [
+  environment.systemPackages = [
     # Development Tools
-    neovim
-    vscode
-    tmux
-    tmuxp
-    cargo
-    go
-    lazygit
-    poetry
-    sqlc
-    qmk
+    pkgs-neovim.neovim
+    pkgs.vscode
+    pkgs.tmux
+    pkgs.tmuxp
+    pkgs.cargo
+    pkgs.go
+    pkgs.lazygit
+    pkgs.poetry
+    pkgs.sqlc
+    pkgs.qmk
 
     # Languages
-    nodejs_22
-    python3
-    go
+    pkgs.nodejs_22
+    pkgs.python3
+    pkgs.go
 
     # CLI Utilities & Tools
-    bat
-    carapace
-    eza
-    fzf
-    git
-    goose
-    just
-    ripgrep
-    superfile
-    unixtools.watch
-    fastfetch
-    mkalias
-    nushell
-    sqlc
-    tcping-go
-    terraform
-    tree
-    wezterm
-    wget
-    jq
-    yq
-    zip
-    zsh-completions
+    pkgs.bat
+    pkgs.carapace
+    pkgs.eza
+    pkgs.fzf
+    pkgs.git
+    pkgs.goose
+    pkgs.just
+    pkgs.ripgrep
+    pkgs.superfile
+    pkgs.unixtools.watch
+    pkgs.fastfetch
+    pkgs.mkalias
+    pkgs.nushell
+    pkgs.sqlc
+    pkgs.tcping-go
+    pkgs.terraform
+    pkgs.tree
+    pkgs.wezterm
+    pkgs.wget
+    pkgs.jq
+    pkgs.yq
+    pkgs.zip
+    pkgs.zsh-completions
 
     # Cloud, DevOps, & Infrastructure
-    awscli2
-    direnv
-    dive
-    docker-client
-    docker-slim
-    (google-cloud-sdk.withExtraComponents [google-cloud-sdk.components.gke-gcloud-auth-plugin])
-    kubectl
-    kubernetes-helm
-    kubectx
-    kustomize
-    k9s
-    colima
+    pkgs.awscli2
+    pkgs.direnv
+    pkgs.dive
+    pkgs.docker-client
+    pkgs.docker-slim
+    (pkgs.google-cloud-sdk.withExtraComponents [pkgs.google-cloud-sdk.components.gke-gcloud-auth-plugin])
+    pkgs.kubectl
+    pkgs.kubernetes-helm
+    pkgs.kubectx
+    pkgs.kustomize
+    pkgs.k9s
+    pkgs.colima
 
     # Productivity & Workflow
-    atuin
-    obsidian
-    oh-my-posh
-    slack
-    zoxide
+    pkgs.atuin
+    pkgs.obsidian
+    pkgs.oh-my-posh
+    pkgs.slack
+    pkgs.zoxide
 
     # Miscellaneous
-    bruno
-    nerdfonts
+    pkgs.bruno
+    pkgs.nerdfonts
   ];
 
   environment.variables.EDITOR = "nvim";

@@ -24,7 +24,7 @@ pwdcopy() {
 }
 alias ls="eza --group-directories-first -a --icons"
 alias vi="nvim"
-alias vim="/Users/po.locp/tmp-nvim/bin/nvim" #tmp
+alias vim="nvim"
 alias cat="bat --color=always"
 
 # Shortened Commands

@@ -48,11 +48,28 @@
         "type": "github"
       }
     },
+    "nixpkgs-neovim": {
+      "locked": {
+        "lastModified": 1725980463,
+        "narHash": "sha256-3ruEhwpLlccjwYTvLCyFAtPndcRxAs3XazL2lhOXucI=",
+        "owner": "nixos",
+        "repo": "nixpkgs",
+        "rev": "5ed627539ac84809c78b2dd6d26a5cebeb5ae269",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nixos",
+        "repo": "nixpkgs",
+        "rev": "5ed627539ac84809c78b2dd6d26a5cebeb5ae269",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
         "darwin": "darwin",
         "nixpkgs": "nixpkgs",
-        "nixpkgs-darwin": "nixpkgs-darwin"
+        "nixpkgs-darwin": "nixpkgs-darwin",
+        "nixpkgs-neovim": "nixpkgs-neovim"
       }
     }
   },
