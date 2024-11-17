@@ -3,76 +3,67 @@
   # But on macOS, it's less stable than homebrew.
   # Related Discussion: https://discourse.nixos.org/t/darwin-again/29331
   nixpkgs.config.allowUnfree = true;
+
   environment.systemPackages = [
-    # Development Tools
-    pkgs-neovim.neovim
-    pkgs.vscode
-    pkgs.tmux
-    pkgs.tmuxp
-    pkgs.cargo
-    pkgs.go
-    pkgs.lazygit
-    pkgs.poetry
-    pkgs.sqlc
-    pkgs.qmk
-
-    # Languages
-    pkgs.nodejs_22
-    pkgs.python3
-    pkgs.go
-
-    # CLI Utilities & Tools
-    pkgs.bat
-    pkgs.carapace
-    pkgs.eza
-    pkgs.fzf
-    pkgs.git
-    pkgs.goose
-    pkgs.just
-    pkgs.ripgrep
-    pkgs.superfile
-    pkgs.unixtools.watch
-    pkgs.fastfetch
-    pkgs.mkalias
-    pkgs.nushell
-    pkgs.sqlc
-    pkgs.tcping-go
-    pkgs.terraform
-    pkgs.tree
-    pkgs.wezterm
-    pkgs.wget
-    pkgs.jq
-    pkgs.yq
-    pkgs.zip
-    pkgs.zsh-completions
-
-    # Cloud, DevOps, & Infrastructure
+    # Development & Infrastructure
     pkgs.awscli2
+    pkgs.bruno
+    pkgs.cargo
+    pkgs.colima
     pkgs.direnv
     pkgs.dive
     pkgs.docker-client
     pkgs.docker-slim
+    pkgs.git
+    pkgs.go
     (pkgs.google-cloud-sdk.withExtraComponents [pkgs.google-cloud-sdk.components.gke-gcloud-auth-plugin])
-    pkgs.kubectl
-    pkgs.kubernetes-helm
-    pkgs.kubectx
-    pkgs.kustomize
+    pkgs.goose
     pkgs.k9s
-    pkgs.colima
+    pkgs.kubectl
+    pkgs.kubectx
+    pkgs.kubernetes-helm
+    pkgs.kustomize
+    pkgs.lazygit
+    pkgs.nodejs_22
+    pkgs-neovim.neovim
+    pkgs.poetry
+    pkgs.python3
+    pkgs.sqlc
+    pkgs.terraform
+    pkgs.tmux
+    pkgs.tmuxp
+    pkgs.vscode
 
-    # Productivity & Workflow
+    # System & CLI Tools
     pkgs.atuin
-    pkgs.obsidian
-    pkgs.oh-my-posh
-    pkgs.slack
-    pkgs.zoxide
-
-    # Miscellaneous
-    pkgs.bruno
+    pkgs.bat
+    pkgs.carapace
+    pkgs.eza
+    pkgs.fastfetch
+    pkgs.fzf
+    pkgs.jq
+    pkgs.just
+    pkgs.mkalias
     pkgs.nerdfonts
-  ];
+    pkgs.nushell
+    pkgs.oh-my-posh
+    pkgs.ripgrep
+    pkgs.superfile
+    pkgs.tcping-go
+    pkgs.tree
+    pkgs.unixtools.watch
+    pkgs.wezterm
+    pkgs.wget
+    pkgs.yq
+    pkgs.zip
+    pkgs.zoxide
+    pkgs.zsh-completions
 
-  environment.variables.EDITOR = "nvim";
+    # Applications
+    pkgs.obsidian
+    pkgs.qmk
+    pkgs.slack
+  ];
 
   # TODO To make this work, homebrew need to be installed manually, see https://brew.sh
   #

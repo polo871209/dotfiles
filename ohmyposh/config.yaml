@@ -1,8 +1,8 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/schema.json
 
-version: 2
+version: 3
 final_space: true
-console_title_template: "{{ .Shell }} in {{ .Folder }}"
+shell_integration: true
 blocks:
   - type: prompt
     alignment: left
@@ -17,9 +17,11 @@ blocks:
         foreground: blue
         background: transparent
         template: "{{ .Path }}"
+        max_depth: 4
         properties:
+          style: agnoster_short
           folder_icon: ..
-          style: full
+          max_depth: 4
       - type: git
         style: plain
         foreground: p:grey
@@ -30,14 +32,16 @@ blocks:
           branch_icon: "  "
           commitz_icon: "@"
           fetch_status: true
-  # RIGHT PROMPT
-  - type: rprompt
+  - type: prompt
+    alignment: right
     segments:
       - type: python
         style: plain
         foreground: "#FFFF00"
         background: transparent
-        template: "  {{ .Venv }} "
+        template: "{{ .Venv }} 󰌠 {{ .Full }}"
+        properties:
+          display_mode: files
       - type: go
         style: plain
         foreground: "#FFFF00"
@@ -55,10 +59,18 @@ blocks:
         foreground: "p:terraform"
         background: transparent
         template: "󱁢 {{.WorkspaceName}}"
+      - type: kubectl
+        style: plain
+        foreground: p:kubernetes
+        background: transparent
+        template: " ﴱ {{.Context}}{{if .Namespace}}:{{.Namespace}}{{end}}"
+  - type: rprompt
+    segments:
       - type: executiontime
         style: plain
         properties:
           threshold: 5000
+          style: round
   # NEW LINE
   - type: prompt
     alignment: left
@@ -73,18 +85,6 @@ blocks:
         background: transparent
         template: 󰊠
 tooltips:
-  - type: kubectl
-    style: plain
-    tips:
-      - k
-      - kubectl
-      - kctx
-      - kns
-    foreground: p:kubernetes
-    background: transparent
-    template: " ﴱ {{.Context}}{{if .Namespace}}:{{.Namespace}}{{end}}"
-    properties:
-      parse_kubeconfig: true
   - type: gcp
     style: plain
     tips:
