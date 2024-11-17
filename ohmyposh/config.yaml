@@ -102,7 +102,7 @@ secondary_prompt:
 palette:
   google_yellow: "#ffce44"
   grey: "#6c6c6c"
-  kubernetes: "#326CE5"
+  kubernetes: "#3a7be1"
   pacman_blue: "#46bfee"
   pacman_red: "#d03e19"
   terraform: "#623CE4"
