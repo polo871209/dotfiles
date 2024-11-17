@@ -26,9 +26,5 @@ git config --global filter.lfs.clean "git-lfs clean -- %f"
 git config --global filter.lfs.smudge "git-lfs smudge -- %f"
 git config --global filter.lfs.process "git-lfs filter-process"
 
-# Alias Configuration
-git config --global alias.ac "!f() { git add . && git commit -m \"$*\"; }; f"
-
 # Additional Configuration
-git config --global rebase.autostash true
 git config --global diff.algorithm histogram
