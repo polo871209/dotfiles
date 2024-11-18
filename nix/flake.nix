@@ -32,12 +32,13 @@
     useremail = "qazh0123@gmail.com";
     system = "aarch64-darwin";
     hostname = "polohi";
-    pkgs-neovim = nixpkgs-neovim.legacyPackages.${system};
 
     # username = "po.locp";
     # useremail = "qazh0123@gmail.com";
     # system = "aarch64-darwin";
     # hostname = "KJ9NCMV04M";
+
+    pkgs-neovim = nixpkgs-neovim.legacyPackages.${system};
 
     specialArgs =
       inputs

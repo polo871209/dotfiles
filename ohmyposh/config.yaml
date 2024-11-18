@@ -21,7 +21,7 @@ blocks:
         properties:
           style: agnoster_short
           folder_icon: ..
-          max_depth: 4
+          max_depth: 2
       - type: git
         style: plain
         foreground: p:grey
