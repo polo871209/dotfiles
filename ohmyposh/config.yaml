@@ -21,7 +21,8 @@ blocks:
         properties:
           style: agnoster_short
           folder_icon: ..
-          max_depth: 2
+          max_depth: 4
+          hide_root_location: true
       - type: git
         style: plain
         foreground: p:grey
@@ -29,11 +30,18 @@ blocks:
         templates:
           - "{{ .HEAD }}{{ if or (.Working.Changed) (.Staging.Changed) }}*{{ end }} <#a12036>{{ if gt .Behind 0 }}\uea9a{{ end }}</><#10854e>{{if gt .Ahead 0 }}\ueaa1{{ end}}</>"
         properties:
-          branch_icon: "  "
+          branch_icon: " "
           commitz_icon: "@"
           fetch_status: true
   - type: prompt
     alignment: right
+    segments:
+      - type: kubectl
+        style: plain
+        foreground: p:kubernetes
+        background: transparent
+        template: " ﴱ {{.Context}}{{if .Namespace}}:{{.Namespace}}{{end}}"
+  - type: rprompt
     segments:
       - type: python
         style: plain
@@ -47,25 +55,11 @@ blocks:
         foreground: "#FFFF00"
         background: transparent
         template: " ﳑ {{ .Full }} "
-      - type: helm
-        style: plain
-        foreground: "blue"
-        background: transparent
-        template: "󱃾 Helm {{ .Version }}"
-        properties:
-          display_mode: files
       - type: terraform
         style: plain
         foreground: "p:terraform"
         background: transparent
         template: "󱁢 {{.WorkspaceName}}"
-      - type: kubectl
-        style: plain
-        foreground: p:kubernetes
-        background: transparent
-        template: " ﴱ {{.Context}}{{if .Namespace}}:{{.Namespace}}{{end}}"
-  - type: rprompt
-    segments:
       - type: executiontime
         style: plain
         properties:
