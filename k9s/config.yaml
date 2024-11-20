@@ -3,7 +3,7 @@ k9s:
   # C-s location
   screenDumpDir: /k9s-dump
   # Enable periodic refresh of resource browser windows. Default false
-  liveViewAutoRefresh: false
+  liveViewAutoRefresh: true
   # Represents ui poll intervals. Default 2secs
   refreshRate: 2
   # Number of retries once the connection to the api-server is lost. Default 15.
