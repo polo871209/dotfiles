@@ -9,6 +9,7 @@ export KUBE_EDITOR=vim
 
 export GOPATH=$HOME/go
 export PATH=$PATH:$GOPATH/bin
+export PATH=$PATH:~/dotfiles/scripts
 
 export DOCKER_DEFAULT_PLATFORM=linux/amd64
 export POETRY_VIRTUALENVS_IN_PROJECT=true

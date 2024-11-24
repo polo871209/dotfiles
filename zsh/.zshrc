@@ -62,18 +62,6 @@ h() {
     "$@" --help 2>&1 | bathelp
 }
 
-# Some functions
-kdiff() {
-    k diff -f "$1" | \
-    sed '/last-applied-configuration/{N;d;}' | \
-    grep -v "generation:" | \
-    grep -v "neg-status" | \
-    grep -v "diff" | \
-    sed -E $'s/^(\\+\\+\\+.*)$/\033[45m\033[1m\\1\033[22m\033[49m/' | \
-    sed -E $'s/^(-.*)$/\033[31m\\1\033[39m/' | \
-    sed -E $'s/^(\\+.*)$/\033[32m\\1\033[39m/' | bat
-}
-
 # Interactive sessions
 source <(fzf --zsh)
 eval "$(oh-my-posh init zsh --config $XDG_CONFIG_HOME/ohmyposh/config.yaml)"

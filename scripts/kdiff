@@ -1,0 +1,13 @@
+#! /usr/bin/env bash
+
+set -euo pipefail
+
+kubectl diff -f $1 | \
+    sed '/last-applied-configuration/{N;d;}' | \
+    grep -v "generation:" | \
+    grep -v "neg-status" | \
+    grep -v "diff" | \
+    sed -E $'s/^(\\+\\+\\+.*)$/\033[45m\033[1m\\1\033[22m\033[49m/' | \
+    sed -E $'s/^(-.*)$/\033[31m\\1\033[39m/' | \
+    sed -E $'s/^(\\+.*)$/\033[32m\\1\033[39m/' | bat -p
+
