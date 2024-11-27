@@ -55,7 +55,6 @@
     pkgs.unixtools.watch
     pkgs.wezterm
     pkgs.wget
-    pkgs.yq
     pkgs.zip
     pkgs.zoxide
     pkgs.zsh-completions
@@ -94,12 +93,15 @@
     # `brew install`
     brews = [
       "mas"
+      "python@3.10"
+      "yq"
       "zsh-autosuggestions"
       "zsh-syntax-highlighting"
     ];
 
     # `brew install --cask`
     casks = [
+      "nikitabobko/tap/aerospace"
       "alt-tab"
       "arc"
       "betterdisplay"
