@@ -10,6 +10,7 @@
     pkgs.bruno
     pkgs.cargo
     pkgs.colima
+    pkgs.crane
     pkgs.direnv
     pkgs.dive
     pkgs.docker-client
