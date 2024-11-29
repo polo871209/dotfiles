@@ -176,10 +176,19 @@ return {
       taplo = {},
       jsonls = {},
       nil_ls = {},
+      helm_ls = {
+        settings = {
+          ['helm-ls'] = {
+            yamlls = {
+              path = 'yaml-language-server',
+            },
+          },
+        },
+      },
       yamlls = {
         settings = {
           yaml = {
-            validate = true,
+            validate = false,
             completion = true,
 
             -- disable the schema store
@@ -202,11 +211,7 @@ return {
               ['http://json.schemastore.org/github-workflow'] = '.github/workflows/*',
               ['https://json.schemastore.org/cloudbuild.json'] = '*/cloudbuild.yaml',
               ['https://json.schemastore.org/prometheus.json'] = { 'prometheus.yaml', 'prometheus.yml' },
-              ['https://gitlab.com/gitlab-org/gitlab/-/raw/master/app/assets/javascripts/editor/schema/ci.json'] = {
-                '*.gitlab-ci.yaml',
-                '*.gitlab-ci.yml',
-                '.gitlab/ci/*.yml',
-              },
+              ['https://gitlab.com/gitlab-org/gitlab/-/raw/master/app/assets/javascripts/editor/schema/ci.json'] = { '*.gitlab-ci.yml', '.gitlab/ci/*.yml' },
               ['https://gitlab.com/gitlab-org/cluster-integration/gitlab-agent/-/raw/master/pkg/agentcfg/agentcfg_schemas/ConfigurationFile.json'] = {
                 '.gitlab/agents/*/config.yaml',
               },
