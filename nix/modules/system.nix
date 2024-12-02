@@ -17,7 +17,7 @@
       # activateSettings -u will reload the settings from the database and apply them to the current session,
       # so we do not need to logout and login again to make the changes take effect.
       /System/Library/PrivateFrameworks/SystemAdministration.framework/Resources/activateSettings -u
-    ''; 
+    '';
 
     applications.text = let
       env = pkgs.buildEnv {
@@ -41,7 +41,7 @@
     };
 
     defaults = {
-      menuExtraClock.Show24Hour = true;  
+      menuExtraClock.Show24Hour = true;
 
       finder = {
         AppleShowAllExtensions = true;
@@ -58,11 +58,11 @@
         show-recents = false;
         tilesize = 1;
       };
-      
+
       WindowManager = {
         StandardHideDesktopIcons = true;
       };
-         
+
 
       NSGlobalDomain = {
         AppleInterfaceStyle = "Dark";  # dark mode
@@ -72,7 +72,7 @@
         # This is very useful for vim users, they use `hjkl` to move cursor.
         # sets how long it takes before it starts repeating.
         InitialKeyRepeat = 15;  # normal minimum is 15 (225 ms), maximum is 120 (1800 ms)
-        # sets how fast it repeats once it starts. 
+        # sets how fast it repeats once it starts.
         KeyRepeat = 2;  # normal minimum is 2 (30 ms), maximum is 120 (1800 ms)
       };
     };
@@ -90,26 +90,4 @@
   ];
   # Set your time zone.
   time.timeZone = "Asia/Taipei";
-
-  # Fonts
-  fonts = {
-    packages = with pkgs; [
-      # icon fonts
-      material-design-icons
-      font-awesome
-
-      # nerdfonts
-      # https://github.com/NixOS/nixpkgs/blob/nixos-24.05/pkgs/data/fonts/nerdfonts/shas.nix
-      (nerdfonts.override {
-        fonts = [
-          # symbols icon only
-          "NerdFontsSymbolsOnly"
-          # Characters
-          "JetBrainsMono"
-          "Meslo"
-        ];
-      })
-    ];
-  };
-
 }

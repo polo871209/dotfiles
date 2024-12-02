@@ -45,7 +45,9 @@
     pkgs.jq
     pkgs.just
     pkgs.mkalias
-    pkgs.nerdfonts
+    pkgs.nerd-fonts.jetbrains-mono
+    pkgs.nerd-fonts.meslo-lg
+    pkgs.nerd-fonts.symbols-only
     pkgs.nushell
     pkgs.oh-my-posh
     pkgs.ripgrep
@@ -102,7 +104,6 @@
 
     # `brew install --cask`
     casks = [
-      "nikitabobko/tap/aerospace"
       "alt-tab"
       "arc"
       "betterdisplay"
