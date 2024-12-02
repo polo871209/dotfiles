@@ -28,7 +28,7 @@
     pkgs.nodejs_22
     pkgs-neovim.neovim
     pkgs.poetry
-    pkgs.python3
+    pkgs.python313Full
     pkgs.sqlc
     pkgs.terraform
     pkgs.tmux
