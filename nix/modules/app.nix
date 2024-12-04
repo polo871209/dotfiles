@@ -28,11 +28,12 @@
     pkgs.nodejs_22
     pkgs-neovim.neovim
     pkgs.poetry
-    pkgs.python313Full
+    pkgs.python3Full
     pkgs.sqlc
     pkgs.terraform
     pkgs.tmux
     pkgs.tmuxp
+    pkgs.uv
     pkgs.vscode
 
     # System & CLI Tools
@@ -96,7 +97,6 @@
     # `brew install`
     brews = [
       "mas"
-      "python@3.10"
       "yq"
       "zsh-autosuggestions"
       "zsh-syntax-highlighting"

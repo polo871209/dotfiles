@@ -5,9 +5,10 @@ bindkey jj vi-cmd-mode
 zstyle ':completion:*' menu select
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
 export CARAPACE_BRIDGES='zsh,fish,bash,inshellisense' # optional
+zstyle ':completion:*' format $'\e[2;37mCompleting %d\e[m'
 zstyle ':completion:*:git:*' group-order 'main commands' 'alias commands' 'external commands'
-autoload -Uz compinit
-compinit
+autoload -Uz compinit; compinit
+source <(uv generate-shell-completion zsh)
 source <(carapace _carapace)
 
 export BREW_PREFIX="/opt/homebrew/share"

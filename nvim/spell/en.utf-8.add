@@ -43,3 +43,6 @@ default
 default
 default
 kubectl
+SHOPEE
+UAT
+initContainer
