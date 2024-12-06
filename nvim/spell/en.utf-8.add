@@ -46,3 +46,4 @@ kubectl
 SHOPEE
 UAT
 initContainer
+FZF

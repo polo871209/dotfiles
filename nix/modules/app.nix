@@ -42,6 +42,7 @@
     pkgs.carapace
     pkgs.eza
     pkgs.fastfetch
+    pkgs.fd
     pkgs.fzf
     pkgs.jq
     pkgs.just
