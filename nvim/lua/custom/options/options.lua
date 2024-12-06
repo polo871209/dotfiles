@@ -143,7 +143,17 @@ vim.cmd [[
     autocmd!
     autocmd BufRead,BufNewFile *-dockerfile set filetype=dockerfile
     augroup END
-  ]]
+]]
+
+vim.api.nvim_create_autocmd('FileType', {
+  pattern = { 'sh', 'bash' },
+  callback = function()
+    vim.bo.expandtab = true
+    vim.bo.tabstop = 4
+    vim.bo.shiftwidth = 4
+    vim.bo.softtabstop = 4
+  end,
+})
 
 -- [[ Basic Autocommands ]]
 --  See `:help lua-guide-autocommands`

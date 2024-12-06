@@ -52,6 +52,7 @@
     pkgs.nushell
     pkgs.oh-my-posh
     pkgs.ripgrep
+    pkgs.shellcheck
     pkgs.stow
     pkgs.superfile
     pkgs.tcping-go
