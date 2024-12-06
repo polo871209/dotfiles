@@ -55,6 +55,7 @@
     pkgs.stow
     pkgs.superfile
     pkgs.tcping-go
+    pkgs.tldr
     pkgs.tree
     pkgs.unixtools.watch
     pkgs.wezterm
