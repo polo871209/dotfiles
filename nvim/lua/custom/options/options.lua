@@ -76,7 +76,6 @@ vim.api.nvim_set_keymap('n', '<leader>df', ':windo diffthis<CR>', { noremap = tr
 -- Spell Check
 vim.opt.spell = true
 vim.opt.spelllang = 'en_us'
-vim.api.nvim_set_keymap('n', '<leader>sc', '[S]pell Check', { noremap = true, silent = true })
 
 -- Sets how neovim will display certain whitespace characters in the editor.
 --  See `:help 'list'`
