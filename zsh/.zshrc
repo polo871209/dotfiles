@@ -32,6 +32,15 @@ alias cat="bat --color=always"
 alias c="code ."
 alias cafe="fastfetch && caffeinate -d"
 alias cls="clear"
+alias cs=create_shell_script
+create_shell_script () {
+    touch "$1.sh" && chmod +x "$1.sh"
+    bat --plain  <<EOF >> "$1.sh"
+#!/usr/bin/env bash
+
+set -euo pipefail
+EOF
+}
 alias ff='fzf --preview "bat --color=always --style=numbers --line-range=:500 {}" | pbcopy'
 alias k="kubectl"
 alias kctx="kubectx"
