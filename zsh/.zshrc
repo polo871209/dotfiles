@@ -9,9 +9,10 @@ autoload -Uz compinit; compinit
 source <(uv generate-shell-completion zsh)
 source <(carapace _carapace)
 
-export PATH="/opt/homebrew/bin:$PATH"
+# ZSH Plugins
 source /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh
 source /opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+source $HOME/dotfiles/zsh/plugins/autoswitch_virtualenv.zsh
 
 # Aliases
 alias c="code ."
