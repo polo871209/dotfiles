@@ -57,6 +57,7 @@ alias url="tmux capture-pane -J -p | grep -oE '(https?):\/\/.*[^>]' | fzf-tmux -
 
 # Functions
 cs() {
+    [ -f "$1.sh" ] && echo "$1.sh already exist" && return
     touch "$1.sh" && chmod +x "$1.sh"
     bat --plain  <<EOF >> "$1.sh"
 #!/usr/bin/env bash
