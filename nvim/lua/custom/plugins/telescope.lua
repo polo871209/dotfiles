@@ -57,6 +57,7 @@ return { -- Fuzzy Finder (files, lsp, etc)tele
         },
       },
       extensions = {
+        fzf = {},
         ['ui-select'] = {
           require('telescope.themes').get_dropdown(),
         },
