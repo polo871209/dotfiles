@@ -155,7 +155,21 @@ return {
 
       -- Programming Language
       gopls = {},
-      pyright = {},
+      pyright = {
+        settings = {
+          pyright = {
+            -- Using Ruff's import organizer
+            disableOrganizeImports = true,
+          },
+          python = {
+            analysis = {
+              -- Ignore all files for analysis to exclusively use Ruff for linting
+              ignore = { '*' },
+            },
+          },
+        },
+      },
+      ruff = {},
       bashls = {},
       lua_ls = {
         -- cmd = {...},
@@ -167,7 +181,7 @@ return {
               callSnippet = 'Replace',
             },
             -- You can toggle below to ignore Lua_LS's noisy `missing-fields` warnings
-            -- diagnostics = { disable = { 'missing-fields' } },
+            diagnostics = { disable = { 'missing-fields' } },
           },
         },
       },
@@ -253,8 +267,6 @@ return {
     vim.list_extend(ensure_installed, {
       'prettier', -- prettier formatter
       'stylua', -- lua formatter
-      'isort', -- python formatter
-      'black', -- python formatter
     })
     require('mason-tool-installer').setup { ensure_installed = ensure_installed }
 
