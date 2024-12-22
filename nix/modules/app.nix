@@ -5,63 +5,62 @@
   nixpkgs.config.allowUnfree = true;
 
   environment.systemPackages = [
-    # Development & Infrastructure
+
+    pkgs-neovim.neovim
+    pkgs.atuin
     pkgs.awscli2
+    pkgs.bat
     pkgs.bruno
     pkgs.cargo
+    pkgs.carapace
     pkgs.colima
     pkgs.crane
     pkgs.direnv
     pkgs.dive
     pkgs.docker-client
     pkgs.docker-slim
+    pkgs.eza
+    pkgs.fastfetch
+    pkgs.fd
+    pkgs.fzf
     pkgs.git
-    pkgs.go
     (pkgs.google-cloud-sdk.withExtraComponents [pkgs.google-cloud-sdk.components.gke-gcloud-auth-plugin])
+    pkgs.go
     pkgs.goose
+    pkgs.jq
+    pkgs.just
     pkgs.k9s
     pkgs.kubectl
     pkgs.kubectx
     pkgs.kubernetes-helm
     pkgs.kustomize
     pkgs.lazygit
-    pkgs.nodejs_22
-    pkgs-neovim.neovim
-    pkgs.poetry
-    pkgs.python3Full
-    pkgs.sqlc
-    pkgs.terraform
-    pkgs.tmux
-    pkgs.tmuxp
-    pkgs.uv
-    pkgs.vscode
-
-    # System & CLI Tools
-    pkgs.atuin
-    pkgs.bat
-    pkgs.carapace
-    pkgs.eza
-    pkgs.fastfetch
-    pkgs.fd
-    pkgs.fzf
-    pkgs.jq
-    pkgs.just
     pkgs.mkalias
     pkgs.nerd-fonts.jetbrains-mono
     pkgs.nerd-fonts.meslo-lg
     pkgs.nerd-fonts.symbols-only
+    pkgs.nodejs_22
     pkgs.nushell
     pkgs.oh-my-posh
+    pkgs.poetry
+    pkgs.python3
     pkgs.ripgrep
+    pkgs.ruff
     pkgs.shellcheck
+    pkgs.sqlc
     pkgs.stow
     pkgs.superfile
     pkgs.tcping-go
+    pkgs.terraform
     pkgs.tldr
+    pkgs.tmux
+    pkgs.tmuxp
     pkgs.tree
-    pkgs.unixtools.watch
+    pkgs.uv
+    pkgs.vscode
     pkgs.wezterm
     pkgs.wget
+    pkgs.yq
     pkgs.zip
     pkgs.zoxide
     pkgs.zsh-completions
@@ -100,7 +99,6 @@
     # `brew install`
     brews = [
       "mas"
-      "yq"
       "zsh-autosuggestions"
       "zsh-syntax-highlighting"
     ];
