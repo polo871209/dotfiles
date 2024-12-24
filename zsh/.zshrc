@@ -1,13 +1,12 @@
 setopt prompt_subst
 
 # Auto Complete
+export CARAPACE_BRIDGES='zsh,fish,bash,inshellisense'
 zstyle ':completion:*' menu select
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
 zstyle ':completion:*' format $'\e[2;37mCompleting %d\e[m'
-zstyle ':completion:*:git:*' group-order 'main commands' 'alias commands' 'external commands'
-autoload -Uz compinit; compinit
-source <(uv generate-shell-completion zsh)
 source <(carapace _carapace)
+source /run/current-system/sw/share/zsh/site-functions/_gsutil # temporary fix https://github.com/carapace-sh/carapace-bin/issues/2658
 
 # ZSH Plugins
 source /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh
