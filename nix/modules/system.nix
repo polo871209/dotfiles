@@ -63,7 +63,6 @@
         StandardHideDesktopIcons = true;
       };
 
-
       NSGlobalDomain = {
         AppleInterfaceStyle = "Dark";  # dark mode
         ApplePressAndHoldEnabled = true;  # enable press and hold
@@ -88,6 +87,7 @@
     pkgs.zsh
     pkgs.nushell
   ];
+
   # Set your time zone.
   time.timeZone = "Asia/Taipei";
 }

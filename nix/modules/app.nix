@@ -41,12 +41,16 @@
     pkgs.nerd-fonts.symbols-only
     pkgs.nodejs_22
     pkgs.nushell
+    pkgs.obsidian
     pkgs.oh-my-posh
     pkgs.poetry
     pkgs.python3
+    pkgs.qmk
+    pkgs.rclone
     pkgs.ripgrep
     pkgs.ruff
     pkgs.shellcheck
+    pkgs.slack
     pkgs.sqlc
     pkgs.stow
     pkgs.superfile
@@ -64,11 +68,6 @@
     pkgs.zip
     pkgs.zoxide
     pkgs.zsh-completions
-
-    # Applications
-    pkgs.obsidian
-    pkgs.qmk
-    pkgs.slack
   ];
 
   # TODO To make this work, homebrew need to be installed manually, see https://brew.sh
