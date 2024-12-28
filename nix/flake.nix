@@ -8,7 +8,6 @@
   inputs = {
     nixpkgs-darwin.url = "github:nixos/nixpkgs/nixpkgs-unstable";
     # To install a specific version of a package, find its hash at: https://www.nixhub.io
-    nixpkgs-neovim.url = "github:nixos/nixpkgs/5ed627539ac84809c78b2dd6d26a5cebeb5ae269";
     darwin = {
       url = "github:lnl7/nix-darwin";
       inputs.nixpkgs.follows = "nixpkgs-darwin";
@@ -23,7 +22,6 @@
   outputs = inputs @ {
     self,
     nixpkgs,
-    nixpkgs-neovim,
     darwin,
     ...
   }: let
@@ -33,22 +31,15 @@
     system = "aarch64-darwin";
     hostname = "polohi";
 
-    # username = "po.locp";
-    # useremail = "qazh0123@gmail.com";
-    # system = "aarch64-darwin";
-    # hostname = "KJ9NCMV04M";
-
-    pkgs-neovim = nixpkgs-neovim.legacyPackages.${system};
-
     specialArgs =
       inputs
       // {
-        inherit username useremail hostname pkgs-neovim;
+        inherit username useremail hostname;
       };
   in
   {
     # Build darwin flake using:
-    # $ darwin-rebuild switch --flake ~/.config/nix
+    # darwin-rebuild switch --flake ~/dotfiles/nix
     darwinConfigurations."${hostname}" = darwin.lib.darwinSystem {
       inherit specialArgs;
       modules = [

@@ -1,4 +1,4 @@
-{ pkgs, pkgs-neovim,  ... }: {
+{ pkgs, ... }: {
   # The packages installed here are available to all users, and are reproducible across machines, and are rollbackable.
   # But on macOS, it's less stable than homebrew.
   # Related Discussion: https://discourse.nixos.org/t/darwin-again/29331
@@ -6,11 +6,8 @@
 
   environment.systemPackages = [
 
-    pkgs-neovim.neovim
     pkgs.atuin
-    pkgs.awscli2
     pkgs.bat
-    pkgs.bruno
     pkgs.cargo
     pkgs.carapace
     pkgs.colima
@@ -36,6 +33,7 @@
     pkgs.kustomize
     pkgs.lazygit
     pkgs.mkalias
+    pkgs.neovim
     pkgs.nerd-fonts.jetbrains-mono
     pkgs.nerd-fonts.meslo-lg
     pkgs.nerd-fonts.symbols-only
@@ -97,6 +95,7 @@
 
     # `brew install`
     brews = [
+      "awscli"
       "mas"
       "zsh-autosuggestions"
       "zsh-syntax-highlighting"
