@@ -108,6 +108,7 @@
       "betterdisplay"
       "chatgpt"
       "dbeaver-community"
+      "ghostty"
       "hiddenbar"
       "hyperkey"
       "raycast"
