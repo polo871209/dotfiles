@@ -33,6 +33,15 @@ return { -- Autocompletion
     --  into multiple repos for maintenance purposes.
     'hrsh7th/cmp-nvim-lsp',
     'hrsh7th/cmp-path',
+    {
+      'Exafunction/codeium.nvim',
+      dependencies = {
+        'nvim-lua/plenary.nvim',
+      },
+      config = function()
+        require('codeium').setup {}
+      end,
+    },
   },
   config = function()
     -- See `:help cmp`
@@ -76,7 +85,7 @@ return { -- Autocompletion
         -- Manually trigger a completion from nvim-cmp.
         --  Generally you don't need this, because nvim-cmp will display
         --  completions whenever it has completion options available.
-        ['<C-Space>'] = cmp.mapping.complete {},
+        ['<C-c>'] = cmp.mapping.complete {},
 
         -- Think of <c-l> as moving to the right of your snippet expansion.
         --  So if you have a snippet that's like:
@@ -86,16 +95,16 @@ return { -- Autocompletion
         --
         -- <c-l> will move you to the right of each of the expansion locations.
         -- <c-h> is similar, except moving you backwards.
-        ['<C-l>'] = cmp.mapping(function()
-          if luasnip.expand_or_locally_jumpable() then
-            luasnip.expand_or_jump()
-          end
-        end, { 'i', 's' }),
-        ['<C-h>'] = cmp.mapping(function()
-          if luasnip.locally_jumpable(-1) then
-            luasnip.jump(-1)
-          end
-        end, { 'i', 's' }),
+        -- ['<C-l>'] = cmp.mapping(function()
+        --   if luasnip.expand_or_locally_jumpable() then
+        --     luasnip.expand_or_jump()
+        --   end
+        -- end, { 'i', 's' }),
+        -- ['<C-h>'] = cmp.mapping(function()
+        --   if luasnip.locally_jumpable(-1) then
+        --     luasnip.jump(-1)
+        --   end
+        -- end, { 'i', 's' }),
 
         -- For more advanced Luasnip keymaps (e.g. selecting choice nodes, expansion) see:
         --    https://github.com/L3MON4D3/LuaSnip?tab=readme-ov-file#keymaps
@@ -112,7 +121,5 @@ return { -- Autocompletion
         { name = 'codeium' },
       },
     }
-    -- Trigger completion
-    vim.api.nvim_set_keymap('n', '<leader>cc', '<Cmd>lua require("cmp").complete()<CR>', { noremap = true, silent = true, desc = '[C]mp [C]ompletion' })
   end,
 }

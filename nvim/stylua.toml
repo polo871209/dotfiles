@@ -1,5 +1,4 @@
 column_width = 160
-collapse_simple_statement = true
 line_endings = "Unix"
 indent_type = "Spaces"
 indent_width = 2

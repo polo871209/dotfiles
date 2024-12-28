@@ -22,39 +22,47 @@ return {
       vim.cmd.hi 'Comment gui=none'
     end,
   },
-  -- {
-  --   'rebelot/kanagawa.nvim',
-  --   lazy = false, -- Load the plugin immediately
-  --   priority = 1000, -- Ensures this plugin loads first for colors
-  --   config = function()
-  --     require('kanagawa').setup {
-  --       compile = false, -- Enable compiling the colorscheme
-  --       undercurl = true, -- Enable undercurls
-  --       commentStyle = { italic = true },
-  --       functionStyle = {},
-  --       keywordStyle = { italic = true },
-  --       statementStyle = { bold = true },
-  --       typeStyle = {},
-  --       transparent = false, -- Do not set background color
-  --       dimInactive = false, -- Dim inactive window `:h hl-NormalNC`
-  --       terminalColors = true, -- Define vim.g.terminal_color_{0,17}
-  --       colors = { -- Add/modify theme and palette colors
-  --         palette = {},
-  --         theme = { wave = {}, lotus = {}, dragon = {}, all = {} },
-  --       },
-  --       overrides = function(colors) -- Add/modify highlights
-  --         return {}
-  --       end,
-  --       theme = 'wave', -- Load "wave" theme when 'background' option is not set
-  --       background = { -- Map the value of 'background' option to a theme
-  --         dark = 'dragon', -- Try "dragon" !
-  --         light = 'lotus',
-  --       },
-  --     }
-  --     -- Activate the colorscheme
-  --     vim.cmd 'colorscheme kanagawa'
-  --   end,
-  -- },
   -- Highlight todo, notes, etc in comments
-  { 'folke/todo-comments.nvim', event = 'VimEnter', dependencies = { 'nvim-lua/plenary.nvim' }, opts = { signs = false } },
+  {
+    'folke/todo-comments.nvim',
+    event = 'VimEnter',
+    dependencies = { 'nvim-lua/plenary.nvim' },
+    opts = { signs = false },
+  },
+  {
+    -- Add indentation guides even on blank lines
+    'lukas-reineke/indent-blankline.nvim',
+    -- Enable `lukas-reineke/indent-blankline.nvim`
+    -- See `:help ibl`
+    main = 'ibl',
+    opts = {},
+    config = function()
+      local highlight = {
+        'RainbowRed',
+        'RainbowYellow',
+        'RainbowBlue',
+        'RainbowOrange',
+        'RainbowGreen',
+        'RainbowViolet',
+        'RainbowCyan',
+      }
+      local hooks = require 'ibl.hooks'
+      -- create the highlight groups in the highlight setup hook, so they are reset
+      -- every time the colorscheme changes
+      hooks.register(hooks.type.HIGHLIGHT_SETUP, function()
+        vim.api.nvim_set_hl(0, 'RainbowRed', { fg = '#E06C75' })
+        vim.api.nvim_set_hl(0, 'RainbowYellow', { fg = '#E5C07B' })
+        vim.api.nvim_set_hl(0, 'RainbowBlue', { fg = '#61AFEF' })
+        vim.api.nvim_set_hl(0, 'RainbowOrange', { fg = '#D19A66' })
+        vim.api.nvim_set_hl(0, 'RainbowGreen', { fg = '#98C379' })
+        vim.api.nvim_set_hl(0, 'RainbowViolet', { fg = '#C678DD' })
+        vim.api.nvim_set_hl(0, 'RainbowCyan', { fg = '#56B6C2' })
+      end)
+
+      vim.g.rainbow_delimiters = { highlight = highlight }
+      require('ibl').setup { scope = { highlight = highlight } }
+
+      hooks.register(hooks.type.SCOPE_HIGHLIGHT, hooks.builtin.scope_highlight_from_extmark)
+    end,
+  },
 }

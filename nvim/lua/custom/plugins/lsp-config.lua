@@ -10,7 +10,18 @@ return {
     -- Useful status updates for LSP.
     -- NOTE: `opts = {}` is the same as calling `require('fidget').setup({})`
     { 'j-hui/fidget.nvim', opts = {} },
-
+    {
+      -- `lazydev` configures Lua LSP for your Neovim config, runtime and plugins
+      -- used for completion, annotations and signatures of Neovim apis
+      'folke/lazydev.nvim',
+      ft = 'lua',
+      opts = {
+        library = {
+          -- Load luvit types when the `vim.uv` word is found
+          { path = 'luvit-meta/library', words = { 'vim%.uv' } },
+        },
+      },
+    },
     -- Allows extra capabilities provided by nvim-cmp
     'hrsh7th/cmp-nvim-lsp',
   },
@@ -135,6 +146,16 @@ return {
       end,
     })
 
+    -- Change diagnostic symbols in the sign column (gutter)
+    -- if vim.g.have_nerd_font then
+    --   local signs = { ERROR = '', WARN = '', INFO = '', HINT = '' }
+    --   local diagnostic_signs = {}
+    --   for type, icon in pairs(signs) do
+    --     diagnostic_signs[vim.diagnostic.severity[type]] = icon
+    --   end
+    --   vim.diagnostic.config { signs = { text = diagnostic_signs } }
+    -- end
+
     -- LSP servers and clients are able to communicate to each other what features they support.
     --  By default, Neovim doesn't support everything that is in the LSP specification.
     --  When you add nvim-cmp, luasnip, etc. Neovim now has *more* capabilities.
@@ -151,122 +172,116 @@ return {
     --  - capabilities (table): Override fields in capabilities. Can be used to disable certain LSP features.
     --  - settings (table): Override the default settings passed when initializing the server.
     --        For example, to see the options for `lua_ls`, you could go to: https://luals.github.io/wiki/settings/
-    local servers = {
+    local servers =
+      {
+        -- ... etc. See `:help lspconfig-all` for a list of all the pre-configured LSPs
+        --
+        -- Some languages (like typescript) have entire language plugins that can be useful:
+        --    https://github.com/pmizio/typescript-tools.nvim
+        --
+        -- But for many setups, the LSP (`ts_ls`) will work just fine
+        -- ts_ls = {},
+        --
 
-      -- Programming Language
-      gopls = {},
-      pyright = {
-        settings = {
-          pyright = {
-            -- Using Ruff's import organizer
-            disableOrganizeImports = true,
-          },
-          python = {
-            analysis = {
-              -- Ignore all files for analysis to exclusively use Ruff for linting
-              ignore = { '*' },
-            },
-          },
-        },
-      },
-      ruff = {},
-      bashls = {},
-      lua_ls = {
-        -- cmd = {...},
-        -- filetypes = { ...},
-        -- capabilities = {},
-        settings = {
-          Lua = {
-            completion = {
-              callSnippet = 'Replace',
-            },
-            -- You can toggle below to ignore Lua_LS's noisy `missing-fields` warnings
-            diagnostics = { disable = { 'missing-fields' } },
-          },
-        },
-      },
-
-      -- Configuration language
-      taplo = {},
-      jsonls = {},
-      nil_ls = {},
-      helm_ls = {
-        settings = {
-          ['helm-ls'] = {
-            yamlls = {
-              path = 'yaml-language-server',
-            },
-          },
-        },
-      },
-      yamlls = {
-        settings = {
-          yaml = {
-            validate = false,
-            completion = true,
-
-            -- disable the schema store
-            schemaStore = {
-              enable = true,
-              url = '',
-            },
-            -- Disable formatting if not needed
-            format = {
-              enabled = false,
-            },
-            -- To add other schema shebang other than pattern below define below
-            -- # yaml-language-server: $schema={SchemaURL}
-            schemas = {
-              -- kubernetes
-              kubernetes = { 'deploy.yaml', 'deploy.yml' },
-              ['https://json.schemastore.org/kustomization.json'] = { 'kustomization.yaml', 'kustomization.yml', 'Kustomization' },
-
-              -- others
-              ['http://json.schemastore.org/github-workflow'] = '.github/workflows/*',
-              ['https://json.schemastore.org/cloudbuild.json'] = '*/cloudbuild.yaml',
-              ['https://json.schemastore.org/prometheus.json'] = { 'prometheus.yaml', 'prometheus.yml' },
-              ['https://gitlab.com/gitlab-org/gitlab/-/raw/master/app/assets/javascripts/editor/schema/ci.json'] = { '*.gitlab-ci.yml', '.gitlab/ci/*.yml' },
-              ['https://gitlab.com/gitlab-org/cluster-integration/gitlab-agent/-/raw/master/pkg/agentcfg/agentcfg_schemas/ConfigurationFile.json'] = {
-                '.gitlab/agents/*/config.yaml',
+        bashls = {},
+        gopls = {},
+        helm_ls = {
+          settings = {
+            ['helm-ls'] = {
+              yamlls = {
+                path = 'yaml-language-server',
               },
-              ['https://raw.githubusercontent.com/compose-spec/compose-spec/master/schema/compose-spec.json'] = { 'docker-compose.yaml', 'docker-compose.yml' },
+            },
+          },
+        },
+        jsonls = {},
+        nil_ls = {},
+        pyright = {
+          settings = {
+            pyright = {
+              -- Using Ruff's import organizer
+              disableOrganizeImports = true,
+            },
+            python = {
+              analysis = {
+                -- Ignore all files for analysis to exclusively use Ruff for linting
+                ignore = { '*' },
+              },
+            },
+          },
+        },
+        ruff = {},
+        taplo = {},
+        terraformls = {
+          filetypes = { 'terraform', 'hcl', 'tf' },
+          root_dir = require('lspconfig').util.root_pattern('.terraform', '.git'),
+          settings = {
+            terraform = {
+              format = {
+                enabled = true,
+              },
+              lint = {
+                enabled = true,
+              },
+            },
+          },
+        },
+        yamlls = {
+          settings = {
+            yaml = {
+              validate = false,
+              completion = true,
 
-              --- Disable yaml schema validation
-              ['https://json.schemastore.org/yamllint.json'] = { 'values.yaml', 'values.yml', 'ingressroute.yaml' },
+              -- disable the schema store
+              schemaStore = {
+                enable = true,
+                url = '',
+              },
+              -- Disable formatting if not needed
+              format = {
+                enabled = false,
+              },
+              -- To add other schema shebang other than pattern below define below
+              -- # yaml-language-server: $schema={SchemaURL}
+              schemas = {
+                -- kubernetes
+                kubernetes = { 'deploy.yaml', 'deploy.yml' },
+                ['https://json.schemastore.org/kustomization.json'] = { 'kustomization.yaml', 'kustomization.yml', 'Kustomization' },
+
+                -- others
+                ['http://json.schemastore.org/github-workflow'] = '.github/workflows/*',
+                ['https://json.schemastore.org/cloudbuild.json'] = '*/cloudbuild.yaml',
+                ['https://json.schemastore.org/prometheus.json'] = { 'prometheus.yaml', 'prometheus.yml' },
+                ['https://gitlab.com/gitlab-org/gitlab/-/raw/master/app/assets/javascripts/editor/schema/ci.json'] = { '*.gitlab-ci.yml', '.gitlab/ci/*.yml' },
+                ['https://gitlab.com/gitlab-org/cluster-integration/gitlab-agent/-/raw/master/pkg/agentcfg/agentcfg_schemas/ConfigurationFile.json'] = {
+                  '.gitlab/agents/*/config.yaml',
+                },
+                ['https://raw.githubusercontent.com/compose-spec/compose-spec/master/schema/compose-spec.json'] = {
+                  'docker-compose.yaml',
+                  'docker-compose.yml',
+                },
+
+                --- Disable yaml schema validation
+                ['https://json.schemastore.org/yamllint.json'] = { 'values.yaml', 'values.yml', 'ingressroute.yaml' },
+              },
             },
           },
         },
       },
-      terraformls = {
-        filetypes = { 'terraform', 'hcl', 'tf' },
-        root_dir = require('lspconfig').util.root_pattern('.terraform', '.git'),
-        settings = {
-          terraform = {
-            format = {
-              enabled = true,
-            },
-            lint = {
-              enabled = true,
-            },
-          },
-        },
-      },
-    }
-
-    -- Ensure the servers and tools above are installed
-    --  To check the current status of installed tools and/or manually install
-    --  other tools, you can run
-    --    :Mason
-    --
-    --  You can press `g?` for help in this menu.
-    require('mason').setup()
+      -- Ensure the servers and tools above are installed
+      --  To check the current status of installed tools and/or manually install
+      --  other tools, you can run
+      --    :Mason
+      --
+      --  You can press `g?` for help in this menu.
+      require('mason').setup()
 
     -- You can add other tools here that you want Mason to install
     -- for you, so that they are available from within Neovim.
     local ensure_installed = vim.tbl_keys(servers or {})
     vim.list_extend(ensure_installed, {
+      'stylua', -- Used to format Lua code
       'prettier', -- prettier formatter
-      'stylua', -- lua formatter
     })
     require('mason-tool-installer').setup { ensure_installed = ensure_installed }
 
