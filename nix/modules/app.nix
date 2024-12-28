@@ -44,7 +44,6 @@
     pkgs.poetry
     pkgs.python3
     pkgs.qmk
-    pkgs.rclone
     pkgs.ripgrep
     pkgs.ruff
     pkgs.shellcheck
