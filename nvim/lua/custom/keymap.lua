@@ -76,13 +76,37 @@ local action_state = require 'telescope.actions.state'
 vim.keymap.set('n', '<leader>on', function()
   require('telescope.builtin').find_files {
     cwd = vim.fn.expand '~/vaults/obsidian',
-    hidden = true, -- Include hidden files, if necessary
+    hidden = false,
     attach_mappings = function(prompt_bufnr, map)
       local open_in_right_split = function()
         local entry = action_state.get_selected_entry()
         actions.close(prompt_bufnr) -- Close Telescope
         vim.cmd 'vsplit' -- Open in a vertical split
         vim.cmd('edit ' .. entry.path) -- Open the selected file
+
+        -- Move the cursor to the second appearance of ---
+        vim.api.nvim_buf_call(0, function()
+          local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false) -- Get the buffer lines
+          local first_dash_idx = nil
+          local second_dash_idx = nil
+
+          -- Find the indices of the first and second appearance of ---
+          for i, line in ipairs(lines) do
+            if line:match '^---' then
+              if not first_dash_idx then
+                first_dash_idx = i
+              elseif not second_dash_idx then
+                second_dash_idx = i
+                break
+              end
+            end
+          end
+
+          -- Move the cursor to the second appearance of ---
+          if second_dash_idx then
+            vim.api.nvim_win_set_cursor(0, { second_dash_idx + 2, 0 })
+          end
+        end)
       end
 
       -- Map `<CR>` (Enter) to open in a right split
@@ -92,8 +116,3 @@ vim.keymap.set('n', '<leader>on', function()
     end,
   }
 end, { desc = '[O]bsidian [N]otes in a new pane' })
-
-vim.keymap.set('n', '<leader>O', function()
-  -- Run the tmux command to split the window and start nvim in the vault directory
-  vim.fn.system 'tmux split-window -h "cd ~/vaults/obsidian && nvim"'
-end, { desc = '[O]pen Obsidian and start a new note' })

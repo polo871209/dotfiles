@@ -4,14 +4,6 @@ return {
     version = '*', -- recommended, use latest release instead of latest commit
     lazy = true,
     ft = 'markdown',
-    -- Replace the above line with this if you only want to load obsidian.nvim for markdown files in your vault:
-    -- event = {
-    --   -- If you want to use the home shortcut '~' here you need to call 'vim.fn.expand'.
-    --   -- E.g. "BufReadPre " .. vim.fn.expand "~" .. "/my-vault/*.md"
-    --   -- refer to `:h file-pattern` for more examples
-    --   "BufReadPre path/to/my-vault/*.md",
-    --   "BufNewFile path/to/my-vault/*.md",
-    -- },
     dependencies = {
       -- Required.
       'nvim-lua/plenary.nvim',
@@ -23,6 +15,57 @@ return {
           path = '~/vaults/obsidian',
         },
       },
+
+      -- Add a custom frontmatter function
+      note_frontmatter_func = function(note)
+        -- Add the title of the note as an alias
+        if note.title then
+          note:add_alias(note.title)
+        end
+
+        -- Get the current datetime in ISO 8601 format
+        local datetime = os.date '!%Y-%m-%dT%H:%M:%SZ' -- UTC time
+
+        -- Create the base frontmatter
+        local out = {
+          id = note.id,
+          tags = note.tags,
+          updated_at = datetime,
+        }
+
+        -- Add tags based on the folder structure of the note's path
+        if next(note.tags) == nil then
+          -- Resolve the actual paths to handle symlinks
+          local vault_path = vim.loop.fs_realpath(vim.fn.expand '~/vaults/obsidian') -- Real path of the vault
+          local note_path = vim.loop.fs_realpath(vim.fn.expand '%:p') -- Real path of the note
+
+          if not vault_path or not note_path then
+            -- Fallback: If the realpath fails for some reason, skip adding tags
+            return out
+          end
+
+          -- Remove the vault path from the note path
+          local relative_path = string.gsub(note_path, '^' .. vault_path .. '/', '')
+
+          -- Extract folder names from the relative path and add them as tags
+          for folder in string.gmatch(relative_path, '([^/]+)/') do
+            table.insert(out.tags, folder)
+          end
+
+          -- add url when init
+          out.urls = {}
+        end
+
+        -- `note.metadata` contains any manually added fields in the frontmatter.
+        -- So here we just make sure those fields are kept in the frontmatter.
+        if note.metadata ~= nil and not vim.tbl_isempty(note.metadata) then
+          for k, v in pairs(note.metadata) do
+            out[k] = v
+          end
+        end
+
+        return out
+      end,
     },
   },
   {
