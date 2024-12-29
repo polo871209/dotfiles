@@ -1,0 +1,7 @@
+#! /usr/bin/env bash
+
+set -euo pipefail
+
+cd ~/dotfiles/scripts/snippet 
+
+uv run snippet.py ~/vaults/obsidian

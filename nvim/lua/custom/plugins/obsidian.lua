@@ -52,8 +52,9 @@ return {
             table.insert(out.tags, folder)
           end
 
-          -- add url when init
+          -- other init metadata
           out.urls = {}
+          out.snippet = false
         end
 
         -- `note.metadata` contains any manually added fields in the frontmatter.
