@@ -16,6 +16,6 @@ stow .
 # gen key and add to github
 ssh-keygen -t ed25519
 
-# setup notes(install google drive first)
-ln -s "~/Google Drive/My Drive/vaults" ~/vaults
+# setup notes(login google drive first)
+mkdir ~/valuts && cd ~/Google\ Drive/My\ Drive/vaults && stow .
 ```

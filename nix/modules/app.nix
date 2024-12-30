@@ -42,7 +42,7 @@
     pkgs.obsidian
     pkgs.oh-my-posh
     pkgs.poetry
-    pkgs.python3
+    pkgs.python3Full
     pkgs.qmk
     pkgs.ripgrep
     pkgs.ruff
@@ -108,6 +108,7 @@
       "chatgpt"
       "dbeaver-community"
       "ghostty"
+      "google-drive"
       "hiddenbar"
       "hyperkey"
       "raycast"
