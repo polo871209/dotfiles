@@ -18,11 +18,6 @@ return {
 
       -- Add a custom frontmatter function
       note_frontmatter_func = function(note)
-        -- Add the title of the note as an alias
-        if note.title then
-          note:add_alias(note.title)
-        end
-
         -- Get the current datetime in ISO 8601 format
         local datetime = os.date '!%Y-%m-%dT%H:%M:%SZ' -- UTC time
 
@@ -45,7 +40,7 @@ return {
           end
 
           -- Remove the vault path from the note path
-          local relative_path = string.gsub(note_path, '^' .. vault_path .. '/', '')
+          local relative_path = note_path:sub(#vault_path + 2) -- +2 to remove trailing slash
 
           -- Extract folder names from the relative path and add them as tags
           for folder in string.gmatch(relative_path, '([^/]+)/') do
