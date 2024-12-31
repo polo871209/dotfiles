@@ -5,7 +5,6 @@
   nixpkgs.config.allowUnfree = true;
 
   environment.systemPackages = [
-
     pkgs.atuin
     pkgs.bat
     pkgs.cargo
@@ -86,6 +85,7 @@
     # For details, see https://github.com/mas-cli/mas
     masApps = {
       Xnip = 1221250572;
+      PDFGear = 6469021132;
     };
 
     taps = [
