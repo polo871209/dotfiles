@@ -31,13 +31,11 @@
     pkgs.kubernetes-helm
     pkgs.kustomize
     pkgs.lazygit
-    pkgs.mkalias
     pkgs.neovim
     pkgs.nerd-fonts.jetbrains-mono
     pkgs.nerd-fonts.meslo-lg
     pkgs.nerd-fonts.symbols-only
     pkgs.nodejs_22
-    pkgs.nushell
     pkgs.obsidian
     pkgs.oh-my-posh
     pkgs.poetry
@@ -49,7 +47,6 @@
     pkgs.slack
     pkgs.sqlc
     pkgs.stow
-    pkgs.superfile
     pkgs.tcping-go
     pkgs.terraform
     pkgs.tldr
@@ -58,7 +55,6 @@
     pkgs.tree
     pkgs.uv
     pkgs.vscode
-    pkgs.wezterm
     pkgs.wget
     pkgs.yq
     pkgs.zip
