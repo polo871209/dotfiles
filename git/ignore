@@ -1,0 +1,27 @@
+# macOS system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.env
+*.venv
+
+# Go
+*.out
+
+# Docker
+*.env
+*.env.*
+
+# Terraform
+*.tfstate
+*.tfstate.*
+
+# direnv
+.envrc
