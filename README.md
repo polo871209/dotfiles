@@ -18,4 +18,8 @@ ssh-keygen -t ed25519
 
 # setup notes(login google drive first)
 mkdir ~/valuts && cd ~/Google\ Drive/My\ Drive/vaults && stow .
+
+# supress prompt
+cd
+touch .hushlogin
 ```
