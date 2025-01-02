@@ -65,6 +65,11 @@ set -euo pipefail
 EOF
 }
 
+# docker dive local image
+divelocal() {
+    dive <(docker save "$1") --source=docker-archive "${@:2}"
+}
+
 eval "$(oh-my-posh init zsh --config $XDG_CONFIG_HOME/ohmyposh/config.yaml)"
 eval "$(atuin init zsh)"
 eval "$(direnv hook zsh)"
