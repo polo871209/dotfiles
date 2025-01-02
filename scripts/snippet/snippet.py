@@ -27,7 +27,8 @@ def process_markdown_files(folder_path):
                     # Check if this is a snippet
                     if post.metadata.get("snippet", False):
                         # Get the id from frontmatter
-                        snippet_id = post.metadata.get("id", "")
+                        id: str = post.metadata.get("id", "")
+                        snippet_id = id.split("-")[-1]
                         if not snippet_id:
                             print(
                                 f"Warning: Skipping {file} - missing id in frontmatter"
