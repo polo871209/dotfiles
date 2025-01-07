@@ -1,8 +1,7 @@
-#! /usr/bin/env bash
-
+#!/usr/bin/env bash
 set -euo pipefail
 
-kubectl diff -f $1 | \
+kubectl diff -f "$1" | \
     sed '/last-applied-configuration/{N;d;}' | \
     grep -v "generation:" | \
     grep -v "neg-status" | \

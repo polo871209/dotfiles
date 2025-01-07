@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+pod=$(
+    kubectl get pods -o json | \
+    jq -r '.items[] | "\(.status.phase) \t \(.metadata.name)"' | \
+    fzf --header "status           pod" --prompt "pod: " | \
+    awk '{print $2}'
+)
+
+container=$(
+    kubectl get pod "$pod" -ojson | \
+    jq -r '.status.containerStatuses.[] | "\(.state | keys[])  \(.name)"' | \
+    fzf --header "status   container" --prompt "container: " | \
+    awk '{print $2}'
+)
+
+image=$(
+    gum input --header "pod: $pod, container: $container" --header.foreground=#d79921 --prompt "debug image: "
+)
+
+kubectl debug -it --profile=sysadmin \
+   "$pod" --target="$container" \
+   --image="$image" -- /bin/bash
+

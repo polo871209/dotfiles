@@ -48,6 +48,7 @@ h() {
 # FZF
 source <(fzf --zsh)
 export FZF_DEFAULT_COMMAND="fd --hidden --strip-cwd-prefix --exclude .git --exclude .venv"
+export FZF_DEFAULT_OPTS="--select-1"
 nf() {
     file=$(fzf --preview "bat --color=always --style=numbers --line-range=:500 {}")
     [ -d $file ] && cd $file && nvim || nvim $file
@@ -60,7 +61,6 @@ cs() {
     touch "$1.sh" && chmod +x "$1.sh"
     bat --plain  <<EOF >> "$1.sh"
 #!/usr/bin/env bash
-
 set -euo pipefail
 EOF
 }
