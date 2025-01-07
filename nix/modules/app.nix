@@ -53,6 +53,7 @@
     pkgs.tmux
     pkgs.tmuxp
     pkgs.tree
+    pkgs.trivy
     pkgs.uv
     pkgs.vscode
     pkgs.wget
