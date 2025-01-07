@@ -39,7 +39,9 @@
     pkgs.nodejs_22
     pkgs.obsidian
     pkgs.oh-my-posh
+    pkgs.openssl
     pkgs.poetry
+    pkgs.postgresql
     pkgs.python3Full
     pkgs.qmk
     pkgs.ripgrep
