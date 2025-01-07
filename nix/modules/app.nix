@@ -23,6 +23,7 @@
     (pkgs.google-cloud-sdk.withExtraComponents [pkgs.google-cloud-sdk.components.gke-gcloud-auth-plugin])
     pkgs.go
     pkgs.goose
+    pkgs.gum
     pkgs.jq
     pkgs.just
     pkgs.k9s
