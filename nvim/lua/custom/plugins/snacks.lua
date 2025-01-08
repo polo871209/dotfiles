@@ -64,4 +64,13 @@ return {
       end,
     })
   end,
+  config = function(_, opts)
+    -- Require the Snacks module
+    local Snacks = require 'snacks'
+
+    -- Initialize the plugin with the provided options
+    Snacks.setup(opts)
+
+    -- Optionally, you can set up global variables or additional configurations here
+  end,
 }
