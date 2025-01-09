@@ -20,6 +20,7 @@
     pkgs.fd
     pkgs.fzf
     pkgs.git
+    pkgs.gitleaks
     (pkgs.google-cloud-sdk.withExtraComponents [pkgs.google-cloud-sdk.components.gke-gcloud-auth-plugin])
     pkgs.go
     pkgs.goose
@@ -42,6 +43,7 @@
     pkgs.openssl
     pkgs.poetry
     pkgs.postgresql
+    pkgs.pre-commit
     pkgs.python3Full
     pkgs.qmk
     pkgs.ripgrep
