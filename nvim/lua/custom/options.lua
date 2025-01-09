@@ -94,6 +94,14 @@ vim.cmd [[
     augroup END
 ]]
 
+-- New Direnv .envrc Detection
+vim.cmd [[
+    augroup EnvrcDetection
+        autocmd!
+        autocmd BufRead,BufNewFile .envrc set filetype=sh
+    augroup END
+]]
+
 -- [[ Basic Autocommands ]]
 --  See `:help lua-guide-autocommands`
 
