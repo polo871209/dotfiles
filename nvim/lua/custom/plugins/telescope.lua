@@ -54,6 +54,7 @@ return { -- Fuzzy Finder (files, lsp, etc)tele
       pickers = {
         find_files = {
           hidden = true,
+          no_ignore = true,
         },
       },
       extensions = {
