@@ -4,7 +4,7 @@ return {
   config = function()
     vim.g.floaterm_title = '🦍🦍🦍🦍 WE STRONK 🦍🦍🦍🦍 WE APE 🦍🦍🦍🦍'
     vim.g.floaterm_width = 0.99
-    vim.g.floaterm_height = 0.7
+    vim.g.floaterm_height = 0.99
     vim.g.floaterm_position = 'bottom'
     vim.g.floaterm_titleposition = 'center'
     vim.g.floaterm_borderchars = '─│─│╭╮╯╰'
