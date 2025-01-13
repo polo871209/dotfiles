@@ -9,7 +9,6 @@
     pkgs.bat
     pkgs.cargo
     pkgs.carapace
-    pkgs.colima
     pkgs.crane
     pkgs.direnv
     pkgs.dive
@@ -113,6 +112,7 @@
       "google-drive"
       "hiddenbar"
       "hyperkey"
+      "orbstack"
       "raycast"
     ];
   };
