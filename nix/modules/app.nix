@@ -27,6 +27,7 @@
     pkgs.jq
     pkgs.just
     pkgs.k9s
+    pkgs.kcl
     pkgs.kubectl
     pkgs.kubectx
     pkgs.kubernetes-helm

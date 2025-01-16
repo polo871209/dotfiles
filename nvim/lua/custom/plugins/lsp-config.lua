@@ -16,6 +16,8 @@ return {
     -- Allows extra capabilities provided by nvim-cmp
     'hrsh7th/cmp-nvim-lsp',
 
+    -- other language plugins
+    --
     -- `lazydev` configures Lua LSP for your Neovim config, runtime and plugins
     -- used for completion, annotations and signatures of Neovim apis
     {
@@ -28,6 +30,7 @@ return {
         },
       },
     },
+    'kcl-lang/kcl.nvim',
   },
   config = function()
     -- Brief aside: **What is LSP?**
@@ -189,6 +192,7 @@ return {
         },
       },
       jsonls = {},
+      kcl = {},
       nil_ls = {},
       pyright = {
         settings = {
