@@ -31,6 +31,7 @@ return {
       },
     },
     'kcl-lang/kcl.nvim',
+    { 'ckipp01/nvim-jenkinsfile-linter', requires = { 'nvim-lua/plenary.nvim' } },
   },
   config = function()
     -- Brief aside: **What is LSP?**
@@ -182,6 +183,7 @@ return {
     local servers = {
       bashls = {},
       gopls = {},
+      groovyls = {},
       helm_ls = {
         settings = {
           ['helm-ls'] = {

@@ -66,6 +66,7 @@
     pkgs.zip
     pkgs.zoxide
     pkgs.zsh-completions
+    pkgs.zulu8
   ];
 
   # TODO To make this work, homebrew need to be installed manually, see https://brew.sh

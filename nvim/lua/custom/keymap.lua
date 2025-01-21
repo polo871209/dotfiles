@@ -55,6 +55,10 @@ vim.keymap.set('n', '<leader><leader>', builtin.find_files, { desc = '[ ] Find F
 vim.keymap.set('n', '<leader>ss', builtin.spell_suggest, { desc = '[S]pell [S]uggestion' })
 vim.keymap.set('n', '<leader>/', builtin.current_buffer_fuzzy_find, { desc = '[/] Fuzzily search in current buffer' })
 
+vim.keymap.set('n', '<leader>lj', function()
+  require('jenkinsfile_linter').validate()
+end, { desc = '[L]int [J]enkinsfile' })
+
 -- It's also possible to pass additional configuration options.
 --  See `:help telescope.builtin.live_grep()` for information about particular keys
 vim.keymap.set('n', '<leader>s/', function()
