@@ -55,10 +55,6 @@ vim.keymap.set('n', '<leader><leader>', builtin.find_files, { desc = '[ ] Find F
 vim.keymap.set('n', '<leader>ss', builtin.spell_suggest, { desc = '[S]pell [S]uggestion' })
 vim.keymap.set('n', '<leader>/', builtin.current_buffer_fuzzy_find, { desc = '[/] Fuzzily search in current buffer' })
 
-vim.keymap.set('n', '<leader>lj', function()
-  require('jenkinsfile_linter').validate()
-end, { desc = '[L]int [J]enkinsfile' })
-
 -- It's also possible to pass additional configuration options.
 --  See `:help telescope.builtin.live_grep()` for information about particular keys
 vim.keymap.set('n', '<leader>s/', function()
@@ -72,6 +68,16 @@ end, { desc = '[S]earch [/] in Open Files' })
 vim.keymap.set('n', '<leader>sn', function()
   builtin.find_files { cwd = vim.fn.stdpath 'config' }
 end, { desc = '[S]earch [N]eovim files' })
+
+-- Git
+vim.keymap.set('n', '<leader>ga', function()
+  vim.cmd 'terminal git commit --amend'
+end, { desc = '[G]it [A]mend commit' })
+
+-- Misc
+vim.keymap.set('n', '<leader>lj', function()
+  require('jenkinsfile_linter').validate()
+end, { desc = '[L]int [J]enkinsfile' })
 
 -- Search Obsidian notes and open selected file in a right split
 local actions = require 'telescope.actions'
