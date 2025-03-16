@@ -32,6 +32,7 @@ return { -- Autoformat
     end,
     formatters_by_ft = {
       lua = { 'stylua' },
+      go = { 'gofmt' },
       python = {
         'ruff_fix',
         'ruff_format',
