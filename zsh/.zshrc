@@ -1,12 +1,12 @@
 setopt prompt_subst
 
 # Auto Complete
+autoload -Uz compinit; compinit
 export CARAPACE_BRIDGES='zsh,fish,bash,inshellisense'
 zstyle ':completion:*' menu select
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
 zstyle ':completion:*' format $'\e[2;37mCompleting %d\e[m'
 source <(carapace _carapace)
-source /run/current-system/sw/share/zsh/site-functions/_gsutil # temporary fix https://github.com/carapace-sh/carapace-bin/issues/2658
 
 # ZSH Plugins
 source /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh
@@ -27,8 +27,6 @@ alias o="open ."
 alias tf="terraform"
 
 # Configuration Reloads & Updates
-alias nixup="nix flake update --flake $HOME/dotfiles/nix && darwin-rebuild switch --flake $HOME/dotfiles/nix"
-alias nixclean="nix-store --gc"
 alias st="tmux source-file ${XDG_CONFIG_HOME:-$HOME}/tmux/tmux.conf"
 alias sz="source ${ZDOTDIR:-$HOME}/.zshrc"
 

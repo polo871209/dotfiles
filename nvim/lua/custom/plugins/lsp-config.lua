@@ -183,7 +183,6 @@ return {
     local servers = {
       bashls = {},
       gopls = {},
-      groovyls = {},
       helm_ls = {
         settings = {
           ['helm-ls'] = {
