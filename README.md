@@ -11,11 +11,13 @@ stow .
 
 # gen key and add to github
 ssh-keygen -t ed25519
+git remote set-url origin git@github.com:polo871209/dotfiles.git
+./run_once_install_configure_git.sh
 
 # setup notes(login google drive first)
-mkdir ~/valuts && cd ~/Google\ Drive/My\ Drive/vaults && stow .
+mkdir ~/vaults && cd ~/Google\ Drive/My\ Drive/vaults && stow .
 
-# supress prompt
+# suppress prompt
 cd
 touch .hushlogin
 ```

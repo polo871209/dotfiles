@@ -2,6 +2,7 @@
 
 # User Configuration
 git config --global user.name "PoLo"
+git config --global user.email "qazh0123@gmail.com"
 
 # Init Configuration
 git config --global init.defaultBranch "main"

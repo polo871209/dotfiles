@@ -7,6 +7,7 @@ zstyle ':completion:*' menu select
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
 zstyle ':completion:*' format $'\e[2;37mCompleting %d\e[m'
 source <(carapace _carapace)
+eval "$(uv generate-shell-completion zsh)"
 
 # ZSH Plugins
 source /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh
@@ -27,6 +28,7 @@ alias o="open ."
 alias tf="terraform"
 
 # Configuration Reloads & Updates
+alias brewup="brew update && brew upgrade && brew upgrade --cask"
 alias st="tmux source-file ${XDG_CONFIG_HOME:-$HOME}/tmux/tmux.conf"
 alias sz="source ${ZDOTDIR:-$HOME}/.zshrc"
 
