@@ -27,6 +27,7 @@ alias o="open ."
 alias tf="terraform"
 
 # Configuration Reloads & Updates
+alias brewup="brew update && brew upgrade && brew upgrade --cask"
 alias st="tmux source-file ${XDG_CONFIG_HOME:-$HOME}/tmux/tmux.conf"
 alias sz="source ${ZDOTDIR:-$HOME}/.zshrc"
 
