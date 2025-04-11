@@ -35,7 +35,7 @@ return { -- Autocompletion
     'hrsh7th/cmp-nvim-lsp',
     'hrsh7th/cmp-path',
     {
-      'Exafunction/codeium.nvim',
+      'Exafunction/windsurf.nvim',
       dependencies = {
         'nvim-lua/plenary.nvim',
       },
