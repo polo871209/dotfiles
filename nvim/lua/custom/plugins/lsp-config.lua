@@ -193,7 +193,6 @@ return {
       },
       jsonls = {},
       kcl = {},
-      nil_ls = {},
       pyright = {
         settings = {
           pyright = {
