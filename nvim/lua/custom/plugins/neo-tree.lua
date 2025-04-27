@@ -36,7 +36,7 @@ return {
         event = 'file_opened',
         handler = function()
           -- Automatically close the Neo-tree window after selecting a file
-          require('neo-tree').close_all()
+          require('neo-tree.command').execute { action = 'close' }
         end,
       },
     },
