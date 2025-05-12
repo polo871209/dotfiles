@@ -39,6 +39,7 @@ return { -- Autocompletion
       },
       config = function()
         require('codeium').setup {}
+        vim.keymap.set('n', '<leader>aq', '<cmd>Codeium Toggle<CR>', { desc = 'codeium: toggle' })
       end,
     },
   },
