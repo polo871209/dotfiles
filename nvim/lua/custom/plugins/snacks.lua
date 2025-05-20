@@ -8,12 +8,14 @@ return {
     -- or leave it empty to use the default settings
     -- refer to the configuration section below
     bigfile = { enabled = true },
+    image = { enabled = true },
+    indent = { enabled = true },
+    lazygit = { configure = false },
     notifier = {
       enabled = true,
       level = vim.log.levels.WARN,
     },
     words = { enabled = true },
-    lazygit = { configure = false },
   },
   keys = {
     {
