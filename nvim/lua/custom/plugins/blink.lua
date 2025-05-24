@@ -30,14 +30,18 @@ return { -- Autocompletion
       },
       opts = {},
     },
-    'folke/lazydev.nvim',
     {
       'Exafunction/windsurf.nvim',
       dependencies = {
         'nvim-lua/plenary.nvim',
         'hrsh7th/nvim-cmp',
       },
+      config = function()
+        require('codeium').setup {}
+      end,
     },
+    'folke/lazydev.nvim',
+    'Kaiser-Yang/blink-cmp-avante',
   },
   --- @module 'blink.cmp'
   --- @type blink.cmp.Config
@@ -86,10 +90,11 @@ return { -- Autocompletion
     },
 
     sources = {
-      default = { 'lsp', 'path', 'snippets', 'buffer', 'lazydev', 'codeium' },
+      default = { 'avante', 'codeium', 'lsp', 'path', 'snippets', 'buffer', 'lazydev' },
       providers = {
-        lazydev = { module = 'lazydev.integrations.blink', score_offset = 100 },
+        avante = { name = 'Avante', module = 'blink-cmp-avante', opts = {} },
         codeium = { name = 'Codeium', module = 'codeium.blink', async = true },
+        lazydev = { module = 'lazydev.integrations.blink', score_offset = 100 },
       },
     },
 

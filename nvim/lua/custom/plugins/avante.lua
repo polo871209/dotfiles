@@ -5,10 +5,10 @@ return {
     version = false, -- Never set this value to "*"! Never!
     opts = {
       -- add any opts here
-      -- for example
-      provider = 'ollama',
-      ollama = {
-        model = 'deepseek-r1:14b',
+      provider = 'gemini',
+      gemini = {
+        -- GEMINI_API_KEY
+        model = 'gemini-2.0-flash',
       },
     },
     -- if you want to build from source then do `make BUILD_FROM_SOURCE=true`
