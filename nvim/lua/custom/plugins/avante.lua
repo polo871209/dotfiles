@@ -1,18 +1,37 @@
 return {
   {
+    'zbirenbaum/copilot.lua',
+    -- Copilot Auth
+    cmd = 'Copilot',
+    event = 'InsertEnter',
+    config = function()
+      require('copilot').setup {}
+    end,
+  },
+  {
     'yetone/avante.nvim',
     event = 'VeryLazy',
     version = false, -- Never set this value to "*"! Never!
     opts = {
       -- add any opts here
       -- for example
-      provider = 'ollama',
-      ollama = {
-        model = 'deepseek-r1:14b',
+      provider = 'copilot',
+      copilot = {
+        -- model = 'claude-sonnet-4',
+        model = 'gemini-2.5-pro',
+        -- timeout = 30000, -- Timeout in milliseconds, increase this for reasoning models
+        temperature = 0,
+        -- max_completion_tokens = 8192, -- Increase this to include reasoning tokens (for reasoning models)
+        --reasoning_effort = "medium", -- low|medium|high, only used for reasoning models
       },
     },
+    config = function(_, opts)
+      require('avante').setup(opts)
+      vim.keymap.set('n', '<leader>ax', '<cmd>AvanteClear<cr>', { desc = 'Avante Clear History', noremap = true, silent = true })
+    end,
     -- if you want to build from source then do `make BUILD_FROM_SOURCE=true`
     build = 'make',
+    -- build = "powershell -ExecutionPolicy Bypass -File Build.ps1 -BuildFromSource false" -- for windows
     dependencies = {
       'nvim-treesitter/nvim-treesitter',
       'stevearc/dressing.nvim',
@@ -24,6 +43,7 @@ return {
       'hrsh7th/nvim-cmp', -- autocompletion for avante commands and mentions
       'ibhagwan/fzf-lua', -- for file_selector provider fzf
       'nvim-tree/nvim-web-devicons', -- or echasnovski/mini.icons
+      'zbirenbaum/copilot.lua', -- for providers='copilot'
       {
         -- support for image pasting
         'HakonHarnes/img-clip.nvim',
