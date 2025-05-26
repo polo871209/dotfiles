@@ -18,6 +18,8 @@ source $HOME/dotfiles/zsh/plugins/autoswitch_virtualenv.zsh
 alias c="code ."
 alias cafe="fastfetch && caffeinate -d"
 alias cls="clear"
+# https://docs.github.com/en/copilot/managing-copilot/configure-personal-settings/installing-github-copilot-in-the-cli
+alias gc="gh copilot"
 alias lg="lazygit"
 alias ls="eza --group-directories-first -a --icons"
 alias k="kubectl"
