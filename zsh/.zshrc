@@ -38,7 +38,7 @@ alias setenv='echo '\''{ "venvPath": ".", "venv": ".venv" }'\'' > pyrightconfig.
 
 # Bat
 export BAT_THEME="OneHalfDark"
-alias cat="bat --color=always"
+alias bat="bat --color=always"
 alias -g -- -h='-h 2>&1 | bat --language=help --style=plain'
 alias -g -- --help='--help 2>&1 | bat --language=help --style=plain'
 h() {
