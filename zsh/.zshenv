@@ -11,6 +11,7 @@ export GOPATH=$HOME/go
 export PATH=$PATH:$GOPATH/bin
 export PATH=$PATH:/opt/homebrew/bin
 export PATH=$PATH:~/dotfiles/scripts
+export PATH=$PATH:~/.local/bin
 
 export DOCKER_DEFAULT_PLATFORM=linux/amd64
 export DOCKER_HOST="$(docker context inspect | jq -r '.[].Endpoints.docker.Host')"

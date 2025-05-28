@@ -91,11 +91,22 @@ return { -- Autocompletion
     },
 
     sources = {
-      default = { 'avante', 'lsp', 'path', 'snippets', 'buffer', 'lazydev', 'copilot' },
+      default = { 'lsp', 'path', 'snippets', 'buffer', 'lazydev', 'copilot', 'codecompanion' },
       providers = {
-        avante = { name = 'Avante', module = 'blink-cmp-avante', opts = {} },
-        copilot = { name = 'copilot', module = 'blink-cmp-copilot', score_offset = 100, async = true },
-        lazydev = { module = 'lazydev.integrations.blink', score_offset = 100 },
+        lsp = {
+          min_keyword_length = 2, -- Number of characters to trigger porvider
+          score_offset = 0, -- Boost/penalize the score of the items
+        },
+        copilot = {
+          name = 'copilot',
+          module = 'blink-cmp-copilot',
+          score_offset = 100,
+          async = true,
+        },
+        lazydev = {
+          module = 'lazydev.integrations.blink',
+          score_offset = 100,
+        },
       },
     },
 

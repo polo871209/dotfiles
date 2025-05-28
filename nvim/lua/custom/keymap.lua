@@ -34,6 +34,14 @@ vim.keymap.set('n', '<leader>d', vim.lsp.buf.hover, { desc = 'Show [D]ocumentati
 -- vim.keymap.set('n', '<C-j>', '<C-w><C-j>', { desc = 'Move focus to the lower window' })
 -- vim.keymap.set('n', '<C-k>', '<C-w><C-k>', { desc = 'Move focus to the upper window' })
 
+-- CodeCompanion: AI-powered pair programmer for Neovim
+vim.keymap.set('n', '<leader>an', '<cmd>CodeCompanionChat<CR>', { desc = 'CodeCompanion [N]ew Chat' })
+vim.keymap.set('n', '<leader>aa', '<cmd>CodeCompanionChat Toggle<CR>', { desc = 'CodeCompanion Toggle' })
+vim.keymap.set('v', '<leader>aa', ':CodeCompanion<Space>', { desc = 'CodeCompanion Inline' })
+vim.keymap.set('n', '<leader>ah', '<cmd>CodeCompanionHistory<CR>', { desc = 'CodeCompanion [H]istory' })
+vim.keymap.set('n', '<leader>ac', '<cmd>CodeCompanionActions<CR>', { desc = 'CodeCompanion Action [C]enter' })
+vim.keymap.set('v', '<leader>al', '<cmd>CodeCompanionChat Add<CR>', { desc = 'CodeCompanion add [Lines] to buffer' })
+
 -- Spilt screen
 vim.api.nvim_set_keymap('n', '<leader>-', ':split<CR>', { noremap = true, silent = true })
 vim.api.nvim_set_keymap('n', '<leader>|', ':vsplit<CR>', { noremap = true, silent = true })
