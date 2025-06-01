@@ -33,4 +33,8 @@ return {
     'wurli/visimatch.nvim',
     opts = {},
   },
+  {
+    'MeanderingProgrammer/render-markdown.nvim',
+    ft = { 'markdown', 'codecompanion' },
+  },
 }

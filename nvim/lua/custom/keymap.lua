@@ -8,39 +8,8 @@ vim.keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR>')
 -- Diagnostic keymaps
 vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
 
--- Exit terminal mode in the builtin terminal with a shortcut that is a bit easier
+-- Show LSP documentation on hover
 vim.keymap.set('n', '<leader>d', vim.lsp.buf.hover, { desc = 'Show [D]ocumentation (Hover)' })
-
--- for people to discover. Otherwise, you normally need to press <C-\><C-n>, which
--- is not what someone will guess without a bit more experience.
---
--- NOTE: This won't work in all terminal emulators/tmux/etc. Try your own mapping
--- or just use <C-\><C-n> to exit terminal mode
-
--- vim.keymap.set('t', '<Esc><Esc>', '<C-\\><C-n>', { desc = 'Exit terminal mode' })
-
--- TIP: Disable arrow keys in normal mode
--- vim.keymap.set('n', '<left>', '<cmd>echo "Use h to move!!"<CR>')
--- vim.keymap.set('n', '<right>', '<cmd>echo "Use l to move!!"<CR>')
--- vim.keymap.set('n', '<up>', '<cmd>echo "Use k to move!!"<CR>')
--- vim.keymap.set('n', '<down>', '<cmd>echo "Use j to move!!"<CR>')
-
--- Keybinds to make split navigation easier.
---  Use CTRL+<hjkl> to switch between windows
---
---  See `:help wincmd` for a list of all window commands
--- vim.keymap.set('n', '<C-h>', '<C-w><C-h>', { desc = 'Move focus to the left window' })
--- vim.keymap.set('n', '<C-l>', '<C-w><C-l>', { desc = 'Move focus to the right window' })
--- vim.keymap.set('n', '<C-j>', '<C-w><C-j>', { desc = 'Move focus to the lower window' })
--- vim.keymap.set('n', '<C-k>', '<C-w><C-k>', { desc = 'Move focus to the upper window' })
-
--- CodeCompanion: AI-powered pair programmer for Neovim
-vim.keymap.set('n', '<leader>an', '<cmd>CodeCompanionChat<CR>', { desc = 'CodeCompanion [N]ew Chat' })
-vim.keymap.set('n', '<leader>aa', '<cmd>CodeCompanionChat Toggle<CR>', { desc = 'CodeCompanion Toggle' })
-vim.keymap.set('v', '<leader>aa', ':CodeCompanion<Space>', { desc = 'CodeCompanion Inline' })
-vim.keymap.set('n', '<leader>ah', '<cmd>CodeCompanionHistory<CR>', { desc = 'CodeCompanion [H]istory' })
-vim.keymap.set('n', '<leader>ac', '<cmd>CodeCompanionActions<CR>', { desc = 'CodeCompanion Action [C]enter' })
-vim.keymap.set('v', '<leader>al', '<cmd>CodeCompanionChat Add<CR>', { desc = 'CodeCompanion add [Lines] to buffer' })
 
 -- Spilt screen
 vim.api.nvim_set_keymap('n', '<leader>-', ':split<CR>', { noremap = true, silent = true })
@@ -54,16 +23,24 @@ vim.api.nvim_set_keymap('n', 'c', '"_c', { noremap = true, silent = true })
 -- Telescope
 -- See `:help telescope.builtin`
 local builtin = require 'telescope.builtin'
+vim.keymap.set('n', '<leader><leader>', builtin.find_files, { desc = '[ ] Find Files' })
+vim.keymap.set('n', '<leader>/', builtin.current_buffer_fuzzy_find, { desc = '[/] Fuzzily search in current buffer' })
+vim.keymap.set('n', '<leader>s.', builtin.oldfiles, { desc = '[S]earch Recent Files ("." for repeat)' })
+vim.keymap.set('n', '<leader>sb', builtin.buffers, { desc = '[S]earch [B]uffer' })
+vim.keymap.set('n', '<leader>sd', builtin.diagnostics, { desc = '[S]earch [D]iagnostics' })
+vim.keymap.set('n', '<leader>sg', builtin.live_grep, { desc = '[S]earch by [G]rep' })
 vim.keymap.set('n', '<leader>sh', builtin.help_tags, { desc = '[S]earch [H]elp' })
 vim.keymap.set('n', '<leader>sk', builtin.keymaps, { desc = '[S]earch [K]eymaps' })
-vim.keymap.set('n', '<leader>sw', builtin.grep_string, { desc = '[S]earch current [W]ord' })
-vim.keymap.set('n', '<leader>sg', builtin.live_grep, { desc = '[S]earch by [G]rep' })
-vim.keymap.set('n', '<leader>sd', builtin.diagnostics, { desc = '[S]earch [D]iagnostics' })
-vim.keymap.set('n', '<leader>sb', builtin.buffers, { desc = '[S]earch [B]uffer' })
-vim.keymap.set('n', '<leader>s.', builtin.oldfiles, { desc = '[S]earch Recent Files ("." for repeat)' })
-vim.keymap.set('n', '<leader><leader>', builtin.find_files, { desc = '[ ] Find Files' })
 vim.keymap.set('n', '<leader>ss', builtin.spell_suggest, { desc = '[S]pell [S]uggestion' })
-vim.keymap.set('n', '<leader>/', builtin.current_buffer_fuzzy_find, { desc = '[/] Fuzzily search in current buffer' })
+vim.keymap.set('n', '<leader>sw', builtin.grep_string, { desc = '[S]earch current [W]ord' })
+
+-- CodeCompanion: AI-powered pair programmer for Neovim
+vim.keymap.set('n', '<leader>aa', '<cmd>CodeCompanionChat Toggle<CR>', { desc = 'CodeCompanion Toggle' })
+vim.keymap.set('v', '<leader>aa', ':CodeCompanion<Space>', { desc = 'CodeCompanion Inline' })
+vim.keymap.set('n', '<leader>ac', '<cmd>CodeCompanionActions<CR>', { desc = 'CodeCompanion Action [C]enter' })
+vim.keymap.set('n', '<leader>ah', '<cmd>CodeCompanionHistory<CR>', { desc = 'CodeCompanion [H]istory' })
+vim.keymap.set('v', '<leader>al', '<cmd>CodeCompanionChat Add<CR>', { desc = 'CodeCompanion add [Lines] to buffer' })
+vim.keymap.set('n', '<leader>an', '<cmd>CodeCompanionChat<CR>', { desc = 'CodeCompanion [N]ew Chat' })
 
 -- It's also possible to pass additional configuration options.
 --  See `:help telescope.builtin.live_grep()` for information about particular keys
@@ -78,16 +55,6 @@ end, { desc = '[S]earch [/] in Open Files' })
 vim.keymap.set('n', '<leader>sn', function()
   builtin.find_files { cwd = vim.fn.stdpath 'config' }
 end, { desc = '[S]earch [N]eovim files' })
-
--- Git
-vim.keymap.set('n', '<leader>ga', function()
-  vim.cmd 'terminal git commit --amend'
-end, { desc = '[G]it [A]mend commit' })
-
--- Misc
-vim.keymap.set('n', '<leader>lj', function()
-  require('jenkinsfile_linter').validate()
-end, { desc = '[L]int [J]enkinsfile' })
 
 -- Search Obsidian notes and open selected file in a right split
 local actions = require 'telescope.actions'

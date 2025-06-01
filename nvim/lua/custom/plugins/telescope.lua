@@ -48,7 +48,16 @@ return { -- Fuzzy Finder (files, lsp, etc)tele
       --  All the info you're looking for is in `:help telescope.setup()`
       --
       defaults = {
-        file_ignore_patterns = { 'node_modules', '.git/', '.DS_Store', '^.terraform/.*', '.cache/', '^.obsidian/.*', '.venv', '__pycache__' },
+        file_ignore_patterns = {
+          'node_modules',
+          '.git/',
+          '.DS_Store',
+          '^.terraform/.*',
+          '.cache/',
+          '^.obsidian/.*',
+          '.venv',
+          '__pycache__',
+        },
       },
       pickers = {
         find_files = {

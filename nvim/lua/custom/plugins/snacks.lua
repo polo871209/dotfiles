@@ -14,6 +14,7 @@ return {
       enabled = true,
       level = vim.log.levels.WARN,
     },
+    toggle = { enabled = true },
     words = { enabled = true },
   },
   keys = {
@@ -39,7 +40,7 @@ return {
       desc = '[G]it [B]rowse',
     },
     {
-      '<leader>un',
+      '<leader>tn',
       function()
         Snacks.notifier.hide()
       end,
@@ -60,8 +61,8 @@ return {
         vim.print = _G.dd -- Override print to use snacks for `:=` command
 
         -- Create some toggle mappings
-        Snacks.toggle.option('wrap', { name = 'Wrap' }):map '<leader>uw'
-        Snacks.toggle.diagnostics():map '<leader>ud'
+        Snacks.toggle.option('wrap', { name = 'Wrap' }):map '<leader>tw'
+        Snacks.toggle.diagnostics():map '<leader>td'
       end,
     })
   end,

@@ -73,11 +73,11 @@ return {
             show_result_in_chat = true,
           },
         },
-        -- vectorcode = {
-        --   opts = {
-        --     add_tool = true,
-        --   },
-        -- },
+        vectorcode = {
+          opts = {
+            add_tool = true,
+          },
+        },
       },
       adapters = {
         copilot = function()
@@ -154,5 +154,16 @@ return {
         log_level = 'DEBUG',
       },
     },
+  },
+  {
+
+    'ravitemer/mcphub.nvim',
+    dependencies = {
+      'nvim-lua/plenary.nvim',
+    },
+    build = 'npm install -g mcp-hub@latest', -- Installs `mcp-hub` node binary globally
+    config = function()
+      require('mcphub').setup()
+    end,
   },
 }
