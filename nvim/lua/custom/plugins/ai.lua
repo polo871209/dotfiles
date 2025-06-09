@@ -84,13 +84,58 @@ return {
           return require('codecompanion.adapters').extend('copilot', {
             schema = {
               model = {
-                default = 'gemini-2.5-pro',
+                default = 'claude-sonnet-4',
               },
             },
           })
         end,
       },
-      prompt_library = {},
+      prompt_library = {
+        ['Word'] = {
+          strategy = 'inline',
+          description = 'documentation and code improvement assistant',
+          opts = {
+            index = 3,
+            is_default = true,
+            is_slash_cmd = false,
+            user_prompt = false,
+            modes = { 'v' },
+            short_name = 'word',
+          },
+          prompts = {
+            {
+              role = 'system',
+              content = [[You are a documentation and code improvement assistant. Please rewrite the provided content to enhance clarity, conciseness, and structure while preserving all original meaning and technical accuracy.
+
+**Improvement Guidelines:**
+• **Clarity**: Use clear, direct language and eliminate ambiguity
+• **Structure**: Organize with logical flow and consistent formatting
+• **Conciseness**: Remove redundancy while maintaining completeness
+• **Readability**: Improve grammar, word choice, and sentence construction
+• **Technical Accuracy**: Preserve all original information and functionality
+
+**Focus Areas:**
+• Documentation (README files, API docs, user guides)
+• Code comments and inline documentation
+• Log messages and debug statements
+• Error messages and notifications
+• Configuration files and technical specifications
+
+**Enhancement Examples:**
+Before: `logger.info("start process")`
+After: `logger.info("Starting data processing")`
+
+Before: `// do the thing`
+After: `// Process user input and validate data`
+
+Please maintain the original intent while making the content more professional and accessible.]],
+              opts = {
+                visible = false,
+              },
+            },
+          },
+        },
+      },
       strategies = {
         chat = {
           adapter = 'copilot',

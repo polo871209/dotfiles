@@ -36,7 +36,8 @@ vim.keymap.set('n', '<leader>sw', builtin.grep_string, { desc = '[S]earch curren
 
 -- CodeCompanion: AI-powered pair programmer for Neovim
 vim.keymap.set('n', '<leader>aa', '<cmd>CodeCompanionChat Toggle<CR>', { desc = 'CodeCompanion Toggle' })
-vim.keymap.set('v', '<leader>aa', ':CodeCompanion<Space>', { desc = 'CodeCompanion Inline' })
+vim.keymap.set('v', '<leader>aa', ':CodeCompanion ', { desc = 'CodeCompanion Inline' })
+vim.keymap.set('v', '<leader>aw', '<cmd>CodeCompanion /word<CR>', { desc = 'CodeCompanion Inline [W]ord' })
 vim.keymap.set('n', '<leader>ac', '<cmd>CodeCompanionActions<CR>', { desc = 'CodeCompanion Action [C]enter' })
 vim.keymap.set('n', '<leader>ah', '<cmd>CodeCompanionHistory<CR>', { desc = 'CodeCompanion [H]istory' })
 vim.keymap.set('v', '<leader>al', '<cmd>CodeCompanionChat Add<CR>', { desc = 'CodeCompanion add [Lines] to buffer' })
