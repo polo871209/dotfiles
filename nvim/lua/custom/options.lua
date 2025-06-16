@@ -56,7 +56,7 @@ vim.o.splitbelow = true
 --   See `:help lua-options`
 --   and `:help lua-options-guide`
 vim.o.list = true
-vim.opt.listchars = { trail = '·', nbsp = '␣' }
+vim.opt.listchars = { trail = '·', nbsp = '␣', tab = '» ' }
 
 -- Preview substitutions live, as you type!
 vim.o.inccommand = 'split'
@@ -82,6 +82,15 @@ vim.o.conceallevel = 1
 
 -- [[ Basic filetype ]]
 --  See `:help filetype`
+
+--  -- Go specific settings
+vim.cmd [[
+    augroup GoSettings
+        autocmd!
+        autocmd FileType go setlocal tabstop=4
+    augroup END
+]]
+
 -- Add *-dockerfile to Dockerfile
 vim.cmd [[
     augroup DockerfileDetection
