@@ -30,7 +30,7 @@ alias o="open ."
 alias tf="terraform"
 
 # Configuration Reloads & Updates
-alias brewup="brew update && brew upgrade && brew upgrade --cask"
+alias brewup="brew update && brew upgrade && brew upgrade --greedy"
 alias st="tmux source-file ${XDG_CONFIG_HOME:-$HOME}/tmux/tmux.conf"
 alias sz="source ${ZDOTDIR:-$HOME}/.zshrc"
 
@@ -66,6 +66,20 @@ cs() {
 set -euo pipefail
 EOF
 }
+
+# sesh
+function sesh-sessions() {
+  {
+    exec </dev/tty
+    exec <&1
+    local session
+    session=$(sesh list -t -c | fzf --height 40% --reverse --border-label ' sesh ' --border --prompt '⚡  ')
+    zle reset-prompt > /dev/null 2>&1 || true
+    [[ -z "$session" ]] && return
+    sesh connect $session
+  }
+}
+alias s=sesh-sessions
 
 # docker dive local image
 divelocal() {

@@ -1,0 +1,7 @@
+[default_session]
+startup_command = "nvim -c ':Telescope find_files'"
+preview_command = "eza --all --git --icons --color=always {}"
+
+[[session]]
+name = "dotfiles "
+path = "~/dotfiles"
