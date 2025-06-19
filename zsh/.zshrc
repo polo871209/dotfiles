@@ -25,7 +25,7 @@ alias ls="eza --group-directories-first -a --icons"
 alias k="kubectl"
 alias kctx="kubectx"
 alias kns="kubens"
-alias n="nvim"
+alias n="nvim -c ':Telescope find_files'"
 alias o="open ."
 alias tf="terraform"
 

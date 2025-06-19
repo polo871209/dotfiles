@@ -20,10 +20,9 @@ return {
         end,
       },
       {
-        'Davidyz/VectorCode', -- Index and search code in your repositories
+        'Davidyz/VectorCode',
         version = '*',
-        -- pipx install vectorcode
-        build = 'pipx upgrade vectorcode',
+        build = 'uv tool upgrade vectorcode',
         dependencies = { 'nvim-lua/plenary.nvim' },
       },
       {
@@ -73,6 +72,7 @@ return {
             show_result_in_chat = true,
           },
         },
+        -- https://github.com/Davidyz/VectorCode/blob/main/docs/cli.md#getting-started
         vectorcode = {
           opts = {
             add_tool = true,
