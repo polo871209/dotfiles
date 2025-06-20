@@ -74,6 +74,7 @@ cask "raycast"
 cask "telegram"
 cask "whatsapp"
 cask "yaak"
+cask "yank"
 cask "zen"
 mas "Keynote", id: 409183694
 mas "Numbers", id: 409203825
