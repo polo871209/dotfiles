@@ -1,24 +1,24 @@
-# Init New Mac
+## Quick Setup
 
 ```bash
-git clone https://github.com/polo871209/dotfiles.git && cd dotfiles
+git clone --recurse-submodules https://github.com/polo871209/dotfiles.git && cd dotfiles
 
+# Install all Homebrew packages and applications
 brew bundle install
 
-# set XDG_CONFIG_HOME
+# Configure shell environment variables
 cat ~/dotfiles/dot_zshenv >| ~/.zshenv
 
-# create config symlinks
+# Create symbolic links for all configuration files
 stow .
 
-# gen key and add to github
+# Generate SSH key and configure Git for authenticated access
 ssh-keygen -t ed25519
 git remote set-url origin git@github.com:polo871209/dotfiles.git
-./run_once_install_configure_git.sh
 
-# suppress prompt
+# Disable login message on terminal startup
 touch ~/.hushlogin
 
-# setup notes(login google drive first)
+# Setup note-taking vault (requires Google Drive to be logged in first)
 mkdir ~/vaults && cd ~/Google\ Drive/My\ Drive/vaults && stow .
 ```

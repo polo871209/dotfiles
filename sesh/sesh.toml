@@ -1,5 +1,5 @@
 [default_session]
-startup_command = "nvim -c ':Telescope find_files'"
+startup_command = "[ -f .venv/bin/activate ] && source .venv/bin/activate"
 preview_command = "eza --all --git --icons --color=always {}"
 
 [[session]]

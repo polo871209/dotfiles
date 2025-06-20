@@ -1,5 +1,5 @@
-.DS_Store
-tmux/plugins/
+tmux/plugins/*
+!tmux/plugins/tpm
 history.txt
 .zcompdump
 raycast/

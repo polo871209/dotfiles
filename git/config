@@ -1,0 +1,26 @@
+[alias]
+	pulla = pull --autostash
+[user]
+	name = PoLo
+	email = qazh0123@gmail.com
+[init]
+	defaultBranch = main
+[core]
+	autocrlf = false
+	excludesFile = ~/.config/git/ignore
+	editor = nvim
+	filemode = false
+	quotepath = false
+[rerere]
+	enabled = true
+	autoupdate = true
+[pull]
+	rebase = true
+[filter "lfs"]
+	required = true
+	clean = git-lfs clean -- %f
+	smudge = git-lfs smudge -- %f
+	process = git-lfs filter-process
+[diff]
+	algorithm = histogram
+

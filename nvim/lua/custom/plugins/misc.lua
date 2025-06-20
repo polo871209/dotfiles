@@ -16,6 +16,11 @@ return {
     event = 'InsertEnter',
     opts = {},
   },
+
+  -- Justfile syntax highlighting and support
+  { 'NoahTheDuke/vim-just' },
+
+  -- Git status symbols and indicators
   {
     'lewis6991/gitsigns.nvim',
     opts = {
