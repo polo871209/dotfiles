@@ -143,6 +143,13 @@ Please maintain the original intent while making the content more professional a
           roles = {
             user = 'Po',
           },
+          variables = {
+            ['buffer'] = {
+              opts = {
+                default_params = 'watch',
+              },
+            },
+          },
           slash_commands = {
             ['buffer'] = {
               keymaps = {

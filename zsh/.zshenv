@@ -1,5 +1,4 @@
 # Development Tools and PATH
-export BREWPREFIX=/opt/homebrew/bin/brew
 export GOPATH=$HOME/go
 export PATH=$PATH:$GOPATH/bin
 export PATH=$PATH:/opt/homebrew/bin
