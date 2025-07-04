@@ -1,6 +1,3 @@
-#!/usr/bin/env zsh
-# shellcheck shell=bash disable=SC1071
-
 setopt prompt_subst
 
 # Autocompletion Configuration
@@ -12,9 +9,9 @@ zstyle ':completion:*' format $'\e[2;37mCompleting %d\e[m'
 source <(carapace _carapace)
 
 # ZSH Plugin Sources
-source "$(brew --prefix)/share/zsh-autosuggestions/zsh-autosuggestions.zsh"
-source "$(brew --prefix)/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
-source "$HOME/dotfiles/zsh/plugins/autoswitch_virtualenv.zsh"
+source $(brew --prefix)/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+source $(brew --prefix)/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+source $HOME/dotfiles/zsh/plugins/autoswitch_virtualenv.zsh
 
 # Aliases
 alias c="pbcopy"
@@ -32,8 +29,8 @@ alias y="yank"
 
 ## Configuration Reloads & Updates
 alias brewup="brew update && brew upgrade && brew upgrade --greedy"
-alias st='tmux source-file "${XDG_CONFIG_HOME:-$HOME}/tmux/tmux.conf"'
-alias sz='source "${ZDOTDIR:-$HOME}/.zshrc"'
+alias st="tmux source-file ${XDG_CONFIG_HOME:-$HOME}/tmux/tmux.conf"
+alias sz="source ${ZDOTDIR:-$HOME}/.zshrc"
 
 ## Bat
 alias bat="bat --color=always"
@@ -49,11 +46,7 @@ export FZF_DEFAULT_COMMAND="fd --hidden --strip-cwd-prefix --exclude .git --excl
 export FZF_DEFAULT_OPTS="--select-1"
 nf() {
     file=$(fzf --preview "bat --color=always --style=numbers --line-range=:500 {}")
-    if [ -d "$file" ]; then
-        cd "$file" && nvim
-    else
-        nvim "$file"
-    fi
+    [ -d $file ] && cd $file && nvim || nvim $file
 }
 
 # Functions
@@ -75,7 +68,7 @@ function sesh-sessions() {
     session=$(sesh list -t -c | fzf --height 40% --reverse --border-label ' sesh ' --border --prompt '⚡  ')
     zle reset-prompt > /dev/null 2>&1 || true
     [[ -z "$session" ]] && return
-    sesh connect "$session"
+    sesh connect $session
   }
 }
 alias s=sesh-sessions
@@ -85,7 +78,7 @@ divelocal() {
     dive <(docker save "$1") --source=docker-archive "${@:2}"
 }
 
-eval "$(oh-my-posh init zsh --config "$XDG_CONFIG_HOME/ohmyposh/config.yaml")"
+eval "$(oh-my-posh init zsh --config $XDG_CONFIG_HOME/ohmyposh/config.yaml)"
 eval "$(atuin init zsh)"
 eval "$(direnv hook zsh)"
 eval "$(zoxide init zsh)"

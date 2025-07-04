@@ -1,5 +1,3 @@
-# Auto-activate Python virtual environments when entering directories
-# This plugin automatically activates .venv when entering a directory with one
 function auto_venv() {
     if [[ -f .venv/bin/activate ]]; then
         if [[ -z "$VIRTUAL_ENV" || "$VIRTUAL_ENV" != "$(pwd)/.venv" ]]; then
