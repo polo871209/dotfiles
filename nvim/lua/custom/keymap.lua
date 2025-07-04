@@ -11,11 +11,13 @@ vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagn
 -- Show LSP documentation on hover
 vim.keymap.set('n', '<leader>d', vim.lsp.buf.hover, { desc = 'Show [D]ocumentation (Hover)' })
 
--- Spilt screen
+-- Split screen shortcuts
+-- <leader>- for horizontal split, <leader>| for vertical split
 vim.api.nvim_set_keymap('n', '<leader>-', ':split<CR>', { noremap = true, silent = true })
 vim.api.nvim_set_keymap('n', '<leader>|', ':vsplit<CR>', { noremap = true, silent = true })
 
--- Disable copy when delete
+-- Disable copy to clipboard when deleting
+-- This sends deleted text to black hole register instead of clipboard
 vim.api.nvim_set_keymap('n', 'd', '"_d', { noremap = true, silent = true })
 vim.api.nvim_set_keymap('v', 'd', '"_d', { noremap = true, silent = true })
 vim.api.nvim_set_keymap('n', 'c', '"_c', { noremap = true, silent = true })

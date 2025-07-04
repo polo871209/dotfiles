@@ -1,6 +1,27 @@
+# Tmux plugin manager - ignore plugins except TPM itself
 tmux/plugins/*
 !tmux/plugins/tpm
+
+# Shell history and completion files
 history.txt
-.zcompdump
-raycast/
+.zcompdump*
 .zsh_history
+.bash_history
+
+# Application-specific directories and files
+raycast/
+
+# Temporary and cache files
+*.tmp
+*.swp
+*.swo
+*~
+.DS_Store
+
+# IDE and editor files
+.vscode/
+.idea/
+*.code-workspace
+
+# Log files
+*.log

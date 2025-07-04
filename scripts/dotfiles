@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# dotfiles - Simple dotfiles management utility
+set -euo pipefail
+
+DOTFILES_DIR="$HOME/dotfiles"
+
+usage() {
+    cat << EOF
+Usage: dotfiles <command>
+
+Commands:
+    update      Update Homebrew packages and sync dotfiles
+    sync        Sync configuration files using stow
+    backup      Create a backup of current configurations
+    status      Show git status of dotfiles repository
+    edit        Open dotfiles directory in editor
+
+Examples:
+    dotfiles update
+    dotfiles sync
+    dotfiles status
+EOF
+}
+
+update() {
+    echo "🍺 Updating Homebrew packages..."
+    brew update && brew upgrade && brew upgrade --greedy
+    
+    echo "📦 Cleaning up Homebrew..."
+    brew cleanup
+    
+    echo "🔄 Syncing dotfiles..."
+    cd "$DOTFILES_DIR"
+    git pull origin main
+    stow .
+    
+    echo "✅ Update complete!"
+}
+
+sync() {
+    echo "🔗 Syncing dotfiles with stow..."
+    cd "$DOTFILES_DIR"
+    stow .
+    echo "✅ Sync complete!"
+}
+
+backup() {
+    backup_dir="$HOME/dotfiles-backup-$(date +%Y%m%d-%H%M%S)"
+    echo "💾 Creating backup at $backup_dir..."
+    
+    mkdir -p "$backup_dir"
+    
+    # Backup key configuration files
+    for file in .zshrc .tmux.conf .gitconfig; do
+        if [[ -f "$HOME/$file" ]]; then
+            cp "$HOME/$file" "$backup_dir/"
+        fi
+    done
+    
+    # Backup neovim config
+    if [[ -d "$HOME/.config/nvim" ]]; then
+        cp -r "$HOME/.config/nvim" "$backup_dir/"
+    fi
+    
+    echo "✅ Backup created at $backup_dir"
+}
+
+status() {
+    echo "📊 Dotfiles repository status:"
+    cd "$DOTFILES_DIR"
+    git status --short
+    echo ""
+    echo "📍 Current branch: $(git branch --show-current)"
+    echo "🔄 Last commit: $(git log -1 --pretty=format:'%h - %s (%cr)')"
+}
+
+edit() {
+    echo "✏️  Opening dotfiles in editor..."
+    cd "$DOTFILES_DIR"
+    "${EDITOR:-nvim}" .
+}
+
+main() {
+    case "${1:-}" in
+        update)
+            update
+            ;;
+        sync)
+            sync
+            ;;
+        backup)
+            backup
+            ;;
+        status)
+            status
+            ;;
+        edit)
+            edit
+            ;;
+        -h|--help|help)
+            usage
+            ;;
+        "")
+            echo "Error: No command specified"
+            echo ""
+            usage
+            exit 1
+            ;;
+        *)
+            echo "Error: Unknown command '$1'"
+            echo ""
+            usage
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"
