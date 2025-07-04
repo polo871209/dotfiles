@@ -2,7 +2,6 @@ return {
   'folke/snacks.nvim',
   priority = 1000,
   lazy = false,
-  ---@type snacks.Config
   opts = {
     -- your configuration comes here
     -- or leave it empty to use the default settings
@@ -65,14 +64,5 @@ return {
         Snacks.toggle.diagnostics():map '<leader>td'
       end,
     })
-  end,
-  config = function(_, opts)
-    -- Require the Snacks module
-    local Snacks = require 'snacks'
-
-    -- Initialize the plugin with the provided options
-    Snacks.setup(opts)
-
-    -- Optionally, you can set up global variables or additional configurations here
   end,
 }

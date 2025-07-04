@@ -30,7 +30,6 @@ return { -- Autocompletion
       },
       opts = {},
     },
-    'folke/lazydev.nvim',
     'giuxtaposition/blink-cmp-copilot',
   },
   --- @module 'blink.cmp'
