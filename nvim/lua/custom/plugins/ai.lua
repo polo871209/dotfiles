@@ -8,7 +8,7 @@ return {
       {
         'ravitemer/mcphub.nvim', -- Manage MCP servers
         cmd = 'MCPHub',
-        build = 'npm install -g mcp-hub@latest',
+        build = 'npm update -g mcp-hub@latest',
         config = true,
       },
       {
