@@ -20,6 +20,19 @@ vim.api.nvim_set_keymap('n', 'd', '"_d', { noremap = true, silent = true })
 vim.api.nvim_set_keymap('v', 'd', '"_d', { noremap = true, silent = true })
 vim.api.nvim_set_keymap('n', 'c', '"_c', { noremap = true, silent = true })
 
+-- Diffview: Smart toggle between open/close based on current state
+local function toggle_diffview()
+  local view = require('diffview.lib').get_current_view()
+  if view then
+    vim.cmd 'DiffviewClose'
+  else
+    vim.cmd 'DiffviewOpen'
+  end
+end
+
+vim.keymap.set('n', '<leader>gd', toggle_diffview, { desc = '[G]it [D]iff Toggle' })
+vim.keymap.set('n', '<leader>gc', ':DiffviewOpen ', { desc = '[G]it [C]ompare selection' })
+
 -- Telescope
 -- See `:help telescope.builtin`
 local builtin = require 'telescope.builtin'

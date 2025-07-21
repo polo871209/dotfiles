@@ -20,6 +20,7 @@ return {
   -- Justfile syntax highlighting and support
   { 'NoahTheDuke/vim-just' },
 
+  { 'sindrets/diffview.nvim' },
   -- Git status symbols and indicators
   {
     'lewis6991/gitsigns.nvim',
