@@ -6,12 +6,6 @@ return {
       'j-hui/fidget.nvim', -- Display status
       'ravitemer/codecompanion-history.nvim', -- Save and load conversation history
       {
-        'ravitemer/mcphub.nvim', -- Manage MCP servers
-        cmd = 'MCPHub',
-        build = 'npm update -g mcp-hub@latest',
-        config = true,
-      },
-      {
         'zbirenbaum/copilot.lua',
         -- Copilot Auth
         cmd = 'Copilot',
@@ -19,12 +13,6 @@ return {
         config = function()
           require('copilot').setup {}
         end,
-      },
-      {
-        'Davidyz/VectorCode',
-        version = '*',
-        build = 'uv tool upgrade vectorcode',
-        dependencies = { 'nvim-lua/plenary.nvim' },
       },
       {
         'echasnovski/mini.diff', -- Inline and better diff over the default
@@ -63,20 +51,6 @@ return {
             picker = 'snacks',
             enable_logging = false,
             dir_to_save = vim.fn.stdpath 'data' .. '/codecompanion-history',
-          },
-        },
-        mcphub = {
-          callback = 'mcphub.extensions.codecompanion',
-          opts = {
-            make_vars = true,
-            make_slash_commands = true,
-            show_result_in_chat = true,
-          },
-        },
-        -- https://github.com/Davidyz/VectorCode/blob/main/docs/cli.md#getting-started
-        vectorcode = {
-          opts = {
-            add_tool = true,
           },
         },
       },

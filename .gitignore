@@ -5,3 +5,4 @@ history.txt
 raycast/
 .zsh_history
 .opencode/
+.zshenv.secret

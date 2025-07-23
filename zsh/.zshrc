@@ -78,6 +78,11 @@ divelocal() {
     dive <(docker save "$1") --source=docker-archive "${@:2}"
 }
 
+# Secret
+source "$ZDOTDIR/.zshenv.secret"
+# export OBSIDIAN_API_KEY=
+# export BRAVE_API_KEY
+
 eval "$(oh-my-posh init zsh --config $XDG_CONFIG_HOME/ohmyposh/config.yaml)"
 eval "$(atuin init zsh)"
 eval "$(direnv hook zsh)"

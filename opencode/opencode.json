@@ -1,6 +1,44 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "theme": "system",
   "autoupdate": true,
-  "model": "copilot/claude-sonnet-4"
+  "mcp": {
+    "basic-memory": {
+      "command": ["uvx", "basic-memory", "mcp"],
+      "enabled": false,
+      "type": "local"
+    },
+    "brave-search": {
+      "command": ["npx", "-y", "@modelcontextprotocol/server-brave-search"],
+      "enabled": false,
+      "environment": {
+        "BRAVE_API_KEY": "{env:BRAVE_API_KEY}"
+      },
+      "type": "local"
+    },
+    "context7": {
+      "command": ["npx", "-y", "@upstash/context7-mcp"],
+      "enabled": true,
+      "type": "local"
+    },
+    "desktop-commander": {
+      "command": ["npx", "-y", "@wonderwhy-er/desktop-commander"],
+      "enabled": true,
+      "type": "local"
+    },
+    "kubernetes": {
+      "command": ["npx", "mcp-server-kubernetes"],
+      "enabled": true,
+      "type": "local"
+    },
+    "mcp-obsidian": {
+      "command": ["uvx", "mcp-obsidian"],
+      "enabled": true,
+      "environment": {
+        "OBSIDIAN_API_KEY": "{env:OBSIDIAN_API_KEY}"
+      },
+      "type": "local"
+    }
+  },
+  "model": "copilot/claude-sonnet-4",
+  "theme": "system"
 }
