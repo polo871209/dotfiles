@@ -1,0 +1,9 @@
+version: "3.9"
+
+services:
+  registry:
+    image: registry:3
+    container_name: registry
+    ports:
+      - "5000:5000"
+    restart: always
