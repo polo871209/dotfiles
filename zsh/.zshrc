@@ -28,7 +28,7 @@ alias tf="terraform"
 alias y="yank"
 
 ## Configuration Reloads & Updates
-alias brewup="brew update && brew upgrade && brew upgrade --greedy"
+alias brewup="brew update && brew upgrade"
 alias st="tmux source-file ${XDG_CONFIG_HOME:-$HOME}/tmux/tmux.conf"
 alias sz="source ${ZDOTDIR:-$HOME}/.zshrc"
 

@@ -16,6 +16,8 @@ return {
       -- Allows extra capabilities provided by blink.cmp
       'saghen/blink.cmp',
 
+      -- Schema store
+      'b0o/schemastore.nvim',
       -- other language plugins
       --
       -- `lazydev` configures Lua LSP for your Neovim config, runtime and plugins
@@ -162,20 +164,7 @@ return {
       local servers = {
         bashls = {},
         jsonls = {},
-        pyright = {
-          settings = {
-            pyright = {
-              -- Using Ruff's import organizer
-              disableOrganizeImports = true,
-            },
-            python = {
-              analysis = {
-                -- Ignore all files for analysis to exclusively use Ruff for linting
-                ignore = { '*' },
-              },
-            },
-          },
-        },
+        pyrefly = {},
         ruff = {},
         taplo = {},
         terraformls = {
@@ -197,39 +186,20 @@ return {
             yaml = {
               validate = false,
               completion = true,
-
-              -- disable the schema store
               schemaStore = {
-                enable = true,
+                enable = false,
                 url = '',
               },
-              -- Disable formatting if not needed
               format = {
                 enabled = false,
               },
-              -- To add other schema shebang other than pattern below define below
-              -- # yaml-language-server: $schema={SchemaURL}
-              schemas = {
+              schemas = vim.list_extend(require('schemastore').yaml.schemas(), {
                 -- kubernetes
                 kubernetes = { 'deploy.yaml', 'deploy.yml' },
-                ['https://json.schemastore.org/kustomization.json'] = { 'kustomization.yaml', 'kustomization.yml', 'Kustomization' },
-
-                -- others
-                ['http://json.schemastore.org/github-workflow'] = '.github/workflows/*',
-                ['https://json.schemastore.org/cloudbuild.json'] = '*/cloudbuild.yaml',
-                ['https://json.schemastore.org/prometheus.json'] = { 'prometheus.yaml', 'prometheus.yml' },
-                ['https://gitlab.com/gitlab-org/gitlab/-/raw/master/app/assets/javascripts/editor/schema/ci.json'] = { '*.gitlab-ci.yml', '.gitlab/ci/*.yml' },
-                ['https://gitlab.com/gitlab-org/cluster-integration/gitlab-agent/-/raw/master/pkg/agentcfg/agentcfg_schemas/ConfigurationFile.json'] = {
-                  '.gitlab/agents/*/config.yaml',
-                },
-                ['https://raw.githubusercontent.com/compose-spec/compose-spec/master/schema/compose-spec.json'] = {
-                  'docker-compose.yaml',
-                  'docker-compose.yml',
-                },
 
                 --- Disable yaml schema validation
                 ['https://json.schemastore.org/yamllint.json'] = { 'values.yaml', 'values.yml', 'ingressroute.yaml' },
-              },
+              }),
             },
           },
         },

@@ -1,33 +1,44 @@
-# macOS system files
-.DS_Store
-.AppleDouble
-.LSOverride
+# Binaries
+*.a
+*.dylib
+*.dll
+*.exe
+*.o
+*.so
+bin/
 
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
-*.env
-*.venv
+# Env
+.env.*
+.env
+.envrc
 
 # Go
 *.out
 
-# Docker
-*.env
-*.env.*
+# Logs
+*.log
+logs/
+
+# macOS
+.AppleDouble
+.DS_Store
+.LSOverride
+
+# Opencode
+AGENTS.md
+
+# Python
+*.pyd
+*.pyc
+*.pyo
+*.venv
+.Python
+__pycache__/
+
+# Ruff
+.ruff_cache/
 
 # Terraform
+.terraform/
 *.tfstate
 *.tfstate.*
-
-# Direnv
-.envrc
-
-# VectorCode
-.vectorcode
-
-# OpenCode
-.OpenCode
