@@ -1,6 +1,14 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "autoupdate": true,
+  "model": "copilot/claude-sonnet-4",
+  "theme": "system",
+  "formatter": {
+    "py": {
+      "command": ["ruff", "format"],
+      "extensions": [".py"]
+    }
+  },
   "mcp": {
     "basic-memory": {
       "command": ["uvx", "basic-memory", "mcp"],
@@ -38,7 +46,5 @@
       },
       "type": "local"
     }
-  },
-  "model": "copilot/claude-sonnet-4",
-  "theme": "system"
+  }
 }
