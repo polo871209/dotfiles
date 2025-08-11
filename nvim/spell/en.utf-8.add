@@ -161,3 +161,13 @@ cmd
 efk
 codebase
 context7
+kibana
+api
+runtime
+distro
+SBOM
+BuildKit
+divelocal
+filesystems
+patches
+CVE
