@@ -5,3 +5,11 @@ preview_command = "eza --all --git --icons --color=always {}"
 [[session]]
 name = "dotfiles "
 path = "~/dotfiles"
+
+[[session]]
+name = "arch"
+path = "~/app/arch"
+
+[[session]]
+name = "blog"
+path = "~/app/blog"
