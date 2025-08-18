@@ -30,7 +30,25 @@
     },
     "desktop-commander": {
       "command": ["npx", "-y", "@wonderwhy-er/desktop-commander"],
+      "enabled": false,
+      "type": "local"
+    },
+    "github": {
+      "command": [
+        "docker",
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "--name",
+        "github-mcp",
+        "ghcr.io/github/github-mcp-server"
+      ],
       "enabled": true,
+      "environment": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "{env:GITHUB_PERSONAL_ACCESS_TOKEN}"
+      },
       "type": "local"
     },
     "kubernetes": {

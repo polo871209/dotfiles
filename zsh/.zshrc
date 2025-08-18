@@ -106,6 +106,7 @@ source "$ZDOTDIR/.zshenv.secret"
 # export OBSIDIAN_API_KEY=
 # export BRAVE_API_KEY
 # export BW_SESSION=
+# export GITHUB_PERSONAL_ACCESS_TOKEN=
 
 eval "$(oh-my-posh init zsh --config $XDG_CONFIG_HOME/ohmyposh/config.yaml)"
 eval "$(atuin init zsh)"
