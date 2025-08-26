@@ -41,8 +41,6 @@
         "--rm",
         "-e",
         "GITHUB_PERSONAL_ACCESS_TOKEN",
-        "--name",
-        "github-mcp",
         "ghcr.io/github/github-mcp-server"
       ],
       "enabled": true,

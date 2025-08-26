@@ -7,6 +7,7 @@ zstyle ':completion:*' menu select
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
 zstyle ':completion:*' format $'\e[2;37mCompleting %d\e[m'
 source <(carapace _carapace)
+source <(kubectl-argo-rollouts completion zsh)
 
 # ZSH Plugin Sources
 source $(brew --prefix)/share/zsh-autosuggestions/zsh-autosuggestions.zsh
@@ -21,6 +22,7 @@ alias lg="lazygit"
 alias ls="eza --group-directories-first -a --icons"
 alias k="kubectl"
 alias kctx="kubectx"
+alias ka="kubectl-argo-rollouts"
 alias kns="kubens"
 alias n="nvim"
 alias o="open ."
