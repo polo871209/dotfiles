@@ -188,3 +188,7 @@ workspace
 yaml
 Zipkin
 zsh
+rollouts
+hardcoded
+rollout
+argo

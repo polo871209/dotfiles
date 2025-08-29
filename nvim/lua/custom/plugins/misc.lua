@@ -53,14 +53,13 @@ return {
     'folke/which-key.nvim',
     event = 'VimEnter', -- Sets the loading event to 'VimEnter'
     opts = {
-      this_plugin = true, -- Enable this plugin
       -- delay between pressing a key and opening which-key (milliseconds)
       -- this setting is independent of vim.o.timeoutlen
       delay = 0,
 
       -- Key map grouping
       spec = {
-        { '<leader>a', group = '[A]i Codecompaion' },
+        { '<leader>a', group = '[A]i Codecompanion' },
         { '<leader>g', group = '[G]it' },
         { '<leader>o', group = '[O]bsidian' },
         { '<leader>s', group = '[S]earch' },

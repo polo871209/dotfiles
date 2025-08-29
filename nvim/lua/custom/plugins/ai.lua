@@ -2,7 +2,6 @@ return {
   {
     'olimorris/codecompanion.nvim', -- The KING of AI programming
     dependencies = {
-      'j-hui/fidget.nvim', -- Display status
       'ravitemer/codecompanion-history.nvim', -- Save and load conversation history
       {
         'zbirenbaum/copilot.lua',
@@ -54,15 +53,17 @@ return {
         },
       },
       adapters = {
-        copilot = function()
-          return require('codecompanion.adapters').extend('copilot', {
-            schema = {
-              model = {
-                default = 'claude-sonnet-4',
+        http = {
+          copilot = function()
+            return require('codecompanion.adapters').extend('copilot', {
+              schema = {
+                model = {
+                  default = 'claude-sonnet-4',
+                },
               },
-            },
-          })
-        end,
+            })
+          end,
+        },
       },
       prompt_library = {
         ['Word'] = {
