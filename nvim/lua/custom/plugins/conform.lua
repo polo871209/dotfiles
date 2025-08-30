@@ -34,6 +34,7 @@ return { -- Autoformat
       go = { 'gofmt' },
       html = { 'prettier' },
       json = { 'prettier' },
+      jsonnet = { 'jsonnetfmt' },
       lua = { 'stylua' },
       markdown = { 'prettier' },
       protobuf = { 'buf' },
@@ -44,6 +45,11 @@ return { -- Autoformat
       },
       terraform = { 'terraform_fmt' },
       yaml = { 'prettier' },
+    },
+    formatters = {
+      jsonnetfmt = {
+        args = { '--indent', '0', '--max-blank-lines', '2', '--sort-imports', '--string-style', 's', '--comment-style', 's', '--no-pad-objects', '-' },
+      },
     },
   },
 }

@@ -57,6 +57,9 @@ return { -- Fuzzy Finder (files, lsp, etc)tele
           '^.obsidian/.*',
           '.venv',
           '__pycache__',
+          'public',
+          'vendor',
+          'resources',
         },
       },
       pickers = {
