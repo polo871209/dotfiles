@@ -11,6 +11,7 @@ export GOOGLE_APPLICATION_CREDENTIALS="$CLOUDSDK_CONFIG/application_default_cred
 
 export BAT_THEME="OneHalfDark"
 export EDITOR="nvim"
+export HWATCH="--color"
 export PAGER="bat --paging=always"
 export MANPAGER="sh -c 'col -bx | bat -l man -p'"
 export KUBE_EDITOR=vim

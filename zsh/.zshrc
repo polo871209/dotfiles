@@ -15,27 +15,29 @@ source $(brew --prefix)/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zs
 source $HOME/dotfiles/zsh/plugins/autoswitch_virtualenv.zsh
 
 # Aliases
-alias c="pbcopy"
-alias cafe="fastfetch && caffeinate -d"
-alias cls="clear"
-alias lg="lazygit"
-alias ls="eza --group-directories-first -a --icons"
-alias k="kubectl"
-alias kctx="kubectx"
-alias ka="kubectl-argo-rollouts"
-alias kns="kubens"
-alias n="nvim"
-alias o="open ."
-alias tf="terraform"
-alias y="yank"
+alias -g c="pbcopy"
+alias -g cafe="fastfetch && caffeinate -d"
+alias -g cls="clear"
+alias -g lg="lazygit"
+alias -g ls="eza --group-directories-first -a --icons"
+alias -g k="kubectl"
+alias -g kctx="kubectx"
+alias -g ka="kubectl-argo-rollouts"
+alias -g kns="kubens"
+alias -g n="nvim"
+alias -g o="open ."
+alias -g oc="opencode"
+alias -g tf="terraform"
+alias -g watch="hwatch"
+alias -g y="yank"
 
 ## Configuration Reloads & Updates
-alias brewup="brew update && brew upgrade"
-alias st="tmux source-file ${XDG_CONFIG_HOME:-$HOME}/tmux/tmux.conf"
-alias sz="source ${ZDOTDIR:-$HOME}/.zshrc"
+alias -g brewup="brew update && brew upgrade"
+alias -g st="tmux source-file ${XDG_CONFIG_HOME:-$HOME}/tmux/tmux.conf"
+alias -g sz="source ${ZDOTDIR:-$HOME}/.zshrc"
 
 ## Bat
-alias bat="bat --color=always"
+alias -g bat="bat --color=always"
 alias -g -- -h='-h 2>&1 | bat --language=help --style=plain'
 alias -g -- --help='--help 2>&1 | bat --language=help --style=plain'
 h() {
@@ -73,7 +75,7 @@ function sesh-sessions() {
     sesh connect $session
   }
 }
-alias s=sesh-sessions
+alias -g s=sesh-sessions
 
 # docker dive local image
 divelocal() {
