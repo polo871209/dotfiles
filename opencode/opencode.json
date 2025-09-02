@@ -10,11 +10,6 @@
     }
   },
   "mcp": {
-    "basic-memory": {
-      "command": ["uvx", "basic-memory", "mcp"],
-      "enabled": false,
-      "type": "local"
-    },
     "brave-search": {
       "command": ["npx", "-y", "@modelcontextprotocol/server-brave-search"],
       "enabled": false,
@@ -56,7 +51,7 @@
     },
     "mcp-obsidian": {
       "command": ["uvx", "mcp-obsidian"],
-      "enabled": true,
+      "enabled": false,
       "environment": {
         "OBSIDIAN_API_KEY": "{env:OBSIDIAN_API_KEY}"
       },

@@ -82,29 +82,6 @@ divelocal() {
     dive <(docker save "$1") --source=docker-archive "${@:2}"
 }
 
-# bitwarden search and copy
-bwf() {
-    app=$(bw list items | jq -r '.[].name' | fzf)
-
-    # Get matching items
-    items=$(bw list items --search "$app")
-    count=$(echo "$items" | jq '. | length')
-
-    if [[ $count -eq 1 ]]; then
-        # Only one item - show username and copy password
-        username=$(echo "$items" | jq -r '.[0].login.username')
-        password=$(echo "$items" | jq -r '.[0].login.password')
-    else
-        selection=$(echo "$items" | jq -r '.[] | "\(.name): \(.login.username) [\(.id)]"' | fzf --prompt "Select item: " --delimiter=" : ")
-        id=$(echo "$selection" | grep -o '\[.*\]' | tr -d '[]')
-        item_data=$(bw get item "$id")
-        username=$(echo "$item_data" | jq -r '.login.username')
-        password=$(echo "$item_data" | jq -r '.login.password')
-    fi
-    echo "Username: $username"
-    echo "$password" | pbcopy
-}
-
 # Secret
 source "$ZDOTDIR/.zshenv.secret"
 # export OBSIDIAN_API_KEY=
