@@ -60,6 +60,7 @@ return { -- Fuzzy Finder (files, lsp, etc)tele
           'public',
           'vendor',
           'resources',
+          'external',
         },
       },
       pickers = {
