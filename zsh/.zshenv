@@ -22,3 +22,5 @@ export DOCKER_HOST="$(docker context inspect | jq -r '.[].Endpoints.docker.Host'
 export POETRY_VIRTUALENVS_IN_PROJECT=true
 
 export TERM=xterm-256color
+
+export HOMEBREW_NO_ENV_HINTS=1
