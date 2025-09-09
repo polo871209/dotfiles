@@ -13,9 +13,6 @@ return {
       -- NOTE: `opts = {}` is the same as calling `require('fidget').setup({})`
       { 'j-hui/fidget.nvim', opts = {} },
 
-      -- Allows extra capabilities provided by blink.cmp
-      'saghen/blink.cmp',
-
       -- Schema store
       'b0o/schemastore.nvim',
       -- other language plugins

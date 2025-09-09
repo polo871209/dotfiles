@@ -47,15 +47,6 @@ vim.keymap.set('n', '<leader>sk', builtin.keymaps, { desc = '[S]earch [K]eymaps'
 vim.keymap.set('n', '<leader>ss', builtin.spell_suggest, { desc = '[S]pell [S]uggestion' })
 vim.keymap.set('n', '<leader>sw', builtin.grep_string, { desc = '[S]earch current [W]ord' })
 
--- CodeCompanion: AI-powered pair programmer for Neovim
-vim.keymap.set('n', '<leader>aa', '<cmd>CodeCompanionChat Toggle<CR>', { desc = 'CodeCompanion Toggle' })
-vim.keymap.set('v', '<leader>aa', ':CodeCompanion ', { desc = 'CodeCompanion Inline' })
-vim.keymap.set('v', '<leader>aw', '<cmd>CodeCompanion /word<CR>', { desc = 'CodeCompanion Inline [W]ord' })
-vim.keymap.set('n', '<leader>ac', '<cmd>CodeCompanionActions<CR>', { desc = 'CodeCompanion Action [C]enter' })
-vim.keymap.set('n', '<leader>ah', '<cmd>CodeCompanionHistory<CR>', { desc = 'CodeCompanion [H]istory' })
-vim.keymap.set('v', '<leader>al', '<cmd>CodeCompanionChat Add<CR>', { desc = 'CodeCompanion add [Lines] to buffer' })
-vim.keymap.set('n', '<leader>an', '<cmd>CodeCompanionChat<CR>', { desc = 'CodeCompanion [N]ew Chat' })
-
 -- It's also possible to pass additional configuration options.
 --  See `:help telescope.builtin.live_grep()` for information about particular keys
 vim.keymap.set('n', '<leader>s/', function()
