@@ -23,12 +23,6 @@ return { -- Autocompletion
       preset = 'super-tab',
     },
 
-    appearance = {
-      -- 'mono' (default) for 'Nerd Font Mono' or 'normal' for 'Nerd Font'
-      -- Adjusts spacing to ensure icons are aligned
-      nerd_font_variant = 'mono',
-    },
-
     completion = {
       -- By default, you may press `<c-space>` to show the documentation.
       -- Optionally, set `auto_show = true` to show the documentation after a delay.
@@ -42,8 +36,7 @@ return { -- Autocompletion
       default = { 'lsp', 'path', 'buffer', 'copilot' },
       providers = {
         lsp = {
-          min_keyword_length = 2, -- Number of characters to trigger porvider
-          score_offset = 0, -- Boost/penalize the score of the items
+          score_offset = 0,
         },
         copilot = {
           name = 'copilot',

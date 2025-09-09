@@ -1,5 +1,5 @@
 return {
-  { -- Main LSP Configurationlsp
+  { -- Main LSP Configuration
     'neovim/nvim-lspconfig',
     dependencies = {
       -- Automatically install LSPs and related tools to stdpath for Neovim
@@ -15,20 +15,6 @@ return {
 
       -- Schema store
       'b0o/schemastore.nvim',
-      -- other language plugins
-      --
-      -- `lazydev` configures Lua LSP for your Neovim config, runtime and plugins
-      -- used for completion, annotations and signatures of Neovim apis
-      {
-        'folke/lazydev.nvim',
-        ft = 'lua',
-        opts = {
-          library = {
-            -- Load luvit types when the `vim.uv` word is found
-            { path = '${3rd}/luv/library', words = { 'vim%.uv' } },
-          },
-        },
-      },
     },
     config = function()
       --  This function gets run when an LSP attaches to a particular buffer.
@@ -277,7 +263,7 @@ return {
       require('mason-tool-installer').setup { ensure_installed = ensure_installed }
 
       require('mason-lspconfig').setup {
-        ensure_installed = {}, -- explicitly set to an empty table (Kickstart populates installs via mason-tool-installer)
+        ensure_installed = {}, -- Handled by mason-tool-installer for better control
         automatic_enable = true,
         automatic_installation = false,
         handlers = {
@@ -303,7 +289,7 @@ return {
       -- lsp_keymaps = false,
       -- other options
     },
-    config = function(lp, opts)
+    config = function(_, opts)
       require('go').setup(opts)
       local format_sync_grp = vim.api.nvim_create_augroup('GoFormat', {})
       vim.api.nvim_create_autocmd('BufWritePre', {
@@ -317,5 +303,15 @@ return {
     event = { 'CmdlineEnter' },
     ft = { 'go', 'gomod' },
     build = ':lua require("go.install").update_all_sync()', -- if you need to install/update all binaries
+  },
+  {
+    'folke/lazydev.nvim',
+    ft = 'lua',
+    opts = {
+      library = {
+        -- Load luvit types when the `vim.uv` word is found
+        { path = '${3rd}/luv/library', words = { 'vim%.uv' } },
+      },
+    },
   },
 }

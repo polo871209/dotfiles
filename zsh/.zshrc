@@ -53,15 +53,6 @@ nf() {
     [ -d $file ] && cd $file && nvim || nvim $file
 }
 
-# Functions
-cs() {
-    [ -f "$1.sh" ] && echo "$1.sh already exist" && return
-    touch "$1.sh" && chmod +x "$1.sh"
-    bat --plain  <<EOF >> "$1.sh"
-#!/usr/bin/env bash
-set -euo pipefail
-EOF
-}
 
 # sesh
 function sesh-sessions() {

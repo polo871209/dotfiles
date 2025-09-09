@@ -11,14 +11,14 @@ vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagn
 -- Show LSP documentation on hover
 vim.keymap.set('n', '<leader>d', vim.lsp.buf.hover, { desc = 'Show [D]ocumentation (Hover)' })
 
--- Spilt screen
-vim.api.nvim_set_keymap('n', '<leader>-', ':split<CR>', { noremap = true, silent = true })
-vim.api.nvim_set_keymap('n', '<leader>|', ':vsplit<CR>', { noremap = true, silent = true })
+-- Split screen
+vim.keymap.set('n', '<leader>-', ':split<CR>', { desc = 'Horizontal Split' })
+vim.keymap.set('n', '<leader>|', ':vsplit<CR>', { desc = 'Vertical Split' })
 
 -- Disable copy when delete
-vim.api.nvim_set_keymap('n', 'd', '"_d', { noremap = true, silent = true })
-vim.api.nvim_set_keymap('v', 'd', '"_d', { noremap = true, silent = true })
-vim.api.nvim_set_keymap('n', 'c', '"_c', { noremap = true, silent = true })
+vim.keymap.set('n', 'd', '"_d', { desc = 'Delete without yanking' })
+vim.keymap.set('v', 'd', '"_d', { desc = 'Delete without yanking' })
+vim.keymap.set('n', 'c', '"_c', { desc = 'Change without yanking' })
 
 -- Diffview: Smart toggle between open/close based on current state
 local function toggle_diffview()

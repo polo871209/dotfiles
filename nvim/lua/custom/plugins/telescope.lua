@@ -1,4 +1,4 @@
-return { -- Fuzzy Finder (files, lsp, etc)tele
+return { -- Fuzzy Finder (files, lsp, etc)
   'nvim-telescope/telescope.nvim',
   event = 'VimEnter',
   dependencies = {
@@ -49,18 +49,18 @@ return { -- Fuzzy Finder (files, lsp, etc)tele
       --
       defaults = {
         file_ignore_patterns = {
-          'node_modules',
+          'node_modules/',
           '.git/',
           '.DS_Store',
-          '^.terraform/.*',
+          '^.terraform/',
           '.cache/',
-          '^.obsidian/.*',
-          '.venv',
-          '__pycache__',
-          'public',
-          'vendor',
-          'resources',
-          'external',
+          '^.obsidian/',
+          '.venv/',
+          '__pycache__/',
+          'public/',
+          'vendor/',
+          'resources/',
+          'external/',
         },
       },
       pickers = {
