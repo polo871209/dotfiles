@@ -40,7 +40,7 @@ blocks:
         style: plain
         foreground: p:kubernetes
         background: transparent
-        template: " ﴱ {{.Context}}{{if .Namespace}}:{{.Namespace}}{{end}}"
+        template: "  {{.Context}}{{if .Namespace}}:{{.Namespace}}{{end}}"
   - type: rprompt
     segments:
       - type: python
@@ -54,7 +54,7 @@ blocks:
         style: plain
         foreground: "#FFFF00"
         background: transparent
-        template: " ﳑ {{ .Full }} "
+        template: " 󰟓 {{ .Full }} "
       - type: terraform
         style: plain
         foreground: "p:terraform"
