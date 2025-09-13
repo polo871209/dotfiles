@@ -61,6 +61,8 @@ return { -- Fuzzy Finder (files, lsp, etc)
           'vendor/',
           'resources/',
           'external/',
+          '.*%.lock$',
+          '.*%-lock%..*$',
         },
       },
       pickers = {
