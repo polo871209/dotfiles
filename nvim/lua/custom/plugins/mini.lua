@@ -46,7 +46,7 @@ return { -- Collection of various small independent plugins/modules
     -- starting page
     local starter = require 'mini.starter'
     starter.setup {
-      items = { starter.sections.recent_files(5, false) },
+      items = { starter.sections.recent_files(3, true) },
       header = header_art,
       footer = footer_art,
     }
