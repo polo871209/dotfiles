@@ -18,6 +18,11 @@
       },
       "type": "local"
     },
+    "chrome-devtools": {
+      "command": ["npx", "chrome-devtools-mcp@latest"],
+      "enabled": false,
+      "type": "local"
+    },
     "context7": {
       "command": ["npx", "-y", "@upstash/context7-mcp"],
       "enabled": true,
