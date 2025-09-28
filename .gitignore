@@ -6,3 +6,4 @@ raycast/
 .zsh_history
 .opencode/
 .zshenv.secret
+.secret.nu

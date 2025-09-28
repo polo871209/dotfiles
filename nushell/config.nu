@@ -1,6 +1,5 @@
 $env.config.buffer_editor = "nvim"
 $env.config.show_banner = false
-$env.CARAPACE_BRIDGES = 'zsh,fish,bash,inshellisense' 
 
 # Aliases
 alias c = pbcopy
@@ -35,6 +34,16 @@ def s [] {
         sesh connect $session
     }
 }
+
+# Secret
+source ~/.config/nushell/.secret.nu
+# $env.OBSIDIAN_API_KEY = ''
+# $env.BRAVE_API_KEY = ''
+# $env.BW_SESSION = ''
+# $env.GITHUB_PERSONAL_ACCESS_TOKEN = ''
+
+# Plugins
+source ~/dotfiles/nushell/plugins/autoswitch_virtualenv.nu
 
 oh-my-posh init nu --config $"($env.XDG_CONFIG_HOME)/ohmyposh/config.nu.yaml"
 source $"($nu.cache-dir)/atuin.nu" 
