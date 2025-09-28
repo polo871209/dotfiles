@@ -4,6 +4,7 @@ export PATH=$PATH:$GOPATH/bin
 export PATH=$PATH:/opt/homebrew/bin
 export PATH=$PATH:~/dotfiles/scripts
 export PATH=$PATH:~/.local/bin
+export PATH=$PATH:~/.cargo/bin
 
 # Shell Configuration
 export CLOUDSDK_CONFIG="$HOME/.gcloud"

@@ -1,0 +1,102 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/schema.json
+
+version: 3
+final_space: true
+shell_integration: true
+blocks:
+  - type: prompt
+    alignment: left
+    segments:
+      - type: text
+        style: plain
+        foreground: white
+        background: transparent
+        template: " "
+      - type: path
+        style: plain
+        foreground: blue
+        background: transparent
+        template: "{{ .Path }}"
+        max_depth: 4
+        properties:
+          style: agnoster_short
+          folder_icon: ..
+          max_depth: 4
+          hide_root_location: true
+      - type: git
+        style: plain
+        foreground: p:grey
+        background: transparent
+        templates:
+          - "{{ .HEAD }}{{ if or (.Working.Changed) (.Staging.Changed) }}*{{ end }} <#a12036>{{ if gt .Behind 0 }}\uea9a{{ end }}</><#10854e>{{if gt .Ahead 0 }}\ueaa1{{ end}}</>"
+        properties:
+          branch_icon: " "
+          commitz_icon: "@"
+          fetch_status: true
+  - type: prompt
+    alignment: right
+    segments:
+      - type: kubectl
+        style: plain
+        foreground: p:kubernetes
+        background: transparent
+        template: "  {{.Context}}{{if .Namespace}}:{{.Namespace}}{{end}}"
+  - type: rprompt
+    segments:
+      - type: python
+        style: plain
+        foreground: "#FFFF00"
+        background: transparent
+        template: "{{ .Venv }} 󰌠 {{ .Full }}"
+        properties:
+          display_mode: files
+      - type: go
+        style: plain
+        foreground: "#FFFF00"
+        background: transparent
+        template: " 󰟓 {{ .Full }} "
+      - type: terraform
+        style: plain
+        foreground: "p:terraform"
+        background: transparent
+        template: "󱁢 {{.WorkspaceName}}"
+      - type: executiontime
+        style: plain
+        properties:
+          threshold: 5000
+          style: round
+  # NEW LINE
+  - type: prompt
+    alignment: left
+    newline: true
+    segments:
+      - type: text
+        style: plain
+        foreground_templates:
+          - "{{if .Env.POSH_VI_MODE}}p:google_yellow{{end}}"
+          - "{{if gt .Code 0}}p:pacman_red{{end}}"
+          - "{{if eq .Code 0}}p:pacman_blue{{end}}"
+        background: transparent
+        template: "nu󰊠"
+tooltips:
+  - type: gcp
+    style: plain
+    tips:
+      - gcloud
+    foreground: p:google_yellow
+    background: transparent
+    template: " {{.Project}}:{{.Region}}"
+transient_prompt:
+  foreground: p:pacman_blue
+  background: transparent
+  template: "󰊠 "
+secondary_prompt:
+  foreground: p:pacman_blue
+  background: transparent
+palette:
+  google_yellow: "#ffce44"
+  grey: "#6c6c6c"
+  kubernetes: "#3a7be1"
+  pacman_blue: "#46bfee"
+  pacman_red: "#d03e19"
+  terraform: "#623CE4"
