@@ -16,7 +16,7 @@ vim.keymap.set('n', '<leader>-', ':split<CR>', { desc = 'Horizontal Split' })
 vim.keymap.set('n', '<leader>|', ':vsplit<CR>', { desc = 'Vertical Split' })
 
 -- Disable copy when delete/change
-vim.keymap.set('v', 'd', '"_d', { desc = 'Delete without yanking' })
+vim.keymap.set('n', 'd', '"_d', { desc = 'Delete without yanking' })
 vim.keymap.set('n', 'c', '"_c', { desc = 'Change without yanking' })
 
 -- Paste without replacing clipboard in visual mode
