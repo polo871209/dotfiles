@@ -31,7 +31,11 @@ blocks:
           - "{{ .HEAD }}{{ if or (.Working.Changed) (.Staging.Changed) }}*{{ end }} <#a12036>{{ if gt .Behind 0 }}\uea9a{{ end }}</><#10854e>{{if gt .Ahead 0 }}\ueaa1{{ end}}</>"
         properties:
           branch_icon: " "
-          commitz_icon: "@"
+          commit_icon: "@"
+
+          # This fetches status of current git, might make the loading very slow
+          # git config diff.ignoreSubmodules dirty
+          # git config status.submoduleSummary false
           fetch_status: true
   - type: prompt
     alignment: right
