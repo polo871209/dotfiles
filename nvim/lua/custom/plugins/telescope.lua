@@ -63,12 +63,13 @@ return { -- Fuzzy Finder (files, lsp, etc)
           'external/',
           '.*%.lock$',
           '.*%-lock%..*$',
+          'chroma_data/',
+          'bin/',
         },
       },
       pickers = {
         find_files = {
-          hidden = true,
-          no_ignore = true,
+          find_command = { 'fd', '--type', 'f', '--strip-cwd-prefix', '--hidden' },
         },
       },
       extensions = {
