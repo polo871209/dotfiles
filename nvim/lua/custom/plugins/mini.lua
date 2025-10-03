@@ -38,18 +38,18 @@ return { -- Collection of various small independent plugins/modules
   'echasnovski/mini.nvim',
   config = function()
     -- Better Around/Inside textobjects
-    require('mini.ai').setup { n_lines = 500 }
+    require('mini.ai').setup({ n_lines = 500 })
 
     -- Add/delete/replace surroundings (brackets, quotes, etc.)
     require('mini.surround').setup()
 
     -- starting page
-    local starter = require 'mini.starter'
-    starter.setup {
+    local starter = require('mini.starter')
+    starter.setup({
       items = { starter.sections.recent_files(3, true) },
       header = header_art,
       footer = footer_art,
-    }
+    })
 
     -- ... and there is more!
     --  Check out: https://github.com/echasnovski/mini.nvim

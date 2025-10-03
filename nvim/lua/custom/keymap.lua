@@ -26,9 +26,9 @@ vim.keymap.set('v', '<leader>p', '"_dP', { desc = 'Paste without replacing clipb
 local function toggle_diffview()
   local view = require('diffview.lib').get_current_view()
   if view then
-    vim.cmd 'DiffviewClose'
+    vim.cmd('DiffviewClose')
   else
-    vim.cmd 'DiffviewOpen'
+    vim.cmd('DiffviewOpen')
   end
 end
 
@@ -37,7 +37,7 @@ vim.keymap.set('n', '<leader>gc', ':DiffviewOpen ', { desc = '[G]it [C]ompare se
 
 -- Telescope
 -- See `:help telescope.builtin`
-local builtin = require 'telescope.builtin'
+local builtin = require('telescope.builtin')
 vim.keymap.set('n', '<leader><leader>', builtin.find_files, { desc = '[ ] Find Files' })
 vim.keymap.set('n', '<leader>/', builtin.current_buffer_fuzzy_find, { desc = '[/] Fuzzily search in current buffer' })
 vim.keymap.set('n', '<leader>s.', builtin.oldfiles, { desc = '[S]earch Recent Files ("." for repeat)' })
@@ -52,30 +52,30 @@ vim.keymap.set('n', '<leader>sw', builtin.grep_string, { desc = '[S]earch curren
 -- It's also possible to pass additional configuration options.
 --  See `:help telescope.builtin.live_grep()` for information about particular keys
 vim.keymap.set('n', '<leader>s/', function()
-  builtin.live_grep {
+  builtin.live_grep({
     grep_open_files = true,
     prompt_title = 'Live Grep in Open Files',
-  }
+  })
 end, { desc = '[S]earch [/] in Open Files' })
 
 -- Searching your Neovim configuration files
 vim.keymap.set('n', '<leader>sn', function()
-  builtin.find_files { cwd = vim.fn.stdpath 'config' }
+  builtin.find_files({ cwd = vim.fn.stdpath('config') })
 end, { desc = '[S]earch [N]eovim files' })
 
 -- Search Obsidian notes and open selected file in a right split
-local actions = require 'telescope.actions'
-local action_state = require 'telescope.actions.state'
+local actions = require('telescope.actions')
+local action_state = require('telescope.actions.state')
 
 vim.keymap.set('n', '<leader>on', function()
-  require('telescope.builtin').find_files {
-    cwd = vim.fn.expand '~/vaults/obsidian',
+  require('telescope.builtin').find_files({
+    cwd = vim.fn.expand('~/vaults/obsidian'),
     hidden = false,
     attach_mappings = function(prompt_bufnr, map)
       local open_in_right_split = function()
         local entry = action_state.get_selected_entry()
         actions.close(prompt_bufnr) -- Close Telescope
-        vim.cmd 'vsplit' -- Open in a vertical split
+        vim.cmd('vsplit') -- Open in a vertical split
         vim.cmd('edit ' .. entry.path) -- Open the selected file
 
         -- Move the cursor to the second appearance of ---
@@ -86,7 +86,7 @@ vim.keymap.set('n', '<leader>on', function()
 
           -- Find the indices of the first and second appearance of ---
           for i, line in ipairs(lines) do
-            if line:match '^---' then
+            if line:match('^---') then
               if not first_dash_idx then
                 first_dash_idx = i
               elseif not second_dash_idx then
@@ -108,5 +108,5 @@ vim.keymap.set('n', '<leader>on', function()
       map('n', '<CR>', open_in_right_split)
       return true
     end,
-  }
+  })
 end, { desc = '[O]bsidian [N]otes in a new pane' })

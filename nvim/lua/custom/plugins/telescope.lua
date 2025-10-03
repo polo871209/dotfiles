@@ -13,7 +13,7 @@ return { -- Fuzzy Finder (files, lsp, etc)
       -- `cond` is a condition used to determine whether this plugin should be
       -- installed and loaded.
       cond = function()
-        return vim.fn.executable 'make' == 1
+        return vim.fn.executable('make') == 1
       end,
     },
     { 'nvim-telescope/telescope-ui-select.nvim' },
@@ -43,7 +43,7 @@ return { -- Fuzzy Finder (files, lsp, etc)
 
     -- [[ Configure Telescope ]]
     -- See `:help telescope` and `:help telescope.setup()`
-    require('telescope').setup {
+    require('telescope').setup({
       -- You can put your default mappings / updates / etc. in here
       --  All the info you're looking for is in `:help telescope.setup()`
       --
@@ -78,7 +78,7 @@ return { -- Fuzzy Finder (files, lsp, etc)
           require('telescope.themes').get_dropdown(),
         },
       },
-    }
+    })
 
     -- Enable Telescope extensions if they are installed
     pcall(require('telescope').load_extension, 'fzf')

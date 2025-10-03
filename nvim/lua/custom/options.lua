@@ -84,28 +84,28 @@ vim.o.conceallevel = 1
 --  See `:help filetype`
 
 --  -- Go specific settings
-vim.cmd [[
+vim.cmd([[
     augroup GoSettings
         autocmd!
         autocmd FileType go setlocal tabstop=4
     augroup END
-]]
+]])
 
 -- Add *-dockerfile to Dockerfile
-vim.cmd [[
+vim.cmd([[
     augroup DockerfileDetection
     autocmd!
     autocmd BufRead,BufNewFile *-dockerfile set filetype=dockerfile
     augroup END
-]]
+]])
 
 -- New Direnv .envrc Detection
-vim.cmd [[
+vim.cmd([[
     augroup EnvrcDetection
         autocmd!
         autocmd BufRead,BufNewFile .envrc set filetype=sh
     augroup END
-]]
+]])
 
 -- [[ Basic Autocommands ]]
 --  See `:help lua-guide-autocommands`

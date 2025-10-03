@@ -19,7 +19,7 @@ return {
       -- Add a custom frontmatter function
       note_frontmatter_func = function(note)
         -- Get the current datetime in ISO 8601 format
-        local datetime = os.date '!%Y-%m-%dT%H:%M:%SZ' -- UTC time
+        local datetime = os.date('!%Y-%m-%dT%H:%M:%SZ') -- UTC time
 
         -- Create the base frontmatter
         local out = {
@@ -31,8 +31,8 @@ return {
         -- Add tags based on the folder structure of the note's path
         if next(note.tags) == nil then
           -- Resolve the actual paths to handle symlinks
-          local vault_path = vim.uv.fs_realpath(vim.fn.expand '~/vaults/obsidian') -- Real path of the vault
-          local note_path = vim.uv.fs_realpath(vim.fn.expand '%:p') -- Real path of the note
+          local vault_path = vim.uv.fs_realpath(vim.fn.expand('~/vaults/obsidian')) -- Real path of the vault
+          local note_path = vim.uv.fs_realpath(vim.fn.expand('%:p')) -- Real path of the note
 
           if not vault_path or not note_path then
             -- Fallback: If the realpath fails for some reason, skip adding tags
