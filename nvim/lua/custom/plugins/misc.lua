@@ -64,6 +64,7 @@ return {
         { '<leader>o', group = '[O]bsidian' },
         { '<leader>s', group = '[S]earch' },
         { '<leader>t', group = '[T]oggle' },
+        { 'gr', group = 'LSP Actions', mode = { 'n' } },
       },
     },
   },
