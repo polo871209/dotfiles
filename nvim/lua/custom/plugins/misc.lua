@@ -1,11 +1,6 @@
 return {
   -- Detect tabstop and shiftwidth automatically
-  {
-    'nmac427/guess-indent.nvim',
-    config = function()
-      require('guess-indent').setup({})
-    end,
-  },
+  { 'NMAC427/guess-indent.nvim', opts = {} },
 
   -- "gc" to comment visual regions/lines
   { 'numToStr/Comment.nvim', opts = {} },

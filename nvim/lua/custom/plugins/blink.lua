@@ -33,7 +33,7 @@ return { -- Autocompletion
     },
 
     sources = {
-      default = { 'path', 'buffer', 'lsp', 'copilot' },
+      default = { 'path', 'buffer', 'copilot', 'lsp' },
       providers = {
         path = {
           score_offset = 100,
@@ -41,14 +41,14 @@ return { -- Autocompletion
         buffer = {
           score_offset = 75,
         },
-        lsp = {
-          score_offset = 50,
-        },
         copilot = {
           name = 'copilot',
           module = 'blink-copilot',
-          score_offset = 25,
+          score_offset = 50,
           async = true,
+        },
+        lsp = {
+          score_offset = 25,
         },
       },
     },
