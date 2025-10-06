@@ -10,6 +10,16 @@ return {
       -- Configure Catppuccin with transparent background
       require('catppuccin').setup({
         transparent_background = true,
+        custom_highlights = function(colors)
+          return {
+            yamlKey = { fg = colors.blue },
+            yamlBlockMappingKey = { fg = colors.blue },
+            yamlString = { fg = colors.green },
+            yamlPlainScalar = { fg = colors.text },
+            yamlFlowString = { fg = colors.green },
+            yamlBlockScalar = { fg = colors.green },
+          }
+        end,
       })
     end,
     init = function()

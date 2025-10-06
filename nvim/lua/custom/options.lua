@@ -77,6 +77,13 @@ vim.o.laststatus = 0
 vim.o.spell = true
 vim.o.spelllang = 'en_us'
 
+vim.cmd([[
+    augroup DisableSpellCheck
+        autocmd!
+        autocmd FileType yaml setlocal nospell
+    augroup END
+]])
+
 -- https://github.com/epwalsh/obsidian.nvim?tab=readme-ov-file#concealing-characters
 vim.o.conceallevel = 1
 
