@@ -5,4 +5,6 @@ macos-titlebar-style = hidden
 scrollback-limit = 500000
 theme = Gruvbox Dark
 window-padding-x = 8
-window-padding-y = 5
+window-padding-y = 12
+fullscreen=true
+macos-non-native-fullscreen=true
