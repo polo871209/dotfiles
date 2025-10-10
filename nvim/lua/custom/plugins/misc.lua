@@ -55,6 +55,7 @@ return {
       -- Key map grouping
       spec = {
         { '<leader>a', group = '[A]i Codecompanion' },
+        { '<leader>b', group = 'De[B]ug' },
         { '<leader>g', group = '[G]it' },
         { '<leader>o', group = '[O]bsidian' },
         { '<leader>s', group = '[S]earch' },
