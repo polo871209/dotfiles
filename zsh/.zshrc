@@ -14,6 +14,25 @@ source $(brew --prefix)/share/zsh-autosuggestions/zsh-autosuggestions.zsh
 source $(brew --prefix)/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 source $HOME/dotfiles/zsh/plugins/autoswitch_virtualenv.zsh
 
+# vi mode
+bindkey -v
+export VI_MODE_SET_CURSOR=true
+
+# cursor style when in vi mode
+function zle-keymap-select {
+  if [[ ${KEYMAP} == vicmd ]] ; then
+    echo -ne "\e[1 q"
+  else
+    echo -ne "\e[5 q"
+  fi
+}
+zle -N zle-keymap-select
+
+# v to edit the command line in editor
+autoload -Uz edit-command-line
+zle -N edit-command-line
+bindkey -M vicmd 'v' edit-command-line
+
 # Aliases
 alias -g c="pbcopy"
 alias -g cafe="fastfetch && caffeinate -d"
