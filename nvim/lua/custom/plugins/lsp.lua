@@ -1,10 +1,7 @@
 return {
-  { -- Main LSP Configuration
+  {
     'neovim/nvim-lspconfig',
     dependencies = {
-      -- Automatically install LSPs and related tools to stdpath for Neovim
-      -- Mason must be loaded before its dependents so we need to set it up here.
-      -- NOTE: `opts = {}` is the same as calling `require('mason').setup({})`
       { 'mason-org/mason.nvim', opts = {} },
       'mason-org/mason-lspconfig.nvim',
       'WhoIsSethDaniel/mason-tool-installer.nvim',
@@ -73,13 +70,12 @@ return {
           settings = {
             basedpyright = {
               analysis = {
-                useLibraryCodeForTypes = true,
                 typeCheckingMode = 'basic',
-                diagnosticMode = 'workspace',
-                autoSearchPath = true,
                 inlayHints = {
-                  enable = true,
+                  variableTypes = false,
                   callArgumentNames = true,
+                  functionReturnTypes = false,
+                  genericTypes = false,
                 },
               },
             },
