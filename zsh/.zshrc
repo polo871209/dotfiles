@@ -35,7 +35,7 @@ bindkey -M vicmd 'v' edit-command-line
 
 # Aliases
 alias -g c="pbcopy"
-alias -g cafe="fastfetch && caffeinate -d"
+alias -g cafe="caffeinate -id asciiquarium"
 alias -g cls="clear"
 alias -g lg="lazygit"
 alias ll="eza --group-directories-first -a --icons"
