@@ -53,12 +53,16 @@ return {
       })
 
       -- Diagnostic Config
-      local signs = { ERROR = '', WARN = '', INFO = '', HINT = '' }
-      local diagnostic_signs = {}
-      for type, icon in pairs(signs) do
-        diagnostic_signs[vim.diagnostic.severity[type]] = icon
-      end
-      vim.diagnostic.config({ signs = { text = diagnostic_signs } })
+      vim.diagnostic.config({
+        signs = {
+          text = {
+            [vim.diagnostic.severity.ERROR] = '',
+            [vim.diagnostic.severity.WARN] = '',
+            [vim.diagnostic.severity.INFO] = '',
+            [vim.diagnostic.severity.HINT] = '',
+          },
+        },
+      })
 
       vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = '[D]iagnostic [Q]uickfix' })
 
@@ -130,18 +134,18 @@ return {
       ---@diagnostic disable-next-line: missing-fields
       require('mason-lspconfig').setup({
         automatic_enable = vim.tbl_keys(servers or {}),
+        handlers = {
+          function(server_name)
+            vim.lsp.config(server_name, servers[server_name] or {})
+          end,
+        },
       })
 
-      local ensure_installed = vim.tbl_keys(servers or {})
-      vim.list_extend(ensure_installed, {
+      local ensure_installed = vim.tbl_extend('keep', vim.tbl_keys(servers), {
         'stylua',
         'prettier',
       })
       require('mason-tool-installer').setup({ ensure_installed = ensure_installed })
-
-      for server_name, config in pairs(servers) do
-        vim.lsp.config(server_name, config)
-      end
     end,
   },
   -- other languages plugins

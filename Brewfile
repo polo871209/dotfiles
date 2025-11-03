@@ -74,6 +74,7 @@ brew "zsh-syntax-highlighting"
 brew "aquasecurity/trivy/trivy"
 brew "argoproj/tap/kubectl-argo-rollouts"
 brew "jandedobbeleer/oh-my-posh/oh-my-posh"
+brew "osx-cross/avr/avr-gcc@9"
 brew "qmk/qmk/qmk"
 brew "sst/tap/opencode"
 cask "alt-tab"
@@ -83,7 +84,6 @@ cask "font-meslo-lg-nerd-font"
 cask "ghostty"
 cask "google-chrome"
 cask "google-drive"
-cask "hyperkey"
 cask "lm-studio"
 cask "obsidian"
 cask "orbstack"
@@ -100,3 +100,4 @@ mas "Numbers", id: 409203825
 mas "Pages", id: 409201541
 mas "PDFgear", id: 6469021132
 mas "Xnip", id: 1221250572
+go "gotest.tools/gotestsum"
