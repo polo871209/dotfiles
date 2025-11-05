@@ -3,7 +3,7 @@ return {
   { 'NMAC427/guess-indent.nvim', opts = {} },
 
   -- "gc" to comment visual regions/lines
-  { 'numToStr/Comment.nvim', opts = {} },
+  { 'numToStr/Comment.nvim',     opts = {} },
 
   -- https://github.com/windwp/nvim-autopairs
   {
@@ -12,8 +12,8 @@ return {
     opts = {},
   },
 
-  -- Justfile syntax highlighting and support
-  { 'NoahTheDuke/vim-just' },
+  -- Syntax highlighting and support
+  { 'ekalinin/Dockerfile.vim' },
 
   { 'sindrets/diffview.nvim' },
   -- Git status symbols and indicators
@@ -44,7 +44,7 @@ return {
       { '<c-l>', '<cmd><C-U>TmuxNavigateRight<cr>' },
     },
   },
-  { -- Useful plugin to show you pending keybinds.
+  {                     -- Useful plugin to show you pending keybinds.
     'folke/which-key.nvim',
     event = 'VimEnter', -- Sets the loading event to 'VimEnter'
     opts = {
@@ -60,7 +60,7 @@ return {
         { '<leader>o', group = '[O]bsidian' },
         { '<leader>s', group = '[S]earch' },
         { '<leader>t', group = '[T]oggle' },
-        { 'gr', group = 'LSP Actions', mode = { 'n' } },
+        { 'gr',        group = 'LSP Actions',       mode = { 'n' } },
       },
     },
   },

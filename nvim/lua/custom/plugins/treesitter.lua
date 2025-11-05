@@ -9,14 +9,20 @@ return {
     })
 
     require('nvim-treesitter').install({
+      -- https://github.com/nvim-treesitter/nvim-treesitter/blob/main/SUPPORTED_LANGUAGES.md
       'bash',
       'c',
       'diff',
-      'dockerfile',
       'go',
-      'git_config',
+      'hcl',
+      'helm',
       'html',
+      'javascript',
+      'jq',
       'json',
+      'jsonc',
+      'jsonnet',
+      'just',
       'lua',
       'luadoc',
       'markdown',
@@ -24,6 +30,7 @@ return {
       'nu',
       'python',
       'query',
+      'sql',
       'terraform',
       'toml',
       'vim',

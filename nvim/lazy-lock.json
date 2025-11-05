@@ -1,5 +1,6 @@
 {
   "Comment.nvim": { "branch": "master", "commit": "e30b7f2008e52442154b66f7c519bfd2f1e32acb" },
+  "Dockerfile.vim": { "branch": "master", "commit": "2a31e6bcea5977209c05c728c4253d82fd873c82" },
   "blink-copilot": { "branch": "main", "commit": "7ad8209b2f880a2840c94cdcd80ab4dc511d4f39" },
   "blink.cmp": { "branch": "main", "commit": "2408f14f740f89d603cad33fe8cbd92ab068cc92" },
   "conform.nvim": { "branch": "master", "commit": "cde4da5c1083d3527776fee69536107d98dae6c9" },
@@ -42,7 +43,6 @@
   "telescope-ui-select.nvim": { "branch": "master", "commit": "6e51d7da30bd139a6950adf2a47fda6df9fa06d2" },
   "telescope.nvim": { "branch": "master", "commit": "47a8530e79a484d55ba5efa3768fc0b0c023d497" },
   "todo-comments.nvim": { "branch": "main", "commit": "411503d3bedeff88484de572f2509c248e499b38" },
-  "vim-just": { "branch": "main", "commit": "c13e317dda76ea01c2521cbed2a5c552a96951bd" },
   "vim-tmux-navigator": { "branch": "master", "commit": "c45243dc1f32ac6bcf6068e5300f3b2b237e576a" },
   "visimatch.nvim": { "branch": "main", "commit": "4334be61a9d3a6b268179144c6354349e445eb89" },
   "which-key.nvim": { "branch": "main", "commit": "3aab2147e74890957785941f0c1ad87d0a44c15a" }
