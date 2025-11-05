@@ -65,6 +65,7 @@ brew "terraform"
 brew "tmux"
 brew "tmuxp"
 brew "tree"
+brew "tree-sitter-cli"
 brew "uv"
 brew "watch"
 brew "yank"
@@ -100,4 +101,6 @@ mas "Numbers", id: 409203825
 mas "Pages", id: 409201541
 mas "PDFgear", id: 6469021132
 mas "Xnip", id: 1221250572
-go "gotest.tools/gotestsum"
+go "github.com/go-delve/delve/cmd/dlv"
+go "mvdan.cc/gofumpt"
+go "github.com/segmentio/golines"
