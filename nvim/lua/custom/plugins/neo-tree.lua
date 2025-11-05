@@ -10,7 +10,22 @@ return {
     'MunifTanjim/nui.nvim',
   },
   keys = {
-    { '\\', ':Neotree reveal<CR>', desc = 'NeoTree reveal', silent = true },
+    {
+      '\\',
+      function()
+        local bufname = vim.api.nvim_buf_get_name(0)
+        -- Check if current buffer is a real file
+        if bufname == '' or vim.bo.filetype == 'ministarter' or vim.bo.buftype ~= '' then
+          -- Not a real file, just toggle neo-tree without reveal
+          vim.cmd('Neotree toggle')
+        else
+          -- Real file, reveal it in neo-tree
+          vim.cmd('Neotree reveal')
+        end
+      end,
+      desc = 'NeoTree toggle/reveal',
+      silent = true,
+    },
   },
   opts = {
     filesystem = {

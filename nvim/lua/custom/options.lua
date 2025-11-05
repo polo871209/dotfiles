@@ -73,8 +73,8 @@ vim.o.wrap = false
 -- Disable status line at the bottom
 vim.o.laststatus = 0
 
--- Spell Check
-vim.o.spell = true
+-- Spell Check - disabled by default, enabled only for writing filetypes
+vim.o.spell = false
 vim.o.spelllang = 'en_us'
 
 -- https://github.com/epwalsh/obsidian.nvim?tab=readme-ov-file#concealing-characters
@@ -86,36 +86,12 @@ vim.o.conceallevel = 1
 -- Filetype-specific settings
 local filetype_group = vim.api.nvim_create_augroup('FileTypeSettings', { clear = true })
 
+-- Enable spell check for writing-focused filetypes
 vim.api.nvim_create_autocmd('FileType', {
-  pattern = 'yaml',
+  pattern = { 'markdown', 'text', 'gitcommit', 'plaintex' },
   group = filetype_group,
   callback = function()
-    vim.opt_local.spell = false
-  end,
-})
-
-vim.api.nvim_create_autocmd('FileType', {
-  pattern = 'go',
-  group = filetype_group,
-  callback = function()
-    vim.opt_local.tabstop = 4
-  end,
-})
-
--- https://github.com/epwalsh/obsidian.nvim?tab=readme-ov-file#concealing-characters
-vim.o.conceallevel = 1
-
--- [[ Basic filetype ]]
---  See `:help filetype`
-
--- Filetype-specific settings
-local filetype_group = vim.api.nvim_create_augroup('FileTypeSettings', { clear = true })
-
-vim.api.nvim_create_autocmd('FileType', {
-  pattern = 'yaml',
-  group = filetype_group,
-  callback = function()
-    vim.opt_local.spell = false
+    vim.opt_local.spell = true
   end,
 })
 
