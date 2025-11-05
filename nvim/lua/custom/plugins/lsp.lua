@@ -8,7 +8,7 @@ return {
 
       -- Useful status updates for LSP.
       -- NOTE: `opts = {}` is the same as calling `require('fidget').setup({})`
-      { 'j-hui/fidget.nvim', opts = {} },
+      { 'j-hui/fidget.nvim',    opts = {} },
 
       -- Schema store
       'b0o/schemastore.nvim',
@@ -22,7 +22,8 @@ return {
         group = vim.api.nvim_create_augroup('lsp-attach', { clear = true }),
         callback = function(event)
           vim.keymap.set('n', 'grn', vim.lsp.buf.rename, { buffer = event.buf, desc = 'LSP: [R]e[n]ame' })
-          vim.keymap.set({ 'n', 'x' }, 'gra', vim.lsp.buf.code_action, { buffer = event.buf, desc = 'LSP: [G]oto Code [A]ction' })
+          vim.keymap.set({ 'n', 'x' }, 'gra', vim.lsp.buf.code_action,
+            { buffer = event.buf, desc = 'LSP: [G]oto Code [A]ction' })
           vim.keymap.set('n', 'grD', vim.lsp.buf.declaration, { buffer = event.buf, desc = 'LSP: [G]oto [D]eclaration' })
           vim.keymap.set('n', '<leader>d', vim.lsp.buf.hover, { desc = 'LSP: [D]ocumentation (Hover)' })
 
@@ -77,7 +78,7 @@ return {
                 typeCheckingMode = 'basic',
                 inlayHints = {
                   variableTypes = false,
-                  callArgumentNames = true,
+                  callArgumentNames = false,
                   functionReturnTypes = false,
                   genericTypes = false,
                 },
@@ -169,7 +170,6 @@ return {
         group = format_sync_grp,
       })
     end,
-    event = { 'CmdlineEnter' },
     ft = { 'go', 'gomod' },
     build = ':lua require("go.install").update_all_sync()', -- if you need to install/update all binaries
   },

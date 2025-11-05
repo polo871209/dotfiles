@@ -99,18 +99,6 @@ return {
       })
 
       require('dap-python').setup('uv')
-
-      local bootstrap_path = vim.fn.getcwd() .. '/bootstrap.sh'
-      if vim.fn.filereadable(bootstrap_path) == 1 then
-        table.insert(dap.configurations.python, 1, {
-          type = 'python',
-          request = 'launch',
-          name = 'uvicorn',
-          module = 'uvicorn',
-          args = { 'app.main:app', '--reload' },
-          justMyCode = false,
-        })
-      end
     end,
   },
 }

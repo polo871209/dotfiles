@@ -12,13 +12,17 @@ return {
     opts = {},
   },
 
-  -- Syntax highlighting and support
+  -- Extra highlighting
   { 'ekalinin/Dockerfile.vim' },
 
-  { 'sindrets/diffview.nvim' },
+  {
+    'sindrets/diffview.nvim',
+    cmd = { 'DiffviewOpen', 'DiffviewClose', 'DiffviewToggleFiles', 'DiffviewFocusFiles' },
+  },
   -- Git status symbols and indicators
   {
     'lewis6991/gitsigns.nvim',
+    event = { 'BufReadPre', 'BufNewFile' },
     opts = {
       signs = {
         add = { text = '+' },
@@ -50,7 +54,7 @@ return {
     opts = {
       -- delay between pressing a key and opening which-key (milliseconds)
       -- this setting is independent of vim.o.timeoutlen
-      delay = 0,
+      delay = 200,
 
       -- Key map grouping
       spec = {

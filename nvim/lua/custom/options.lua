@@ -77,12 +77,30 @@ vim.o.laststatus = 0
 vim.o.spell = true
 vim.o.spelllang = 'en_us'
 
-vim.cmd([[
-    augroup DisableSpellCheck
-        autocmd!
-        autocmd FileType yaml setlocal nospell
-    augroup END
-]])
+-- https://github.com/epwalsh/obsidian.nvim?tab=readme-ov-file#concealing-characters
+vim.o.conceallevel = 1
+
+-- [[ Basic filetype ]]
+--  See `:help filetype`
+
+-- Filetype-specific settings
+local filetype_group = vim.api.nvim_create_augroup('FileTypeSettings', { clear = true })
+
+vim.api.nvim_create_autocmd('FileType', {
+  pattern = 'yaml',
+  group = filetype_group,
+  callback = function()
+    vim.opt_local.spell = false
+  end,
+})
+
+vim.api.nvim_create_autocmd('FileType', {
+  pattern = 'go',
+  group = filetype_group,
+  callback = function()
+    vim.opt_local.tabstop = 4
+  end,
+})
 
 -- https://github.com/epwalsh/obsidian.nvim?tab=readme-ov-file#concealing-characters
 vim.o.conceallevel = 1
@@ -90,29 +108,42 @@ vim.o.conceallevel = 1
 -- [[ Basic filetype ]]
 --  See `:help filetype`
 
---  -- Go specific settings
-vim.cmd([[
-    augroup GoSettings
-        autocmd!
-        autocmd FileType go setlocal tabstop=4
-    augroup END
-]])
+-- Filetype-specific settings
+local filetype_group = vim.api.nvim_create_augroup('FileTypeSettings', { clear = true })
+
+vim.api.nvim_create_autocmd('FileType', {
+  pattern = 'yaml',
+  group = filetype_group,
+  callback = function()
+    vim.opt_local.spell = false
+  end,
+})
+
+vim.api.nvim_create_autocmd('FileType', {
+  pattern = 'go',
+  group = filetype_group,
+  callback = function()
+    vim.opt_local.tabstop = 4
+  end,
+})
 
 -- Add *-dockerfile to Dockerfile
-vim.cmd([[
-    augroup DockerfileDetection
-    autocmd!
-    autocmd BufRead,BufNewFile *-dockerfile set filetype=dockerfile
-    augroup END
-]])
+vim.api.nvim_create_autocmd({ 'BufRead', 'BufNewFile' }, {
+  pattern = '*-dockerfile',
+  group = vim.api.nvim_create_augroup('DockerfileDetection', { clear = true }),
+  callback = function()
+    vim.bo.filetype = 'dockerfile'
+  end,
+})
 
--- New Direnv .envrc Detection
-vim.cmd([[
-    augroup EnvrcDetection
-        autocmd!
-        autocmd BufRead,BufNewFile .envrc set filetype=sh
-    augroup END
-]])
+-- Direnv .envrc Detection
+vim.api.nvim_create_autocmd({ 'BufRead', 'BufNewFile' }, {
+  pattern = '.envrc',
+  group = vim.api.nvim_create_augroup('EnvrcDetection', { clear = true }),
+  callback = function()
+    vim.bo.filetype = 'sh'
+  end,
+})
 
 -- [[ Basic Autocommands ]]
 --  See `:help lua-guide-autocommands`
