@@ -36,7 +36,9 @@ def s [] {
 }
 
 # Secret
-source ~/.config/nushell/.secret.nu
+if ('~/.config/nushell/.secret.nu' | path expand | path exists) {
+    source ~/.config/nushell/.secret.nu
+}
 # $env.OBSIDIAN_API_KEY = ''
 # $env.BRAVE_API_KEY = ''
 # $env.BW_SESSION = ''
