@@ -1,12 +1,12 @@
 function auto_venv() {
-    if [[ -f .venv/bin/activate ]]; then
-        if [[ -z "$VIRTUAL_ENV" || "$VIRTUAL_ENV" != "$(pwd)/.venv" ]]; then
-            source .venv/bin/activate
-            echo "Activated virtual environment: $(pwd)/.venv"
-        fi
+    local venv_path="${PWD}/.venv"
+
+    [[ "$VIRTUAL_ENV" == "$venv_path" ]] && return
+
+    if [[ -f "${venv_path}/bin/activate" ]]; then
+        source "${venv_path}/bin/activate"
     elif [[ -n "$VIRTUAL_ENV" ]]; then
         deactivate
-        echo "Deactivated virtual environment."
     fi
 }
 
