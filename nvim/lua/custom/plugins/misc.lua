@@ -61,6 +61,7 @@ return {
         { '<leader>a', group = '[A]i Codecompanion' },
         { '<leader>b', group = 'De[B]ug' },
         { '<leader>g', group = '[G]it' },
+        { '<leader>m', group = 'Split/Join' },
         { '<leader>o', group = '[O]bsidian' },
         { '<leader>s', group = '[S]earch' },
         { '<leader>t', group = '[T]oggle' },
