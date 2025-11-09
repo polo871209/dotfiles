@@ -29,6 +29,25 @@ end
 vim.keymap.set('n', '<leader>gd', toggle_diffview, { desc = '[G]it [D]iff Toggle' })
 vim.keymap.set('n', '<leader>gc', ':DiffviewOpen ', { desc = '[G]it [C]ompare selection' })
 
+-- Show buffer diagnostics in location list
+vim.keymap.set('n', '<leader>tt', function()
+  -- Check if we're in a location list window
+  if vim.fn.getloclist(0, {winid = 0}).winid ~= 0 then
+    vim.cmd('lclose')
+  else
+    vim.diagnostic.setloclist()
+    vim.cmd('lopen')
+  end
+end, { desc = '[T]oggle [T]rouble' })
+
+-- Auto-close location list when selecting an entry with Enter
+vim.api.nvim_create_autocmd('FileType', {
+  pattern = 'qf',
+  callback = function()
+    vim.keymap.set('n', '<CR>', '<CR>:lclose<CR>', { buffer = true, silent = true })
+  end,
+})
+
 -- Search Obsidian notes and open selected file in a right split
 local actions = require('telescope.actions')
 local action_state = require('telescope.actions.state')
@@ -40,8 +59,8 @@ vim.keymap.set('n', '<leader>on', function()
     attach_mappings = function(prompt_bufnr, map)
       local open_in_right_split = function()
         local entry = action_state.get_selected_entry()
-        actions.close(prompt_bufnr) -- Close Telescope
-        vim.cmd('vsplit') -- Open in a vertical split
+        actions.close(prompt_bufnr)    -- Close Telescope
+        vim.cmd('vsplit')              -- Open in a vertical split
         vim.cmd('edit ' .. entry.path) -- Open the selected file
 
         -- Move the cursor to the second appearance of ---

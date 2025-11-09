@@ -14,7 +14,6 @@ return {
       'c',
       'diff',
       'go',
-      'hcl',
       'helm',
       'html',
       'javascript',
