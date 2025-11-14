@@ -5,57 +5,14 @@
   "theme": "gruvbox",
   "formatter": {
     "py": {
-      "command": ["ruff", "format"],
-      "extensions": [".py"]
+      "command": [
+        "ruff",
+        "format"
+      ],
+      "extensions": [
+        ".py"
+      ]
     }
   },
-  "mcp": {
-    "brave-search": {
-      "command": ["npx", "-y", "@modelcontextprotocol/server-brave-search"],
-      "enabled": false,
-      "environment": {
-        "BRAVE_API_KEY": "{env:BRAVE_API_KEY}"
-      },
-      "type": "local"
-    },
-    "chrome-devtools": {
-      "command": ["npx", "chrome-devtools-mcp@latest"],
-      "enabled": false,
-      "type": "local"
-    },
-    "context7": {
-      "command": ["npx", "-y", "@upstash/context7-mcp"],
-      "enabled": false,
-      "type": "local"
-    },
-    "github": {
-      "command": [
-        "docker",
-        "run",
-        "-i",
-        "--rm",
-        "-e",
-        "GITHUB_PERSONAL_ACCESS_TOKEN",
-        "ghcr.io/github/github-mcp-server"
-      ],
-      "enabled": false,
-      "environment": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "{env:GITHUB_PERSONAL_ACCESS_TOKEN}"
-      },
-      "type": "local"
-    },
-    "kubernetes": {
-      "command": ["npx", "mcp-server-kubernetes"],
-      "enabled": false,
-      "type": "local"
-    },
-    "mcp-obsidian": {
-      "command": ["uvx", "mcp-obsidian"],
-      "enabled": false,
-      "environment": {
-        "OBSIDIAN_API_KEY": "{env:OBSIDIAN_API_KEY}"
-      },
-      "type": "local"
-    }
-  }
+  "mcp": {}
 }
