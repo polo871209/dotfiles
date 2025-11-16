@@ -19,6 +19,16 @@ return {
     'sindrets/diffview.nvim',
     cmd = { 'DiffviewOpen', 'DiffviewClose', 'DiffviewToggleFiles', 'DiffviewFocusFiles' },
   },
+
+  -- Quickfix improvements <ctr>q
+  {
+    'stevearc/quicker.nvim',
+    ft = "qf",
+    ---@module "quicker"
+    ---@type quicker.SetupOptions
+    opts = {},
+  },
+
   -- Git status symbols and indicators
   {
     'lewis6991/gitsigns.nvim',

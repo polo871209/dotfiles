@@ -134,3 +134,13 @@ vim.api.nvim_create_autocmd('TextYankPost', {
     vim.hl.on_yank()
   end,
 })
+
+-- Set quickfix window height to 45% of screen
+vim.api.nvim_create_autocmd('FileType', {
+  pattern = 'qf',
+  group = vim.api.nvim_create_augroup('QuickfixHeight', { clear = true }),
+  callback = function()
+    local height = math.floor(vim.o.lines * 0.45)
+    vim.cmd('resize ' .. height)
+  end,
+})
