@@ -1,4 +1,3 @@
--- Kickstart https://github.com/nvim-lua/kickstart.nvim/tree/master
 require 'custom.options'
 
 -- Bootstrap lazy.nvim

@@ -26,7 +26,7 @@ local header_art = [[⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 ]]
 local footer_art = [[
   🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍
-  🦍_    _ _____   _____ ___________ _____ _   _  _   __  🦍
+  🦍 _    _ _____   _____ ___________ _____ _   _  _   __ 🦍
   🦍| |  | |  ___| /  ___|_   _| ___ \  _  | \ | || | / / 🦍
   🦍| |  | | |__   \ `--.  | | | |_/ / | | |  \| || |/ /  🦍
   🦍| |/\| |  __|   `--. \ | | |    /| | | | . ` ||    \  🦍
@@ -35,23 +35,23 @@ local footer_art = [[
   🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍🦍
 ]]
 return { -- Collection of various small independent plugins/modules
-  'nvim-mini/mini.nvim',
-  config = function()
-    -- Better Around/Inside textobjects
-    require('mini.ai').setup({ n_lines = 500 })
+      'nvim-mini/mini.nvim',
+      config = function()
+            -- Better Around/Inside textobjects
+            require('mini.ai').setup({ n_lines = 500 })
 
-    -- Add/delete/replace surroundings (brackets, quotes, etc.)
-    require('mini.surround').setup()
+            -- Add/delete/replace surroundings (brackets, quotes, etc.)
+            require('mini.surround').setup()
 
-    -- starting page
-    local starter = require('mini.starter')
-    starter.setup({
-      items = { starter.sections.recent_files(3, true) },
-      header = header_art,
-      footer = footer_art,
-    })
+            -- starting page
+            local starter = require('mini.starter')
+            starter.setup({
+                  items = { starter.sections.recent_files(3, true) },
+                  header = header_art,
+                  footer = footer_art,
+            })
 
-    -- ... and there is more!
-    --  Check out: https://github.com/echasnovski/mini.nvim
-  end,
+            -- ... and there is more!
+            --  Check out: https://github.com/echasnovski/mini.nvim
+      end,
 }

@@ -10,8 +10,8 @@ return {
       -- NOTE: `opts = {}` is the same as calling `require('fidget').setup({})`
       { 'j-hui/fidget.nvim',    opts = {} },
 
-      -- Schema store
-      'b0o/schemastore.nvim',
+      -- JSON/YAML schema support
+      'b0o/SchemaStore.nvim',
     },
     config = function()
       --  This function gets run when an LSP attaches to a particular buffer.
@@ -106,17 +106,42 @@ return {
             yaml = {
               validate = false,
               completion = true,
+              hover = true,
               schemaStore = {
+                -- Disable built-in schemaStore, use SchemaStore.nvim instead for better control
                 enable = false,
                 url = '',
               },
               format = {
-                enabled = false,
+                enable = true,
+                singleQuote = false,
+                bracketSpacing = true,
               },
-              schemas = vim.list_extend(require('schemastore').yaml.schemas(), {
-                kubernetes = { 'deploy.yaml', 'deploy.yml' },
-                ['https://json.schemastore.org/yamllint.json'] = { 'values.yaml', 'values.yml', 'ingressroute.yaml' },
+              schemas = require('schemastore').yaml.schemas({
+                -- Only load schemas you actually use for better performance
+                select = {
+                  'kustomization.yaml',
+                  'GitHub Workflow',
+                  'docker-compose.yml',
+                  'gitlab-ci',
+                },
+                -- Add custom schema mappings
+                -- extra = {
+                --   {
+                --     name = 'Kubernetes',
+                --     description = 'Kubernetes resource definitions',
+                --     url =
+                --     'https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/master-standalone-strict/all.json',
+                --     fileMatch = { 'deploy*.yaml', 'deploy*.yml', 'k8s/*.yaml', 'k8s/*.yml' },
+                --   },
+                -- },
               }),
+              customTags = {
+                -- Support for common YAML tags
+                '!reference sequence',
+                '!secret scalar',
+                '!include scalar',
+              },
             },
           },
         },
