@@ -30,6 +30,7 @@ return {
       'python',
       'query',
       'sql',
+      'starlark',
       'terraform',
       'toml',
       'vim',

@@ -72,6 +72,9 @@ return {
         bashls = {},
         gopls = {},
         jsonls = {},
+        starpls = {
+          filetypes = { 'bzl', 'bazel', 'starlark' },
+        },
         basedpyright = {
           settings = {
             basedpyright = {
@@ -169,6 +172,7 @@ return {
       })
 
       local ensure_installed = vim.tbl_extend('keep', vim.tbl_keys(servers), {
+        'buildifier',
         'stylua',
         'prettier',
       })

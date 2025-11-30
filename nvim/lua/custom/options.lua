@@ -121,6 +121,16 @@ vim.api.nvim_create_autocmd({ 'BufRead', 'BufNewFile' }, {
   end,
 })
 
+-- Bazel file detection
+vim.api.nvim_create_autocmd({ 'BufRead', 'BufNewFile' }, {
+  pattern = { 'BUILD', 'BUILD.bazel', 'WORKSPACE', 'WORKSPACE.bazel', 'MODULE.bazel', '*.bzl' },
+  group = vim.api.nvim_create_augroup('BazelDetection', { clear = true }),
+  callback = function()
+    vim.bo.filetype = 'bzl'
+  end,
+})
+
+
 -- [[ Basic Autocommands ]]
 --  See `:help lua-guide-autocommands`
 

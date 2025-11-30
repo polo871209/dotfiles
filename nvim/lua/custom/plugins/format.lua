@@ -43,6 +43,7 @@ return {
         }
       end,
       formatters_by_ft = {
+        bzl = { 'buildifier' },
         go = { 'gofmt' },
         html = { 'prettier' },
         json = { 'prettier' },
