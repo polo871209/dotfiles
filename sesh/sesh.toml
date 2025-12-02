@@ -1,5 +1,4 @@
 [default_session]
-startup_command = "[ -f .venv/bin/activate ] && source .venv/bin/activate ; clear"
 preview_command = "eza --all --git --icons --color=always {}"
 
 [[session]]
