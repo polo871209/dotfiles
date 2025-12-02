@@ -44,9 +44,6 @@ if ('~/.config/nushell/.secret.nu' | path expand | path exists) {
 # $env.BW_SESSION = ''
 # $env.GITHUB_PERSONAL_ACCESS_TOKEN = ''
 
-# Plugins
-source ~/dotfiles/nushell/plugins/autoswitch_virtualenv.nu
-
 oh-my-posh init nu --config $"($env.XDG_CONFIG_HOME)/ohmyposh/config.nu.yaml"
 source $"($nu.cache-dir)/atuin.nu" 
 source $"($nu.cache-dir)/carapace.nu"

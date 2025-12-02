@@ -32,7 +32,6 @@ source <(carapace _carapace)
 BREW_PREFIX="$(brew --prefix)"
 source "$BREW_PREFIX/share/zsh-autosuggestions/zsh-autosuggestions.zsh"
 source "$BREW_PREFIX/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
-source $HOME/dotfiles/zsh/plugins/autoswitch_virtualenv.zsh
 
 # vi mode
 bindkey -v

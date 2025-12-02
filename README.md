@@ -22,3 +22,14 @@ touch ~/.hushlogin
 # Setup note-taking vault (requires Google Drive to be logged in first)
 mkdir ~/vaults && cd ~/Google\ Drive/My\ Drive/vaults && stow .
 ```
+
+## Notes
+
+```bash
+# Using python standard venv with direnv
+cat >> .envrc << 'EOF'
+export VIRTUAL_ENV=.venv
+layout python3
+EOF
+direnv allow
+```
