@@ -3,7 +3,6 @@ cursor-style-blink = true
 font-family = "MesloLGS NF Regular"
 font-size = 16
 fullscreen = true
-macos-non-native-fullscreen = true
 macos-titlebar-style = hidden
 scrollback-limit = 500000
 theme = Gruvbox Dark
