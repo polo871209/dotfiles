@@ -1,6 +1,10 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "autoupdate": true,
+  "tui": {
+    "scroll_acceleration": {
+      "enabled": true
+    }
+  },
   "model": "copilot/claude-sonnet-4.5",
   "theme": "gruvbox",
   "formatter": {
