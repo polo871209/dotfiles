@@ -13,6 +13,7 @@ path=(
 
 # Shell Configuration
 export CLOUDSDK_CONFIG="$HOME/.gcloud"
+export CLOUDSDK_PYTHON=/opt/homebrew/bin/python3.13
 export GOOGLE_APPLICATION_CREDENTIALS="$CLOUDSDK_CONFIG/application_default_credentials.json"
 
 export BAT_THEME="OneHalfDark"
