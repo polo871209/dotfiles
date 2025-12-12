@@ -127,6 +127,7 @@ return {
                   'GitHub Workflow',
                   'docker-compose.yml',
                   'gitlab-ci',
+                  'prometheus.json'
                 },
                 -- Add custom schema mappings
                 -- extra = {
