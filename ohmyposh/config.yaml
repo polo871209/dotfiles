@@ -1,102 +1,82 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/schema.json
 
-version: 3
-final_space: true
+version: 4
 shell_integration: true
+final_space: true
+secondary_prompt:
+  foreground: p:pacman_blue
+  background: transparent
+transient_prompt:
+  template: "󰊠 "
+  foreground: p:pacman_blue
+  background: transparent
 blocks:
   - type: prompt
     alignment: left
     segments:
-      - type: text
-        style: plain
+      - template: " "
         foreground: white
         background: transparent
-        template: " "
-      - type: path
+        type: text
         style: plain
+      - template: "{{ .Path }}"
         foreground: blue
         background: transparent
-        template: "{{ .Path }}"
-        max_depth: 4
-        properties:
-          style: agnoster_short
-          folder_icon: ..
-          max_depth: 4
-          hide_root_location: true
-      - type: git
+        type: path
         style: plain
-        foreground: p:grey
+      - foreground: p:grey
         background: transparent
+        type: git
+        style: plain
         templates:
-          - "{{ .HEAD }}{{ if or (.Working.Changed) (.Staging.Changed) }}*{{ end }} <#a12036>{{ if gt .Behind 0 }}\uea9a{{ end }}</><#10854e>{{if gt .Ahead 0 }}\ueaa1{{ end}}</>"
-        properties:
-          branch_icon: " "
-          commit_icon: "@"
-
-          # This fetches status of current git, might make the loading very slow
-          # git config diff.ignoreSubmodules dirty
-          # git config status.submoduleSummary false
-          fetch_status: true
+          - " {{ .HEAD }}{{ if or (.Working.Changed) (.Staging.Changed) }}*{{ end }} <#a12036>{{ if gt .Behind 0 }}{{ end }}</><#10854e>{{if gt .Ahead 0 }}{{ end}}</>"
   - type: prompt
     alignment: right
     segments:
-      - type: kubectl
-        style: plain
+      - template: "  {{.Context}}{{if .Namespace}}:{{.Namespace}}{{end}}"
         foreground: p:kubernetes
         background: transparent
-        template: "  {{.Context}}{{if .Namespace}}:{{.Namespace}}{{end}}"
+        type: kubectl
+        style: plain
   - type: rprompt
     segments:
-      - type: python
-        style: plain
+      - template: "{{ .Venv }} 󰌠 {{ .Full }}"
         foreground: "#FFFF00"
         background: transparent
-        template: "{{ .Venv }} 󰌠 {{ .Full }}"
-        properties:
-          display_mode: files
-      - type: go
+        type: python
         style: plain
+      - template: " {{ .Full }} "
         foreground: "#FFFF00"
         background: transparent
-        template: " 󰟓 {{ .Full }} "
-      - type: terraform
+        type: go
         style: plain
-        foreground: "p:terraform"
+      - template: "󱁢 {{.WorkspaceName}}"
+        foreground: p:terraform
         background: transparent
-        template: "󱁢 {{.WorkspaceName}}"
+        type: terraform
+        style: plain
       - type: executiontime
         style: plain
-        properties:
-          threshold: 5000
-          style: round
-  # NEW LINE
   - type: prompt
     alignment: left
-    newline: true
     segments:
-      - type: text
+      - template: "󰊠"
+        background: transparent
+        type: text
         style: plain
         foreground_templates:
           - "{{if .Env.POSH_VI_MODE}}p:google_yellow{{end}}"
           - "{{if gt .Code 0}}p:pacman_red{{end}}"
           - "{{if eq .Code 0}}p:pacman_blue{{end}}"
-        background: transparent
-        template: 󰊠
+    newline: true
 tooltips:
-  - type: gcp
+  - template:  {{.Project}}:{{.Region}}
+    foreground: p:google_yellow
+    background: transparent
+    type: gcp
     style: plain
     tips:
       - gcloud
-    foreground: p:google_yellow
-    background: transparent
-    template: " {{.Project}}:{{.Region}}"
-transient_prompt:
-  foreground: p:pacman_blue
-  background: transparent
-  template: "󰊠 "
-secondary_prompt:
-  foreground: p:pacman_blue
-  background: transparent
 palette:
   google_yellow: "#ffce44"
   grey: "#6c6c6c"
