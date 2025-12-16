@@ -75,17 +75,12 @@ return {
         starpls = {
           filetypes = { 'bzl', 'bazel', 'starlark' },
         },
-        basedpyright = {
+        ty = {
           settings = {
-            basedpyright = {
-              analysis = {
-                typeCheckingMode = 'basic',
-                inlayHints = {
-                  variableTypes = false,
-                  callArgumentNames = false,
-                  functionReturnTypes = false,
-                  genericTypes = false,
-                },
+            ty = {
+              inlayHints = {
+                variableTypes = false,
+                callArgumentNames = false,
               },
             },
           },
