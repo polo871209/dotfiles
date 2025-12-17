@@ -1,7 +1,7 @@
 ## Quick Setup
 
 ```bash
-git clone --recurse-submodules https://github.com/polo871209/dotfiles.git && cd dotfiles
+git clone https://github.com/polo871209/dotfiles.git && cd dotfiles
 
 # Install all Homebrew packages and applications
 brew bundle install

@@ -106,7 +106,12 @@ function sesh-sessions() {
     exec </dev/tty
     exec <&1
     local session
-    session=$(sesh list -tcd | fzf --height 40% --reverse --border-label ' sesh ' --border --prompt '⚡  ')
+    session=$(sesh list --icons | fzf --height 40% --reverse --border-label ' sesh ' --border --prompt '> ' \
+      --ansi \
+      --color 'bg:#282828,bg+:#3c3836,fg:#89b4fa,fg+:#89b4fa' \
+      --color 'hl:#fabd2f,hl+:#fabd2f,info:#83a598,marker:#8ec07c' \
+      --color 'prompt:#d79921,spinner:#8ec07c,pointer:#fe8019,header:#928374' \
+      --color 'border:#928374,label:#ebdbb2,query:#ebdbb2')
     zle reset-prompt > /dev/null 2>&1 || true
     [[ -z "$session" ]] && return
     sesh connect $session
