@@ -8,7 +8,18 @@ return {
     -- refer to the configuration section below
     bigfile = { enabled = true },
     indent = { enabled = true },
-    lazygit = { configure = false },
+    lazygit = {
+      configure = false,
+      win = {
+        style = 'lazygit',
+      },
+    },
+    styles = {
+      lazygit = {
+        width = 0.99,
+        height = 0.99,
+      },
+    },
     notifier = {
       enabled = true,
       level = vim.log.levels.WARN,
