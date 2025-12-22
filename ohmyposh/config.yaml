@@ -24,10 +24,14 @@ blocks:
         background: transparent
         type: path
         style: plain
+        options:
+          style: full
       - foreground: p:grey
         background: transparent
         type: git
         style: plain
+        options:
+          branch_icon: " "
         templates:
           - " {{ .HEAD }}{{ if or (.Working.Changed) (.Staging.Changed) }}*{{ end }} <#a12036>{{ if gt .Behind 0 }}{{ end }}</><#10854e>{{if gt .Ahead 0 }}{{ end}}</>"
   - type: prompt
