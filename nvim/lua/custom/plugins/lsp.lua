@@ -70,6 +70,7 @@ return {
 
       local servers = {
         bashls = {},
+        cue = {},
         gopls = {},
         jsonls = {},
         starpls = {

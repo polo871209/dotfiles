@@ -44,6 +44,7 @@ return {
       end,
       formatters_by_ft = {
         bzl = { 'buildifier' },
+        cue = { 'cue_fmt' },
         go = { 'gofmt' },
         html = { 'prettier' },
         json = { 'prettier' },

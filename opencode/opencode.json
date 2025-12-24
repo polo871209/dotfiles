@@ -18,5 +18,17 @@
       ]
     }
   },
+  "lsp": {
+    "cue": {
+      "command": [
+        "cue",
+        "lsp",
+        "serve"
+      ],
+      "extensions": [
+        ".cue"
+      ]
+    }
+  },
   "mcp": {}
 }
