@@ -12,3 +12,8 @@ path = "~/app/arch"
 [[session]]
 name = "blog"
 path = "~/app/blog"
+
+[[session]]
+name = "ollama"
+path = "~/.ollama"
+startup_command = "ollama serve"
