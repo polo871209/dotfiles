@@ -28,6 +28,16 @@
       "extensions": [
         ".cue"
       ]
+    },
+    "ty": {
+      "command": [
+        "uvx",
+        "ty",
+        "server"
+      ],
+      "extensions": [
+        ".py"
+      ]
     }
   },
   "mcp": {}

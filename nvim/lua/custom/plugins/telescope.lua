@@ -49,6 +49,12 @@ return { -- Fuzzy Finder (files, lsp, etc)
       --  All the info you're looking for is in `:help telescope.setup()`
       --
       defaults = {
+        layout_strategy = 'horizontal',
+        layout_config = {
+          width = 0.95,
+          height = 0.95,
+          preview_width = 0.6,
+        },
         file_ignore_patterns = {
           'node_modules/',
           '.git/',

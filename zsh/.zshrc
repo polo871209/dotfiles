@@ -28,7 +28,6 @@ source <(carapace _carapace)
 # source <(kubectl-argo-rollouts completion zsh)
 
 # ZSH Plugin Sources
-# Cache brew prefix for better performance
 BREW_PREFIX="$(brew --prefix)"
 source "$BREW_PREFIX/share/zsh-autosuggestions/zsh-autosuggestions.zsh"
 source "$BREW_PREFIX/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
@@ -62,8 +61,10 @@ bindkey -M vicmd 'v' edit-command-line
 alias c="pbcopy"
 alias cafe="caffeinate -id asciiquarium"
 alias cls="clear"
+alias io="istioctl"
 alias lg="lazygit"
 alias ll="eza --group-directories-first -a --icons"
+alias j="just"
 alias k="kubectl"
 alias kctx="kubectx"
 alias ka="kubectl-argo-rollouts"
@@ -81,6 +82,7 @@ alias st="tmux source-file ${XDG_CONFIG_HOME:-$HOME}/tmux/tmux.conf"
 alias sz="source ${ZDOTDIR:-$HOME}/.zshrc"
 
 ## Bat
+export BAT_PAGER="less -iRFK"
 alias bat="bat --color=always"
 alias -g -- -h='-h 2>&1 | bat --language=help --style=plain'
 alias -g -- --help='--help 2>&1 | bat --language=help --style=plain'
@@ -98,7 +100,6 @@ nf() {
     [[ -z "$file" ]] && return
     [[ -d "$file" ]] && cd "$file" && nvim || nvim "$file"
 }
-
 
 # sesh
 function sesh-sessions() {
