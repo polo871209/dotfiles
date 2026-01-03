@@ -14,6 +14,9 @@ end
 local rtp = vim.opt.rtp
 rtp:prepend(lazypath)
 
+-- NVIM_PRACTICE_MODE=1
+vim.g.practice_mode = vim.env.NVIM_PRACTICE_MODE == '1'
+
 -- Setup lazy.nvim
 require('lazy').setup {
   { import = 'custom.plugins' },

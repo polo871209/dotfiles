@@ -1,3 +1,8 @@
+-- Don't load completions in practice mode
+if vim.g.practice_mode then
+  return {}
+end
+
 return { -- Autocompletion
   'saghen/blink.cmp',
   dependencies = {

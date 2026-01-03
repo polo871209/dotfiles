@@ -1,3 +1,8 @@
+-- Don't load AI assistant in practice mode
+if vim.g.practice_mode then
+  return {}
+end
+
 return { -- OpenCode AI Assistant Integration
   'NickvanDyke/opencode.nvim',
   event = 'VeryLazy',

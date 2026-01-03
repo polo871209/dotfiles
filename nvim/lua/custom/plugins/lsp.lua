@@ -1,3 +1,8 @@
+-- Don't load LSP in practice mode
+if vim.g.practice_mode then
+  return {}
+end
+
 return {
   {
     'neovim/nvim-lspconfig',
