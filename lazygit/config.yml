@@ -1,6 +1,7 @@
 # yaml-language-server: $schema=https://raw.githubusercontent.com/jesseduffield/lazygit/refs/heads/master/schema/config.json
 gui:
   commandLogSize: 6
+  sidePanelWidth: 0.24
   theme:
     activeBorderColor:
       - "#d79921"

@@ -4,7 +4,7 @@
 [init]
 	defaultBranch = main
 [core]
-	autocrlf = false
+	autocrlf = input
 	excludesFile = ~/.config/git/ignore
 	editor = nvim
 	filemode = false
@@ -22,3 +22,5 @@
 [diff]
 	algorithm = histogram
 
+[merge]
+	conflictstyle = zdiff3
