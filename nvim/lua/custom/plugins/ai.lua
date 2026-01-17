@@ -3,16 +3,17 @@ if vim.g.practice_mode then
   return {}
 end
 
-return { -- OpenCode AI Assistant Integration
-  'NickvanDyke/opencode.nvim',
-  event = 'VeryLazy',
+return {
+  "NickvanDyke/opencode.nvim",
   dependencies = {
-    { 'folke/snacks.nvim', opts = { input = {}, picker = {}, terminal = {} } },
+    { "folke/snacks.nvim", opts = { input = {}, picker = {}, terminal = {} } },
   },
   config = function()
-    -- Configure OpenCode
+    ---@type opencode.Opts
     vim.g.opencode_opts = {
-      -- Add custom configuration here if needed
+      provider = {
+        enabled = 'tmux',
+      },
     }
 
     -- Required for auto-reloading buffers when opencode edits files

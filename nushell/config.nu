@@ -18,7 +18,7 @@ alias kns = kubens
 alias lg = lazygit
 alias n = nvim
 alias o = open .
-alias oc = opencode
+alias oc = opencode --port
 alias tf = terraform
 
 def sz [] {
