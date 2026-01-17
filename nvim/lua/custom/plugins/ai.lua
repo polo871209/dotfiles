@@ -1,8 +1,3 @@
--- Don't load AI assistant in practice mode
-if vim.g.practice_mode then
-  return {}
-end
-
 return {
   "NickvanDyke/opencode.nvim",
   dependencies = {

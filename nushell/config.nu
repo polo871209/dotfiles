@@ -1,9 +1,5 @@
 $env.config.buffer_editor = ["nvim" "-c" "set filetype=nu"]
 $env.config.show_banner = false
-$env.config.cursor_shape = {
-  vi_insert: line
-  vi_normal: block
-}
 
 alias bat = bat --color=always
 alias c = pbcopy

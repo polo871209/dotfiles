@@ -72,10 +72,7 @@ alias kns="kubens"
 alias n="nvim"
 alias o="open ."
 alias oc="opencode --port"
-alias p="NVIM_PRACTICE_MODE=1 nvim /tmp/pratice.py"
 alias tf="terraform"
-alias watch="hwatch"
-alias y="yank"
 
 ## Configuration Reloads & Updates
 alias brewup="brew update && brew upgrade"
