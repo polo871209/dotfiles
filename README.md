@@ -1,26 +1,33 @@
-## Quick Setup
+## Tools
 
+- Terminal: [Ghostty](https://ghostty.org/)
+- Shell: [Nushell](https://www.nushell.sh/)
+- Editor: [Nvim](https://neovim.io/)
+- Multiplexer: [Tmux](https://github.com/tmux/tmux)
+- Prompt: [Oh-my-posh](https://ohmyposh.dev/)
+- Completer: [Carapace](https://carapace.sh/)
+- History: [Atuin](https://docs.atuin.sh/cli/)
+- AI: [Opencode](https://opencode.ai/)
+
+## Mac Quick Setup
+
+### Init
 ```bash
 git clone https://github.com/polo871209/dotfiles.git && cd dotfiles
-
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 brew bundle install
-
-# Create symbolic links for all configuration files
-stow .
-
-# Configure shell environment variables
+stow .  # Create symbolic links for configuration files
 cat ~/dotfiles/dot_zshenv >| ~/.zshenv
 touch ~/.hushlogin
 ```
 
+### Setup SSH and Git Authentication
 ```bash
-# Generate SSH key and configure Git for authenticated access
 ssh-keygen -t ed25519
 git remote set-url origin git@github.com:polo871209/dotfiles.git
 ```
 
-
+### Configure Nushell
 ```nu
 nu
 echo "source ~/.config/nushell/config.nu" | save $nu.config-path
@@ -29,15 +36,16 @@ sudo echo "$(which nu)" >> /etc/shells
 chsh -s /opt/homebrew/bin/nu
 ```
 
-## Notes
+## Additional Configuration
 
+### Note-Taking Vault
+Requires Google Drive to be logged in first:
 ```bash
-# Setup note-taking vault (requires Google Drive to be logged in first)
 mkdir ~/vaults && cd ~/Google\ Drive/My\ Drive/vaults && stow .
 ```
 
+### Python Virtual Environment with direnv
 ```bash
-# Using python standard venv with direnv
 cat >> .envrc << 'EOF'
 export VIRTUAL_ENV=.venv
 layout python3
