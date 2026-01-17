@@ -1,33 +1,50 @@
-$env.config.buffer_editor = "nvim"
+$env.config.buffer_editor = ["nvim" "-c" "set filetype=nu"]
 $env.config.show_banner = false
+$env.config.cursor_shape = {
+  vi_insert: line
+  vi_normal: block
+}
 
-# Aliases
+alias bat = bat --color=always
 alias c = pbcopy
+alias cafe = caffeinate -id asciiquarium
 alias cls = clear
-alias lg = lazygit
-alias ll = ls -a 
+alias io = istioctl
+alias j = just
 alias k = kubectl
-alias kctx = kubectx
 alias ka = kubectl-argo-rollouts
+alias kctx = kubectx
 alias kns = kubens
+alias lg = lazygit
 alias n = nvim
 alias o = open .
 alias oc = opencode
 alias tf = terraform
-alias watch = hwatch
-alias y = yank
 
-# Configuration Reloads & Updates
-alias brewup = brew update; brew upgrade
-alias st = tmux source-file ($env.XDG_CONFIG_HOME | default $env.HOME)/tmux/tmux.conf
 def sz [] {
     source ($nu.env-path)
 }
 
-# Bat
-alias bat = bat --color=always
+def h [command: string, ...args] {
+    run-external $command ...$args "--help" | bat --plain --language=help
+}
 
-# Sesh
+def nf [] {
+    let file = (fzf --preview "bat --color=always --style=numbers --line-range=:500 {}")
+    if ($file | is-not-empty) {
+        if ($file | path type) == "dir" {
+            cd $file
+            nvim
+        } else {
+            nvim $file
+        }
+    }
+}
+
+def divelocal [image: string, ...args] {
+    dive (docker save $image) --source=docker-archive ...$args
+}
+
 def s [] {
     let session = (sesh list -t -c | fzf --height 40% --reverse --border-label ' sesh ' --border --prompt '⚡  ')
     if ($session | is-not-empty) {
@@ -35,31 +52,27 @@ def s [] {
     }
 }
 
-# Secret
 if ('~/.config/nushell/.secret.nu' | path expand | path exists) {
     source ~/.config/nushell/.secret.nu
 }
-# $env.OBSIDIAN_API_KEY = ''
-# $env.BRAVE_API_KEY = ''
-# $env.BW_SESSION = ''
-# $env.GITHUB_PERSONAL_ACCESS_TOKEN = ''
 
-oh-my-posh init nu --config $"($env.XDG_CONFIG_HOME)/ohmyposh/config.nu.yaml"
+oh-my-posh init nu --config $"($env.XDG_CONFIG_HOME)/ohmyposh/config.yaml"
 source $"($nu.cache-dir)/atuin.nu" 
 source $"($nu.cache-dir)/carapace.nu"
-source $"($nu.cache-dir)/zoxide.nu" 
-$env.config = {
-  hooks: {
-    pre_prompt: [{ ||
-      if (which direnv | is-empty) {
-        return
-      }
+source $"($nu.cache-dir)/zoxide.nu"
 
-      direnv export json | from json | default {} | load-env
-      if 'ENV_CONVERSIONS' in $env and 'PATH' in $env.ENV_CONVERSIONS {
-        $env.PATH = do $env.ENV_CONVERSIONS.PATH.from_string $env.PATH
-      }
-    }]
+use std/config *
+
+# Initialize the PWD hook as an empty list if it doesn't exist
+$env.config.hooks.env_change.PWD = $env.config.hooks.env_change.PWD? | default []
+
+$env.config.hooks.env_change.PWD ++= [{||
+  if (which direnv | is-empty) {
+    # If direnv isn't installed, do nothing
+    return
   }
-}
 
+  direnv export json | from json | default {} | load-env
+  # If direnv changes the PATH, it will become a string and we need to re-convert it to a list
+  $env.PATH = do (env-conversions).path.from_string $env.PATH
+}]

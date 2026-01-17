@@ -179,6 +179,8 @@ return {
         'prettier',
       })
       require('mason-tool-installer').setup({ ensure_installed = ensure_installed })
+
+      vim.lsp.enable('nushell')
     end,
   },
   -- other languages plugins

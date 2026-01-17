@@ -1,3 +1,4 @@
+copy-on-select = clipboard
 cursor-style = bar
 cursor-style-blink = true
 font-family = "MesloLGS NF Regular"
