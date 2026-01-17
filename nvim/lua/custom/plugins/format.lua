@@ -37,12 +37,7 @@ return {
         else
           lsp_format_opt = 'fallback'
         end
--- Don't load formatters in practice mode
-if vim.g.practice_mode then
-  return {}
-end
-
-return {
+        return {
           timeout_ms = 1500,
           lsp_format = lsp_format_opt,
         }
