@@ -12,12 +12,13 @@ alias ka = kubectl-argo-rollouts
 alias kctx = kubectx
 alias kns = kubens
 alias lg = lazygit
+alias l = eza --group-directories-first -a --icons
 alias n = nvim
 alias o = open .
 alias oc = opencode --port
 alias tf = terraform
 
-def sz [] {
+def sn [] {
     source ($nu.env-path)
 }
 
