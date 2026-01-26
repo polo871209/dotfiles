@@ -1,9 +1,3 @@
-# Init nushell completions
-# mkdir $"($nu.cache-dir)"
-# atuin init nu | save --force $"($nu.cache-dir)/atuin.nu" 
-# carapace _carapace nushell | save --force $"($nu.cache-dir)/carapace.nu"
-# zoxide init nushell | save --force $"($nu.cache-dir)/zoxide.nu"
-
 $env.XDG_CONFIG_HOME = $"($env.HOME)/.config"
 $env.GOPATH = $"($env.HOME)/go"
 $env.OBSIDIAN_VAULT = $"($env.HOME)/vaults/obsidian"
@@ -36,3 +30,9 @@ $env.HOMEBREW_NO_ENV_HINTS = "1"
 $env.CARAPACE_BRIDGES = 'zsh,fish,bash,inshellisense'
 $env.FZF_DEFAULT_COMMAND = "fd --hidden --strip-cwd-prefix --exclude .git --exclude .venv"
 $env.FZF_DEFAULT_OPTS = "--select-1"
+
+# Init nushell
+# mkdir $"($nu.cache-dir)"
+# atuin init nu | save --force $"($nu.cache-dir)/atuin.nu" 
+# carapace _carapace nushell | save --force $"($nu.cache-dir)/carapace.nu"
+# zoxide init nushell | save --force $"($nu.cache-dir)/zoxide.nu"

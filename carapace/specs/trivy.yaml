@@ -1,0 +1,6 @@
+# yaml-language-server: $schema=https://carapace.sh/schemas/command.json
+name: trivy
+description: Scanner for vulnerabilities in container images, file systems, and Git repositories
+parsing: disabled
+completion:
+  positionalany: ["$carapace.bridge.Cobra([trivy])"]

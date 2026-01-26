@@ -1,0 +1,6 @@
+# yaml-language-server: $schema=https://carapace.sh/schemas/command.json
+name: k8sgpt
+description: K8sGPT CLI
+parsing: disabled
+completion:
+  positionalany: ["$carapace.bridge.Cobra([k8sgpt])"]
