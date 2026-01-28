@@ -34,6 +34,7 @@ return {
       'starlark',
       'terraform',
       'toml',
+      'typescript',
       'vim',
       'vimdoc',
       'yaml',
