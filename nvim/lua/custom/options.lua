@@ -1,109 +1,86 @@
--- Set <space> as the leader key
--- See `:help mapleader`
---  NOTE: Must happen before plugins are loaded (otherwise wrong leader will be used)
+-- Leader key (before plugins load)
 vim.g.mapleader = ' '
 vim.g.maplocalleader = ' '
 
--- [[ Setting options ]]
--- See `:help vim.o`
--- NOTE: You can change these options as you wish!
---  For more options, you can see `:help option-list`
-
+-- Line numbers
 vim.o.number = true
 vim.o.relativenumber = true
 
--- Enable mouse mode, can be useful for re sizing splits for example!
+-- Enable mouse
 vim.o.mouse = 'a'
 
--- Don't show the mode, since it's already in the status line
+-- Hide mode display (shown in status line)
 vim.o.showmode = false
 
--- Sync clipboard between OS and Neovim.
--- See `:help 'clipboard'`
-vim.schedule(function()
-  vim.o.clipboard = 'unnamedplus'
-end)
+-- Sync clipboard with OS
+vim.schedule(function() vim.o.clipboard = 'unnamedplus' end)
 
--- Enable break indent
+-- Indentation
 vim.o.breakindent = true
 
--- Save undo history
+-- Persistent undo
 vim.o.undofile = true
 
 -- Disable swap files
 vim.o.swapfile = false
 
--- Case-insensitive searching UNLESS \C or one or more capital letters in the search term
+-- Smart case-insensitive search
 vim.o.ignorecase = true
 vim.o.smartcase = true
 
--- Keep signcolumn on by default
+-- Always show sign column
 vim.o.signcolumn = 'yes'
 
--- Decrease update time
+-- Faster update time
 vim.o.updatetime = 250
 
--- Decrease mapped sequence wait time
--- Displays which-key popup sooner
+-- Faster key sequence timeout
 vim.o.timeoutlen = 300
 
--- Configure how new splits should be opened
+-- Split directions
 vim.o.splitright = true
 vim.o.splitbelow = true
 
--- Sets how neovim will display certain whitespace characters in the editor.
---  See `:help 'list'`
---  and `:help 'listchars'`
---  Notice listchars is set using `vim.opt` instead of `vim.o`.
---  It is very similar to `vim.o` but offers an interface for conveniently interacting with tables.
---   See `:help lua-options`
---   and `:help lua-options-guide`
+-- Show whitespace characters
 vim.o.list = true
 vim.opt.listchars = { trail = '·', nbsp = '␣', tab = '» ' }
 
--- Preview substitutions live, as you type!
+-- Live substitution preview
 vim.o.inccommand = 'split'
 
--- Show which line your cursor is on
+-- Highlight cursor line
 vim.o.cursorline = true
 
--- Minimal number of screen lines to keep above and below the cursor.
+-- Scroll padding
 vim.o.scrolloff = 10
 
 -- Disable line wrap
 vim.o.wrap = false
 
--- Disable status line at the bottom
+-- Hide status line
 vim.o.laststatus = 0
 
--- Spell Check - disabled by default, enabled only for writing filetypes
+-- Spell check
 vim.o.spell = false
 vim.o.spelllang = 'en_us'
 
--- https://github.com/epwalsh/obsidian.nvim?tab=readme-ov-file#concealing-characters
+-- Concealment level for obsidian.nvim
 vim.o.conceallevel = 1
-
--- [[ Basic filetype ]]
---  See `:help filetype`
 
 -- Filetype-specific settings
 local filetype_group = vim.api.nvim_create_augroup('FileTypeSettings', { clear = true })
 
--- Enable spell check for writing-focused filetypes
+-- Enable spell check for text files
 vim.api.nvim_create_autocmd('FileType', {
   pattern = { 'markdown', 'text', 'gitcommit', 'plaintex' },
   group = filetype_group,
-  callback = function()
-    vim.opt_local.spell = true
-  end,
+  callback = function() vim.opt_local.spell = true end,
 })
 
 vim.api.nvim_create_autocmd('FileType', {
   pattern = 'go',
   group = filetype_group,
-  callback = function()
-    vim.opt_local.tabstop = 4
-  end,
+  callback = function() vim.opt_local.tabstop = 4 end,
 })
 
 vim.api.nvim_create_autocmd('FileType', {
@@ -116,48 +93,43 @@ vim.api.nvim_create_autocmd('FileType', {
   end,
 })
 
--- Add *-dockerfile to Dockerfile
-vim.api.nvim_create_autocmd({ 'BufRead', 'BufNewFile' }, {
-  pattern = '*-dockerfile',
-  group = vim.api.nvim_create_augroup('DockerfileDetection', { clear = true }),
+-- TypeScript/JavaScript indentation (set after other plugins)
+vim.api.nvim_create_autocmd({ 'FileType', 'BufEnter' }, {
+  group = vim.api.nvim_create_augroup('TSJSIndent', { clear = true }),
   callback = function()
-    vim.bo.filetype = 'dockerfile'
+    vim.schedule(function() vim.opt_local.tabstop = 4 end)
   end,
 })
 
--- Direnv .envrc Detection
+-- Dockerfile detection
+vim.api.nvim_create_autocmd({ 'BufRead', 'BufNewFile' }, {
+  pattern = '*-dockerfile',
+  group = vim.api.nvim_create_augroup('DockerfileDetection', { clear = true }),
+  callback = function() vim.bo.filetype = 'dockerfile' end,
+})
+
+-- Direnv .envrc detection
 vim.api.nvim_create_autocmd({ 'BufRead', 'BufNewFile' }, {
   pattern = '.envrc',
   group = vim.api.nvim_create_augroup('EnvrcDetection', { clear = true }),
-  callback = function()
-    vim.bo.filetype = 'sh'
-  end,
+  callback = function() vim.bo.filetype = 'sh' end,
 })
 
 -- Bazel file detection
 vim.api.nvim_create_autocmd({ 'BufRead', 'BufNewFile' }, {
   pattern = { 'BUILD', 'BUILD.bazel', 'WORKSPACE', 'WORKSPACE.bazel', 'MODULE.bazel', '*.bzl' },
   group = vim.api.nvim_create_augroup('BazelDetection', { clear = true }),
-  callback = function()
-    vim.bo.filetype = 'bzl'
-  end,
+  callback = function() vim.bo.filetype = 'bzl' end,
 })
 
--- [[ Basic Autocommands ]]
---  See `:help lua-guide-autocommands`
-
--- Highlight when yanking (copying) text
---  Try it with `yap` in normal mode
---  See `:help vim.hl.on_yank()`
+-- Highlight on yank
 vim.api.nvim_create_autocmd('TextYankPost', {
-  desc = 'Highlight when yanking (copying) text',
+  desc = 'Highlight when yanking text',
   group = vim.api.nvim_create_augroup('kickstart-highlight-yank', { clear = true }),
-  callback = function()
-    vim.hl.on_yank()
-  end,
+  callback = function() vim.hl.on_yank() end,
 })
 
--- Set quickfix window height to 45% of screen
+-- Quickfix window height
 vim.api.nvim_create_autocmd('FileType', {
   pattern = 'qf',
   group = vim.api.nvim_create_augroup('QuickfixHeight', { clear = true }),

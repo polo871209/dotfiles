@@ -2,36 +2,35 @@ return {
   {
     'mfussenegger/nvim-dap',
     dependencies = {
-      -- Creates a beautiful debugger UI
+      -- Debug UI
       'rcarriga/nvim-dap-ui',
       'nvim-neotest/nvim-nio',
       'theHamsta/nvim-dap-virtual-text',
 
-      -- Installs the debug adapters for you
+      -- Install debug adapters
       'mason-org/mason.nvim',
       'jay-babu/mason-nvim-dap.nvim',
 
-      -- Add your own debuggers here
+      -- Language-specific debuggers
       'leoluz/nvim-dap-go',
       'mfussenegger/nvim-dap-python',
     },
     config = function()
-      local dap = require('dap')
-      local dapui = require('dapui')
+      local dap = require 'dap'
+      local dapui = require 'dapui'
       require('nvim-dap-virtual-text').setup()
 
-      require('mason-nvim-dap').setup({
+      require('mason-nvim-dap').setup {
         automatic_installation = true,
         handlers = {},
         ensure_installed = {
           'delve',
         },
-      })
+      }
 
-      -- Dap UI setup
-      -- For more information, see |:help nvim-dap-ui|
+      -- DAP UI setup
       ---@diagnostic disable-next-line: missing-fields
-      dapui.setup({
+      dapui.setup {
         icons = { expanded = '▾', collapsed = '▸', current_frame = '*' },
         controls = {
           icons = {
@@ -63,7 +62,7 @@ return {
             position = 'bottom',
           },
         },
-      })
+      }
 
       -- Change breakpoint icons
       vim.api.nvim_set_hl(0, 'DapBreak', { fg = '#e51400' })
@@ -83,22 +82,20 @@ return {
       vim.keymap.set('n', '<leader>bu', dapui.toggle, { desc = 'Debug: Toggle UI' })
       vim.keymap.set('n', '<leader>bt', dap.terminate, { desc = 'Debug: Terminate' })
 
-      vim.keymap.set('n', '<leader>?', function()
-        require('dapui').eval(nil, { enter = true })
-      end)
+      vim.keymap.set('n', '<leader>?', function() require('dapui').eval(nil, { enter = true }) end)
 
       dap.listeners.after.event_initialized['dapui_config'] = dapui.open
       dap.listeners.before.event_terminated['dapui_config'] = dapui.close
       dap.listeners.before.event_exited['dapui_config'] = dapui.close
 
-      -- Install golang specific config
-      require('dap-go').setup({
+      -- Go debug config
+      require('dap-go').setup {
         delve = {
-          detached = vim.fn.has('win32') == 0,
+          detached = vim.fn.has 'win32' == 0,
         },
-      })
+      }
 
-      require('dap-python').setup('uv')
+      require('dap-python').setup 'uv'
     end,
   },
 }

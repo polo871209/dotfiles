@@ -1,14 +1,10 @@
 return {
-  -- Split/join code blocks (arrays, functions, etc.)
   {
     'Wansmer/treesj',
     keys = {
       { '<leader>m', '<cmd>TSJToggle<cr>', desc = 'Toggle split/join' },
     },
-    dependencies = { 'nvim-treesitter/nvim-treesitter' },
-    config = function()
-      require('treesj').setup({})
-    end,
+    config = function() require('treesj').setup {} end,
   },
   {
     'stevearc/conform.nvim',
@@ -17,9 +13,7 @@ return {
     keys = {
       {
         '<leader>f',
-        function()
-          require('conform').format({ async = true, lsp_format = 'fallback' })
-        end,
+        function() require('conform').format { async = true, lsp_format = 'fallback' } end,
         mode = '',
         desc = '[F]ormat buffer',
       },
@@ -27,9 +21,7 @@ return {
     opts = {
       notify_on_error = false,
       format_on_save = function(bufnr)
-        -- Disable "format_on_save lsp_fallback" for languages that don't
-        -- have a well standardized coding style. You can add additional
-        -- languages here or re-enable it for the disabled ones.
+        -- Disable for C/C++ (no standard style)
         local disable_filetypes = { c = true, cpp = true }
         local lsp_format_opt
         if disable_filetypes[vim.bo[bufnr].filetype] then
@@ -65,6 +57,6 @@ return {
           args = { '--indent', '0', '--max-blank-lines', '2', '--sort-imports', '--string-style', 's', '--comment-style', 's', '--no-pad-objects', '-' },
         },
       },
-    }
+    },
   },
 }

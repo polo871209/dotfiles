@@ -3,9 +3,7 @@ return {
   priority = 1000,
   lazy = false,
   opts = {
-    -- your configuration comes here
-    -- or leave it empty to use the default settings
-    -- refer to the configuration section below
+    -- Configuration
     bigfile = { enabled = true },
     indent = { enabled = true },
     lazygit = {
@@ -30,30 +28,22 @@ return {
   keys = {
     {
       '<leader>lg',
-      function()
-        Snacks.lazygit()
-      end,
+      function() Snacks.lazygit() end,
       desc = '[L]azy[g]it',
     },
     {
       '<leader>gb',
-      function()
-        Snacks.git.blame_line()
-      end,
+      function() Snacks.git.blame_line() end,
       desc = '[G]it [B]lame Line',
     },
     {
       '<leader>gB',
-      function()
-        Snacks.gitbrowse()
-      end,
+      function() Snacks.gitbrowse() end,
       desc = '[G]it [B]rowse',
     },
     {
       '<leader>tn',
-      function()
-        Snacks.notifier.hide()
-      end,
+      function() Snacks.notifier.hide() end,
       desc = 'Dismiss All [N]otifications',
     },
   },
@@ -61,18 +51,14 @@ return {
     vim.api.nvim_create_autocmd('User', {
       pattern = 'VeryLazy',
       callback = function()
-        -- Setup some globals for debugging (lazy-loaded)
-        _G.dd = function(...)
-          Snacks.debug.inspect(...)
-        end
-        _G.bt = function()
-          Snacks.debug.backtrace()
-        end
-        vim.print = _G.dd -- Override print to use snacks for `:=` command
+        -- Debugging globals
+        _G.dd = function(...) Snacks.debug.inspect(...) end
+        _G.bt = function() Snacks.debug.backtrace() end
+        vim.print = _G.dd -- Override print for :=
 
-        -- Create some toggle mappings
-        Snacks.toggle.option('wrap', { name = 'Wrap' }):map('<leader>tw')
-        Snacks.toggle.diagnostics():map('<leader>td')
+        -- Toggle mappings
+        Snacks.toggle.option('wrap', { name = 'Wrap' }):map '<leader>tw'
+        Snacks.toggle.diagnostics():map '<leader>td'
       end,
     })
   end,

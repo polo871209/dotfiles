@@ -11,13 +11,13 @@ return {
       '\\',
       function()
         local bufname = vim.api.nvim_buf_get_name(0)
-        -- Check if current buffer is a real file
+        -- Check if buffer is a real file
         if bufname == '' or vim.bo.filetype == 'ministarter' or vim.bo.buftype ~= '' then
-          -- Not a real file, just toggle neo-tree without reveal
-          vim.cmd('Neotree toggle')
+          -- Not a real file, toggle neo-tree
+          vim.cmd 'Neotree toggle'
         else
           -- Real file, reveal it in neo-tree
-          vim.cmd('Neotree reveal')
+          vim.cmd 'Neotree reveal'
         end
       end,
       desc = 'NeoTree toggle/reveal',
@@ -46,8 +46,8 @@ return {
       {
         event = 'file_opened',
         handler = function()
-          -- Automatically close the Neo-tree window after selecting a file
-          require('neo-tree.command').execute({ action = 'close' })
+          -- Auto-close after selecting file
+          require('neo-tree.command').execute { action = 'close' }
         end,
       },
     },
