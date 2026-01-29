@@ -1,17 +1,7 @@
 return { -- Completion
   'saghen/blink.cmp',
   dependencies = {
-    {
-      'zbirenbaum/copilot.lua',
-      cmd = 'Copilot',
-      event = 'InsertEnter',
-      config = function()
-        require('copilot').setup {
-          suggestion = { enabled = false },
-          panel = { enabled = false },
-        }
-      end,
-    },
+    'zbirenbaum/copilot.lua',
     'fang2hou/blink-copilot',
   },
   version = '1.*',
@@ -40,7 +30,7 @@ return { -- Completion
       providers = {
         path = {
           score_offset = 100,
-          max_items = 5, -- Limit path suggestions
+          max_items = 5,
           opts = {
             trailing_slash = false,
             label_trailing_slash = false,
@@ -48,8 +38,8 @@ return { -- Completion
         },
         buffer = {
           score_offset = 75,
-          max_items = 5, -- Limit number of buffer completions
-          min_keyword_length = 3, -- Don't trigger on 1-2 character inputs
+          max_items = 5,
+          min_keyword_length = 3,
         },
         copilot = {
           name = 'copilot',
@@ -59,7 +49,7 @@ return { -- Completion
         },
         lsp = {
           score_offset = 25,
-          max_items = 10, -- Limit LSP completions
+          max_items = 10,
         },
       },
     },

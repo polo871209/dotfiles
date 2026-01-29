@@ -3,9 +3,9 @@ return {
   priority = 1000,
   lazy = false,
   opts = {
-    -- Configuration
     bigfile = { enabled = true },
     indent = { enabled = true },
+    input = { enabled = true },
     lazygit = {
       configure = false,
       win = {
@@ -22,6 +22,7 @@ return {
       enabled = true,
       level = vim.log.levels.WARN,
     },
+    terminal = { enabled = true },
     toggle = { enabled = true },
     words = { enabled = true },
   },
@@ -51,11 +52,6 @@ return {
     vim.api.nvim_create_autocmd('User', {
       pattern = 'VeryLazy',
       callback = function()
-        -- Debugging globals
-        _G.dd = function(...) Snacks.debug.inspect(...) end
-        _G.bt = function() Snacks.debug.backtrace() end
-        vim.print = _G.dd -- Override print for :=
-
         -- Toggle mappings
         Snacks.toggle.option('wrap', { name = 'Wrap' }):map '<leader>tw'
         Snacks.toggle.diagnostics():map '<leader>td'
