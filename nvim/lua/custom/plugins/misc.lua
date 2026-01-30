@@ -52,14 +52,13 @@ return {
     opts = {
       delay = 200,
       spec = {
-        { '<leader>a', group = '[A]i Codecompanion' },
+        { '<leader>o', group = '[O]penCode' },
         { '<leader>b', group = 'De[B]ug' },
         { '<leader>g', group = '[G]it' },
         { '<leader>m', group = 'Split/Join' },
-        { '<leader>o', group = '[O]bsidian' },
         { '<leader>s', group = '[S]earch' },
         { '<leader>t', group = '[T]oggle' },
-        { 'gr', group = 'LSP Actions', mode = { 'n' } },
+        { 'g', group = 'LSP Actions', mode = { 'n' } },
       },
     },
   },
