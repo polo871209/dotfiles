@@ -19,6 +19,7 @@ return {
 
           map('grn', vim.lsp.buf.rename, '[R]e[n]ame')
           map('gra', vim.lsp.buf.code_action, '[G]oto Code [A]ction', { 'n', 'x' })
+          map('<leader>ca', vim.lsp.buf.code_action, '[C]ode [A]ction', { 'n', 'x' })
           map('grD', vim.lsp.buf.declaration, '[G]oto [D]eclaration')
           map('<leader>d', vim.lsp.buf.hover, '[D]ocumentation (Hover)')
 
@@ -165,10 +166,17 @@ return {
                 disable = { 'missing-fields' },
                 globals = { 'vim' },
               },
+              hint = {
+                enable = false,
+              },
             })
           end,
           settings = {
-            Lua = {},
+            Lua = {
+              hint = {
+                enable = false,
+              },
+            },
           },
         },
       }
@@ -203,9 +211,12 @@ return {
   {
     'ray-x/go.nvim',
     dependencies = { 'ray-x/guihua.lua' },
-    opts = {},
-    config = function(_, opts)
-      require('go').setup(opts)
+    config = function()
+      require('go').setup {
+        lsp_cfg = false,
+        lsp_gofumpt = false,
+        lsp_on_attach = false,
+      }
       local format_sync_grp = vim.api.nvim_create_augroup('GoFormat', {})
       vim.api.nvim_create_autocmd('BufWritePre', {
         pattern = '*.go',
@@ -213,6 +224,7 @@ return {
         group = format_sync_grp,
       })
     end,
+    event = { 'CmdlineEnter' },
     ft = { 'go', 'gomod' },
     build = ':lua require("go.install").update_all_sync()',
   },

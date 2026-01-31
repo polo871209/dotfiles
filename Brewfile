@@ -53,7 +53,7 @@ brew "nushell"
 brew "ollama"
 brew "opentofu"
 brew "pipx"
-brew "pre-commit"
+brew "prek"
 brew "prometheus"
 brew "ripgrep"
 brew "ruff"
@@ -101,9 +101,11 @@ mas "Numbers", id: 409203825
 mas "Pages", id: 409201541
 mas "PDFgear", id: 6469021132
 mas "Xnip", id: 1221250572
+go "github.com/bootdotdev/bootdev"
 go "golang.org/x/tools/cmd/callgraph"
 go "github.com/go-delve/delve/cmd/dlv"
 go "mvdan.cc/gofumpt"
+go "github.com/twpayne/go-jsonstruct/v3/cmd/gojsonstruct"
 go "github.com/segmentio/golines"
 go "github.com/controlplaneio/kubesec/v2"
 cargo "nufmt"

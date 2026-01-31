@@ -60,6 +60,9 @@ vim.o.wrap = false
 -- Hide status line
 vim.o.laststatus = 0
 
+-- Hide command line
+vim.o.cmdheight = 0
+
 -- Spell check
 vim.o.spell = false
 vim.o.spelllang = 'en_us'

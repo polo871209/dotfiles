@@ -13,6 +13,11 @@ return {
     },
     picker = {
       layout = { fullscreen = true, preset = 'telescope' },
+      sources = {
+        smart = {
+          filter = { cwd = true },
+        },
+      },
     },
     styles = {
       lazygit = { width = 0.99, height = 0.99 },
