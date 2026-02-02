@@ -52,7 +52,7 @@ return {
     opts = {
       delay = 200,
       spec = {
-        { '<leader>o', group = '[O]penCode' },
+        { '<leader><leader>', group = 'OpenCode Ask' },
         { '<leader>b', group = 'De[B]ug' },
         { '<leader>g', group = '[G]it' },
         { '<leader>m', group = 'Split/Join' },

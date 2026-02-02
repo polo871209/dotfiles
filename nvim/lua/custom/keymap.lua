@@ -40,3 +40,7 @@ vim.api.nvim_create_autocmd('FileType', {
   pattern = 'qf',
   callback = function() vim.keymap.set('n', '<CR>', '<CR>:lclose<CR>', { buffer = true, silent = true }) end,
 })
+
+-- OpenCode integration
+vim.keymap.set('x', '<leader><leader>', function() require('custom.opencode').send_selection() end, { desc = 'Send selection to OpenCode' })
+vim.keymap.set('n', '<leader>da', function() require('custom.opencode').send_diagnostics() end, { desc = '[D]iagnostic [A]sk' })

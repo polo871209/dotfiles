@@ -23,7 +23,7 @@ return {
       lazygit = { width = 0.99, height = 0.99 },
     },
     notifier = {
-      level = vim.log.levels.WARN,
+      level = vim.log.levels.INFO,
     },
     terminal = {},
     toggle = {},
