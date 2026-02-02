@@ -5,7 +5,7 @@ return {
     config = function()
       require('catppuccin').setup {
         transparent_background = true,
-        custom_highlights = function(colors)
+        custom_highlights = function()
           return {
             -- Gruvbox-style popup backgrounds
             NormalFloat = { bg = '#282828' },

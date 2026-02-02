@@ -1,8 +1,9 @@
 [default_session]
+startup_command = "tmux rename-window opencode; tmux new-window; tmux new-window -d; oc"
 preview_command = "eza --all --git --icons --color=always {}"
 
 [[session]]
-name = "dotfiles "
+name = "dotfiles"
 path = "~/dotfiles"
 
 [[session]]

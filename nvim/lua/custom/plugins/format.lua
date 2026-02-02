@@ -37,7 +37,7 @@ return {
       formatters_by_ft = {
         bzl = { 'buildifier' },
         cue = { 'cue_fmt' },
-        go = { 'gofmt' },
+        go = { 'goimports' },
         html = { 'prettier' },
         json = { 'prettier' },
         jsonnet = { 'jsonnetfmt' },

@@ -4,11 +4,11 @@ version: 4
 shell_integration: true
 final_space: true
 secondary_prompt:
-  foreground: p:pacman_blue
+  foreground: p:gruvbox_blue
   background: transparent
 transient_prompt:
   template: "󰊠 "
-  foreground: p:pacman_blue
+  foreground: p:gruvbox_blue
   background: transparent
 blocks:
   - type: prompt
@@ -70,8 +70,8 @@ blocks:
         style: plain
         foreground_templates:
           - "{{if .Env.POSH_VI_MODE}}p:google_yellow{{end}}"
-          - "{{if gt .Code 0}}p:pacman_red{{end}}"
-          - "{{if eq .Code 0}}p:pacman_blue{{end}}"
+          - "{{if gt .Code 0}}p:gruvbox_red{{end}}"
+          - "{{if eq .Code 0}}p:gruvbox_blue{{end}}"
     newline: true
 tooltips:
   - template:  {{.Project}}:{{.Region}}
@@ -85,6 +85,6 @@ palette:
   google_yellow: "#ffce44"
   grey: "#6c6c6c"
   kubernetes: "#3a7be1"
-  pacman_blue: "#46bfee"
-  pacman_red: "#d03e19"
+  gruvbox_blue: "#83a598"
+  gruvbox_red: "#fb4934"
   terraform: "#623CE4"

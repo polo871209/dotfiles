@@ -4,7 +4,6 @@ return {
   lazy = false,
   opts = {
     bigfile = {},
-    explorer = {},
     indent = {},
     input = {},
     lazygit = {
@@ -17,6 +16,9 @@ return {
         smart = {
           filter = { cwd = true },
         },
+        files = {
+          hidden = true,
+        },
       },
     },
     styles = {
@@ -25,7 +27,6 @@ return {
     notifier = {
       level = vim.log.levels.INFO,
     },
-    terminal = {},
     toggle = {},
     words = {},
   },
