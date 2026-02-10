@@ -1,20 +1,3 @@
 [default_session]
 startup_command = "tmux rename-window opencode; tmux new-window; tmux new-window -d; oc"
 preview_command = "eza --all --git --icons --color=always {}"
-
-[[session]]
-name = "dotfiles"
-path = "~/dotfiles"
-
-[[session]]
-name = "arch"
-path = "~/app/arch"
-
-[[session]]
-name = "blog"
-path = "~/app/blog"
-
-[[session]]
-name = "ollama"
-path = "~/.ollama"
-startup_command = "ollama serve"
