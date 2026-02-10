@@ -7,7 +7,6 @@ return {
       require('copilot').setup {
         suggestion = { enabled = false },
         panel = { enabled = false },
-        copilot_model = 'claude-sonnet-4.5',
       }
 
       -- Toggle copilot with <leader>ai
