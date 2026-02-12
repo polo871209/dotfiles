@@ -6,6 +6,7 @@ typeset -U path
 path=(
   $GOPATH/bin
   /opt/homebrew/bin
+  /opt/homebrew/opt/node/bin
   ~/dotfiles/scripts
   ~/.local/bin
   ~/.cargo/bin
