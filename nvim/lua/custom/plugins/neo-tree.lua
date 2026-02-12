@@ -1,3 +1,13 @@
+IgnoreDirs = {
+  '.claude',
+  '.codex',
+  '.specify',
+  '.terraform',
+  '.vite',
+  '.vscode',
+  '.windsurf',
+}
+
 return {
   'nvim-neo-tree/neo-tree.nvim',
   version = '*',
@@ -30,11 +40,7 @@ return {
         visible = false,
         show_hidden_count = false,
         hide_dotfiles = false,
-        hide_by_name = {
-          '.git',
-          '.DS_Store',
-          '.terraform',
-        },
+        hide_by_name = IgnoreDirs,
       },
       window = {
         mappings = {

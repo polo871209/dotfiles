@@ -29,6 +29,3 @@ gui:
       - "#fb4934"
     defaultFgColor:
       - "#ebdbb2"
-git:
-  commit:
-    signOff: true

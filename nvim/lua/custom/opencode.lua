@@ -60,18 +60,26 @@ end
 
 local function send_to_opencode(message, port)
   vim.system({
-    'curl', '-s', '-X', 'POST', '-H', 'Content-Type: application/json',
+    'curl',
+    '-s',
+    '-X',
+    'POST',
+    '-H',
+    'Content-Type: application/json',
     'http://localhost:' .. port .. '/tui/append-prompt',
-    '-d', vim.fn.json_encode { text = message },
+    '-d',
+    vim.fn.json_encode { text = message },
   }, { text = true, timeout = 500 }, function(append_result)
     if append_result.code ~= 0 then
-      vim.schedule(function() 
-        vim.notify('Failed to append: ' .. (append_result.stderr or 'unknown error'), vim.log.levels.ERROR) 
-      end)
+      vim.schedule(function() vim.notify('Failed to append: ' .. (append_result.stderr or 'unknown error'), vim.log.levels.ERROR) end)
       return
     end
     vim.system({
-      'curl', '-s', '-X', 'POST', 'http://localhost:' .. port .. '/tui/submit-prompt',
+      'curl',
+      '-s',
+      '-X',
+      'POST',
+      'http://localhost:' .. port .. '/tui/submit-prompt',
     }, { text = true, timeout = 500 }, function(submit_result)
       vim.schedule(function()
         if submit_result.code ~= 0 then
@@ -95,7 +103,7 @@ function M.send_selection()
 
   vim.ui.input({ prompt = 'OpenCode', default = '' }, function(input)
     if not input or input == '' then return end
-    local message = string.format('%s\n\n```\n%s\n```\n@%s:L%d-L%d ', input, selection.text, selection.filepath, selection.start_line, selection.end_line)
+    local message = string.format('%s\n\n```\n%s\n```\n%s:L%d-L%d ', input, selection.text, selection.filepath, selection.start_line, selection.end_line)
     send_to_opencode(message, port)
   end)
 end

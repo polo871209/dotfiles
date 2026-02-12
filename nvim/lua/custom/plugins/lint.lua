@@ -6,7 +6,6 @@ return {
       local lint = require 'lint'
       lint.linters_by_ft = {
         dockerfile = { 'hadolint' },
-        go = { 'golangci_lint' },
         python = { 'ruff' },
       }
       -- Lint on these events
