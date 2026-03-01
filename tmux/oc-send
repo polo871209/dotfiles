@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# oc-send — Send output to OpenCode
+#
+# Usage:
+#   oc-send "message"        # captures last 100 lines of pane + message
+#   oc-send                  # captures last 100 lines of pane, no message
+#   echo "..." | oc-send "message"  # uses stdin as the output (visual selection mode)
+
+set -euo pipefail
+
+MESSAGE=""
+LINES=100
+PANE_ID=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -p) PANE_ID="$2"; shift 2 ;;
+    *)  MESSAGE="$1"; shift ;;
+  esac
+done
+
+# --- Port discovery ---
+
+if [[ -z "${TMUX:-}" ]]; then
+  echo "oc-send: not running inside a tmux session" >&2
+  exit 1
+fi
+
+PIDS=$(pgrep -f 'opencode.*--port' 2>/dev/null || true)
+if [[ -z "$PIDS" ]]; then
+  echo "oc-send: opencode is not running (start it with 'oc')" >&2
+  exit 1
+fi
+
+PORT=""
+for PID in $PIDS; do
+  ENV_OUT=$(ps eww -p "$PID" 2>/dev/null || true)
+  if echo "$ENV_OUT" | grep -qF "TMUX=$TMUX"; then
+    for CHECK_PID in "$PID" $(pgrep -P "$PID" 2>/dev/null || true); do
+      PORT=$(lsof -iTCP -sTCP:LISTEN -P -n -a -p "$CHECK_PID" 2>/dev/null \
+             | grep -oE ':[0-9]+' | head -1 | tr -d ':' || true)
+      [[ -n "$PORT" ]] && break
+    done
+    [[ -n "$PORT" ]] && break
+  fi
+done
+
+if [[ -z "$PORT" ]]; then
+  echo "oc-send: opencode found but no listening port detected" >&2
+  exit 1
+fi
+
+BASE="http://localhost:$PORT"
+
+# --- Get the most recent session ---
+
+SESSION_JSON=$(curl -sf "$BASE/session?roots=true&limit=1" 2>/dev/null || true)
+if [[ -z "$SESSION_JSON" || "$SESSION_JSON" == "[]" ]]; then
+  echo "oc-send: no active opencode session found" >&2
+  exit 1
+fi
+
+SESSION_ID=$(echo "$SESSION_JSON" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+if [[ -z "$SESSION_ID" ]]; then
+  echo "oc-send: could not parse session id" >&2
+  exit 1
+fi
+
+# --- Get content: stdin (visual selection) or pane capture ---
+
+if [[ -n "$PANE_ID" ]]; then
+  # pane id provided — full pane capture path
+  PANE_OUTPUT=$(tmux capture-pane -p -J -S "-$LINES" -t "$PANE_ID" 2>/dev/null | sed '/^[[:space:]]*$/d' || true)
+else
+  # no pane id — read from stdin (copy-pipe visual selection path)
+  PANE_OUTPUT=$(cat)
+fi
+
+if [[ -z "$PANE_OUTPUT" ]]; then
+  echo "oc-send: output is empty" >&2
+  exit 1
+fi
+
+# --- Build payload ---
+
+if [[ -n "$MESSAGE" ]]; then
+  TEXT="Here is my terminal output:
+
+$MESSAGE
+
+\`\`\`
+$PANE_OUTPUT
+\`\`\`"
+else
+  TEXT="Here is my terminal output:
+
+\`\`\`
+$PANE_OUTPUT
+\`\`\`"
+fi
+
+PAYLOAD=$(printf '{"parts":[{"type":"text","text":%s}]}' \
+  "$(printf '%s' "$TEXT" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')")
+
+# --- Send ---
+
+curl -sf -X POST \
+  -H 'Content-Type: application/json' \
+  "$BASE/session/$SESSION_ID/prompt_async" \
+  -d "$PAYLOAD" > /dev/null 2>&1 || true
+
+echo "oc-send: sent to opencode session $SESSION_ID"
