@@ -18,10 +18,11 @@
 git clone https://github.com/polo871209/dotfiles.git && cd dotfiles
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 brew bundle install
-stow .  # Create symbolic links for configuration files
-cat ~/dotfiles/dot_zshenv >| ~/.zshenv
+stow .
 touch ~/.hushlogin
+cat ~/dotfiles/dot_zshenv >| ~/.zshenv
 ./zen-browser/install.sh
+skhd --start-service
 ```
 
 ### Setup SSH and Git Authentication
@@ -43,7 +44,7 @@ sudo launchctl start com.example.kanata
 
 - Restart Mac
 
-### Configure Nushell(Optional)
+### Configure Nushell (Optional)
 
 ```nu
 nu

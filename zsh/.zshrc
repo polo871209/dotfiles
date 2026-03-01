@@ -59,7 +59,7 @@ bindkey -M vicmd 'v' edit-command-line
 
 # Aliases
 alias c="pbcopy"
-alias cafe="caffeinate -id asciiquarium"
+alias cafe="caffeinate -id weathr"
 alias cls="clear"
 alias io="istioctl"
 alias lg="lazygit"

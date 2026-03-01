@@ -1,6 +1,7 @@
 IgnoreDirs = {
   '.claude',
   '.codex',
+  '.git',
   '.specify',
   '.terraform',
   '.vite',
@@ -45,6 +46,8 @@ return {
       window = {
         mappings = {
           ['\\'] = 'close_window',
+          ['<Right>'] = 'open',
+          ['<Left>'] = 'close_node',
         },
       },
     },
