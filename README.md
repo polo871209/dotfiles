@@ -8,6 +8,7 @@
 - Completer: [Carapace](https://carapace.sh/)
 - History: [Atuin](https://docs.atuin.sh/cli/)
 - AI: [Opencode](https://opencode.ai/)
+- Browser: [Zen](https://zen-browser.app/)
 
 ## Mac Quick Setup
 
@@ -20,6 +21,7 @@ brew bundle install
 stow .  # Create symbolic links for configuration files
 cat ~/dotfiles/dot_zshenv >| ~/.zshenv
 touch ~/.hushlogin
+./zen-browser/install.sh
 ```
 
 ### Setup SSH and Git Authentication
