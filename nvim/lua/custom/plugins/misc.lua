@@ -55,7 +55,6 @@ return {
     },
   },
   { 'NMAC427/guess-indent.nvim', opts = {} },
-  { 'numToStr/Comment.nvim', opts = {} },
   {
     'sindrets/diffview.nvim',
     cmd = { 'DiffviewOpen', 'DiffviewClose', 'DiffviewToggleFiles', 'DiffviewFocusFiles' },
