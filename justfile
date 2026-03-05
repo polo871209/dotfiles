@@ -1,3 +1,38 @@
+skills_dir := justfile_directory() / "opencode/skills"
+
+default:
+    @just --list
+
+# Update all opencode skills from their upstream GitHub repos
+# To add a new skill, append to the SKILLS array: "name=user/repo/branch/path"
+skills-update:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    SKILLS=(
+        "worktrunk=max-sixty/worktrunk/main/skills/worktrunk"
+    )
+    SKILLS_DIR="{{ skills_dir }}"
+    RAW="https://raw.githubusercontent.com"
+    for entry in "${SKILLS[@]}"; do
+        skill="${entry%%=*}"
+        repo_path="${entry#*=}"
+        gh_repo="$(echo "$repo_path" | cut -d/ -f1-2)"
+        branch="$(echo "$repo_path" | cut -d/ -f3)"
+        skill_path="$(echo "$repo_path" | cut -d/ -f4-)"
+        dest="$SKILLS_DIR/$skill"
+        echo "==> Updating skill: $skill"
+        mkdir -p "$dest/reference"
+        curl -fsSL "$RAW/$repo_path/SKILL.md" -o "$dest/SKILL.md"
+        echo "    SKILL.md"
+        ref_files=$(curl -fsSL "https://api.github.com/repos/$gh_repo/contents/$skill_path/reference?ref=$branch" \
+            | grep '"name"' | grep '\.md"' | sed 's/.*"name": "\(.*\)".*/\1/')
+        for f in $ref_files; do
+            curl -fsSL "$RAW/$repo_path/reference/$f" -o "$dest/reference/$f"
+            echo "    reference/$f"
+        done
+        echo "    done."
+    done
+
 key-enable:
     @sudo cp katana/com.example.kanata.plist /Library/LaunchDaemons/
     @sudo launchctl load /Library/LaunchDaemons/com.example.kanata.plist
