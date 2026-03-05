@@ -16,5 +16,13 @@
       "extensions": [".py"]
     }
   },
-  "mcp": {}
+  "mcp": {},
+  "permission": {
+    "external_directory": {
+      "~/app/**": "allow",
+      "~/work/**": "allow",
+      "/tmp/**": "allow",
+      "/private/**": "allow"
+    }
+  }
 }

@@ -16,5 +16,8 @@ hyper - b : open -a OrbStack
 # open emoji picker
 hyper - e : skhd -k "cmd + ctrl - space"
 
+# open obsidian
+hyper - o : open -a Obsidian
+
 # open zen browser
 hyper - space : open -a Zen
