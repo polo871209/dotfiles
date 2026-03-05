@@ -32,7 +32,7 @@ return {
   },
   keys = {
     { '<leader><space>', function() Snacks.picker.smart() end, desc = 'Smart Find Files' },
-    { '<leader>sg', function() Snacks.picker.grep() end, desc = 'Grep' },
+    { '<leader>sg', function() Snacks.picker.grep({ hidden = true, no_ignore = true }) end, desc = 'Grep' },
     { '<leader>/', function() Snacks.picker.grep_buffers() end, desc = 'Grep Open Buffers' },
     { '<leader>sn', function() Snacks.picker.notifications() end, desc = 'Notification History' },
     { '<leader>sk', function() Snacks.picker.keymaps() end, desc = 'Keymaps' },
