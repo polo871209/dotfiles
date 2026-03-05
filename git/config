@@ -21,3 +21,14 @@
 	process = git-lfs filter-process
 [diff]
 	algorithm = histogram
+[rebase]
+	autoStash = true
+	autoSquash = true
+[push]
+	autoSetupRemote = true
+[fetch]
+	prune = true
+[branch]
+	sort = -committerdate
+[column]
+	ui = auto
