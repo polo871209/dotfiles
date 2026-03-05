@@ -131,8 +131,12 @@ divelocal() {
 # export BW_SESSION=
 # export GITHUB_PERSONAL_ACCESS_TOKEN=
 
-eval "$(oh-my-posh init zsh --config $XDG_CONFIG_HOME/ohmyposh/config.yaml)"
-eval "$(atuin init zsh)"
+# Tool Integrations
 eval "$(direnv hook zsh)"
 eval "$(zoxide init zsh)"
 eval "$(mise activate zsh)"
+eval "$(atuin init zsh)"
+eval "$(wt config shell init zsh)"
+
+# Prompt (last to avoid interference)
+eval "$(oh-my-posh init zsh --config $XDG_CONFIG_HOME/ohmyposh/config.yaml)"
