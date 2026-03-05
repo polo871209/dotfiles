@@ -24,8 +24,8 @@ skills-update:
         mkdir -p "$dest/reference"
         curl -fsSL "$RAW/$repo_path/SKILL.md" -o "$dest/SKILL.md"
         echo "    SKILL.md"
-        ref_files=$(curl -fsSL "https://api.github.com/repos/$gh_repo/contents/$skill_path/reference?ref=$branch" \
-            | grep '"name"' | grep '\.md"' | sed 's/.*"name": "\(.*\)".*/\1/')
+        ref_files=$(curl -fsSL "https://api.github.com/repos/$gh_repo/contents/$skill_path/reference?ref=$branch" 2>/dev/null \
+            | grep '"name"' | grep '\.md"' | sed 's/.*"name": "\(.*\)".*/\1/' || true)
         for f in $ref_files; do
             curl -fsSL "$RAW/$repo_path/reference/$f" -o "$dest/reference/$f"
             echo "    reference/$f"
