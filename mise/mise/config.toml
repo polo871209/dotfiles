@@ -1,0 +1,4 @@
+[tools]
+"cargo:https://github.com/nushell/nufmt" = "latest"
+"cargo:weathr" = "latest"
+"npm:typescript" = "latest"

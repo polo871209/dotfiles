@@ -16,11 +16,11 @@
 
 ```bash
 git clone https://github.com/polo871209/dotfiles.git && cd dotfiles
+cat ~/dotfiles/dot_zshenv >| ~/.zshenv
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 brew bundle install
 stow .
 touch ~/.hushlogin
-cat ~/dotfiles/dot_zshenv >| ~/.zshenv
 ./zen-browser/install.sh
 skhd --start-service
 ```
