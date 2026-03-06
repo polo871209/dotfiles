@@ -99,5 +99,3 @@ mas "Numbers", id: 409203825
 mas "Pages", id: 409201541
 mas "PDFgear", id: 6469021132
 mas "Xnip", id: 1221250572
-cargo "nufmt"
-cargo "weathr"

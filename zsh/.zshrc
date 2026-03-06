@@ -76,7 +76,7 @@ alias oc="opencode --port"
 alias tf="terraform"
 
 ## Configuration Reloads & Updates
-alias brewup="brew update && brew upgrade"
+alias up="brew update && brew upgrade && mise upgrade && brew upgrade --greedy && brew cleanup"
 alias st="tmux source-file ${XDG_CONFIG_HOME:-$HOME}/tmux/tmux.conf"
 alias sz="source ${ZDOTDIR:-$HOME}/.zshrc"
 
