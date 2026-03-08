@@ -24,14 +24,23 @@ skills-update:
         mkdir -p "$dest/reference"
         curl -fsSL "$RAW/$repo_path/SKILL.md" -o "$dest/SKILL.md"
         echo "    SKILL.md"
-        ref_files=$(curl -fsSL "https://api.github.com/repos/$gh_repo/contents/$skill_path/reference?ref=$branch" 2>/dev/null \
-            | grep '"name"' | grep '\.md"' | sed 's/.*"name": "\(.*\)".*/\1/' || true)
+        ref_files=$(gh api "repos/$gh_repo/contents/$skill_path/reference?ref=$branch" \
+            --jq '.[].name | select(endswith(".md"))' 2>/dev/null || true)
         for f in $ref_files; do
             curl -fsSL "$RAW/$repo_path/reference/$f" -o "$dest/reference/$f"
             echo "    reference/$f"
         done
         echo "    done."
     done
+
+# Bootstrap nushell tool caches (run once after first install)
+bootstrap-nushell:
+    #!/usr/bin/env nu
+    mkdir ($nu.cache-dir)
+    atuin init nu | save --force $"($nu.cache-dir)/atuin.nu"
+    carapace _carapace nushell | save --force $"($nu.cache-dir)/carapace.nu"
+    zoxide init nushell | save --force $"($nu.cache-dir)/zoxide.nu"
+    print "Nushell caches initialized. Restart nushell to apply."
 
 key-enable:
     @sudo cp katana/com.example.kanata.plist /Library/LaunchDaemons/

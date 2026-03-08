@@ -1,34 +1,57 @@
 [user]
 	name = PoLo
 	email = qazh0123@gmail.com
-[init]
-	defaultBranch = main
+
 [core]
-	autocrlf = input
-	excludesFile = ~/.config/git/ignore
 	editor = nvim
+	autocrlf = input
 	filemode = false
 	quotepath = false
+	excludesFile = ~/.config/git/ignore
+
+[init]
+	defaultBranch = main
+
+[pull]
+	rebase = true
+
+[push]
+	autoSetupRemote = true
+
+[fetch]
+	prune = true
+
+[merge]
+	conflictstyle = zdiff3
+
+[rebase]
+	autoStash = true
+	autoSquash = true
+
 [rerere]
 	enabled = true
 	autoupdate = true
-[pull]
-	rebase = true
+
+[branch]
+	sort = -committerdate
+
+[tag]
+	sort = -version:refname
+
+[column]
+	ui = auto
+
+[log]
+	date = iso
+
+[diff]
+	algorithm = histogram
+
+[help]
+	autocorrect = prompt
+
 [filter "lfs"]
 	required = true
 	clean = git-lfs clean -- %f
 	smudge = git-lfs smudge -- %f
 	process = git-lfs filter-process
-[diff]
-	algorithm = histogram
-[rebase]
-	autoStash = true
-	autoSquash = true
-[push]
-	autoSetupRemote = true
-[fetch]
-	prune = true
-[branch]
-	sort = -committerdate
-[column]
-	ui = auto

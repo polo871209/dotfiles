@@ -8,7 +8,7 @@ $env.GOOGLE_APPLICATION_CREDENTIALS = $"($env.CLOUDSDK_CONFIG)/application_defau
 $env.PATH = (
     $env.PATH 
     | split row (char esep) 
-    | append [
+    | prepend [
         $"($env.GOPATH)/bin"
         "/opt/homebrew/bin"
         "~/dotfiles/scripts"
@@ -30,9 +30,3 @@ $env.HOMEBREW_NO_ENV_HINTS = "1"
 $env.CARAPACE_BRIDGES = 'zsh,fish,bash,inshellisense'
 $env.FZF_DEFAULT_COMMAND = "fd --hidden --strip-cwd-prefix --exclude .git --exclude .venv"
 $env.FZF_DEFAULT_OPTS = "--select-1"
-
-# Init nushell
-# mkdir $"($nu.cache-dir)"
-# atuin init nu | save --force $"($nu.cache-dir)/atuin.nu" 
-# carapace _carapace nushell | save --force $"($nu.cache-dir)/carapace.nu"
-# zoxide init nushell | save --force $"($nu.cache-dir)/zoxide.nu"

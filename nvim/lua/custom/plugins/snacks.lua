@@ -12,6 +12,11 @@ return {
     },
     picker = {
       layout = { fullscreen = true, preset = 'telescope' },
+      formatters = {
+        file = {
+          min_width = 999,
+        },
+      },
       sources = {
         smart = {
           filter = { cwd = true },

@@ -1,4 +1,4 @@
-IgnoreDirs = {
+local IgnoreDirs = {
   '.claude',
   '.codex',
   '.git',

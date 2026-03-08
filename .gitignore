@@ -1,9 +1,3 @@
-tmux/plugins/*
-!tmux/plugins/tpm
 history.txt
 .zcompdump
-raycast/
 .zsh_history
-.opencode/
-.zshenv.secret
-.secret.nu
