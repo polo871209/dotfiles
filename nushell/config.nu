@@ -3,7 +3,7 @@ $env.config.show_banner = false
 
 alias bat = bat --color=always
 alias c = pbcopy
-alias cafe = caffeinate -id asciiquarium
+alias cafe = caffeinate -id weathr
 alias cls = clear
 alias io = istioctl
 alias j = just
@@ -47,10 +47,6 @@ def s [] {
     if ($session | is-not-empty) {
         sesh connect $session
     }
-}
-
-if ('~/.config/nushell/.secret.nu' | path expand | path exists) {
-    source ~/.config/nushell/.secret.nu
 }
 
 oh-my-posh init nu --config $"($env.XDG_CONFIG_HOME)/ohmyposh/config.yaml"

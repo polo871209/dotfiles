@@ -93,10 +93,11 @@ vim.api.nvim_create_autocmd('FileType', {
 })
 
 -- TypeScript/JavaScript indentation (set after other plugins)
-vim.api.nvim_create_autocmd({ 'FileType', 'BufEnter' }, {
+vim.api.nvim_create_autocmd('FileType', {
+  pattern = { 'typescript', 'typescriptreact', 'javascript', 'javascriptreact' },
   group = vim.api.nvim_create_augroup('TSJSIndent', { clear = true }),
   callback = function()
-    vim.schedule(function() vim.opt_local.tabstop = 4 end)
+    vim.opt_local.tabstop = 4
   end,
 })
 

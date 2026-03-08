@@ -45,15 +45,23 @@ blocks:
   - type: rprompt
     segments:
       - template: "{{ .Venv }} 󰌠 {{ .Full }}"
-        foreground: "#FFFF00"
+        foreground: "#FFD343"
         background: transparent
         type: python
         style: plain
-      - template: " {{ .Full }} "
-        foreground: "#FFFF00"
+      - template: " {{ .Full }}"
+        foreground: "#00ACD7"
         background: transparent
         type: go
         style: plain
+      - template: " {{ .Full }}"
+        foreground: "#417E38"
+        background: transparent
+        type: node
+        style: plain
+        options:
+          display_mode: context
+          fetch_package_manager: true
       - template: "󱁢 {{.WorkspaceName}}"
         foreground: p:terraform
         background: transparent

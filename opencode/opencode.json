@@ -19,6 +19,7 @@
   "mcp": {},
   "permission": {
     "external_directory": {
+      "~/dotfiles/**": "allow",
       "~/app/**": "allow",
       "~/work/**": "allow",
       "/tmp/**": "allow",

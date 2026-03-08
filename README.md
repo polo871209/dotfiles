@@ -22,7 +22,6 @@ brew bundle install
 stow .
 touch ~/.hushlogin
 ./zen-browser/install.sh
-skhd --start-service
 ```
 
 ### Setup SSH and Git Authentication

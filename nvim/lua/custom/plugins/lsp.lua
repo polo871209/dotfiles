@@ -202,6 +202,7 @@ return {
         'lua-language-server',
         -- Additional tools
         'buildifier',
+        'hadolint',
         'stylua',
         'prettier',
       }

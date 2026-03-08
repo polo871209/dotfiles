@@ -14,23 +14,18 @@ setopt SHARE_HISTORY             # Share history between all sessions
 
 # Autocompletion Configuration
 autoload -Uz compinit
-# Cache compinit for faster startup (run once per day)
-if [[ -n ${ZDOTDIR}/.zcompdump(#qN.mh+24) ]]; then
-  compinit
-else
-  compinit -C
-fi
-export CARAPACE_BRIDGES='zsh,fish,bash,inshellisense'
+# -u skips compaudit (insecure dir check) which costs ~15ms every run
+compinit -u
+
+export CARAPACE_BRIDGES="zsh,fish,bash,inshellisense"
 zstyle ':completion:*' menu select
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
 zstyle ':completion:*' format $'\e[2;37mCompleting %d\e[m'
 source <(carapace _carapace)
-# source <(kubectl-argo-rollouts completion zsh)
 
-# ZSH Plugin Sources
-BREW_PREFIX="$(brew --prefix)"
-source "$BREW_PREFIX/share/zsh-autosuggestions/zsh-autosuggestions.zsh"
-source "$BREW_PREFIX/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh"
+# ZSH Plugin Sources — hardcode prefix to avoid forking brew each startup (~20ms)
+source /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh
+source /opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 
 # vi mode
 bindkey -v
@@ -90,7 +85,6 @@ h() {
 }
 
 # FZF
-source <(fzf --zsh)
 export FZF_DEFAULT_COMMAND="fd --hidden --strip-cwd-prefix --exclude .git --exclude .venv"
 export FZF_DEFAULT_OPTS="--select-1"
 nf() {
@@ -114,7 +108,7 @@ function sesh-sessions() {
       --color 'border:#928374,label:#ebdbb2,query:#ebdbb2')
     zle reset-prompt > /dev/null 2>&1 || true
     [[ -z "$session" ]] && return
-    sesh connect $session
+    sesh connect "$session"
   }
 }
 alias -g s=sesh-sessions
@@ -124,19 +118,26 @@ divelocal() {
     dive <(docker save "$1") --source=docker-archive "${@:2}"
 }
 
-# Secret
-[[ -f "$ZDOTDIR/.zshenv.secret" ]] && source "$ZDOTDIR/.zshenv.secret"
-# export OBSIDIAN_API_KEY=
-# export BRAVE_API_KEY
-# export BW_SESSION=
-# export GITHUB_PERSONAL_ACCESS_TOKEN=
+# Tool Integrations — outputs cached to ~/.cache/zsh/ and regenerated daily
+# To force refresh: rm ~/.cache/zsh/*.zsh && exec zsh
+_zsh_cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/zsh"
+[[ -d "$_zsh_cache_dir" ]] || mkdir -p "$_zsh_cache_dir"
 
-# Tool Integrations
-eval "$(direnv hook zsh)"
-eval "$(zoxide init zsh)"
-eval "$(mise activate zsh)"
-eval "$(atuin init zsh)"
-eval "$(wt config shell init zsh)"
+_zsh_init_cache() {
+  local cache="$_zsh_cache_dir/$1.zsh"
+  shift
+  if [[ ! -f "$cache" || -n "$cache"(#qN.mh+24) ]]; then
+    "$@" > "$cache" 2>/dev/null
+  fi
+  source "$cache"
+}
 
-# Prompt (last to avoid interference)
-eval "$(oh-my-posh init zsh --config $XDG_CONFIG_HOME/ohmyposh/config.yaml)"
+_zsh_init_cache direnv    direnv hook zsh
+_zsh_init_cache fzf       fzf --zsh
+_zsh_init_cache zoxide    zoxide init zsh
+_zsh_init_cache mise      mise activate zsh
+_zsh_init_cache atuin     atuin init zsh
+_zsh_init_cache worktrunk wt config shell init zsh
+_zsh_init_cache ohmyposh  oh-my-posh init zsh --config "${XDG_CONFIG_HOME}/ohmyposh/config.yaml"
+
+unset _zsh_cache_dir
