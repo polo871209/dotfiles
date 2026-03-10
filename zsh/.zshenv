@@ -5,7 +5,6 @@ export OBSIDIAN_VAULT="$HOME/vaults/obsidian"
 typeset -U path
 path=(
   "$GOPATH/bin"
-  /opt/homebrew/bin
   /opt/homebrew/opt/node/bin
   /opt/homebrew/opt/libpq/bin
   /Applications/Obsidian.app/Contents/MacOS

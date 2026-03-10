@@ -25,6 +25,7 @@ brew "fastfetch"
 brew "fd"
 brew "fzf"
 brew "gh"
+brew "git"
 brew "go"
 brew "goimports"
 brew "grype"
@@ -93,7 +94,5 @@ cask "telegram"
 cask "whatsapp"
 cask "yaak"
 cask "zen"
-mas "Numbers", id: 409203825
-mas "Pages", id: 409201541
 mas "PDFgear", id: 6469021132
 mas "Xnip", id: 1221250572
