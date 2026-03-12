@@ -16,12 +16,21 @@
       "extensions": [".py"]
     }
   },
-  "mcp": {},
+  "mcp": {
+    "gcp": {
+      "type": "local",
+      "command": ["npx", "-y", "@google-cloud/observability-mcp"]
+    }
+  },
+  "tools": {
+    "gcp_*": false
+  },
   "permission": {
     "external_directory": {
       "~/dotfiles/**": "allow",
       "~/app/**": "allow",
       "~/work/**": "allow",
+      "~/vaults/**": "allow",
       "/tmp/**": "allow",
       "/private/**": "allow"
     }
