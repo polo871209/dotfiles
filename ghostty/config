@@ -1,11 +1,13 @@
-copy-on-select = clipboard
-cursor-style = bar
-cursor-style-blink = true
+theme = Gruvbox Dark
 font-family = "MesloLGS NF Regular"
 font-size = 16
+
 maximize = true
 macos-titlebar-style = hidden
-scrollback-limit = 500000
-theme = Gruvbox Dark
+macos-option-as-alt = true
 window-padding-x = 8
 window-padding-y = 8
+
+copy-on-select = clipboard
+scrollback-limit = 500000
+shell-integration-features = cursor,sudo,title,ssh-env,ssh-terminfo
