@@ -67,7 +67,7 @@ alias kns="kubens"
 alias ks="k9s"
 alias n="nvim"
 alias o="open ."
-alias oc="opencode --port"
+alias oc="opencode --port --continue"
 alias tf="terraform"
 
 ## Configuration Reloads & Updates
