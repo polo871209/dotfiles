@@ -1,153 +1,301 @@
 local M = {}
 
-local function get_opencode_port()
-  if not vim.env.TMUX then return nil, 'Not running in tmux session' end
+local TIMEOUT = 500
+local API_TIMEOUT = 2000
+local CACHE_TTL_MS = 30000
 
-  local result = vim.system({ 'pgrep', '-f', 'opencode.*--port' }, { text = true, timeout = 500 }):wait()
-  if result.code ~= 0 then return nil, 'OpenCode not running' end
+---@type { port: string, session_id: string, window: string?, timestamp: number }?
+local cache = nil
 
-  local pids = {}
-  for pid_str in result.stdout:gmatch '%d+' do
-    table.insert(pids, tonumber(pid_str))
-  end
-  if #pids == 0 then return nil, 'No OpenCode processes found' end
+--- Shell out and return the result.
+---@param cmd string[]
+---@param timeout? number
+---@return vim.SystemCompleted
+local function run(cmd, timeout) return vim.system(cmd, { text = true, timeout = timeout or TIMEOUT }):wait() end
 
-  local target_pid = nil
-  for _, pid in ipairs(pids) do
-    local env = vim.system({ 'ps', 'eww', '-p', tostring(pid) }, { text = true, timeout = 500 }):wait()
-    if env.code == 0 and env.stdout:match('TMUX=' .. vim.pesc(vim.env.TMUX)) then
-      target_pid = pid
-      break
-    end
-  end
-  if not target_pid then return nil, 'OpenCode not found in current tmux session' end
+---@param msg string
+---@param level? integer
+local function notify(msg, level)
+  vim.schedule(function() vim.notify(msg, level or vim.log.levels.INFO) end)
+end
 
-  local pids_to_check = { target_pid }
-  local children = vim.system({ 'pgrep', '-P', tostring(target_pid) }, { text = true, timeout = 500 }):wait()
+--- Find the listening port for a given opencode PID (checks the process and its children).
+---@param pid number
+---@return string?
+local function find_port_for_pid(pid)
+  local pids_to_check = { pid }
+  local children = run { 'pgrep', '-P', tostring(pid) }
   if children.code == 0 then
     for child_pid in children.stdout:gmatch '%d+' do
       table.insert(pids_to_check, tonumber(child_pid))
     end
   end
 
-  for _, pid in ipairs(pids_to_check) do
-    local lsof = vim.system({ 'lsof', '-iTCP', '-sTCP:LISTEN', '-P', '-n', '-a', '-p', tostring(pid) }, { text = true, timeout = 500 }):wait()
+  for _, p in ipairs(pids_to_check) do
+    local lsof = run { 'lsof', '-iTCP', '-sTCP:LISTEN', '-P', '-n', '-a', '-p', tostring(p) }
     if lsof.code == 0 then
       local port = lsof.stdout:match ':(%d+)'
-      if port then return port, nil end
+      if port then return port end
+    end
+  end
+  return nil
+end
+
+--- Find the tmux window index for a given PID by checking all panes.
+---@param pid number
+---@return string?
+local function find_tmux_window(pid)
+  local result = run { 'tmux', 'list-panes', '-s', '-F', '#{window_index}:#{window_name}:#{pane_pid}' }
+  if result.code ~= 0 then return nil end
+  local pid_str = tostring(pid)
+  for line in result.stdout:gmatch '[^\n]+' do
+    local win_idx, win_name, pane_pid = line:match '^(%d+):(.+):(%d+)$'
+    if pane_pid == pid_str then return win_idx .. ':' .. win_name end
+    if pane_pid then
+      local children = run { 'pgrep', '-P', pane_pid }
+      if children.code == 0 then
+        for child in children.stdout:gmatch '%d+' do
+          if child == pid_str then return win_idx .. ':' .. win_name end
+        end
+      end
+    end
+  end
+  return nil
+end
+
+--- Discover all opencode instances running in the current tmux session.
+---@return { pid: number, port: string, window: string }[], string?
+local function discover_instances()
+  if not vim.env.TMUX then return {}, 'Not running in a tmux session' end
+
+  local result = run { 'pgrep', '-f', 'opencode.*--port' }
+  if result.code ~= 0 or not result.stdout or result.stdout == '' then return {}, 'OpenCode is not running (start it with `oc`)' end
+
+  local pids = {}
+  for pid_str in result.stdout:gmatch '%d+' do
+    table.insert(pids, tonumber(pid_str))
+  end
+
+  local tmux_env = vim.pesc(vim.env.TMUX)
+  local instances = {}
+
+  for _, pid in ipairs(pids) do
+    local env = run { 'ps', 'eww', '-p', tostring(pid) }
+    if env.code == 0 and env.stdout:match('TMUX=' .. tmux_env) then
+      local port = find_port_for_pid(pid)
+      if port then
+        local window = find_tmux_window(pid) or '?'
+        table.insert(instances, { pid = pid, port = port, window = window })
+      end
     end
   end
 
-  return nil, 'OpenCode found but no listening port detected'
+  if #instances == 0 then return {}, 'No OpenCode instance with a listening port found in this tmux session' end
+
+  return instances, nil
 end
 
-local function send_to_opencode(parts, port)
-  -- Get the most recently updated session
-  local session_result = vim.system({
-    'curl', '-s', 'http://localhost:' .. port .. '/session?roots=true&limit=1',
-  }, { text = true, timeout = 2000 }):wait()
-
-  if session_result.code ~= 0 or not session_result.stdout or session_result.stdout == '' then
-    vim.schedule(function() vim.notify('Failed to get session: ' .. (session_result.stderr or 'unknown error'), vim.log.levels.ERROR) end)
+--- Resolve the port to use. Only prompts when there are multiple instances.
+---@param callback fun(port: string?, single_instance: boolean, window: string?)
+local function resolve_port(callback)
+  if cache and (vim.uv.now() - cache.timestamp) < CACHE_TTL_MS then
+    callback(cache.port, true, cache.window)
     return
   end
 
-  local ok, sessions = pcall(vim.fn.json_decode, session_result.stdout)
-  if not ok or not sessions or #sessions == 0 then
-    vim.schedule(function() vim.notify('No active OpenCode session found', vim.log.levels.ERROR) end)
+  local instances, err = discover_instances()
+  if #instances == 0 then
+    notify(err or 'No OpenCode instance found', vim.log.levels.ERROR)
+    callback(nil, false, nil)
     return
   end
 
-  local session_id = sessions[1].id
+  if #instances == 1 then
+    callback(instances[1].port, true, instances[1].window)
+    return
+  end
 
-  vim.system({
-    'curl',
-    '-s',
-    '-X',
-    'POST',
-    '-H',
-    'Content-Type: application/json',
-    'http://localhost:' .. port .. '/session/' .. session_id .. '/prompt_async',
-    '-d',
-    vim.fn.json_encode { parts = parts },
-  }, { text = true, timeout = 2000 }, function(result)
-    vim.schedule(function()
-      if result.code ~= 0 then
-        vim.notify('Failed to send: ' .. (result.stderr or 'unknown error'), vim.log.levels.ERROR)
-      else
-        vim.notify('Message sent to OpenCode', vim.log.levels.INFO)
+  vim.schedule(function()
+    vim.ui.select(instances, {
+      prompt = 'Pick OpenCode instance:',
+      format_item = function(item) return string.format('window %s', item.window) end,
+    }, function(choice)
+      if not choice then
+        callback(nil, false, nil)
+        return
       end
+      callback(choice.port, false, choice.window)
     end)
   end)
 end
 
-function M.send_selection()
-  local port, err = get_opencode_port()
-  if not port then
-    vim.notify(err, vim.log.levels.ERROR)
+--- Fetch sessions. Auto-picks the top session when `auto` is true, otherwise prompts. Caches the choice.
+---@param port string
+---@param auto boolean
+---@param window string?
+---@param callback fun(session_id: string?)
+local function resolve_session(port, auto, window, callback)
+  if cache and cache.port == port and (vim.uv.now() - cache.timestamp) < CACHE_TTL_MS then
+    callback(cache.session_id)
     return
   end
 
-  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<esc>', true, false, true), 'x', true)
+  vim.system({
+    'curl', '-sf', 'http://localhost:' .. port .. '/session?limit=10',
+  }, { text = true, timeout = API_TIMEOUT }, function(result)
+    if result.code ~= 0 or not result.stdout or result.stdout == '' then
+      notify('Failed to fetch sessions: ' .. (result.stderr or 'unknown error'), vim.log.levels.ERROR)
+      callback(nil)
+      return
+    end
 
-  local buf = vim.api.nvim_get_current_buf()
-  local start_pos = vim.api.nvim_buf_get_mark(buf, '<')
-  local end_pos = vim.api.nvim_buf_get_mark(buf, '>')
-  local absolute_path = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(buf), ':p')
-  local filepath = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(buf), ':.')
+    local ok, sessions = pcall(vim.json.decode, result.stdout)
+    if not ok or not sessions or #sessions == 0 then
+      notify('No OpenCode sessions found', vim.log.levels.ERROR)
+      callback(nil)
+      return
+    end
 
-  vim.ui.input({ prompt = 'OpenCode', default = '' }, function(input)
-    if not input or input == '' then return end
-    local parts = {
-      {
-        type = 'file',
-        mime = 'text/plain',
-        url = 'file://' .. absolute_path,
-        filename = filepath,
-      },
-      { type = 'text', text = string.format('%s (%s:L%d-L%d)', input, filepath, start_pos[1], end_pos[1]) },
-    }
-    send_to_opencode(parts, port)
+    if auto or #sessions == 1 then
+      cache = { port = port, session_id = sessions[1].id, window = window, timestamp = vim.uv.now() }
+      callback(sessions[1].id)
+      return
+    end
+
+    vim.schedule(function()
+      vim.ui.select(sessions, {
+        prompt = 'Pick session:',
+        format_item = function(s) return s.title or s.slug or s.id end,
+      }, function(choice)
+        if not choice then
+          callback(nil)
+          return
+        end
+        cache = { port = port, session_id = choice.id, window = window, timestamp = vim.uv.now() }
+        callback(choice.id)
+      end)
+    end)
+  end)
+end
+
+--- Resolve port + session, then call back with both.
+---@param callback fun(port: string, session_id: string, window: string?)
+local function resolve(callback)
+  resolve_port(function(port, single_instance, window)
+    if not port then return end
+    resolve_session(port, single_instance, window, function(session_id)
+      if not session_id then return end
+      callback(port, session_id, window)
+    end)
+  end)
+end
+
+--- Post parts to a resolved port + session. Fully async.
+---@param parts table[]
+---@param port string
+---@param session_id string
+local function post_to_opencode(parts, port, session_id)
+  vim.system({
+    'curl', '-sf', '-X', 'POST',
+    '-H', 'Content-Type: application/json',
+    'http://localhost:' .. port .. '/session/' .. session_id .. '/prompt_async',
+    '-d', vim.json.encode { parts = parts },
+  }, { text = true, timeout = API_TIMEOUT }, function(result)
+    if result.code ~= 0 then
+      notify('Failed to send: ' .. (result.stderr or 'unknown error'), vim.log.levels.ERROR)
+    else
+      notify('Sent to OpenCode')
+    end
+  end)
+end
+
+function M.send_selection()
+  -- Step 1: resolve port + session (may show pickers)
+  resolve(function(port, session_id, window)
+    -- Step 2: gather buffer info (on main thread)
+    vim.schedule(function()
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<esc>', true, false, true), 'x', true)
+
+      local buf = vim.api.nvim_get_current_buf()
+      local bufname = vim.api.nvim_buf_get_name(buf)
+      if bufname == '' then
+        notify('Buffer has no file', vim.log.levels.WARN)
+        return
+      end
+
+      local start_pos = vim.api.nvim_buf_get_mark(buf, '<')
+      local end_pos = vim.api.nvim_buf_get_mark(buf, '>')
+      if start_pos[1] == 0 and end_pos[1] == 0 then
+        notify('No visual selection', vim.log.levels.WARN)
+        return
+      end
+
+      local absolute_path = vim.fn.fnamemodify(bufname, ':p')
+      local filepath = vim.fn.fnamemodify(bufname, ':.')
+
+      -- Step 3: prompt for message (last UI interaction before send)
+      local prompt = 'OpenCode'
+      if window then
+        local win_idx = window:match '^(%d+)'
+        local win_name = window:match '^%d+:(.+)$'
+        local label = (win_name and win_name:lower():find 'opencode') and win_idx or window
+        prompt = 'OpenCode [' .. label .. ']'
+      end
+      vim.ui.input({ prompt = prompt }, function(input)
+        if not input or input == '' then return end
+        post_to_opencode({
+          { type = 'file', mime = 'text/plain', url = 'file://' .. absolute_path, filename = filepath },
+          { type = 'text', text = string.format('%s (%s:L%d-L%d)', input, filepath, start_pos[1], end_pos[1]) },
+        }, port, session_id)
+      end)
+    end)
   end)
 end
 
 function M.send_diagnostics()
-  local port, err = get_opencode_port()
-  if not port then
-    vim.notify(err, vim.log.levels.ERROR)
-    return
-  end
+  resolve(function(port, session_id)
+    vim.schedule(function()
+      local buf = vim.api.nvim_get_current_buf()
+      local bufname = vim.api.nvim_buf_get_name(buf)
+      if bufname == '' then
+        notify('Buffer has no file', vim.log.levels.WARN)
+        return
+      end
 
-  local buf = vim.api.nvim_get_current_buf()
-  local absolute_path = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(buf), ':p')
-  local filepath = vim.fn.fnamemodify(vim.api.nvim_buf_get_name(buf), ':.')
-  local diagnostics = vim.diagnostic.get(buf)
+      local diagnostics = vim.diagnostic.get(buf)
+      if #diagnostics == 0 then
+        notify('No diagnostics in current buffer', vim.log.levels.WARN)
+        return
+      end
 
-  if #diagnostics == 0 then
-    vim.notify('No diagnostics in current buffer', vim.log.levels.WARN)
-    return
-  end
+      local severity_names = {
+        [vim.diagnostic.severity.ERROR] = 'ERROR',
+        [vim.diagnostic.severity.WARN] = 'WARNING',
+        [vim.diagnostic.severity.INFO] = 'INFO',
+        [vim.diagnostic.severity.HINT] = 'HINT',
+      }
 
-  local severity_names = {
-    [vim.diagnostic.severity.ERROR] = 'ERROR',
-    [vim.diagnostic.severity.WARN] = 'WARNING',
-    [vim.diagnostic.severity.INFO] = 'INFO',
-    [vim.diagnostic.severity.HINT] = 'HINT',
-  }
+      local lines = {}
+      for _, d in ipairs(diagnostics) do
+        local severity = severity_names[d.severity] or 'UNKNOWN'
+        table.insert(lines, string.format('[%s] Line %d: %s', severity, d.lnum + 1, d.message:gsub('\n', ' ')))
+      end
 
-  local diagnostic_lines = {}
-  for _, diagnostic in ipairs(diagnostics) do
-    local severity = severity_names[diagnostic.severity] or 'UNKNOWN'
-    local line = diagnostic.lnum + 1
-    local message = diagnostic.message:gsub('\n', ' ')
-    table.insert(diagnostic_lines, string.format('[%s] Line %d: %s', severity, line, message))
-  end
+      local absolute_path = vim.fn.fnamemodify(bufname, ':p')
+      local filepath = vim.fn.fnamemodify(bufname, ':.')
 
-  local parts = {
-    { type = 'file', mime = 'text/plain', url = 'file://' .. absolute_path, filename = filepath },
-    { type = 'text', text = 'Please review these diagnostics and help me fix them\n\n' .. filepath .. ':\n' .. table.concat(diagnostic_lines, '\n') },
-  }
-  send_to_opencode(parts, port)
+      post_to_opencode({
+        { type = 'file', mime = 'text/plain', url = 'file://' .. absolute_path, filename = filepath },
+        { type = 'text', text = 'Please review these diagnostics and help me fix them\n\n' .. filepath .. ':\n' .. table.concat(lines, '\n') },
+      }, port, session_id)
+    end)
+  end)
+end
+
+--- Invalidate the cache (switch session or after restarting opencode).
+function M.clear_cache()
+  cache = nil
+  notify('OpenCode cache cleared')
 end
 
 return M

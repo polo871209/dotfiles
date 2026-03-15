@@ -48,7 +48,7 @@ vim.o.inccommand = 'split'
 vim.o.cursorline = true
 
 -- Scroll padding
-vim.o.scrolloff = 10
+vim.o.scrolloff = 15
 
 -- Disable line wrap
 vim.o.wrap = false
@@ -96,9 +96,7 @@ vim.api.nvim_create_autocmd('FileType', {
 vim.api.nvim_create_autocmd('FileType', {
   pattern = { 'typescript', 'typescriptreact', 'javascript', 'javascriptreact' },
   group = vim.api.nvim_create_augroup('TSJSIndent', { clear = true }),
-  callback = function()
-    vim.opt_local.tabstop = 4
-  end,
+  callback = function() vim.opt_local.tabstop = 4 end,
 })
 
 -- Dockerfile detection
