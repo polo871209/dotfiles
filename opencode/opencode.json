@@ -6,6 +6,7 @@
       "extensions": [".py"]
     }
   },
+  "plugin": ["opencode-gemini-auth@latest"],
   "lsp": {
     "cue": {
       "command": ["cue", "lsp", "serve"],
