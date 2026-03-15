@@ -6,6 +6,7 @@
       "extensions": [".py"]
     }
   },
+  "plugin": ["opencode-gemini-auth@latest", "opencode-claude-auth"],
   "lsp": {
     "cue": {
       "command": ["cue", "lsp", "serve"],
@@ -24,6 +25,9 @@
   },
   "tools": {
     "gcp_*": false
+  },
+  "compaction": {
+    "reserved": 50000
   },
   "permission": {
     "external_directory": {

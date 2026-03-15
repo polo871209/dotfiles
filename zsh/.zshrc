@@ -54,7 +54,7 @@ bindkey -M vicmd 'v' edit-command-line
 
 # Aliases
 alias c="pbcopy"
-alias cafe="caffeinate -id weathr"
+alias cafe="caffeinate -id weathr --hide-location"
 alias cls="clear"
 alias io="istioctl"
 alias lg="lazygit"
@@ -71,14 +71,13 @@ alias oc="opencode --port --continue"
 alias tf="terraform"
 
 ## Configuration Reloads & Updates
-alias up="brew update && brew upgrade && mise upgrade && brew upgrade --greedy && brew cleanup"
+alias up="brew update && brew upgrade && brew cleanup"
 alias st="tmux source-file ${XDG_CONFIG_HOME:-$HOME}/tmux/tmux.conf"
 alias sz="source ${ZDOTDIR:-$HOME}/.zshrc"
 
 ## Bat
 export BAT_PAGER="less -iRFK"
 alias bat="bat --color=always"
-alias -g -- -h='-h 2>&1 | bat --language=help --style=plain'
 alias -g -- --help='--help 2>&1 | bat --language=help --style=plain'
 h() {
     "$@" --help 2>&1 | bat --plain --language=help
@@ -118,26 +117,11 @@ divelocal() {
     dive <(docker save "$1") --source=docker-archive "${@:2}"
 }
 
-# Tool Integrations — outputs cached to ~/.cache/zsh/ and regenerated daily
-# To force refresh: rm ~/.cache/zsh/*.zsh && exec zsh
-_zsh_cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/zsh"
-[[ -d "$_zsh_cache_dir" ]] || mkdir -p "$_zsh_cache_dir"
-
-_zsh_init_cache() {
-  local cache="$_zsh_cache_dir/$1.zsh"
-  shift
-  if [[ ! -f "$cache" || -n "$cache"(#qN.mh+24) ]]; then
-    "$@" > "$cache" 2>/dev/null
-  fi
-  source "$cache"
-}
-
-_zsh_init_cache direnv    direnv hook zsh
-_zsh_init_cache fzf       fzf --zsh
-_zsh_init_cache zoxide    zoxide init zsh
-_zsh_init_cache mise      mise activate zsh
-_zsh_init_cache atuin     atuin init zsh
-_zsh_init_cache worktrunk wt config shell init zsh
-_zsh_init_cache ohmyposh  oh-my-posh init zsh --config "${XDG_CONFIG_HOME}/ohmyposh/config.yaml"
-
-unset _zsh_cache_dir
+# Tool Integrations
+eval "$(direnv hook zsh)"
+eval "$(fzf --zsh)"
+eval "$(zoxide init zsh)"
+eval "$(mise activate zsh)"
+eval "$(atuin init zsh)"
+eval "$(wt config shell init zsh)"
+eval "$(oh-my-posh init zsh --config "${XDG_CONFIG_HOME}/ohmyposh/config.yaml")"

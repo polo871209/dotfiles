@@ -24,5 +24,6 @@ export HOMEBREW_NO_ENV_HINTS=1
 export KUBE_EDITOR=nvim
 export LESS=-iRFX
 export MANPAGER="bat -plman"
+export OPENCODE_DISABLE_CLAUDE_CODE=1
 export PAGER="bat --paging=always"
 export TERM=xterm-256color

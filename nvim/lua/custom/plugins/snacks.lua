@@ -26,6 +26,15 @@ return {
         },
       },
     },
+    gitbrowse = {
+      remote_patterns = {
+        { "^git@github%.com%-[^:]+:(.+)%.git$", "https://github.com/%1" },
+        { "^git@github%.com%-[^:]+:(.+)$", "https://github.com/%1" },
+        { "^(https?://.*)%.git$", "%1" },
+        { "^git@(.+):(.+)%.git$", "https://%1/%2" },
+        { "%.git$", "" },
+      },
+    },
     styles = {
       lazygit = { width = 0.99, height = 0.99 },
     },
