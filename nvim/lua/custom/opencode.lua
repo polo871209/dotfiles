@@ -84,7 +84,7 @@ local function discover_instances()
     if env.code == 0 and env.stdout:match('TMUX=' .. tmux_env) then
       local port = find_port_for_pid(pid)
       if port then
-        local window = find_tmux_window(pid) or '?'
+        local window = find_tmux_window(pid)
         table.insert(instances, { pid = pid, port = port, window = window })
       end
     end
@@ -96,22 +96,24 @@ local function discover_instances()
 end
 
 --- Resolve the port to use. Only prompts when there are multiple instances.
----@param callback fun(port: string?, single_instance: boolean, window: string?)
+--- Caches the choice only when multiple instances exist.
+---@param callback fun(port: string?, window: string?)
 local function resolve_port(callback)
   if cache and (vim.uv.now() - cache.timestamp) < CACHE_TTL_MS then
-    callback(cache.port, true, cache.window)
+    callback(cache.port, cache.window)
     return
   end
 
   local instances, err = discover_instances()
   if #instances == 0 then
     notify(err or 'No OpenCode instance found', vim.log.levels.ERROR)
-    callback(nil, false, nil)
+    callback(nil, nil)
     return
   end
 
   if #instances == 1 then
-    callback(instances[1].port, true, instances[1].window)
+    -- Single instance: no cache needed, always resolve fresh
+    callback(instances[1].port, instances[1].window)
     return
   end
 
@@ -121,21 +123,22 @@ local function resolve_port(callback)
       format_item = function(item) return string.format('window %s', item.window) end,
     }, function(choice)
       if not choice then
-        callback(nil, false, nil)
+        callback(nil, nil)
         return
       end
-      callback(choice.port, false, choice.window)
+      -- Multiple instances: cache the picked port so we don't prompt again
+      cache = { port = choice.port, session_id = '', window = choice.window, timestamp = vim.uv.now() }
+      callback(choice.port, choice.window)
     end)
   end)
 end
 
---- Fetch sessions. Auto-picks the top session when `auto` is true, otherwise prompts. Caches the choice.
+--- Fetch sessions. Always auto-picks the top session (session ambiguity is per-instance, not surfaced).
 ---@param port string
----@param auto boolean
 ---@param window string?
 ---@param callback fun(session_id: string?)
-local function resolve_session(port, auto, window, callback)
-  if cache and cache.port == port and (vim.uv.now() - cache.timestamp) < CACHE_TTL_MS then
+local function resolve_session(port, window, callback)
+  if cache and cache.port == port and cache.session_id ~= '' and (vim.uv.now() - cache.timestamp) < CACHE_TTL_MS then
     callback(cache.session_id)
     return
   end
@@ -156,34 +159,20 @@ local function resolve_session(port, auto, window, callback)
       return
     end
 
-    if auto or #sessions == 1 then
+    -- Always auto-pick the top session; update cache if we're in multi-instance mode
+    if cache and cache.port == port then
       cache = { port = port, session_id = sessions[1].id, window = window, timestamp = vim.uv.now() }
-      callback(sessions[1].id)
-      return
     end
-
-    vim.schedule(function()
-      vim.ui.select(sessions, {
-        prompt = 'Pick session:',
-        format_item = function(s) return s.title or s.slug or s.id end,
-      }, function(choice)
-        if not choice then
-          callback(nil)
-          return
-        end
-        cache = { port = port, session_id = choice.id, window = window, timestamp = vim.uv.now() }
-        callback(choice.id)
-      end)
-    end)
+    callback(sessions[1].id)
   end)
 end
 
 --- Resolve port + session, then call back with both.
 ---@param callback fun(port: string, session_id: string, window: string?)
 local function resolve(callback)
-  resolve_port(function(port, single_instance, window)
+  resolve_port(function(port, window)
     if not port then return end
-    resolve_session(port, single_instance, window, function(session_id)
+    resolve_session(port, window, function(session_id)
       if not session_id then return end
       callback(port, session_id, window)
     end)

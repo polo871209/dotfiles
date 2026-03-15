@@ -24,6 +24,12 @@ touch ~/.hushlogin
 ./zen-browser/install.sh
 ```
 
+### Setup Atuin
+
+```bash
+atuin setup
+```
+
 ### Setup SSH and Git Authentication
 
 ```bash
