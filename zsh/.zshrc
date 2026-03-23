@@ -119,7 +119,6 @@ divelocal() {
 
 # Tool Integrations
 eval "$(direnv hook zsh)"
-eval "$(fzf --zsh)"
 eval "$(zoxide init zsh)"
 eval "$(mise activate zsh)"
 eval "$(atuin init zsh)"
