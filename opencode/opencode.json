@@ -38,5 +38,13 @@
       "/tmp/**": "allow",
       "/private/**": "allow"
     }
+  },
+  "agent": {
+    "build": {
+      "color": "#ea6962"
+    },
+    "plan": {
+      "color": "#689d6a"
+    }
   }
 }
