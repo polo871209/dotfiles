@@ -3,6 +3,7 @@ local IgnoreDirs = {
   '.codex',
   '.git',
   '.specify',
+  '.swarm',
   '.terraform',
   '.vite',
   '.vscode',
