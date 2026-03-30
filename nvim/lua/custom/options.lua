@@ -56,6 +56,9 @@ vim.o.wrap = false
 -- Hide status line
 vim.o.laststatus = 0
 
+-- Default border for all floating windows (nvim 0.12+)
+vim.o.winborder = 'rounded'
+
 -- Hide command line
 vim.o.cmdheight = 0
 
@@ -90,20 +93,6 @@ vim.api.nvim_create_autocmd('FileType', {
     vim.opt_local.shiftwidth = 2
     vim.opt_local.expandtab = false
   end,
-})
-
--- TypeScript/JavaScript indentation (set after other plugins)
-vim.api.nvim_create_autocmd('FileType', {
-  pattern = { 'typescript', 'typescriptreact', 'javascript', 'javascriptreact' },
-  group = vim.api.nvim_create_augroup('TSJSIndent', { clear = true }),
-  callback = function() vim.opt_local.tabstop = 4 end,
-})
-
--- Dockerfile detection
-vim.api.nvim_create_autocmd({ 'BufRead', 'BufNewFile' }, {
-  pattern = '*-dockerfile',
-  group = vim.api.nvim_create_augroup('DockerfileDetection', { clear = true }),
-  callback = function() vim.bo.filetype = 'dockerfile' end,
 })
 
 -- Direnv .envrc detection

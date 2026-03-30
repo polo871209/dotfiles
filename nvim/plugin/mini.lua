@@ -25,24 +25,16 @@ local header_art = [[⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
   ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣤⣴⠇⠀⠀⠀⠉⢻⣿⣿⣣⢿⣶⣤⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
   ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣤⣤⣴⣶⣿⣿⣯⠀⠀⠀⠀⠀⠀⠘⠛⠋⠈⠋⠙⣿⣷⣦⣤⣤⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 ]]
-return {
-  'nvim-mini/mini.nvim',
-  config = function()
-    -- Better textobjects
-    require('mini.ai').setup { n_lines = 500 }
 
-    -- Manage surroundings
-    require('mini.surround').setup()
+vim.pack.add { 'https://github.com/echasnovski/mini.nvim' }
 
-    -- Starting page
-    local starter = require 'mini.starter'
-    starter.setup {
-      items = { starter.sections.recent_files(3, true) },
-      header = header_art,
-      footer = '',
-    }
+require('mini.ai').setup { n_lines = 500 }
 
-    -- ... and there is more!
-    --  Check out: https://github.com/echasnovski/mini.nvim
-  end,
+require('mini.surround').setup()
+
+local starter = require 'mini.starter'
+starter.setup {
+  items = { starter.sections.recent_files(3, true) },
+  header = header_art,
+  footer = '',
 }

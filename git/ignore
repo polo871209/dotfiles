@@ -23,9 +23,6 @@ logs/
 .DS_Store
 .LSOverride
 
-# Nvim lock-file
-lazy-lock.json
-
 # Python
 *.pyd
 *.pyc
