@@ -41,6 +41,11 @@ vim.api.nvim_create_autocmd('FileType', {
   callback = function() vim.keymap.set('n', '<CR>', '<CR>:lclose<CR>', { buffer = true, silent = true }) end,
 })
 
+-- Keymaps for vim.pack
+vim.keymap.set('n', '<leader>pu', '<cmd>lua vim.pack.update()<CR>', { desc = '[P]ackage [U]pdate' })
+vim.keymap.set('n', '<leader>ps', '<cmd>lua vim.pack.update(nil, { offline = true })<CR>', { desc = '[P]ackage [S]tatus' })
+vim.keymap.set('n', '<leader>pl', '<cmd>lua vim.pack.update(nil, { target = "lockfile" })<CR>', { desc = '[P]ackage [L]ockfile Sync' })
+
 -- OpenCode integration
 vim.keymap.set('x', '<leader><leader>', function() require('custom.opencode').send_selection() end, { desc = 'Send selection to OpenCode' })
 vim.keymap.set('n', '<leader>da', function() require('custom.opencode').send_diagnostics() end, { desc = '[D]iagnostic [A]sk' })
