@@ -2,8 +2,8 @@
 vim.keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR>')
 
 -- Split screen
-vim.keymap.set('n', '<leader>-', ':split<CR>', { desc = 'Horizontal Split' })
-vim.keymap.set('n', '<leader>|', ':vsplit<CR>', { desc = 'Vertical Split' })
+vim.keymap.set('n', '<leader>-', '<cmd>split<CR>', { desc = 'Horizontal Split' })
+vim.keymap.set('n', '<leader>|', '<cmd>vsplit<CR>', { desc = 'Vertical Split' })
 
 -- Delete/change without yanking
 vim.keymap.set('n', 'd', '"_d', { desc = 'Delete without yanking' })
@@ -42,9 +42,9 @@ vim.api.nvim_create_autocmd('FileType', {
 })
 
 -- Keymaps for vim.pack
-vim.keymap.set('n', '<leader>pu', '<cmd>lua vim.pack.update()<CR>', { desc = '[P]ackage [U]pdate' })
-vim.keymap.set('n', '<leader>ps', '<cmd>lua vim.pack.update(nil, { offline = true })<CR>', { desc = '[P]ackage [S]tatus' })
-vim.keymap.set('n', '<leader>pl', '<cmd>lua vim.pack.update(nil, { target = "lockfile" })<CR>', { desc = '[P]ackage [L]ockfile Sync' })
+vim.keymap.set('n', '<leader>pu', function() vim.pack.update() end, { desc = '[P]ackage [U]pdate' })
+vim.keymap.set('n', '<leader>ps', function() vim.pack.update(nil, { offline = true }) end, { desc = '[P]ackage [S]tatus' })
+vim.keymap.set('n', '<leader>pl', function() vim.pack.update(nil, { target = 'lockfile' }) end, { desc = '[P]ackage [L]ockfile Sync' })
 
 -- OpenCode integration
 vim.keymap.set('x', '<leader><leader>', function() require('custom.opencode').send_selection() end, { desc = 'Send selection to OpenCode' })

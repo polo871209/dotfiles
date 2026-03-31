@@ -1,3 +1,10 @@
+vim.pack.add {
+  'https://github.com/nvim-lua/plenary.nvim',
+  'https://github.com/nvim-tree/nvim-web-devicons',
+  'https://github.com/MunifTanjim/nui.nvim',
+  'https://github.com/nvim-neo-tree/neo-tree.nvim',
+}
+
 local IgnoreDirs = {
   '.claude',
   '.codex',
@@ -8,13 +15,6 @@ local IgnoreDirs = {
   '.vite',
   '.vscode',
   '.windsurf',
-}
-
-vim.pack.add {
-  'https://github.com/nvim-lua/plenary.nvim',
-  'https://github.com/nvim-tree/nvim-web-devicons',
-  'https://github.com/MunifTanjim/nui.nvim',
-  'https://github.com/nvim-neo-tree/neo-tree.nvim',
 }
 
 require('neo-tree').setup {
@@ -37,7 +37,6 @@ require('neo-tree').setup {
     {
       event = 'file_opened',
       handler = function()
-        -- Auto-close after selecting file
         require('neo-tree.command').execute { action = 'close' }
       end,
     },
@@ -46,12 +45,9 @@ require('neo-tree').setup {
 
 vim.keymap.set('n', '\\', function()
   local bufname = vim.api.nvim_buf_get_name(0)
-  -- Check if buffer is a real file
   if bufname == '' or vim.bo.filetype == 'ministarter' or vim.bo.buftype ~= '' then
-    -- Not a real file, toggle neo-tree
     vim.cmd 'Neotree toggle'
   else
-    -- Real file, reveal it in neo-tree
     vim.cmd 'Neotree reveal'
   end
 end, { desc = 'NeoTree toggle/reveal', silent = true })

@@ -1,3 +1,16 @@
+typeset -U path
+path=(
+  /opt/homebrew/opt/llvm/bin
+  "$GOPATH/bin"
+  /opt/homebrew/opt/node/bin
+  /opt/homebrew/opt/libpq/bin
+  /Applications/Obsidian.app/Contents/MacOS
+  ~/dotfiles/scripts
+  ~/.local/bin
+  ~/.cargo/bin
+  $path
+)
+
 setopt prompt_subst
 
 # History Configuration
