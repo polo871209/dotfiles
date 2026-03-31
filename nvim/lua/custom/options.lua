@@ -95,19 +95,18 @@ vim.api.nvim_create_autocmd('FileType', {
   end,
 })
 
--- Direnv .envrc detection
-vim.api.nvim_create_autocmd({ 'BufRead', 'BufNewFile' }, {
-  pattern = '.envrc',
-  group = vim.api.nvim_create_augroup('EnvrcDetection', { clear = true }),
-  callback = function() vim.bo.filetype = 'sh' end,
-})
-
--- Bazel file detection
-vim.api.nvim_create_autocmd({ 'BufRead', 'BufNewFile' }, {
-  pattern = { 'BUILD', 'BUILD.bazel', 'WORKSPACE', 'WORKSPACE.bazel', 'MODULE.bazel', '*.bzl' },
-  group = vim.api.nvim_create_augroup('BazelDetection', { clear = true }),
-  callback = function() vim.bo.filetype = 'bzl' end,
-})
+-- Filetype detection
+vim.filetype.add {
+  filename = {
+    ['.envrc'] = 'sh',
+    ['BUILD'] = 'bzl',
+    ['BUILD.bazel'] = 'bzl',
+    ['WORKSPACE'] = 'bzl',
+    ['WORKSPACE.bazel'] = 'bzl',
+    ['MODULE.bazel'] = 'bzl',
+  },
+  extension = { bzl = 'bzl' },
+}
 
 -- Highlight on yank
 vim.api.nvim_create_autocmd('TextYankPost', {
