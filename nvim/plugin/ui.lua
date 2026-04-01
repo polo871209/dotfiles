@@ -25,3 +25,4 @@ require('which-key').setup {
 }
 
 require('quicker').setup {}
+require('vim._core.ui2').enable {}

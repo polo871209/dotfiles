@@ -1,12 +1,31 @@
 vim.pack.add {
   'https://github.com/mason-org/mason.nvim',
   'https://github.com/WhoIsSethDaniel/mason-tool-installer.nvim',
-  'https://github.com/j-hui/fidget.nvim',
   'https://github.com/b0o/SchemaStore.nvim',
 }
 
 require('mason').setup {}
-require('fidget').setup {}
+
+vim.api.nvim_create_autocmd('LspProgress', {
+  group = vim.api.nvim_create_augroup('lsp-osc-progress', { clear = true }),
+  callback = function(ev)
+    local value = ev.data.params.value or {}
+    local msg = value.message or 'done'
+
+    -- rust-analyzer in particular has really long LSP messages so truncate them
+    if #msg > 40 then msg = msg:sub(1, 37) .. '...' end
+
+    -- :h LspProgress
+    vim.api.nvim_echo({ { msg } }, false, {
+      id = 'lsp',
+      kind = 'progress',
+      title = value.title,
+      source = 'lsp',
+      status = value.kind ~= 'end' and 'running' or 'success',
+      percent = value.percentage,
+    })
+  end,
+})
 
 -- Global fallback root marker for all servers
 vim.lsp.config('*', {
