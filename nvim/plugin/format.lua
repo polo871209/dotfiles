@@ -8,13 +8,10 @@ vim.keymap.set('n', '<leader>m', '<cmd>TSJToggle<cr>', { desc = 'Toggle split/jo
 
 require('conform').setup {
   notify_on_error = false,
-  format_on_save = function(bufnr)
-    local lsp_format_opt = 'fallback'
-    return {
-      timeout_ms = 1500,
-      lsp_format = lsp_format_opt,
-    }
-  end,
+  format_on_save = {
+    timeout_ms = 1500,
+    lsp_format = 'fallback',
+  },
   formatters_by_ft = {
     c = { 'clang-format' },
     cpp = { 'clang-format' },
@@ -27,11 +24,7 @@ require('conform').setup {
     lua = { 'stylua' },
     markdown = { 'prettier' },
     protobuf = { 'buf' },
-    python = {
-      'ruff_fix',
-      'ruff_format',
-      'ruff_organize_imports',
-    },
+    python = { 'ruff_fix', 'ruff_format', 'ruff_organize_imports' },
     terraform = { 'terraform_fmt' },
     yaml = { 'prettier' },
   },
