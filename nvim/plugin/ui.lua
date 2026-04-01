@@ -3,7 +3,6 @@ vim.pack.add {
   'https://github.com/wurli/visimatch.nvim',
   'https://github.com/MeanderingProgrammer/render-markdown.nvim',
   'https://github.com/folke/which-key.nvim',
-  'https://github.com/folke/noice.nvim',
   'https://github.com/stevearc/quicker.nvim',
 }
 
@@ -22,31 +21,6 @@ require('which-key').setup {
     { '<leader>s', group = '[S]earch' },
     { '<leader>t', group = '[T]oggle' },
     { 'g', group = 'LSP Actions', mode = { 'n' } },
-  },
-}
-
-require('noice').setup {
-  presets = {
-    bottom_search = true,
-  },
-  cmdline = {
-    enabled = true,
-    view = 'cmdline_popup',
-  },
-  views = {
-    cmdline_popup = {
-      position = { row = 3, col = '50%' },
-    },
-  },
-  -- Disable everything else to prevent behavior changes
-  messages = { enabled = false },
-  popupmenu = { enabled = false },
-  notify = { enabled = false },
-  lsp = {
-    progress = { enabled = false },
-    hover = { enabled = false },
-    signature = { enabled = false },
-    message = { enabled = false },
   },
 }
 
