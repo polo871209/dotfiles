@@ -47,5 +47,5 @@ vim.keymap.set('n', '<leader>ps', function() vim.pack.update(nil, { offline = tr
 vim.keymap.set('n', '<leader>pl', function() vim.pack.update(nil, { target = 'lockfile' }) end, { desc = '[P]ackage [L]ockfile Sync' })
 
 -- OpenCode integration
-vim.keymap.set('x', '<leader><leader>', function() require('custom.opencode').send_selection() end, { desc = 'Send selection to OpenCode' })
-vim.keymap.set('n', '<leader>da', function() require('custom.opencode').send_diagnostics() end, { desc = '[D]iagnostic [A]sk' })
+vim.keymap.set('x', '<leader><leader>', function() require('opencode').send_selection() end, { desc = 'Send selection to OpenCode' })
+vim.keymap.set('n', '<leader>da', function() require('opencode').send_diagnostics() end, { desc = '[D]iagnostic [A]sk' })
