@@ -4,6 +4,7 @@ vim.pack.add {
   'https://github.com/MeanderingProgrammer/render-markdown.nvim',
   'https://github.com/folke/which-key.nvim',
   'https://github.com/stevearc/quicker.nvim',
+  'https://github.com/3rd/image.nvim',
 }
 
 require('todo-comments').setup { signs = false }
@@ -25,4 +26,16 @@ require('which-key').setup {
 }
 
 require('quicker').setup {}
-require('vim._core.ui2').enable {}
+
+require('image').setup {
+  backend = 'kitty',
+  processor = 'magick_cli',
+  integrations = {
+    markdown = {
+      enabled = true,
+      only_render_image_at_cursor = true,
+    },
+  },
+  max_height_window_percentage = 50,
+  hijack_file_patterns = { '*.png', '*.jpg', '*.jpeg', '*.gif', '*.webp', '*.avif' },
+}
