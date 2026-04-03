@@ -155,6 +155,7 @@ _eval_cache() {
   source "$cache"
 }
 
+_eval_cache uv       uv       uv generate-shell-completion zsh
 _eval_cache direnv   direnv   direnv hook zsh
 _eval_cache zoxide   zoxide   zoxide init zsh
 _eval_cache atuin    atuin    atuin init zsh
