@@ -147,18 +147,22 @@ divelocal() {
 _eval_cache() {
   local cmd="$1" cache="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/$2.zsh"
   local bin_path="${commands[$cmd]}"
-  # Regenerate if cache missing or binary is newer than cache
-  if [[ ! -f "$cache" || "$bin_path" -nt "$cache" ]]; then
+  local extra_dep="$3"  # optional extra file to watch (e.g. config)
+  # Regenerate if cache missing, binary newer, or extra dep newer than cache
+  if [[ ! -f "$cache" || "$bin_path" -nt "$cache" \
+        || ( -n "$extra_dep" && "$extra_dep" -nt "$cache" ) ]]; then
     mkdir -p "${cache:h}"
-    "${@:3}" > "$cache"
+    "${@:4}" > "$cache"
   fi
   source "$cache"
 }
 
-_eval_cache direnv   direnv   direnv hook zsh
-_eval_cache zoxide   zoxide   zoxide init zsh
-_eval_cache atuin    atuin    atuin init zsh
-_eval_cache wt       wt       wt config shell init zsh
-_eval_cache oh-my-posh ohmyposh oh-my-posh init zsh --config "${XDG_CONFIG_HOME}/ohmyposh/config.yaml"
+_eval_cache uv       uv       ""  uv generate-shell-completion zsh
+_eval_cache direnv   direnv   ""  direnv hook zsh
+_eval_cache zoxide   zoxide   ""  zoxide init zsh
+_eval_cache atuin    atuin    ""  atuin init zsh
+_eval_cache wt       wt       ""  wt config shell init zsh
+_eval_cache oh-my-posh ohmyposh "${XDG_CONFIG_HOME}/ohmyposh/config.yaml" \
+  oh-my-posh init zsh --config "${XDG_CONFIG_HOME}/ohmyposh/config.yaml"
 
 unfunction _eval_cache
