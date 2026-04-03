@@ -1,13 +1,14 @@
 typeset -U path
 path=(
-  /opt/homebrew/opt/llvm/bin
-  "$GOPATH/bin"
-  /opt/homebrew/opt/node/bin
-  /opt/homebrew/opt/libpq/bin
-  /Applications/Obsidian.app/Contents/MacOS
   ~/dotfiles/scripts
   ~/.local/bin
   ~/.cargo/bin
+  ~/.local/share/mise/shims
+  "$GOPATH/bin"
+  /opt/homebrew/opt/llvm/bin
+  /opt/homebrew/opt/node/bin
+  /opt/homebrew/opt/libpq/bin
+  /Applications/Obsidian.app/Contents/MacOS
   $path
 )
 
@@ -27,14 +28,25 @@ setopt SHARE_HISTORY             # Share history between all sessions
 
 # Autocompletion Configuration
 autoload -Uz compinit
-# -u skips compaudit (insecure dir check) which costs ~15ms every run
-compinit -u
+# Regenerate dump only once per day; use cached version otherwise (~15ms saved/run)
+if [[ -n "${ZDOTDIR:-$HOME}/.zcompdump"(#qN.mh+24) ]]; then
+  compinit -u
+else
+  compinit -u -C
+fi
 
 export CARAPACE_BRIDGES="zsh,fish,bash,inshellisense"
 zstyle ':completion:*' menu select
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
 zstyle ':completion:*' format $'\e[2;37mCompleting %d\e[m'
-source <(carapace _carapace)
+# Cache carapace init to avoid process substitution on every shell start
+_carapace_cache="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/carapace.zsh"
+if [[ ! -f "$_carapace_cache" ]]; then
+  mkdir -p "${_carapace_cache:h}"
+  carapace _carapace > "$_carapace_cache"
+fi
+source "$_carapace_cache"
+unset _carapace_cache
 
 # ZSH Plugin Sources — hardcode prefix to avoid forking brew each startup (~20ms)
 source /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh
@@ -131,9 +143,22 @@ divelocal() {
 }
 
 # Tool Integrations
-eval "$(direnv hook zsh)"
-eval "$(zoxide init zsh)"
-eval "$(mise activate zsh)"
-eval "$(atuin init zsh)"
-eval "$(wt config shell init zsh)"
-eval "$(oh-my-posh init zsh --config "${XDG_CONFIG_HOME}/ohmyposh/config.yaml")"
+# Cache eval outputs keyed by binary mtime — regenerate only when the tool updates
+_eval_cache() {
+  local cmd="$1" cache="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/$2.zsh"
+  local bin_path="${commands[$cmd]}"
+  # Regenerate if cache missing or binary is newer than cache
+  if [[ ! -f "$cache" || "$bin_path" -nt "$cache" ]]; then
+    mkdir -p "${cache:h}"
+    "${@:3}" > "$cache"
+  fi
+  source "$cache"
+}
+
+_eval_cache direnv   direnv   direnv hook zsh
+_eval_cache zoxide   zoxide   zoxide init zsh
+_eval_cache atuin    atuin    atuin init zsh
+_eval_cache wt       wt       wt config shell init zsh
+_eval_cache oh-my-posh ohmyposh oh-my-posh init zsh --config "${XDG_CONFIG_HOME}/ohmyposh/config.yaml"
+
+unfunction _eval_cache
