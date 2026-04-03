@@ -39,3 +39,7 @@ __pycache__/
 .terraform/
 *.tfstate
 *.tfstate.*
+
+# OpenCode
+.opencode/package-lock.json
+opencode/package-lock.json

@@ -48,7 +48,7 @@ vim.o.inccommand = 'split'
 vim.o.cursorline = true
 
 -- Scroll padding
-vim.o.scrolloff = 15
+vim.o.scrolloff = 30
 
 -- Disable line wrap
 vim.o.wrap = false
@@ -82,7 +82,10 @@ vim.api.nvim_create_autocmd('FileType', {
 vim.api.nvim_create_autocmd('FileType', {
   pattern = 'go',
   group = filetype_group,
-  callback = function() vim.opt_local.tabstop = 4 end,
+  callback = function()
+    vim.opt_local.tabstop = 4
+    vim.opt_local.shiftwidth = 4
+  end,
 })
 
 vim.api.nvim_create_autocmd('FileType', {

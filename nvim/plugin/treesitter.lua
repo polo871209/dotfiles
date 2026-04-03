@@ -9,6 +9,7 @@ vim.opt.runtimepath:prepend(vim.fs.joinpath(install_dir, 'pack/core/opt/nvim-tre
 require('nvim-treesitter').install {
   'bash',
   'c',
+  'cpp',
   'cue',
   'diff',
   'go',
@@ -38,7 +39,5 @@ require('nvim-treesitter').install {
 
 -- Enable treesitter highlighting for all filetypes
 vim.api.nvim_create_autocmd('FileType', {
-  callback = function()
-    pcall(vim.treesitter.start, vim.api.nvim_get_current_buf())
-  end,
+  callback = function() pcall(vim.treesitter.start, vim.api.nvim_get_current_buf()) end,
 })
