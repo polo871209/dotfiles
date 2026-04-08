@@ -39,7 +39,7 @@ const getAncestorPids = async (startPid: number): Promise<Set<number>> => {
       if (ppid === undefined || ppid === pid) break
       pid = ppid
     }
-  } catch {}
+  } catch { }
   return ancestors
 }
 
@@ -173,7 +173,7 @@ const sendNotification = async (title: string, message: string): Promise<void> =
       `osascript -e 'display notification "${esc(message)}" with title "${esc(title)}"'`,
       3000,
     )
-  } catch {}
+  } catch { }
 }
 
 const playSound = (): Promise<void> =>
@@ -257,7 +257,7 @@ export const NotifierPlugin: Plugin = async ({ directory }) => {
           if (info?.parentID) childSessions.add(info.id)
           break
         }
-        case "permission.asked": {
+        case "permission.replied": {
           const sid = (event.properties as any).sessionID ?? ""
           if (!dedup("permission", sid)) await notify("Session needs permission", projectName)
           break
@@ -281,11 +281,7 @@ export const NotifierPlugin: Plugin = async ({ directory }) => {
           if (error?.name !== "MessageAbortedError") await notify("Session encountered an error", projectName)
           break
         }
-        case "question.asked": {
-          const qSid = (event.properties as any).sessionID ?? ""
-          if (!dedup("question", qSid)) await notify("Session has a question", projectName)
-          break
-        }
+
       }
     },
     "permission.ask": async (input, _output) => {
