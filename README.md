@@ -22,6 +22,9 @@ brew bundle install
 stow .
 touch ~/.hushlogin
 ./zen-browser/install.sh
+
+# Install forgecode
+curl -fsSL https://forgecode.dev/cli | sh
 ```
 
 ### Setup Atuin

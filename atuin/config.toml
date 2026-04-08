@@ -378,7 +378,7 @@ columns = ["exit", "duration", "time", "command"]
 # columns = ["duration", "time", { type = "directory", expand = true }, { type = "command", expand = false }]
 
 [ai]
-enabled = true
+enabled = false
 
 [keymap.emacs]
 # When cursor is already at the start, copy the selected command instead of exiting
