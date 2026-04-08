@@ -68,10 +68,6 @@ chsh -s /opt/homebrew/bin/nu
 
 Requires Google Drive to be logged in first:
 
-```bash
-mkdir ~/vaults && cd ~/Google\ Drive/My\ Drive/vaults && stow .
-```
-
 ### Python Virtual Environment with direnv
 
 ```bash

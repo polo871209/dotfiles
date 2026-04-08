@@ -89,6 +89,7 @@ alias k="kubectl"
 alias kctx="kubectx"
 alias ka="kubectl-argo-rollouts"
 alias kns="kubens"
+alias gc="gcloud config configurations activate"
 alias ks="k9s"
 alias n="nvim"
 alias o="open ."
@@ -162,19 +163,8 @@ _eval_cache direnv   direnv   ""  direnv hook zsh
 _eval_cache zoxide   zoxide   ""  zoxide init zsh
 _eval_cache atuin    atuin    ""  atuin init zsh
 _eval_cache wt       wt       ""  wt config shell init zsh
-_eval_cache oh-my-posh ohmyposh "${XDG_CONFIG_HOME}/ohmyposh/config.yaml" \
-  oh-my-posh init zsh --config "${XDG_CONFIG_HOME}/ohmyposh/config.yaml"
-
 unfunction _eval_cache
 
-# >>> forge initialize >>>
-# Load forge shell plugin (commands, completions, keybindings) if not already loaded
-if [[ -z "$_FORGE_PLUGIN_LOADED" ]]; then
-    eval "$(forge zsh plugin)"
-fi
-
-# Load forge shell theme (prompt with AI context) if not already loaded
-if [[ -z "$_FORGE_THEME_LOADED" ]]; then
-    eval "$(forge zsh theme)"
-fi
-# <<< forge initialize <<<
+eval "$(oh-my-posh init zsh --config "${XDG_CONFIG_HOME}/ohmyposh/config.yaml")"
+eval "$(forge zsh plugin)"
+eval "$(forge zsh theme)"
