@@ -166,3 +166,15 @@ _eval_cache oh-my-posh ohmyposh "${XDG_CONFIG_HOME}/ohmyposh/config.yaml" \
   oh-my-posh init zsh --config "${XDG_CONFIG_HOME}/ohmyposh/config.yaml"
 
 unfunction _eval_cache
+
+# >>> forge initialize >>>
+# Load forge shell plugin (commands, completions, keybindings) if not already loaded
+if [[ -z "$_FORGE_PLUGIN_LOADED" ]]; then
+    eval "$(forge zsh plugin)"
+fi
+
+# Load forge shell theme (prompt with AI context) if not already loaded
+if [[ -z "$_FORGE_THEME_LOADED" ]]; then
+    eval "$(forge zsh theme)"
+fi
+# <<< forge initialize <<<
