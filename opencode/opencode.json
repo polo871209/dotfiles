@@ -1,16 +1,13 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "instructions": [
-    "~/.config/opencode/rules/karpathy.md",
-    "~/.config/opencode/rules/caveman.md"
-  ],
   "formatter": {
     "py": {
       "command": ["ruff", "format"],
       "extensions": [".py"]
     }
   },
-  "plugin": ["opencode-claude-auth"],
+  // plugin order matters — keep the order
+  "plugin": ["./plugins/system-prompt.ts", "opencode-claude-auth@latest"],
   "lsp": {
     "cue": {
       "command": ["cue", "lsp", "serve"],
@@ -39,8 +36,7 @@
       "~/app/**": "allow",
       "~/work/**": "allow",
       "~/vaults/**": "allow",
-      "/tmp/**": "allow",
-      "/private/**": "allow"
+      "/tmp/**": "allow"
     }
   },
   "agent": {
