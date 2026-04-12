@@ -15,6 +15,12 @@ require('snacks').setup {
         min_width = 999,
       },
     },
+    exclude = {
+      '*.lock',
+      '*-lock.json',
+      '*-lock.yaml',
+      'lock.json',
+    },
     sources = {
       smart = {
         filter = { cwd = true },
