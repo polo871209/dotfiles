@@ -3,7 +3,7 @@ vim.pack.add {
   'https://github.com/stevearc/conform.nvim',
 }
 
-require('treesj').setup {}
+require('treesj').setup { use_default_keymaps = false }
 vim.keymap.set('n', '<leader>m', '<cmd>TSJToggle<cr>', { desc = 'Toggle split/join' })
 
 require('conform').setup {

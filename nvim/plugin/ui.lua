@@ -17,11 +17,10 @@ require('which-key').setup {
     { '<leader><leader>', group = 'OpenCode Ask' },
     { '<leader>b', group = 'De[B]ug' },
     { '<leader>g', group = '[G]it' },
-    { '<leader>m', group = 'Split/Join' },
     { '<leader>p', group = 'vim [P]ack' },
+    { '<leader>r', group = '[R]un Code' },
     { '<leader>s', group = '[S]earch' },
     { '<leader>t', group = '[T]oggle' },
-    { 'g', group = 'LSP Actions', mode = { 'n' } },
   },
 }
 
