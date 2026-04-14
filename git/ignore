@@ -46,3 +46,5 @@ __pycache__/
 # OpenCode
 .opencode/package-lock.json
 opencode/package-lock.json
+
+**/.claude/settings.local.json
