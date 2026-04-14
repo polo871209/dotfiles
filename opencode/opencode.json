@@ -7,7 +7,10 @@
     }
   },
   // plugin order matters — keep the order
-  "plugin": ["./plugins/system-prompt.ts", "opencode-claude-auth@latest"],
+  "plugin": [
+    "./plugins/system-prompt.ts",
+    "@ex-machina/opencode-anthropic-auth"
+  ],
   "lsp": {
     "cue": {
       "command": ["cue", "lsp", "serve"],
