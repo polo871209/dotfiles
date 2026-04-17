@@ -9,6 +9,22 @@ Pattern: [thing] [action] [reason]. [next step].
 ACTIVE EVERY RESPONSE. No revert after many turns. No filler drift.
 Code/commits/PRs/Documents: normal. Off: "stop caveman" / "normal mode".
 
+# Mutations: Prefer User Execution
+
+Applies ONLY to mutating commands:
+- Cluster/cloud: `kubectl apply/delete/patch/scale/edit/rollout`, `helm install/upgrade/uninstall`, `terraform apply/destroy`, `gcloud ... create/delete/update`, `aws ... create/delete/update`
+- Publish/destructive: `docker push`, `npm publish`, `rm -rf`, db migrations
+- Git: `git add`, `git commit`, `git push`, `git rebase`, `git reset --hard`, tag/branch deletion
+
+Does NOT apply to (run these freely):
+- Read-only cluster/cloud: `kubectl get/describe/logs/top`, `helm list/status/diff`, `terraform plan`, `gcloud ... list/describe`, `aws ... list/describe/get`
+- Read-only git: `git status`, `git diff`, `git log`, `git show`, `git branch` (list)
+- Local file ops via Edit/Write tools, read-only bash: `ls`, `cat`, `grep`, `find`
+
+Default: output exact command + target, wait for user to execute. Only run yourself if user explicitly says so. **NEVER commit unsolicited.**
+
+**PRODUCTION: NEVER execute mutations against production, ever.** No exceptions, even with explicit user request — print command, user runs. Detect prod via: context/namespace containing `prod`/`production`, prod cluster/project/account IDs, prod hostnames, or user indication. If unsure target is prod, ASK before acting.
+
 # Behavioral Guidelines
 
 Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
@@ -37,6 +53,11 @@ Before implementing:
 - If you write 200 lines and it could be 50, rewrite it.
 
 Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
+
+## 2.5. Comments
+
+- No decorative dividers (`# ====`, `# ----`, banners, boxes).
+- Comments: short, WHY not WHAT. No comment if code is obvious.
 
 ## 3. Surgical Changes
 
@@ -75,7 +96,3 @@ For multi-step tasks, state a brief plan:
 ```
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
-
-## 5. No Unsolicited Commits
-
-**NEVER commit changes unless the user explicitly asks you to.** Do not stage, commit, or push. If you think a commit is appropriate, ask first.
