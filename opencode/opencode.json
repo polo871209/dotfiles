@@ -34,6 +34,9 @@
     "reserved": 50000
   },
   "permission": {
+    "bash": {
+      "kubectl apply *": "deny"
+    },
     "external_directory": {
       "~/dotfiles/**": "allow",
       "~/app/**": "allow",

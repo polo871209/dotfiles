@@ -2,17 +2,3 @@
 [default_session]
 startup_command = "tmux rename-window opencode; tmux new-window; tmux new-window -d; oc"
 preview_command = "eza --all --git --icons --color=always {}"
-
-[[session]]
-name = "dotfiles"
-path = "~/dotfiles"
-startup_command = "spotatui"
-windows = ["opencode", "nvim"]
-
-[[window]]
-name = "opencode"
-startup_script = "oc"
-
-[[window]]
-name = "nvim"
-startup_script = "tmux new-window -d; nvim"
