@@ -29,6 +29,9 @@ require('conform').setup {
     yaml = { 'prettier' },
   },
   formatters = {
+    ['clang-format'] = {
+      prepend_args = { '--style={BasedOnStyle: Google, IndentWidth: 4, ReflowComments: false}' },
+    },
     jsonnetfmt = {
       args = { '--indent', '0', '--max-blank-lines', '2', '--sort-imports', '--string-style', 's', '--comment-style', 's', '--no-pad-objects', '-' },
     },
