@@ -24,7 +24,7 @@ export const SystemPromptPlugin: Plugin = async () => {
       // Keep env block
       const envMatch = original.match(/<env>[\s\S]*?<\/env>/)
       const envBlock = envMatch
-        ? "Here is some useful information about the environment you are running in:\n" + envMatch[0]
+        ? "Environment context you are running in:\n" + envMatch[0]
         : ""
 
       // Keep AGENTS.md instructions (format: "Instructions from: ...")
