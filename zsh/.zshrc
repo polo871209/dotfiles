@@ -3,6 +3,7 @@ path=(
   ~/dotfiles/scripts
   ~/.local/bin
   ~/.cargo/bin
+  ~/.bun/bin
   ~/.local/share/mise/shims
   "$GOPATH/bin"
   /opt/homebrew/opt/llvm/bin
@@ -78,28 +79,22 @@ zle -N edit-command-line
 bindkey -M vicmd 'v' edit-command-line
 
 # Aliases
-alias c="pbcopy"
 alias cafe="caffeinate -id weathr --hide-location"
-alias cls="clear"
-alias io="istioctl"
-alias lg="lazygit"
-alias ls="eza --group-directories-first -a --icons"
-alias j="just"
+alias gc="gcloud config configurations activate"
 alias k="kubectl"
 alias kctx="kubectx"
-alias ka="kubectl-argo-rollouts"
 alias kns="kubens"
-alias gc="gcloud config configurations activate"
 alias ks="k9s"
+alias lg="lazygit"
+alias ls="eza --group-directories-first -a --icons"
 alias n="nvim"
 alias o="open ."
 alias oc="opencode --port --continue"
-alias tf="terraform"
-
-## Configuration Reloads & Updates
-alias up="brew update && brew upgrade && brew cleanup"
+alias pwd="pwd | pbcopy"
 alias st="tmux source-file ${XDG_CONFIG_HOME:-$HOME}/tmux/tmux.conf"
 alias sz="source ${ZDOTDIR:-$HOME}/.zshrc"
+alias tf="terraform"
+alias up="brew update && brew upgrade && brew cleanup"
 
 ## Bat
 export BAT_PAGER="less -iRFK"
@@ -162,9 +157,6 @@ _eval_cache uv       uv       ""  uv generate-shell-completion zsh
 _eval_cache direnv   direnv   ""  direnv hook zsh
 _eval_cache zoxide   zoxide   ""  zoxide init zsh
 _eval_cache atuin    atuin    ""  atuin init zsh
-_eval_cache wt       wt       ""  wt config shell init zsh
 unfunction _eval_cache
 
 eval "$(oh-my-posh init zsh --config "${XDG_CONFIG_HOME}/ohmyposh/config.yaml")"
-eval "$(forge zsh plugin)"
-eval "$(forge zsh theme)"
