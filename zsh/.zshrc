@@ -40,14 +40,27 @@ export CARAPACE_BRIDGES="zsh,fish,bash,inshellisense"
 zstyle ':completion:*' menu select
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
 zstyle ':completion:*' format $'\e[2;37mCompleting %d\e[m'
-# Cache carapace init to avoid process substitution on every shell start
-_carapace_cache="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/carapace.zsh"
-if [[ ! -f "$_carapace_cache" ]]; then
-  mkdir -p "${_carapace_cache:h}"
-  carapace _carapace > "$_carapace_cache"
-fi
-source "$_carapace_cache"
-unset _carapace_cache
+
+_eval_cache() {
+  local cmd="$1" cache="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/$2.zsh"
+  local bin_path="${commands[$cmd]}"
+  local extra_dep="$3"
+
+  [[ -z "$bin_path" ]] && return
+
+  if [[ ! -f "$cache" || "$bin_path" -nt "$cache" || ( -n "$extra_dep" && "$extra_dep" -nt "$cache" ) ]]; then
+    mkdir -p "${cache:h}"
+    "${@:4}" > "$cache"
+  fi
+
+  if [[ ! -f "$cache.zwc" || "$cache" -nt "$cache.zwc" ]]; then
+    zcompile -R "$cache" 2>/dev/null || true
+  fi
+
+  source "$cache"
+}
+
+_eval_cache carapace carapace "" carapace _carapace
 
 # ZSH Plugin Sources — hardcode prefix to avoid forking brew each startup (~20ms)
 source /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh
@@ -76,6 +89,7 @@ zle -N zle-line-init
 # v to edit the command line in editor
 autoload -Uz edit-command-line
 zle -N edit-command-line
+zstyle ':zle:edit-command-line' editor nvim -c 'set filetype=bash'
 bindkey -M vicmd 'v' edit-command-line
 
 # Aliases
@@ -100,9 +114,6 @@ alias up="brew update && brew upgrade && brew cleanup"
 export BAT_PAGER="less -iRFK"
 alias bat="bat --color=always"
 alias -g -- --help='--help 2>&1 | bat --language=help --style=plain'
-h() {
-    "$@" --help 2>&1 | bat --plain --language=help
-}
 
 # FZF
 export FZF_DEFAULT_COMMAND="fd --hidden --strip-cwd-prefix --exclude .git --exclude .venv"
@@ -114,8 +125,7 @@ nf() {
     [[ -d "$file" ]] && cd "$file" && nvim || nvim "$file"
 }
 
-# sesh
-function sesh-sessions() {
+sesh-sessions() {
   {
     exec </dev/tty
     exec <&1
@@ -131,28 +141,13 @@ function sesh-sessions() {
     sesh connect "$session"
   }
 }
-alias -g s=sesh-sessions
+alias s=sesh-sessions
 
-# docker dive local image
 divelocal() {
     dive <(docker save "$1") --source=docker-archive "${@:2}"
 }
 
 # Tool Integrations
-# Cache eval outputs keyed by binary mtime — regenerate only when the tool updates
-_eval_cache() {
-  local cmd="$1" cache="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/$2.zsh"
-  local bin_path="${commands[$cmd]}"
-  local extra_dep="$3"  # optional extra file to watch (e.g. config)
-  # Regenerate if cache missing, binary newer, or extra dep newer than cache
-  if [[ ! -f "$cache" || "$bin_path" -nt "$cache" \
-        || ( -n "$extra_dep" && "$extra_dep" -nt "$cache" ) ]]; then
-    mkdir -p "${cache:h}"
-    "${@:4}" > "$cache"
-  fi
-  source "$cache"
-}
-
 _eval_cache uv       uv       ""  uv generate-shell-completion zsh
 _eval_cache direnv   direnv   ""  direnv hook zsh
 _eval_cache zoxide   zoxide   ""  zoxide init zsh

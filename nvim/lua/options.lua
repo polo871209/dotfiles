@@ -64,7 +64,8 @@ vim.o.cmdheight = 0
 
 -- Spell check
 vim.o.spell = false
-vim.o.spelllang = 'en_us'
+vim.o.spelllang = 'en'
+vim.o.spellfile = vim.fn.stdpath 'config' .. '/spell/en.utf-8.add'
 
 -- Concealment level for obsidian.nvim
 vim.o.conceallevel = 1
