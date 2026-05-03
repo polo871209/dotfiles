@@ -19,7 +19,7 @@
     },
     "diffview.nvim": {
       "rev": "4516612fe98ff56ae0415a259ff6361a89419b0a",
-      "src": "https://github.com/sindrets/diffview.nvim"
+      "src": "git@github.com:sindrets/diffview.nvim"
     },
     "flash.nvim": {
       "rev": "fcea7ff883235d9024dc41e638f164a450c14ca2",
@@ -35,11 +35,11 @@
     },
     "image.nvim": {
       "rev": "da2be65c153ba15a14a342b05591652a6df70d58",
-      "src": "https://github.com/3rd/image.nvim"
+      "src": "git@github.com:3rd/image.nvim"
     },
     "mason-nvim-dap.nvim": {
       "rev": "9a10e096703966335bd5c46c8c875d5b0690dade",
-      "src": "https://github.com/jay-babu/mason-nvim-dap.nvim"
+      "src": "git@github.com:jay-babu/mason-nvim-dap.nvim"
     },
     "mason-tool-installer.nvim": {
       "rev": "443f1ef8b5e6bf47045cb2217b6f748a223cf7dc",
@@ -55,11 +55,11 @@
     },
     "neo-tree.nvim": {
       "rev": "84c75e7a7e443586f60508d12fc50f90d9aee14e",
-      "src": "https://github.com/nvim-neo-tree/neo-tree.nvim"
+      "src": "git@github.com:nvim-neo-tree/neo-tree.nvim"
     },
     "nui.nvim": {
       "rev": "de740991c12411b663994b2860f1a4fd0937c130",
-      "src": "https://github.com/MunifTanjim/nui.nvim"
+      "src": "git@github.com:MunifTanjim/nui.nvim"
     },
     "nvim-autopairs": {
       "rev": "59bce2eef357189c3305e25bc6dd2d138c1683f5",
@@ -67,23 +67,23 @@
     },
     "nvim-dap": {
       "rev": "4f5deb110d9ff8994d96c21df95e2271d11214f9",
-      "src": "https://github.com/mfussenegger/nvim-dap"
+      "src": "git@github.com:mfussenegger/nvim-dap"
     },
     "nvim-dap-go": {
       "rev": "b4421153ead5d726603b02743ea40cf26a51ed5f",
-      "src": "https://github.com/leoluz/nvim-dap-go"
+      "src": "git@github.com:leoluz/nvim-dap-go"
     },
     "nvim-dap-python": {
       "rev": "1808458eba2b18f178f990e01376941a42c7f93b",
-      "src": "https://github.com/mfussenegger/nvim-dap-python"
+      "src": "git@github.com:mfussenegger/nvim-dap-python"
     },
     "nvim-dap-ui": {
       "rev": "f5b6673f374626515401c5bc51b005f784a4f252",
-      "src": "https://github.com/rcarriga/nvim-dap-ui"
+      "src": "git@github.com:rcarriga/nvim-dap-ui"
     },
     "nvim-dap-virtual-text": {
       "rev": "fbdb48c2ed45f4a8293d0d483f7730d24467ccb6",
-      "src": "https://github.com/theHamsta/nvim-dap-virtual-text"
+      "src": "git@github.com:theHamsta/nvim-dap-virtual-text"
     },
     "nvim-lint": {
       "rev": "4b03656c09c1561f89b6aa0665c15d292ba9499d",
@@ -91,7 +91,7 @@
     },
     "nvim-nio": {
       "rev": "21f5324bfac14e22ba26553caf69ec76ae8a7662",
-      "src": "https://github.com/nvim-neotest/nvim-nio"
+      "src": "git@github.com:nvim-neotest/nvim-nio"
     },
     "nvim-treesitter": {
       "rev": "7caec274fd19c12b55902a5b795100d21531391f",
@@ -99,11 +99,11 @@
     },
     "nvim-web-devicons": {
       "rev": "d7462543c9e366c0d196c7f67a945eaaf5d99414",
-      "src": "https://github.com/nvim-tree/nvim-web-devicons"
+      "src": "git@github.com:nvim-tree/nvim-web-devicons"
     },
     "plenary.nvim": {
       "rev": "b9fd5226c2f76c951fc8ed5923d85e4de065e509",
-      "src": "https://github.com/nvim-lua/plenary.nvim"
+      "src": "git@github.com:nvim-lua/plenary.nvim"
     },
     "quicker.nvim": {
       "rev": "063cc44da1eef8681bbd653b29d3bc961780886a",
@@ -111,7 +111,7 @@
     },
     "render-markdown.nvim": {
       "rev": "c7188a8f9d2953696b6303caccbf39c51fa2c1b1",
-      "src": "https://github.com/MeanderingProgrammer/render-markdown.nvim"
+      "src": "git@github.com:MeanderingProgrammer/render-markdown.nvim"
     },
     "snacks.nvim": {
       "rev": "ad9ede6a9cddf16cedbd31b8932d6dcdee9b716e",

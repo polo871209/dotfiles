@@ -1,12 +1,18 @@
 # Binaries
 *.a
-*.dylib
 *.dll
+*.dylib
 *.exe
 *.o
+*.out
 *.so
 bin/
 main
+
+# Agent
+**/.claude/settings.local.json
+.opencode/package-lock.json
+opencode/package-lock.json
 
 # Editor
 .nvim-run
@@ -14,9 +20,6 @@ main
 # Env
 .env
 .envrc
-
-# Go
-*.out
 
 # Logs
 *.log
@@ -35,8 +38,6 @@ logs/
 venv
 .Python
 __pycache__/
-
-# Ruff
 .ruff_cache/
 
 # Terraform
@@ -44,8 +45,6 @@ __pycache__/
 *.tfstate
 *.tfstate.*
 
-# OpenCode
-.opencode/package-lock.json
-opencode/package-lock.json
-
-**/.claude/settings.local.json
+# Zig
+.zig-cache/
+zig-out/

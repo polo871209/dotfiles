@@ -10,12 +10,11 @@ M.dirs = {
   '.vite',
   '.vscode',
   '.windsurf',
+  '.zig-cache',
+  'zig-out',
 }
 
 M.files = {
-  '*.lock',
-  '*-lock.json',
-  '*-lock.yaml',
   '*.7z',
   '*.avif',
   '*.bin',
@@ -28,9 +27,7 @@ M.files = {
   '*.ico',
   '*.jpeg',
   '*.jpg',
-  'lock.json',
-  'a.out',
-  'main',
+  '*.lock',
   '*.mov',
   '*.mp4',
   '*.otf',
@@ -43,6 +40,11 @@ M.files = {
   '*.ttf',
   '*.webp',
   '*.zip',
+  '*-lock.json',
+  '*-lock.yaml',
+  'a.out',
+  'lock.json',
+  'main',
 }
 
 M.names = vim.list_extend(vim.deepcopy(M.dirs), { 'lock.json', 'a.out', 'main' })
