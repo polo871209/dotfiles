@@ -1,4 +1,8 @@
 # Dotfiles
 
-Already uses GNU Stow to symlink config files into `~/.config`.
-Symlinks are managed by the user — only focus on files in this repo.
+## CRITICAL RULES — MUST FOLLOW
+
+**ONLY modify files inside `/Users/polo/dotfiles/`.**
+
+- **NEVER read, write, or edit files under `~/.config/` directly.**
+- This repo uses GNU Stow — symlinks from `~/.config/` point back into this repo. Always edit the source files here, not the symlink targets.

@@ -44,7 +44,7 @@
 
 ## which search mode to use
 ## possible values: prefix, fulltext, fuzzy, skim
-# search_mode = "fuzzy"
+search_mode = "daemon-fuzzy"
 
 ## which filter mode to use by default
 ## possible values: "global", "host", "session", "session-preload", "directory", "workspace"
@@ -57,7 +57,7 @@
 ## To use workspace mode by default when available, set this to true and
 ## set filter_mode to "workspace" or leave it unspecified and
 ## set search.filters to include "workspace" before other filter modes.
-# workspaces = false
+workspaces = true
 
 ## which filter mode to use when atuin is invoked from a shell up-key binding
 ## the accepted values are identical to those of "filter_mode"
@@ -118,10 +118,27 @@
 ## with ^ or end with $, they'll match anywhere in the command.
 ## For details on the supported regular expression syntax, see
 ## https://docs.rs/regex/latest/regex/#syntax
-# history_filter = [
-#   "^secret-cmd",
-#   "^innocuous-cmd .*--secret=.+",
-# ]
+history_filter = [
+  # Screen clearing — no value in history
+  "^cls$",
+  "^clear$",
+
+  # Bare directory listing with no useful args
+  "^ls$",
+  "^ls -la?$",
+
+  # Navigation noise
+  "^cd$",
+  "^cd \\.\\.$",
+  "^cd -$",
+  "^pwd$",
+
+  # Bare zoxide with no destination
+  "^z$",
+
+  # Bare commands with 1-3 chars and no args — aliases not worth searching back for
+  "^.{1,3}$",
+]
 
 ## prevent commands run with cwd matching any of these regexes from being written
 ## to history. Note that these regular expressions are unanchored, i.e. if they don't
@@ -260,7 +277,8 @@ records = true
 
 [daemon]
 ## Enables using the daemon to sync. Requires the daemon to be running in the background. Start it with `atuin daemon`
-# enabled = false
+enabled = true
+autostart = true
 
 ## How often the daemon should sync in seconds
 # sync_frequency = 300
@@ -298,7 +316,7 @@ records = true
 ## The list of enabled filter modes, in order of priority.
 ## The "workspace" mode is skipped when not in a workspace or workspaces = false.
 ## Default filter mode can be overridden with the filter_mode setting.
-# filters = [ "global", "host", "session", "session-preload", "workspace", "directory" ]
+filters = ["global", "workspace"]
 
 [tmux]
 ## Enable using atuin with tmux popup (requires tmux >= 3.2)
@@ -340,6 +358,8 @@ enabled = false
 ## Default:
 # columns = ["duration", "time", "command"]
 ##
+columns = ["exit", "duration", "time", "command"]
+##
 ## Examples:
 ##
 ## Minimal - more space for commands:
@@ -356,3 +376,13 @@ enabled = false
 ##
 ## Make directory expand instead of command:
 # columns = ["duration", "time", { type = "directory", expand = true }, { type = "command", expand = false }]
+
+[ai]
+enabled = false
+
+[keymap.emacs]
+# When cursor is already at the start, copy the selected command instead of exiting
+"left" = [
+  { when = "cursor-at-start", action = "copy" },
+  { action = "cursor-left" },
+]

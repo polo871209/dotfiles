@@ -6,6 +6,8 @@
       "extensions": [".py"]
     }
   },
+  // plugin order matters — keep the order
+  "plugin": ["./plugins/system-prompt.ts", "opencode-claude-auth@latest"],
   "lsp": {
     "cue": {
       "command": ["cue", "lsp", "serve"],
@@ -25,14 +27,27 @@
   "tools": {
     "gcp_*": false
   },
+  "compaction": {
+    "reserved": 50000
+  },
   "permission": {
+    "bash": {
+      "kubectl apply *": "deny"
+    },
     "external_directory": {
       "~/dotfiles/**": "allow",
       "~/app/**": "allow",
       "~/work/**": "allow",
       "~/vaults/**": "allow",
-      "/tmp/**": "allow",
-      "/private/**": "allow"
+      "/tmp/**": "allow"
+    }
+  },
+  "agent": {
+    "build": {
+      "color": "#ea6962"
+    },
+    "plan": {
+      "color": "#689d6a"
     }
   }
 }

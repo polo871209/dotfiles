@@ -6,6 +6,10 @@
 *.o
 *.so
 bin/
+main
+
+# Editor
+.nvim-run
 
 # Env
 .env
@@ -23,9 +27,6 @@ logs/
 .DS_Store
 .LSOverride
 
-# Nvim lock-file
-lazy-lock.json
-
 # Python
 *.pyd
 *.pyc
@@ -42,3 +43,9 @@ __pycache__/
 .terraform/
 *.tfstate
 *.tfstate.*
+
+# OpenCode
+.opencode/package-lock.json
+opencode/package-lock.json
+
+**/.claude/settings.local.json

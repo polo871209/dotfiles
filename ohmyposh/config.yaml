@@ -82,13 +82,14 @@ blocks:
           - "{{if eq .Code 0}}p:gruvbox_blue{{end}}"
     newline: true
 tooltips:
-  - template:  {{.Project}}:{{.Region}}
+  - template:  {{.ActiveConfig}}:{{.Project}}:{{.Region}}
     foreground: p:google_yellow
     background: transparent
     type: gcp
     style: plain
     tips:
       - gcloud
+      - gc
 palette:
   google_yellow: "#ffce44"
   grey: "#6c6c6c"

@@ -24,6 +24,12 @@ touch ~/.hushlogin
 ./zen-browser/install.sh
 ```
 
+### Setup Atuin
+
+```bash
+atuin setup
+```
+
 ### Setup SSH and Git Authentication
 
 ```bash
@@ -58,10 +64,6 @@ chsh -s /opt/homebrew/bin/nu
 ### Note-Taking Vault
 
 Requires Google Drive to be logged in first:
-
-```bash
-mkdir ~/vaults && cd ~/Google\ Drive/My\ Drive/vaults && stow .
-```
 
 ### Python Virtual Environment with direnv
 

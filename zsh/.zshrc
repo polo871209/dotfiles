@@ -1,3 +1,18 @@
+typeset -U path
+path=(
+  ~/dotfiles/scripts
+  ~/.local/bin
+  ~/.cargo/bin
+  ~/.bun/bin
+  ~/.local/share/mise/shims
+  "$GOPATH/bin"
+  /opt/homebrew/opt/llvm/bin
+  /opt/homebrew/opt/node/bin
+  /opt/homebrew/opt/libpq/bin
+  /Applications/Obsidian.app/Contents/MacOS
+  $path
+)
+
 setopt prompt_subst
 
 # History Configuration
@@ -14,14 +29,38 @@ setopt SHARE_HISTORY             # Share history between all sessions
 
 # Autocompletion Configuration
 autoload -Uz compinit
-# -u skips compaudit (insecure dir check) which costs ~15ms every run
-compinit -u
+# Regenerate dump only once per day; use cached version otherwise (~15ms saved/run)
+if [[ -n "${ZDOTDIR:-$HOME}/.zcompdump"(#qN.mh+24) ]]; then
+  compinit -u
+else
+  compinit -u -C
+fi
 
 export CARAPACE_BRIDGES="zsh,fish,bash,inshellisense"
 zstyle ':completion:*' menu select
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
 zstyle ':completion:*' format $'\e[2;37mCompleting %d\e[m'
-source <(carapace _carapace)
+
+_eval_cache() {
+  local cmd="$1" cache="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/$2.zsh"
+  local bin_path="${commands[$cmd]}"
+  local extra_dep="$3"
+
+  [[ -z "$bin_path" ]] && return
+
+  if [[ ! -f "$cache" || "$bin_path" -nt "$cache" || ( -n "$extra_dep" && "$extra_dep" -nt "$cache" ) ]]; then
+    mkdir -p "${cache:h}"
+    "${@:4}" > "$cache"
+  fi
+
+  if [[ ! -f "$cache.zwc" || "$cache" -nt "$cache.zwc" ]]; then
+    zcompile -R "$cache" 2>/dev/null || true
+  fi
+
+  source "$cache"
+}
+
+_eval_cache carapace carapace "" carapace _carapace
 
 # ZSH Plugin Sources — hardcode prefix to avoid forking brew each startup (~20ms)
 source /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh
@@ -50,39 +89,31 @@ zle -N zle-line-init
 # v to edit the command line in editor
 autoload -Uz edit-command-line
 zle -N edit-command-line
+zstyle ':zle:edit-command-line' editor nvim -c 'set filetype=bash'
 bindkey -M vicmd 'v' edit-command-line
 
 # Aliases
-alias c="pbcopy"
-alias cafe="caffeinate -id weathr"
-alias cls="clear"
-alias io="istioctl"
-alias lg="lazygit"
-alias ls="eza --group-directories-first -a --icons"
-alias j="just"
+alias cafe="caffeinate -id weathr --hide-location"
+alias gc="gcloud config configurations activate"
 alias k="kubectl"
 alias kctx="kubectx"
-alias ka="kubectl-argo-rollouts"
 alias kns="kubens"
 alias ks="k9s"
+alias lg="lazygit"
+alias ls="eza --group-directories-first -a --icons"
 alias n="nvim"
 alias o="open ."
 alias oc="opencode --port --continue"
-alias tf="terraform"
-
-## Configuration Reloads & Updates
-alias up="brew update && brew upgrade && mise upgrade && brew upgrade --greedy && brew cleanup"
+alias pwd="pwd | pbcopy"
 alias st="tmux source-file ${XDG_CONFIG_HOME:-$HOME}/tmux/tmux.conf"
 alias sz="source ${ZDOTDIR:-$HOME}/.zshrc"
+alias tf="terraform"
+alias up="brew update && brew upgrade && brew cleanup"
 
 ## Bat
 export BAT_PAGER="less -iRFK"
 alias bat="bat --color=always"
-alias -g -- -h='-h 2>&1 | bat --language=help --style=plain'
 alias -g -- --help='--help 2>&1 | bat --language=help --style=plain'
-h() {
-    "$@" --help 2>&1 | bat --plain --language=help
-}
 
 # FZF
 export FZF_DEFAULT_COMMAND="fd --hidden --strip-cwd-prefix --exclude .git --exclude .venv"
@@ -94,8 +125,7 @@ nf() {
     [[ -d "$file" ]] && cd "$file" && nvim || nvim "$file"
 }
 
-# sesh
-function sesh-sessions() {
+sesh-sessions() {
   {
     exec </dev/tty
     exec <&1
@@ -111,33 +141,16 @@ function sesh-sessions() {
     sesh connect "$session"
   }
 }
-alias -g s=sesh-sessions
+alias s=sesh-sessions
 
-# docker dive local image
 divelocal() {
     dive <(docker save "$1") --source=docker-archive "${@:2}"
 }
 
-# Tool Integrations — outputs cached to ~/.cache/zsh/ and regenerated daily
-# To force refresh: rm ~/.cache/zsh/*.zsh && exec zsh
-_zsh_cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/zsh"
-[[ -d "$_zsh_cache_dir" ]] || mkdir -p "$_zsh_cache_dir"
-
-_zsh_init_cache() {
-  local cache="$_zsh_cache_dir/$1.zsh"
-  shift
-  if [[ ! -f "$cache" || -n "$cache"(#qN.mh+24) ]]; then
-    "$@" > "$cache" 2>/dev/null
-  fi
-  source "$cache"
-}
-
-_zsh_init_cache direnv    direnv hook zsh
-_zsh_init_cache fzf       fzf --zsh
-_zsh_init_cache zoxide    zoxide init zsh
-_zsh_init_cache mise      mise activate zsh
-_zsh_init_cache atuin     atuin init zsh
-_zsh_init_cache worktrunk wt config shell init zsh
-_zsh_init_cache ohmyposh  oh-my-posh init zsh --config "${XDG_CONFIG_HOME}/ohmyposh/config.yaml"
-
-unset _zsh_cache_dir
+# Tool Integrations
+_eval_cache uv       uv       ""  uv generate-shell-completion zsh
+_eval_cache direnv   direnv   ""  direnv hook zsh
+_eval_cache zoxide   zoxide   ""  zoxide init zsh
+_eval_cache atuin    atuin    ""  atuin init zsh
+_eval_cache oh-my-posh oh-my-posh "${XDG_CONFIG_HOME}/ohmyposh/config.yaml" oh-my-posh init zsh --config "${XDG_CONFIG_HOME}/ohmyposh/config.yaml" --eval
+unfunction _eval_cache
