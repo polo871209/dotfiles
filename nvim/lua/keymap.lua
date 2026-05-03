@@ -13,7 +13,18 @@ vim.keymap.set('n', 'c', '"_c', { desc = 'Change without yanking' })
 vim.keymap.set('v', '<leader>p', '"_dP', { desc = 'Paste without replacing clipboard' })
 
 -- Diffview toggle
+local diffview_loaded = false
+local function load_diffview()
+  if diffview_loaded then return end
+  diffview_loaded = true
+  vim.pack.add {
+    'https://github.com/nvim-lua/plenary.nvim',
+    'https://github.com/sindrets/diffview.nvim',
+  }
+end
+
 local function toggle_diffview()
+  load_diffview()
   local view = require('diffview.lib').get_current_view()
   if view then
     vim.cmd 'DiffviewClose'
@@ -23,7 +34,10 @@ local function toggle_diffview()
 end
 
 vim.keymap.set('n', '<leader>gd', toggle_diffview, { desc = '[G]it [D]iff Toggle' })
-vim.keymap.set('n', '<leader>gc', ':DiffviewOpen ', { desc = '[G]it [C]ompare selection' })
+vim.keymap.set('n', '<leader>gc', function()
+  load_diffview()
+  vim.api.nvim_feedkeys(':DiffviewOpen ', 'n', false)
+end, { desc = '[G]it [C]ompare selection' })
 
 -- Toggle diagnostics location list
 vim.keymap.set('n', '<leader>tt', function()
