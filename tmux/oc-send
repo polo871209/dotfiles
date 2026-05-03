@@ -60,7 +60,7 @@ if [[ -z "$SESSION_JSON" || "$SESSION_JSON" == "[]" ]]; then
   exit 1
 fi
 
-SESSION_ID=$(echo "$SESSION_JSON" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+SESSION_ID=$(python3 -c 'import json, sys; print(json.load(sys.stdin)[0]["id"])' <<< "$SESSION_JSON" 2>/dev/null || true)
 if [[ -z "$SESSION_ID" ]]; then
   echo "oc-send: could not parse session id" >&2
   exit 1
@@ -107,6 +107,6 @@ PAYLOAD=$(printf '{"parts":[{"type":"text","text":%s}]}' \
 curl -sf -X POST \
   -H 'Content-Type: application/json' \
   "$BASE/session/$SESSION_ID/prompt_async" \
-  -d "$PAYLOAD" > /dev/null 2>&1 || true
+  -d "$PAYLOAD" > /dev/null
 
 echo "oc-send: sent to opencode session $SESSION_ID"

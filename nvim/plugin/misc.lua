@@ -3,16 +3,14 @@ vim.pack.add {
   'https://github.com/folke/flash.nvim',
   'https://github.com/windwp/nvim-autopairs',
   'https://github.com/NMAC427/guess-indent.nvim',
-  'https://github.com/ekalinin/Dockerfile.vim',
   'https://github.com/lewis6991/gitsigns.nvim',
-  'https://github.com/sindrets/diffview.nvim',
 }
 
 -- Tmux navigation
-vim.keymap.set('n', '<c-h>', '<cmd><C-U>TmuxNavigateLeft<cr>')
-vim.keymap.set('n', '<c-j>', '<cmd><C-U>TmuxNavigateDown<cr>')
-vim.keymap.set('n', '<c-k>', '<cmd><C-U>TmuxNavigateUp<cr>')
-vim.keymap.set('n', '<c-l>', '<cmd><C-U>TmuxNavigateRight<cr>')
+vim.keymap.set('n', '<c-h>', '<cmd>TmuxNavigateLeft<cr>')
+vim.keymap.set('n', '<c-j>', '<cmd>TmuxNavigateDown<cr>')
+vim.keymap.set('n', '<c-k>', '<cmd>TmuxNavigateUp<cr>')
+vim.keymap.set('n', '<c-l>', '<cmd>TmuxNavigateRight<cr>')
 
 -- Flash jump
 vim.keymap.set('n', 's', function() require('flash').jump() end, { desc = 'Flash' })

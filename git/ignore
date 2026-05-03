@@ -6,6 +6,7 @@
 *.o
 *.so
 bin/
+main
 
 # Editor
 .nvim-run
