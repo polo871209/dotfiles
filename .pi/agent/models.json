@@ -1,0 +1,19 @@
+{
+  "providers": {
+    "omlx": {
+      "baseUrl": "http://127.0.0.1:7777/v1",
+      "api": "openai-completions",
+      "apiKey": "random",
+      "authHeader": true,
+      "models": [
+        {
+          "id": "gemma-4-E4B-it-MLX-4bit",
+          "name": "gemma-4-E4B-it-MLX-4bit",
+          "reasoning": false,
+          "input": ["text"],
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        }
+      ]
+    }
+  }
+}
