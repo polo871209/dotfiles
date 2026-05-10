@@ -14,4 +14,5 @@ export LESS=-iRFX
 export MANPAGER="bat -plman"
 export OPENCODE_DISABLE_CLAUDE_CODE=1
 export PAGER="bat --paging=always"
+export PI_CODING_AGENT_DIR="$XDG_CONFIG_HOME/.pi/agent"
 export TERM=xterm-256color

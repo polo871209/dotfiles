@@ -126,6 +126,6 @@ vim.keymap.set('n', '<leader>rr', function()
   vim.fn.system(string.format('tmux select-window -t %s', target))
 end, { desc = '[R]un tmux [R]un' })
 
--- OpenCode integration
-vim.keymap.set('x', '<leader><leader>', function() require('opencode').send_selection() end, { desc = 'Send selection to OpenCode' })
-vim.keymap.set('n', '<leader>da', function() require('opencode').send_diagnostics() end, { desc = '[D]iagnostic [A]sk' })
+-- pi integration
+vim.keymap.set('x', '<leader><leader>', function() require('pi').send_selection() end, { desc = 'Send selection to pi' })
+vim.keymap.set('n', '<leader>da', function() require('pi').send_diagnostics() end, { desc = '[D]iagnostic [A]sk pi' })

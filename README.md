@@ -7,7 +7,7 @@
 - Prompt: [Oh-my-posh](https://ohmyposh.dev/)
 - Completer: [Carapace](https://carapace.sh/)
 - History: [Atuin](https://docs.atuin.sh/cli/)
-- AI: [Opencode](https://opencode.ai/)
+- AI Agent: [pi](https://pi.dev/)
 - Browser: [Zen](https://zen-browser.app/)
 
 ## Mac Quick Setup
@@ -19,6 +19,7 @@ git clone https://github.com/polo871209/dotfiles.git && cd dotfiles
 cat ~/dotfiles/dot_zshenv >| ~/.zshenv
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 brew bundle install
+bun install -g @earendil-works/pi-coding-agent
 stow .
 touch ~/.hushlogin
 ./zen-browser/install.sh

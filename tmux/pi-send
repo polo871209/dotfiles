@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# pi-send — Send tmux pane output / message to the pi running in this tmux session.
+#
+# Requires the .pi/extensions/tmux-bridge.ts extension to be loaded in the
+# pi instance running somewhere in this same tmux session.
+#
+# Usage:
+#   pi-send "message"                    # message only
+#   pi-send -p <pane_id> "message"       # capture last 100 lines of pane + message
+#   echo "..." | pi-send "message"       # use stdin (e.g. visual selection) + message
+
+set -euo pipefail
+
+if [[ -z "${TMUX:-}" ]]; then
+  echo "pi-send: not running inside a tmux session" >&2
+  exit 1
+fi
+
+MESSAGE=""
+LINES=100
+PANE_ID=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -p) PANE_ID="$2"; shift 2 ;;
+    *)  MESSAGE="$1"; shift ;;
+  esac
+done
+
+# --- Socket discovery (must match tmux-bridge.ts) ---
+
+SESSION_ID=$(tmux display-message -p '#{session_id}')
+SAFE=$(printf '%s' "$SESSION_ID" | sed 's/[^a-zA-Z0-9_-]/_/g')
+TMPD="${TMPDIR:-/tmp}"
+TMPD="${TMPD%/}"
+SOCK="$TMPD/pi-tmux-${SAFE}/bridge.sock"
+
+if [[ ! -S "$SOCK" ]]; then
+  echo "pi-send: no pi listener for this tmux session" >&2
+  echo "         expected socket: $SOCK" >&2
+  echo "         is pi running with .pi/extensions/tmux-bridge.ts loaded?" >&2
+  exit 1
+fi
+
+# --- Gather content ---
+
+if [[ -n "$PANE_ID" ]]; then
+  PANE_OUTPUT=$(tmux capture-pane -p -J -S "-$LINES" -t "$PANE_ID" 2>/dev/null | sed '/^[[:space:]]*$/d' || true)
+elif [[ ! -t 0 ]]; then
+  PANE_OUTPUT=$(cat)
+else
+  PANE_OUTPUT=""
+fi
+
+if [[ -n "$PANE_OUTPUT" ]]; then
+  if [[ -n "$MESSAGE" ]]; then
+    TEXT="terminal output:
+
+$MESSAGE
+
+\`\`\`
+$PANE_OUTPUT
+\`\`\`"
+  else
+    TEXT="terminal output:
+
+\`\`\`
+$PANE_OUTPUT
+\`\`\`"
+  fi
+else
+  if [[ -z "$MESSAGE" ]]; then
+    echo "pi-send: nothing to send (no message, no pane, no stdin)" >&2
+    exit 1
+  fi
+  TEXT="$MESSAGE"
+fi
+
+# --- Send ---
+
+PAYLOAD=$(printf '%s' "$TEXT" | python3 -c 'import json,sys; print(json.dumps({"text": sys.stdin.read()}))')
+
+# macOS BSD nc supports -U for Unix sockets; -w bounds the wait.
+printf '%s\n' "$PAYLOAD" | nc -U -w 1 "$SOCK"
+
+tmux display-message "pi-send: sent to pi (#{session_name})"
+echo "pi-send: sent to pi (tmux session $SESSION_ID)"
