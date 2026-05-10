@@ -1,0 +1,25 @@
+{
+  "defaultProvider": "anthropic",
+  "defaultModel": "claude-opus-4-7",
+  "defaultThinkingLevel": "minimal",
+  "theme": "catppuccin-mocha",
+  "quietStartup": true,
+  "packages": [
+    "npm:@gotgenes/pi-anthropic-auth",
+    "npm:pi-web-access",
+    "npm:pi-rewind",
+    "npm:pi-subagents",
+    "npm:@plannotator/pi-extension",
+    "npm:@juicesharp/rpiv-ask-user-question"
+  ],
+  "warnings": {
+    "anthropicExtraUsage": false
+  },
+  "compaction": {
+    "reserveTokens": 32768
+  },
+  "branchSummary": {
+    "reserveTokens": 32768
+  },
+  "lastChangelogVersion": "0.74.0"
+}
