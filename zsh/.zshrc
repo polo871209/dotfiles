@@ -153,6 +153,5 @@ _eval_cache uv       uv       ""  uv generate-shell-completion zsh
 _eval_cache direnv   direnv   ""  direnv hook zsh
 _eval_cache zoxide   zoxide   ""  zoxide init zsh
 _eval_cache atuin    atuin    ""  atuin init zsh
+_eval_cache oh-my-posh oh-my-posh "${XDG_CONFIG_HOME}/ohmyposh/config.yaml" oh-my-posh init zsh --config "${XDG_CONFIG_HOME}/ohmyposh/config.yaml" --eval
 unfunction _eval_cache
-
-eval "$(oh-my-posh init zsh --config "${XDG_CONFIG_HOME}/ohmyposh/config.yaml")"
