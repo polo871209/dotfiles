@@ -44,6 +44,7 @@ local parsers = {
   'vim',
   'vimdoc',
   'yaml',
+  'zig',
 }
 
 vim.api.nvim_create_user_command('TSInstallConfigured', function()

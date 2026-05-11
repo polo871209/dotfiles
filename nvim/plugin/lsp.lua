@@ -14,6 +14,7 @@ require('mason-tool-installer').setup {
     'hadolint',
     'stylua',
     'prettier',
+    'zls',
   },
 }
 
@@ -36,6 +37,7 @@ vim.lsp.enable {
   'ty',
   'vtsls',
   'yamlls',
+  'zls',
 }
 
 -- Neovim 0.11+ already maps globally: grn, gra, grr, gri, grt, K

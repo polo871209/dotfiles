@@ -104,11 +104,12 @@ alias ls="eza --group-directories-first -a --icons"
 alias n="nvim"
 alias o="open ."
 alias oc="opencode --port --continue"
+p() { clear; command pi --continue "$@"; clear; }
 alias pwd="pwd | pbcopy"
 alias st="tmux source-file ${XDG_CONFIG_HOME:-$HOME}/tmux/tmux.conf"
 alias sz="source ${ZDOTDIR:-$HOME}/.zshrc"
 alias tf="terraform"
-alias up="brew update && brew upgrade && brew cleanup"
+alias up="brew update && brew upgrade && brew cleanup && pi update"
 
 ## Bat
 export BAT_PAGER="less -iRFK"
