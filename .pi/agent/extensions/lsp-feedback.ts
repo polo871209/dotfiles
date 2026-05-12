@@ -52,6 +52,25 @@ const FIXER_SYSTEM = `Fix only the listed LSP/lint issues in the file. Change no
 const TRACKED_TOOLS = new Set(["edit", "write", "str_replace", "create"]);
 const FIXABLE_SEVERITIES: ReadonlySet<Severity> = new Set(["error", "warn"]);
 
+const isRebasing = (cwd: string): boolean => {
+  let dir = cwd;
+  for (let i = 0; i < 8; i++) {
+    const gitDir = path.join(dir, ".git");
+    if (fs.existsSync(gitDir)) {
+      return (
+        fs.existsSync(path.join(gitDir, "rebase-merge")) ||
+        fs.existsSync(path.join(gitDir, "rebase-apply")) ||
+        fs.existsSync(path.join(gitDir, "MERGE_HEAD")) ||
+        fs.existsSync(path.join(gitDir, "CHERRY_PICK_HEAD"))
+      );
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return false;
+};
+
 const toAbs = (p: string, cwd: string): string =>
   path.isAbsolute(p) ? p : path.resolve(cwd, p);
 
@@ -381,6 +400,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("agent_end", async (_event, ctx) => {
     if (reported || touched.size === 0) return;
+    if (isRebasing(ctx.cwd ?? cwd)) return;
     lastFiles = Array.from(touched);
     touched.clear();
     reported = true;

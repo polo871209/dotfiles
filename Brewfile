@@ -43,6 +43,7 @@ brew "sqlite", link: true
 brew "node"
 brew "nushell"
 brew "prek"
+brew "python@3.14"
 brew "ripgrep"
 brew "ruff"
 brew "sesh"

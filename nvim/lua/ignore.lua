@@ -4,7 +4,6 @@ M.dirs = {
   '.claude',
   '.codex',
   '.git',
-  '.specify',
   '.swarm',
   '.terraform',
   '.vite',
@@ -12,6 +11,7 @@ M.dirs = {
   '.windsurf',
   '.zig-cache',
   'zig-out',
+  'vendor',
 }
 
 M.files = {
