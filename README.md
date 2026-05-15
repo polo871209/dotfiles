@@ -20,7 +20,7 @@ cat ~/dotfiles/dot_zshenv >| ~/.zshenv
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 brew bundle install
 bun install -g @earendil-works/pi-coding-agent
-stow .
+just link
 touch ~/.hushlogin
 ./zen-browser/install.sh
 ```
