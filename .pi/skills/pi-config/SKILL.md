@@ -1,6 +1,6 @@
 ---
 name: pi-config
-description: How Pi coding agent is configured in this repo — settings, extensions, themes, and skills locations.
+description: Read before editing or creating any file under .pi/ (settings, keybindings, extensions, themes, system prompt). Explains Pi config layout, stow setup, and PI_CODING_AGENT_DIR resolution in this repo.
 ---
 
 # Pi Configuration
@@ -9,11 +9,10 @@ description: How Pi coding agent is configured in this repo — settings, extens
 
 This repo uses GNU Stow with target `~/.config`, so `.pi/` stows to `~/.config/.pi/` — which resolves to `PI_CODING_AGENT_DIR`.
 
-
 ## File Locations (in repo)
 
-| File                | Purpose            |
-| ------------------- | ------------------ |
+| File                         | Purpose            |
+| ---------------------------- | ------------------ |
 | `.pi/agent/settings.json`    | Global Pi settings |
 | `.pi/agent/keybindings.json` | Keybindings        |
 | `.pi/agent/extensions/`      | Extensions         |
@@ -23,4 +22,5 @@ Note: Pi only reads files under `.pi/agent/` (since `PI_CODING_AGENT_DIR` points
 
 ## Skills
 
-Skills live in `.agents/skills/` — auto-discovered by Pi for any session inside this repo.
+- Project skills (this repo only): `.pi/skills/`
+- Global skills (linked into `~/.agents/skills/` via `just link`): `.agents/skills/`
