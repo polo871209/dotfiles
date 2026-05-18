@@ -5,10 +5,13 @@
 // The default implementation uses `cli-highlight` (highlight.js for CLI),
 // which often produces drab/incorrect output (e.g. no coloring on JSON).
 //
-// This extension monkey-patches `Markdown.prototype` with a property
-// descriptor for `theme` that wraps any incoming theme object in a Proxy.
-// The Proxy intercepts `theme.highlightCode` and returns a function that
-// shells out to `bat --color=always --style=plain --paging=never`.
+// This extension monkey-patches `Markdown.prototype.render` and swaps
+// `this.theme.highlightCode` to a function that shells out to `bat
+// --color=always --style=plain --paging=never`. We can't patch the `theme`
+// property via Object.defineProperty on the prototype because Markdown
+// declares `theme;` as an ES2022 class field — the constructor's
+// `this.theme = theme` uses [[DefineOwnProperty]] which bypasses prototype
+// setters.
 //
 // `bat` is slow per-invocation (~50ms), so results are memoized by
 // (lang, content) forever. After first render of a given block, it's free.
@@ -20,7 +23,6 @@ type HighlightFn = (code: string, lang?: string) => string[];
 
 const cache = new Map<string, string[]>();
 const MAX_CACHE = 500;
-
 // Languages bat recognizes well; everything else falls through unhighlighted.
 // Map common pi/highlight.js language tags to bat's preferred names.
 const LANG_MAP: Record<string, string> = {
@@ -75,27 +77,30 @@ const batHighlight: HighlightFn = (code: string, lang?: string) => {
   if (hit) return hit;
 
   const mapped = LANG_MAP[langKey];
-  // No-language fenced blocks: skip bat entirely (avoid bat's mis-detection).
-  if (!mapped) {
+  // No-language and shell fences: let theme use mdCodeBlock color.
+  if (!mapped || mapped === "sh") {
     const fallback = code.split("\n");
     if (cache.size < MAX_CACHE) cache.set(cacheKey, fallback);
     return fallback;
   }
 
+  const args = [
+    "--color=always",
+    "--style=plain",
+    "--paging=never",
+    "--decorations=never",
+    "--theme=Catppuccin Mocha",
+    "-l",
+    mapped,
+  ];
+
   let result: string[];
   try {
-    const r = spawnSync(
-      "bat",
-      [
-        "--color=always",
-        "--style=plain",
-        "--paging=never",
-        "--decorations=never",
-        "-l",
-        mapped,
-      ],
-      { input: code, encoding: "utf8", timeout: 3000 },
-    );
+    const r = spawnSync("bat", args, {
+      input: code,
+      encoding: "utf8",
+      timeout: 3000,
+    });
     if (r.status === 0 && r.stdout) {
       // bat appends a trailing newline; strip before splitting.
       const out = r.stdout.replace(/\n$/, "");
@@ -116,31 +121,32 @@ const batHighlight: HighlightFn = (code: string, lang?: string) => {
   return result;
 };
 
-let installed = false;
+const PATCH_TAG = "__codeBatPatched";
 const installPatch = () => {
-  if (installed) return;
-  installed = true;
-  const proto = Markdown.prototype as unknown as Record<string, unknown>;
-  const slot = Symbol("themeSlot");
-  Object.defineProperty(proto, "theme", {
-    configurable: true,
-    enumerable: true,
-    get(this: { [k: symbol]: unknown }) {
-      return this[slot];
-    },
-    set(this: { [k: symbol]: unknown }, t: object | undefined) {
-      if (!t || typeof t !== "object") {
-        this[slot] = t;
-        return;
-      }
-      this[slot] = new Proxy(t, {
-        get(target, prop, receiver) {
-          if (prop === "highlightCode") return batHighlight;
-          return Reflect.get(target, prop, receiver);
-        },
-      });
-    },
-  });
+  const proto = Markdown.prototype as unknown as {
+    render(width: number): string[];
+    theme?: { highlightCode?: HighlightFn };
+  };
+  // Find the original render: walk past any prior code-bat wrappers from
+  // previous /reload runs so we don't stack wrappers (which causes earlier
+  // wrappers to clobber our highlightCode assignment).
+  let origRender = proto.render as unknown as {
+    (width: number): string[];
+    [PATCH_TAG]?: { orig: typeof origRender };
+  };
+  while (origRender[PATCH_TAG]) {
+    origRender = origRender[PATCH_TAG]!.orig;
+  }
+  const wrapper = function (this: { theme?: object }, width: number) {
+    const t = this.theme as { highlightCode?: HighlightFn } | undefined;
+    if (t && typeof t === "object") {
+      // Always (re)assign, so reload picks up new batHighlight closure.
+      t.highlightCode = batHighlight;
+    }
+    return origRender.call(this, width);
+  } as unknown as typeof origRender;
+  wrapper[PATCH_TAG] = { orig: origRender };
+  proto.render = wrapper as unknown as typeof proto.render;
 };
 
 export default function (_pi: ExtensionAPI) {

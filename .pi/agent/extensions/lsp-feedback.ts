@@ -35,22 +35,33 @@ const MAX_FILE_BYTES = 64 * 1024;
 const MARKER = "__LSP_FEEDBACK_JSON__";
 const WIDGET_KEY = "lsp-feedback";
 // Prefix each widget line with a thin vertical bar so the panel reads as a
-// clean block without width-dependent borders. Lines are colored rosewater
-// (catppuccin #f5e0dc) via a direct truecolor ANSI escape so the styling
-// only affects this widget, not the rest of pi.
-// `\x1b[2m` = faint/dim intensity (~50% brightness on most terminals incl.
-// ghostty); combined with the rosewater truecolor it reads as a soft
-// muted rose. `\x1b[22;39m` resets both intensity and fg.
-const ROSE = "\x1b[2;38;2;245;224;220m";
-const RESET = "\x1b[22;39m";
-const BAR = `${ROSE}▎ `;
-const rose = (s: string) => `${ROSE}${s}${RESET}`;
+// clean block without width-dependent borders.
+const BAR = "▎ ";
 const AUTO_FIX = process.env.PI_LSP_FEEDBACK_AUTO_FIX !== "0";
 
 const FIXER_SYSTEM = `Fix only the listed LSP/lint issues in the file. Change nothing else; preserve all other code, comments, and formatting exactly. If unsure, leave it. Output the full corrected file in one fenced code block. No prose.`;
 
 const TRACKED_TOOLS = new Set(["edit", "write", "str_replace", "create"]);
 const FIXABLE_SEVERITIES: ReadonlySet<Severity> = new Set(["error", "warn"]);
+
+const isRebasing = (cwd: string): boolean => {
+  let dir = cwd;
+  for (let i = 0; i < 8; i++) {
+    const gitDir = path.join(dir, ".git");
+    if (fs.existsSync(gitDir)) {
+      return (
+        fs.existsSync(path.join(gitDir, "rebase-merge")) ||
+        fs.existsSync(path.join(gitDir, "rebase-apply")) ||
+        fs.existsSync(path.join(gitDir, "MERGE_HEAD")) ||
+        fs.existsSync(path.join(gitDir, "CHERRY_PICK_HEAD"))
+      );
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return false;
+};
 
 const toAbs = (p: string, cwd: string): string =>
   path.isAbsolute(p) ? p : path.resolve(cwd, p);
@@ -248,10 +259,10 @@ const buildWidgetLines = (
   const formatted = r.formatted.map((f) => displayPath(f, cwd));
   const fixed = fixedFiles.map((f) => displayPath(f, cwd));
 
-  if (diags.length === 0 && formatted.length === 0 && fixed.length === 0)
-    return null;
+  // Suppress notice when nothing actionable happened (pure format-only run).
+  if (diags.length === 0 && fixed.length === 0) return null;
 
-  const lines: string[] = [rose(`${BAR}lsp-feedback`)];
+  const lines: string[] = ["lsp-feedback"];
   if (fixed.length > 0) lines.push(`llm-fixed: ${fixed.join(", ")}`);
   if (formatted.length > 0) lines.push(`formatted: ${formatted.join(", ")}`);
   if (fixSkipped)
@@ -275,7 +286,7 @@ const buildWidgetLines = (
   } else if (fixed.length > 0) {
     lines.push("all errors and warnings fixed ✓");
   }
-  return lines.map((l, i) => (i === 0 ? l : rose(`${BAR}${l}`)));
+  return lines;
 };
 
 export default function (pi: ExtensionAPI) {
@@ -347,11 +358,12 @@ export default function (pi: ExtensionAPI) {
     // widgets (which truncates with "... (widget truncated)").
     ctx.ui?.setWidget?.(
       WIDGET_KEY,
-      (_tui, _theme) => {
+      (_tui, theme) => {
         const container = new Container();
-        for (const line of lines) {
-          container.addChild(new Text(line, 1, 0));
-        }
+        lines.forEach((line, i) => {
+          const color = i === 0 ? "customMessageLabel" : "customMessageText";
+          container.addChild(new Text(theme.fg(color, `${BAR}${line}`), 1, 0));
+        });
         return container;
       },
       { placement: "aboveEditor" } as never,
@@ -368,11 +380,10 @@ export default function (pi: ExtensionAPI) {
     ctx.ui?.setWidget?.(WIDGET_KEY, undefined as never);
   });
 
-  // biome-ignore lint/suspicious/noExplicitAny: tool_result event types vary across pi versions
-  (pi as any).on("tool_result", async (event: any) => {
-    if (!event || event.isError) return;
+  pi.on("tool_result", async (event) => {
+    if (event.isError) return;
     if (!TRACKED_TOOLS.has(event.toolName)) return;
-    const p = extractPath(event.input ?? event.args);
+    const p = extractPath(event.input);
     if (!p) return;
     const abs = toAbs(p, cwd);
     if (!fs.existsSync(abs)) return;
@@ -381,6 +392,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("agent_end", async (_event, ctx) => {
     if (reported || touched.size === 0) return;
+    if (isRebasing(ctx.cwd ?? cwd)) return;
     lastFiles = Array.from(touched);
     touched.clear();
     reported = true;

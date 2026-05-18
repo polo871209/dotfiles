@@ -25,15 +25,8 @@ const SIDE_PROMPT =
   "Caveman mode. One short sentence. No preamble. No suggestions. Plain text.";
 
 const WIDGET_KEY = "btw-answer";
-// Single-bar prefix per line, no width-dependent borders. Lines are
-// colored rosewater (catppuccin #f5e0dc) via direct truecolor ANSI so the
-// styling only affects this widget.
-// `\x1b[2m` adds the faint/dim intensity attribute so the rosewater
-// reads muted instead of vivid. `\x1b[22;39m` resets both.
-const ROSE = "\x1b[2;38;2;245;224;220m";
-const RESET = "\x1b[22;39m";
-const BAR = `${ROSE}▎ `;
-const rose = (s: string) => `${ROSE}${s}${RESET}`;
+// Single-bar prefix per line, no width-dependent borders.
+const BAR = "▎ ";
 const MAX_WIDTH = 100;
 
 // crude word-wrap that respects existing newlines and code fences.
@@ -196,21 +189,19 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      const lines = [
-        rose(`${BAR}btw`),
-        rose(`${BAR}Q: ${question}`),
-        rose(BAR),
-        ...wrap(result, MAX_WIDTH).map((l) => rose(`${BAR}${l}`)),
-      ];
+      const lines = ["btw", `Q: ${question}`, "", ...wrap(result, MAX_WIDTH)];
       // Pass a factory function so we bypass pi's 10-line cap on
       // array-style widgets (which truncates with "... (widget truncated)").
       ctx.ui.setWidget(
         WIDGET_KEY,
-        (_tui, _theme) => {
+        (_tui, theme) => {
           const container = new Container();
-          for (const line of lines) {
-            container.addChild(new Text(line, 1, 0));
-          }
+          lines.forEach((line, i) => {
+            const color = i === 0 ? "customMessageLabel" : "customMessageText";
+            container.addChild(
+              new Text(theme.fg(color, `${BAR}${line}`), 1, 0),
+            );
+          });
           return container;
         },
         { placement: "aboveEditor" } as never,

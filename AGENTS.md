@@ -1,8 +1,5 @@
-# Dotfiles
-
-## CRITICAL RULES — MUST FOLLOW
+# Config files
 
 **ONLY modify files inside `/Users/polo/dotfiles/`.**
 
-- **NEVER read, write, or edit files under `~/.config/` directly.**
-- This repo uses GNU Stow — symlinks from `~/.config/` point back into this repo. Always edit the source files here, not the symlink targets.
+`~/.config/` (via GNU Stow) and `~/.pi/` (via `just link`: `ln -sfn {{dotfiles}}/.pi ~/.pi`) are symlinks pointing back into this repo. Always edit source files here, never the symlink targets.

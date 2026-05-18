@@ -65,8 +65,10 @@ const getAncestorPids = async (startPid: number): Promise<Set<number>> => {
 
 const getTmuxClientPid = async (): Promise<number | null> => {
   try {
-    const target = process.env.TMUX_PANE ? `-t ${process.env.TMUX_PANE} ` : "";
-    const out = await execP(`tmux display-message ${target}-p '#{client_pid}'`);
+    const args = process.env.TMUX_PANE
+      ? ["display-message", "-t", process.env.TMUX_PANE, "-p", "#{client_pid}"]
+      : ["display-message", "-p", "#{client_pid}"];
+    const out = await execFileP("tmux", args);
     const pid = parseInt(out, 10);
     return Number.isFinite(pid) ? pid : null;
   } catch {
@@ -78,9 +80,13 @@ const isTmuxPaneActive = async (): Promise<boolean> => {
   const pane = process.env.TMUX_PANE;
   if (!pane) return true;
   try {
-    const out = await execP(
-      `tmux display-message -t ${pane} -p '#{session_attached} #{window_active} #{pane_active}'`,
-    );
+    const out = await execFileP("tmux", [
+      "display-message",
+      "-t",
+      pane,
+      "-p",
+      "#{session_attached} #{window_active} #{pane_active}",
+    ]);
     const [attached, win, p] = out.split(" ");
     return attached === "1" && win === "1" && p === "1";
   } catch {
