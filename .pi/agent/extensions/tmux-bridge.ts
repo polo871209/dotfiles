@@ -96,14 +96,7 @@ export default function (pi: ExtensionAPI) {
   const start = async (ctx: ExtensionContext) => {
     currentCtx = ctx;
     if (server) return;
-    if (await probeExistingListener()) {
-      ctx.ui?.notify?.(
-        `tmux-bridge: another pi is already listening on ${sockPath}; ` +
-          "this instance will not receive sends from pi-send / neovim.",
-        "warning",
-      );
-      return;
-    }
+    if (await probeExistingListener()) return; // another pi owns the socket
     try {
       fs.mkdirSync(sockDir, { recursive: true, mode: 0o700 });
       fs.chmodSync(sockDir, 0o700);
@@ -111,10 +104,10 @@ export default function (pi: ExtensionAPI) {
     } catch {
       /* not present */
     }
-    server = net.createServer((socket) => {
+    server = net.createServer((socket: net.Socket) => {
       let buf = "";
       socket.setEncoding("utf8");
-      socket.on("data", (chunk) => {
+      socket.on("data", (chunk: string) => {
         buf += chunk;
         let idx = buf.indexOf("\n");
         while (idx !== -1) {
@@ -128,7 +121,7 @@ export default function (pi: ExtensionAPI) {
         /* ignore peer disconnects */
       });
     });
-    server.on("error", (err) => {
+    server.on("error", (err: Error) => {
       ctx.ui?.notify?.(`tmux-bridge: ${err.message}`, "error");
     });
     server.listen(sockPath, () => {
@@ -152,7 +145,7 @@ export default function (pi: ExtensionAPI) {
     }
   };
 
-  pi.on("session_start", async (_event, ctx) => {
+  pi.on("session_start", async (_event: unknown, ctx: ExtensionContext) => {
     start(ctx);
   });
   pi.on("session_shutdown", async () => {

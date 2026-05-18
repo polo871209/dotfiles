@@ -97,3 +97,9 @@ For multi-step tasks, state a brief plan:
 ```
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
+
+## Skip Post-Edit Validation
+
+**Don't manually format, lint, or syntax-check files you edited.** Formatting and diagnostics run automatically after your edits.
+
+Still run when user asks, or when you need the actual output (tests, value resolution, CI parity).

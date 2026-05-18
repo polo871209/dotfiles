@@ -6,5 +6,5 @@ default:
 # Stow + link global skills
 link:
     @stow .
-    @mkdir -p ~/.agents
-    @ln -sfn {{dotfiles}}/.agents/skills ~/.agents/skills
+    @rm -rf ~/.pi
+    @ln -sfn {{dotfiles}}/.pi ~/.pi

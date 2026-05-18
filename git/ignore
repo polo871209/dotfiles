@@ -30,6 +30,10 @@ logs/
 .DS_Store
 .LSOverride
 
+# Node
+node_modules/
+npm/
+
 # Python
 *.pyd
 *.pyc

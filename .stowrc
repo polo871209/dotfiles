@@ -1,5 +1,6 @@
 --target=~/.config
 --ignore=.stowrc
+--ignore=.pi
 --ignore=DS_Store
 --ignore=zen-browser
 --adopt
