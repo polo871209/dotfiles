@@ -1,10 +1,14 @@
 // Customizes pi TUI: padding, input text color, and slim footer.
 // Disable padding with PI_TUI_PADDING=0, or set a custom width (default: 5).
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
-  Editor,
+  CustomEditor,
+  type ExtensionAPI,
+  type KeybindingsManager,
+} from "@earendil-works/pi-coding-agent";
+import type { Theme as PiTheme } from "@earendil-works/pi-coding-agent";
+import {
   TUI,
+  type EditorTheme,
   truncateToWidth,
   visibleWidth,
 } from "@earendil-works/pi-tui";
@@ -14,30 +18,13 @@ const PAD = Math.max(
   Number.parseInt(process.env.PI_TUI_PADDING ?? "5", 10) || 0,
 );
 
-const INPUT = "\x1b[38;2;205;214;244m";
 const RESET = "\x1b[0m";
 const BORDER = /^[\x1b\[[0-9;]*m]*[─ ↑↓0-9more]+[\x1b\[[0-9;]*m]*$/;
 
-const colorInputLine = (line: string) => {
+const colorInputLine = (line: string, theme: PiTheme) => {
   if (BORDER.test(line)) return line;
-  return `${INPUT}${line.replaceAll(RESET, `${RESET}${INPUT}`)}${RESET}`;
-};
-
-const fmtTokens = (n: number): string => {
-  if (n < 1000) return `${n}`;
-  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
-  return `${(n / 1_000_000).toFixed(1)}M`;
-};
-
-const sumCost = (ctx: any): number => {
-  let cost = 0;
-  for (const e of ctx.sessionManager.getBranch()) {
-    if (e.type === "message" && e.message.role === "assistant") {
-      const m = e.message as AssistantMessage;
-      cost += m.usage?.cost?.total ?? 0;
-    }
-  }
-  return cost;
+  const input = theme.getFgAnsi("text");
+  return `${input}${line.replaceAll(RESET, `${RESET}${input}`)}${RESET}`;
 };
 
 const installPaddingPatch = () => {
@@ -58,19 +45,29 @@ const installPaddingPatch = () => {
   };
 };
 
-const installInputColorPatch = () => {
-  const proto = Editor.prototype as unknown as {
-    render(width: number): string[];
-    __inputWhite?: boolean;
-  };
+class ThemedEditor extends CustomEditor {
+  constructor(
+    tui: TUI,
+    editorTheme: EditorTheme,
+    keybindings: KeybindingsManager,
+    private readonly getTheme: () => PiTheme,
+  ) {
+    super(tui, editorTheme, keybindings);
+  }
 
-  if (proto.__inputWhite) return;
+  render(width: number): string[] {
+    const theme = this.getTheme();
+    return super.render(width).map((line) => colorInputLine(line, theme));
+  }
+}
 
-  proto.__inputWhite = true;
-  const origRender = proto.render;
-  proto.render = function (width: number): string[] {
-    return origRender.call(this, width).map(colorInputLine);
-  };
+const installInputColor = (pi: ExtensionAPI) => {
+  pi.on("session_start", async (_event, ctx) => {
+    ctx.ui.setEditorComponent(
+      (tui, editorTheme, keybindings) =>
+        new ThemedEditor(tui, editorTheme, keybindings, () => ctx.ui.theme),
+    );
+  });
 };
 
 const installFooter = (pi: ExtensionAPI) => {
@@ -86,19 +83,10 @@ const installFooter = (pi: ExtensionAPI) => {
         const sessionName = ctx.sessionManager.getSessionName?.();
         if (sessionName) pwd = `${pwd} • ${sessionName}`;
 
-        const cost = sumCost(ctx);
-        const usingSub = ctx.model
-          ? ctx.modelRegistry.isUsingOAuth?.(ctx.model) === true
-          : false;
         const usage = ctx.getContextUsage?.();
         const stats: string[] = [];
-        if (cost > 0 || usingSub) {
-          stats.push(`$${cost.toFixed(3)}${usingSub ? " (sub)" : ""}`);
-        }
-        if (usage) {
-          const pct =
-            usage.percent != null ? `${usage.percent.toFixed(1)}%` : "?";
-          stats.push(`${pct}/${fmtTokens(usage.contextWindow)}`);
+        if (usage?.percent != null) {
+          stats.push(`${usage.percent.toFixed(1)}%`);
         }
         const left = [pwd, stats.join(" ")].filter(Boolean).join("   ");
 
@@ -106,7 +94,7 @@ const installFooter = (pi: ExtensionAPI) => {
         let thinkingText = "";
         let thinkingKey: string | null = null;
         if (ctx.model?.reasoning) {
-          const lvl = String((pi as any).getThinkingLevel?.() ?? "off");
+          const lvl = String(pi.getThinkingLevel() ?? "off");
           thinkingText = lvl === "off" ? "thinking off" : lvl;
           const cap = lvl.charAt(0).toUpperCase() + lvl.slice(1);
           thinkingKey = `thinking${cap}`;
@@ -144,8 +132,8 @@ const installFooter = (pi: ExtensionAPI) => {
 };
 
 installPaddingPatch();
-installInputColorPatch();
 
 export default function (pi: ExtensionAPI) {
+  installInputColor(pi);
   installFooter(pi);
 }

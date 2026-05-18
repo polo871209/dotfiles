@@ -1,7 +1,8 @@
 {
+  "lastChangelogVersion": "0.75.1",
   "defaultProvider": "anthropic",
   "defaultModel": "claude-opus-4-7",
-  "defaultThinkingLevel": "low",
+  "defaultThinkingLevel": "xhigh",
   "theme": "catppuccin-mocha",
   "quietStartup": true,
   "packages": [
@@ -17,6 +18,5 @@
   },
   "branchSummary": {
     "reserveTokens": 32768
-  },
-  "lastChangelogVersion": "0.74.0"
+  }
 }
