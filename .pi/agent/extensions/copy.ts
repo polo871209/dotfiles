@@ -5,7 +5,10 @@ import {
   InteractiveMode,
   copyToClipboard,
 } from "@earendil-works/pi-coding-agent";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionCommandContext,
+} from "@earendil-works/pi-coding-agent";
 
 type Block = { lang?: string; code: string };
 
@@ -53,8 +56,7 @@ const previewText = (text: string): string => {
 const lineCount = (text: string): number =>
   text.length === 0 ? 1 : text.split("\n").length;
 
-const proto = InteractiveMode.prototype as unknown as {
-  __copyPickerPatched?: boolean;
+type Proto = InteractiveMode & {
   handleCopyCommand: () => Promise<void>;
   session: { getLastAssistantText(): string | undefined };
   showError(msg: string): void;
@@ -66,8 +68,10 @@ const proto = InteractiveMode.prototype as unknown as {
   ): Promise<string | undefined>;
 };
 
-if (!proto.__copyPickerPatched) {
-  proto.__copyPickerPatched = true;
+const installPatch = () => {
+  const proto = InteractiveMode.prototype as unknown as Proto;
+  // Re-assign on every load so /reload picks up new code. We fully replace
+  // (no chaining), so reassignment is idempotent.
   proto.handleCopyCommand = async function () {
     const text = this.session.getLastAssistantText();
     if (!text) {
@@ -87,6 +91,10 @@ if (!proto.__copyPickerPatched) {
 
     if (blocks.length === 0) {
       await copy(text, "response");
+      return;
+    }
+    if (blocks.length === 1) {
+      await copy(blocks[0].code, "code block");
       return;
     }
 
@@ -109,13 +117,66 @@ if (!proto.__copyPickerPatched) {
       await copy(text, "response");
       return;
     }
-    const idx = blockLabels.indexOf(selected);
-    if (idx < 0) {
+    const blockIdx = blockLabels.indexOf(selected);
+    if (blockIdx < 0) {
       this.showError("Copy target not found.");
       return;
     }
-    await copy(blocks[idx].code, `code block ${idx + 1}`);
+    await copy(blocks[blockIdx].code, `code block ${blockIdx + 1}`);
   };
-}
+};
 
-export default function (_pi: ExtensionAPI) {}
+installPatch();
+
+const extractText = (content: unknown): string => {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter(
+      (c): c is { type: "text"; text: string } =>
+        !!c && typeof c === "object" && (c as { type?: unknown }).type === "text",
+    )
+    .map((c) => c.text)
+    .join("\n");
+};
+
+const formatSession = (ctx: ExtensionCommandContext): string => {
+  const lines: string[] = [];
+  const name = ctx.sessionManager.getSessionName?.();
+  if (name) lines.push(`# ${name}`, "");
+  for (const entry of ctx.sessionManager.getBranch()) {
+    if (entry.type !== "message") continue;
+    const m = entry.message as { role?: string; content?: unknown };
+    if (m.role !== "user" && m.role !== "assistant") continue;
+    const text = extractText(m.content).trim();
+    if (!text) continue;
+    lines.push(`## ${m.role}`, "", text, "");
+  }
+  return lines.join("\n").trimEnd() + "\n";
+};
+
+export default function (pi: ExtensionAPI) {
+  pi.registerCommand("copy-all", {
+    description: "Copy entire session history (user + assistant) as markdown",
+    handler: async (_args, ctx) => {
+      const text = formatSession(ctx);
+      if (!text.trim()) {
+        ctx.ui.notify("Session is empty", "warning");
+        return;
+      }
+      try {
+        await copyToClipboard(text);
+        const turns = (text.match(/^## /gm) ?? []).length;
+        ctx.ui.notify(
+          `Copied session (${turns} turns, ${text.length} chars)`,
+          "info",
+        );
+      } catch (e) {
+        ctx.ui.notify(
+          `copy-all failed: ${e instanceof Error ? e.message : String(e)}`,
+          "error",
+        );
+      }
+    },
+  });
+}
