@@ -1,0 +1,34 @@
+[tools]
+# Languages / runtimes
+go = "latest"
+node = "latest"
+python = "latest"
+zig = "latest"
+bun = "latest"
+cue = "latest"
+uv = "latest"
+ruff = "latest"
+tree-sitter = "latest"
+
+# LSPs
+"npm:bash-language-server" = "latest"
+"go:golang.org/x/tools/gopls" = "latest"
+"npm:vscode-langservers-extracted" = "latest"
+"aqua:grafana/jsonnet-language-server" = "latest"
+"aqua:LuaLS/lua-language-server" = "latest"
+"pipx:pyrefly" = "latest"
+"ubi:withered-magic/starpls" = { version = "latest", exe = "starpls" }
+"aqua:tamasfe/taplo" = "latest"
+"aqua:hashicorp/terraform-ls" = "latest"
+"npm:@vtsls/language-server" = "latest"
+"npm:yaml-language-server" = "latest"
+"aqua:zigtools/zls" = "latest"
+
+# Formatters / linters / debuggers
+"aqua:bazelbuild/buildtools/buildifier" = "latest"
+"aqua:go-delve/delve" = "latest"
+"aqua:hadolint/hadolint" = "latest"
+"aqua:koalaman/shellcheck" = "latest"
+"npm:prettier" = "latest"
+"npm:@earendil-works/pi-coding-agent" = "latest"
+"aqua:JohnnyMorganz/StyLua" = "latest"

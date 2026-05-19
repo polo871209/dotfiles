@@ -10,7 +10,6 @@ local function load_dap()
     'https://github.com/nvim-neotest/nvim-nio',
     'https://github.com/rcarriga/nvim-dap-ui',
     'https://github.com/theHamsta/nvim-dap-virtual-text',
-    'https://github.com/jay-babu/mason-nvim-dap.nvim',
     'https://github.com/leoluz/nvim-dap-go',
     'https://github.com/mfussenegger/nvim-dap-python',
     'https://github.com/mfussenegger/nvim-dap',

@@ -1,13 +1,10 @@
 typeset -U path
 path=(
+  ~/.local/share/mise/shims
   ~/dotfiles/scripts
   ~/.local/bin
-  ~/.cargo/bin
-  ~/.bun/bin
-  ~/.local/share/mise/shims
   "$GOPATH/bin"
   /opt/homebrew/opt/llvm/bin
-  /opt/homebrew/opt/node/bin
   /opt/homebrew/opt/libpq/bin
   /Applications/Obsidian.app/Contents/MacOS
   $path
@@ -109,7 +106,8 @@ alias pwd="pwd | pbcopy"
 alias st="tmux source-file ${XDG_CONFIG_HOME:-$HOME}/tmux/tmux.conf"
 alias sz="source ${ZDOTDIR:-$HOME}/.zshrc"
 alias tf="terraform"
-alias up="brew update && brew upgrade && brew cleanup && pi update"
+alias up="brew update && brew upgrade && brew cleanup && mise upgrade && pi update"
+alias brewdump="brew bundle dump --force --file=~/dotfiles/Brewfile --formula --cask --tap --mas"
 
 ## Bat
 export BAT_PAGER="less -iRFK"
