@@ -1,7 +1,6 @@
 return {
   cmd = { 'yaml-language-server', '--stdio' },
   filetypes = { 'yaml', 'yaml.docker-compose', 'yaml.gitlab', 'yaml.github' },
-  root_markers = { '.git' },
   settings = {
     yaml = {
       validate = false,
