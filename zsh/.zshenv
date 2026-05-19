@@ -4,7 +4,7 @@ export OBSIDIAN_VAULT="$HOME/vaults/obsidian"
 
 # Shell Configuration
 export CLOUDSDK_CONFIG="$HOME/.gcloud"
-export CLOUDSDK_PYTHON=/opt/homebrew/bin/python3
+export CLOUDSDK_PYTHON="$HOME/.local/share/mise/shims/python3"
 export GOOGLE_APPLICATION_CREDENTIALS="$CLOUDSDK_CONFIG/application_default_credentials.json"
 
 export EDITOR=nvim

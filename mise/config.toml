@@ -17,7 +17,7 @@ tree-sitter = "latest"
 "aqua:grafana/jsonnet-language-server" = "latest"
 "aqua:LuaLS/lua-language-server" = "latest"
 "pipx:pyrefly" = "latest"
-"ubi:withered-magic/starpls" = { version = "latest", exe = "starpls" }
+"github:withered-magic/starpls" = { version = "latest", exe = "starpls" }
 "aqua:tamasfe/taplo" = "latest"
 "aqua:hashicorp/terraform-ls" = "latest"
 "npm:@vtsls/language-server" = "latest"
