@@ -19,8 +19,8 @@ git clone https://github.com/polo871209/dotfiles.git && cd dotfiles
 cat ~/dotfiles/dot_zshenv >| ~/.zshenv
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 brew bundle install
-npm install -g @earendil-works/pi-coding-agent
 just link
+mise install
 touch ~/.hushlogin
 ./zen-browser/install.sh
 ```

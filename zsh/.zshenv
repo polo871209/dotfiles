@@ -9,6 +9,7 @@ export GOOGLE_APPLICATION_CREDENTIALS="$CLOUDSDK_CONFIG/application_default_cred
 
 export EDITOR=nvim
 export HOMEBREW_NO_ENV_HINTS=1
+export GITHUB_TOKEN="$(gh auth token 2>/dev/null)"
 export KUBE_EDITOR=nvim
 export LESS=-iRFX
 export MANPAGER="bat -plman"

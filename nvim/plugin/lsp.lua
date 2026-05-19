@@ -1,34 +1,8 @@
 vim.pack.add {
-  'https://github.com/mason-org/mason.nvim',
-  'https://github.com/WhoIsSethDaniel/mason-tool-installer.nvim',
   'https://github.com/b0o/SchemaStore.nvim',
 }
 
-require('mason').setup {}
-
-require('mason-tool-installer').setup {
-  -- LSP servers are auto-discovered from lsp/*.lua via vim.lsp.enable
-  ensure_installed = {
-    'bash-language-server',
-    'buildifier',
-    'delve',
-    'gopls',
-    'hadolint',
-    'json-lsp',
-    'jsonnet-language-server',
-    'lua-language-server',
-    'prettier',
-    'pyrefly',
-    'starpls',
-    'stylua',
-    'taplo',
-    'terraform-ls',
-    'vtsls',
-    'yaml-language-server',
-    'zls',
-  },
-}
-
+-- LSPs/tools installed via mise (see mise/config.toml)
 vim.lsp.config('*', {
   root_markers = { '.git' },
 })
