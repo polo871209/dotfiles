@@ -72,7 +72,9 @@ local function load_dap()
     },
   }
 
-  require('dap-python').setup 'uv'
+  -- Use a uv-managed venv with debugpy installed; fall back to system python3.
+  local py = vim.fn.exepath 'python3'
+  require('dap-python').setup(py ~= '' and py or 'python3')
 
   return dap, dapui
 end

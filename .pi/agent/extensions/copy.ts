@@ -20,21 +20,28 @@ const sanitizeLang = (lang: string): string | undefined => {
 const extractCodeBlocks = (text: string): Block[] => {
   const lines = text.split("\n");
   const blocks: Block[] = [];
-  for (let i = 0; i < lines.length; i++) {
+  let i = 0;
+  while (i < lines.length) {
     const open = lines[i].match(/^(`{3,})(.*)$/);
-    if (!open) continue;
+    if (!open) {
+      i++;
+      continue;
+    }
     const fence = open[1];
     const lang = sanitizeLang(open[2].trim().split(/\s+/)[0] ?? "");
     const codeLines: string[] = [];
+    let j = i + 1;
     let closed = false;
-    for (i = i + 1; i < lines.length; i++) {
-      if (lines[i].startsWith(fence)) {
+    while (j < lines.length) {
+      if (lines[j].startsWith(fence)) {
         closed = true;
         break;
       }
-      codeLines.push(lines[i]);
+      codeLines.push(lines[j]);
+      j++;
     }
     if (closed) blocks.push({ lang, code: codeLines.join("\n") });
+    i = j + 1;
   }
   return blocks;
 };
@@ -56,7 +63,7 @@ const previewText = (text: string): string => {
 const lineCount = (text: string): number =>
   text.length === 0 ? 1 : text.split("\n").length;
 
-type Proto = InteractiveMode & {
+type Proto = {
   handleCopyCommand: () => Promise<void>;
   session: { getLastAssistantText(): string | undefined };
   showError(msg: string): void;
@@ -70,6 +77,13 @@ type Proto = InteractiveMode & {
 
 const installPatch = () => {
   const proto = InteractiveMode.prototype as unknown as Proto;
+  // Guard against pi upgrades that rename/remove this method.
+  if (typeof proto.handleCopyCommand !== "function") {
+    console.warn(
+      "[copy] InteractiveMode.handleCopyCommand missing — pi version may have changed; skipping patch",
+    );
+    return;
+  }
   // Re-assign on every load so /reload picks up new code. We fully replace
   // (no chaining), so reassignment is idempotent.
   proto.handleCopyCommand = async function () {
@@ -134,7 +148,9 @@ const extractText = (content: unknown): string => {
   return content
     .filter(
       (c): c is { type: "text"; text: string } =>
-        !!c && typeof c === "object" && (c as { type?: unknown }).type === "text",
+        !!c &&
+        typeof c === "object" &&
+        (c as { type?: unknown }).type === "text",
     )
     .map((c) => c.text)
     .join("\n");

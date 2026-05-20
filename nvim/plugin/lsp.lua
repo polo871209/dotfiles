@@ -25,6 +25,17 @@ vim.lsp.enable {
 }
 
 -- Neovim 0.11+ already maps globally: grn, gra, grr, gri, grt, K
+local hl_group = vim.api.nvim_create_augroup('lsp-highlight', { clear = false })
+local detach_group = vim.api.nvim_create_augroup('lsp-detach', { clear = true })
+
+vim.api.nvim_create_autocmd('LspDetach', {
+  group = detach_group,
+  callback = function(ev)
+    vim.lsp.buf.clear_references()
+    vim.api.nvim_clear_autocmds { group = hl_group, buffer = ev.buf }
+  end,
+})
+
 vim.api.nvim_create_autocmd('LspAttach', {
   group = vim.api.nvim_create_augroup('lsp-attach', { clear = true }),
   callback = function(ev)
@@ -32,7 +43,6 @@ vim.api.nvim_create_autocmd('LspAttach', {
 
     -- Highlight references to symbol under cursor
     if client and client:supports_method('textDocument/documentHighlight', ev.buf) then
-      local hl_group = vim.api.nvim_create_augroup('lsp-highlight', { clear = false })
       vim.api.nvim_create_autocmd({ 'CursorHold', 'CursorHoldI' }, {
         buffer = ev.buf,
         group = hl_group,
@@ -42,13 +52,6 @@ vim.api.nvim_create_autocmd('LspAttach', {
         buffer = ev.buf,
         group = hl_group,
         callback = vim.lsp.buf.clear_references,
-      })
-      vim.api.nvim_create_autocmd('LspDetach', {
-        group = vim.api.nvim_create_augroup('lsp-detach', { clear = true }),
-        callback = function(ev2)
-          vim.lsp.buf.clear_references()
-          vim.api.nvim_clear_autocmds { group = 'lsp-highlight', buffer = ev2.buf }
-        end,
       })
     end
 
@@ -105,14 +108,9 @@ vim.api.nvim_create_autocmd('BufWritePre', {
   callback = function(ev)
     local client = vim.lsp.get_clients({ bufnr = ev.buf, name = 'clangd' })[1]
     if not client then return end
-    local params = vim.tbl_extend('force', vim.lsp.util.make_range_params(0, client.offset_encoding), {
+    vim.lsp.buf.code_action {
       context = { only = { 'source.organizeImports' }, diagnostics = {} },
-    })
-    local result = vim.lsp.buf_request_sync(ev.buf, 'textDocument/codeAction', params, 1000)
-    for _, res in pairs(result or {}) do
-      for _, action in pairs(res.result or {}) do
-        if action.edit then vim.lsp.util.apply_workspace_edit(action.edit, client.offset_encoding) end
-      end
-    end
+      apply = true,
+    }
   end,
 })

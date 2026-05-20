@@ -81,7 +81,7 @@ vim.keymap.set('n', '<leader>rf', function()
   if last_run_term and last_run_term:buf_valid() then last_run_term:close() end
   local cmd, root = get_run_cmd()
   local height = math.floor(vim.o.lines * 0.4)
-  last_run_term = _G.Snacks.terminal.open(cmd, {
+  last_run_term = Snacks.terminal.open(cmd, {
     cwd = root,
     auto_close = false,
     win = {

@@ -56,7 +56,7 @@ vim.o.wrap = false
 -- Hide status line
 vim.o.laststatus = 0
 
--- Default border for all floating windows (nvim 0.12+)
+-- Default border for all floating windows (nvim 0.11+)
 vim.o.winborder = 'rounded'
 
 -- Hide command line
@@ -94,7 +94,7 @@ vim.api.nvim_create_autocmd('FileType', {
   group = filetype_group,
   callback = function()
     vim.opt_local.tabstop = 4
-    vim.opt_local.shiftwidth = 2
+    vim.opt_local.shiftwidth = 4
     vim.opt_local.expandtab = false
   end,
 })

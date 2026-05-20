@@ -48,6 +48,8 @@ export default function (pi: ExtensionAPI) {
   let server: net.Server | undefined;
   let currentCtx: ExtensionContext | undefined;
 
+  const VALID_MODES = new Set(["steer", "followUp"]);
+
   const handleLine = (line: string) => {
     const trimmed = line.trim();
     if (!trimmed) return;
@@ -64,10 +66,12 @@ export default function (pi: ExtensionAPI) {
     const text = payload.text;
     if (!text || typeof text !== "string") return;
 
+    const mode =
+      payload.mode && VALID_MODES.has(payload.mode) ? payload.mode : "steer";
     const idle = currentCtx?.isIdle?.() ?? true;
     // When idle, sendUserMessage triggers a turn immediately.
     // When streaming, deliverAs is required.
-    const opts = idle ? undefined : { deliverAs: payload.mode ?? "steer" };
+    const opts = idle ? undefined : { deliverAs: mode };
 
     try {
       pi.sendUserMessage(text, opts as never);
@@ -104,11 +108,21 @@ export default function (pi: ExtensionAPI) {
     } catch {
       /* not present */
     }
+    const MAX_BUF = 256 * 1024; // hard cap per connection to avoid DoS
     server = net.createServer((socket: net.Socket) => {
       let buf = "";
       socket.setEncoding("utf8");
       socket.on("data", (chunk: string) => {
         buf += chunk;
+        if (buf.length > MAX_BUF) {
+          currentCtx?.ui?.notify?.(
+            "tmux-bridge: oversize line dropped",
+            "warning",
+          );
+          buf = "";
+          socket.destroy();
+          return;
+        }
         let idx = buf.indexOf("\n");
         while (idx !== -1) {
           const line = buf.slice(0, idx);

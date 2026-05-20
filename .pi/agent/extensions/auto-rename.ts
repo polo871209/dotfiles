@@ -78,6 +78,12 @@ export default function (pi: ExtensionAPI) {
 
     if (userTurns <= THRESHOLD) return;
 
+    // Cap to last ~12 messages — first few turns are enough to name a session.
+    const MAX_MESSAGES = 12;
+    if (messages.length > MAX_MESSAGES) {
+      messages.splice(0, messages.length - MAX_MESSAGES);
+    }
+
     messages.push({
       role: "user",
       content: [

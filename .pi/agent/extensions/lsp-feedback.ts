@@ -9,7 +9,9 @@ import type {
 import { Container, Text } from "@earendil-works/pi-tui";
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 type Severity = "error" | "warn" | "info" | "hint";
 interface Diag {
@@ -26,7 +28,26 @@ interface DriverResult {
   diagnostics: Diag[];
 }
 
-const DRIVER = path.join(__dirname, "lsp-feedback.lua");
+// ESM-safe __dirname (jiti also injects __dirname; this works under both).
+const _here =
+  typeof __dirname !== "undefined"
+    ? __dirname
+    : path.dirname(fileURLToPath(import.meta.url));
+const DRIVER = path.join(_here, "lsp-feedback.lua");
+// Log file for nvim stderr/parse errors. Writing to stdout/stderr corrupts
+// pi's TUI; route diagnostics-about-diagnostics here instead.
+const LOG_FILE = path.join(os.tmpdir(), "pi-lsp-feedback.log");
+const logDriver = (msg: string) => {
+  try {
+    fs.appendFileSync(
+      LOG_FILE,
+      `[${new Date().toISOString()}] ${msg}\n`,
+      "utf8",
+    );
+  } catch {
+    /* best effort */
+  }
+};
 const NVIM_TIMEOUT_MS = 15_000;
 const MAX_FILES = 25;
 const MAX_LINES_OUT = 50;
@@ -66,6 +87,26 @@ const isRebasing = (cwd: string): boolean => {
 const toAbs = (p: string, cwd: string): string =>
   path.isAbsolute(p) ? p : path.resolve(cwd, p);
 
+// Skip throwaway scratch paths: /tmp, /var/folders/... (macOS $TMPDIR),
+// /private/tmp, /private/var/folders/...
+const SKIP_PREFIXES = [
+  "/tmp/",
+  "/private/tmp/",
+  "/var/folders/",
+  "/private/var/folders/",
+  `${os.tmpdir()}${path.sep}`,
+];
+const isScratchPath = (abs: string): boolean => {
+  const real = (() => {
+    try {
+      return fs.realpathSync(abs);
+    } catch {
+      return abs;
+    }
+  })();
+  return SKIP_PREFIXES.some((p) => abs.startsWith(p) || real.startsWith(p));
+};
+
 const extractPath = (input: unknown): string | undefined => {
   if (!input || typeof input !== "object") return;
   const i = input as Record<string, unknown>;
@@ -97,21 +138,26 @@ const runDriver = (
         /* ignore */
       }
     }, NVIM_TIMEOUT_MS);
-    child.on("error", () => {
+    child.on("error", (err) => {
       clearTimeout(killer);
+      logDriver(`spawn error: ${err.message}`);
       resolve(null);
     });
     child.on("close", () => {
       clearTimeout(killer);
       const idx = stdout.lastIndexOf(MARKER);
+      if (stderr.trim()) logDriver(`stderr: ${stderr.trim()}`);
       if (idx < 0) {
-        if (stderr.trim()) console.error("[lsp-feedback]", stderr.trim());
+        logDriver("no JSON marker in stdout");
         return resolve(null);
       }
       const json = stdout.slice(idx + MARKER.length).trim();
       try {
         resolve(JSON.parse(json) as DriverResult);
-      } catch {
+      } catch (e) {
+        logDriver(
+          `JSON parse failed: ${e instanceof Error ? e.message : String(e)}`,
+        );
         resolve(null);
       }
     });
@@ -234,6 +280,12 @@ const applyFixes = async (
     if (!fixed || fixed === original) continue;
     if (fixed.length < Math.min(20, original.length / 4)) continue;
     try {
+      // Backup original next to file so a bad LLM fix can be recovered.
+      try {
+        fs.writeFileSync(`${file}.lsp-feedback.bak`, original, "utf8");
+      } catch {
+        /* best effort */
+      }
       fs.writeFileSync(file, fixed, "utf8");
       patched.push(file);
     } catch {
@@ -387,6 +439,7 @@ export default function (pi: ExtensionAPI) {
     if (!p) return;
     const abs = toAbs(p, cwd);
     if (!fs.existsSync(abs)) return;
+    if (isScratchPath(abs)) return;
     touched.add(abs);
   });
 
@@ -396,7 +449,14 @@ export default function (pi: ExtensionAPI) {
     lastFiles = Array.from(touched);
     touched.clear();
     reported = true;
-    await runFeedback(lastFiles, ctx, AUTO_FIX);
+    // Fire-and-forget: return immediately so pi marks the turn idle.
+    // The widget appears when the background work finishes.
+    void runFeedback(lastFiles, ctx, AUTO_FIX).catch((e) => {
+      console.error(
+        "[lsp-feedback] background run failed:",
+        e instanceof Error ? e.message : String(e),
+      );
+    });
   });
 
   pi.registerCommand?.("lsp-now", {
