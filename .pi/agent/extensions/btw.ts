@@ -120,6 +120,12 @@ export default function (pi: ExtensionAPI) {
           }
         }
       }
+      // Cap to last ~20 turns to keep side-question payload small.
+      const MAX_TURNS = 20;
+      if (messages.length > MAX_TURNS) {
+        messages.splice(0, messages.length - MAX_TURNS);
+      }
+
       messages.push({
         role: "user",
         content: [{ type: "text", text: `[SIDE QUESTION] ${question}` }],

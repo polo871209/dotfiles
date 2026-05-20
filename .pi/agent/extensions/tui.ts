@@ -19,7 +19,7 @@ const PAD = Math.max(
 );
 
 const RESET = "\x1b[0m";
-const BORDER = /^[\x1b\[[0-9;]*m]*[─ ↑↓0-9more]+[\x1b\[[0-9;]*m]*$/;
+const BORDER = /^(?:\x1b\[[0-9;]*m)*[─ ↑↓0-9more]+(?:\x1b\[[0-9;]*m)*$/;
 
 const colorInputLine = (line: string, theme: PiTheme) => {
   if (BORDER.test(line)) return line;
@@ -80,15 +80,6 @@ const installFooter = (pi: ExtensionAPI) => {
         if (home && pwd.startsWith(home)) pwd = `~${pwd.slice(home.length)}`;
         const branch = footerData.getGitBranch();
         if (branch) pwd = `${pwd} (${branch})`;
-        const sessionName = ctx.sessionManager.getSessionName?.();
-        if (sessionName) pwd = `${pwd} • ${sessionName}`;
-
-        const usage = ctx.getContextUsage?.();
-        const stats: string[] = [];
-        if (usage?.percent != null) {
-          stats.push(`${usage.percent.toFixed(1)}%`);
-        }
-        const left = [pwd, stats.join(" ")].filter(Boolean).join("   ");
 
         const modelName = ctx.model?.id ?? "no-model";
         let thinkingText = "";
@@ -99,15 +90,31 @@ const installFooter = (pi: ExtensionAPI) => {
           const cap = lvl.charAt(0).toUpperCase() + lvl.slice(1);
           thinkingKey = `thinking${cap}`;
         }
-        const rightPlain = thinkingText
-          ? `${modelName} • ${thinkingText}`
-          : modelName;
-        const rightColored = thinkingKey
+
+        const usage = ctx.getContextUsage?.();
+        const usageText =
+          usage?.percent != null ? `${usage.percent.toFixed(1)}%` : "";
+
+        const leftPlain = [
+          pwd,
+          usageText,
+          thinkingText ? `${modelName} • ${thinkingText}` : modelName,
+        ]
+          .filter(Boolean)
+          .join("   ");
+        const modelColored = thinkingKey
           ? `${theme.fg("dim", `${modelName} • `)}${theme.fg(thinkingKey as never, thinkingText)}`
           : theme.fg("dim", modelName);
+        const dimLeft =
+          theme.fg("dim", `${pwd}   `) +
+          (usageText ? theme.fg("dim", `${usageText}   `) : "") +
+          modelColored;
 
-        const dimLeft = theme.fg("dim", left);
-        const lw = visibleWidth(left);
+        const sessionName = ctx.sessionManager.getSessionName?.() ?? "";
+        const rightPlain = sessionName;
+        const rightColored = theme.fg("dim", sessionName);
+
+        const lw = visibleWidth(leftPlain);
         const rw = visibleWidth(rightPlain);
         let line: string;
         if (lw + 2 + rw <= width) {
@@ -122,7 +129,7 @@ const installFooter = (pi: ExtensionAPI) => {
             " ".repeat(Math.max(0, width - lw - truncRw)) +
             theme.fg("dim", truncR);
         } else {
-          line = theme.fg("dim", truncateToWidth(left, width, "..."));
+          line = theme.fg("dim", truncateToWidth(leftPlain, width, "..."));
         }
 
         return [line];

@@ -59,6 +59,8 @@ Ask yourself: "Would a senior engineer say this is overcomplicated?" If yes, sim
 
 - No decorative dividers (`# ====`, `# ----`, banners, boxes).
 - Comments: short, WHY not WHAT. No comment if code is obvious.
+- No history ("Replaces…", "Legacy…", "Previously…"). Write current state unless causing bug.
+- When editing, delete adjacent comments your change made stale, redundant, or restating the next line.
 
 ## Surgical Changes
 

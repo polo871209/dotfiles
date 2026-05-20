@@ -63,5 +63,5 @@ cask "spotify"
 cask "telegram"
 cask "whatsapp"
 cask "zen"
-mas "PDFgear", id: 6469021132
+mas "PDFgear 2", id: 6469021132
 mas "Xnip", id: 1221250572

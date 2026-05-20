@@ -102,7 +102,7 @@ alias n="nvim"
 alias o="open ."
 alias oc="opencode --port --continue"
 p() { clear; command pi --continue "$@"; clear; }
-alias pwd="pwd | pbcopy"
+alias pwd='printf %s "$PWD" | pbcopy'
 alias st="tmux source-file ${XDG_CONFIG_HOME:-$HOME}/tmux/tmux.conf"
 alias sz="source ${ZDOTDIR:-$HOME}/.zshrc"
 alias tf="terraform"

@@ -115,28 +115,11 @@ for _, file in ipairs(files) do
 			vim.cmd("doautocmd FileType")
 		end)
 
-		-- Wait for LSP attach so code actions and diagnostics are available.
-		vim.wait(math.min(2000, remaining()), function()
-			return #vim.lsp.get_clients({ bufnr = bufnr }) > 0
-		end, 50)
-
-		-- Initial diagnostics pull so code-action context has something to feed on.
-		pull_diagnostics(bufnr)
-		pcall(function()
-			require("lint").try_lint()
-		end)
-		-- Brief settle for async publishDiagnostics.
-		vim.wait(math.min(800, remaining()), function()
-			return false
-		end, 50)
-
-		-- Auto-fix: source.fixAll + source.organizeImports (ruff/biome/eslint/ts/etc.)
-		local fixed = apply_code_actions(bufnr)
-
-		-- Format last so it cleans up anything the fix-all rearranged.
+		-- 1) Format FIRST (best effort). conform.nvim uses external formatters
+		--    (prettier/ruff/biome/etc.) and doesn't require LSP attach, so this
+		--    runs even if the rest of the pipeline later fails/times out.
 		local fmt = try_format(bufnr)
-
-		if fixed or fmt then
+		if fmt then
 			pcall(function()
 				vim.api.nvim_buf_call(bufnr, function()
 					vim.cmd("silent! write")
@@ -145,7 +128,35 @@ for _, file in ipairs(files) do
 			table.insert(formatted, vim.api.nvim_buf_get_name(bufnr))
 		end
 
-		-- Re-pull diagnostics so the widget reflects post-fix state.
+		-- 2) Everything below is LSP-dependent and best-effort. If it fails or
+		--    times out, the format above is still on disk.
+		vim.wait(math.min(2000, remaining()), function()
+			return #vim.lsp.get_clients({ bufnr = bufnr }) > 0
+		end, 50)
+
+		pull_diagnostics(bufnr)
+		pcall(function()
+			require("lint").try_lint()
+		end)
+		vim.wait(math.min(800, remaining()), function()
+			return false
+		end, 50)
+
+		-- Auto-fix: source.fixAll + source.organizeImports (ruff/biome/eslint/ts/etc.)
+		local fixed = apply_code_actions(bufnr)
+		if fixed then
+			-- Re-format after fixes so import sort / quick-fixes get tidied.
+			local refmt = try_format(bufnr)
+			pcall(function()
+				vim.api.nvim_buf_call(bufnr, function()
+					vim.cmd("silent! write")
+				end)
+			end)
+			if refmt and not fmt then
+				table.insert(formatted, vim.api.nvim_buf_get_name(bufnr))
+			end
+		end
+
 		pull_diagnostics(bufnr)
 		pcall(function()
 			require("lint").try_lint()

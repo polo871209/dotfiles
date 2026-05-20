@@ -1,8 +1,16 @@
 // notifier — macOS desktop notifications when pi finishes a turn and the
 // user is not currently looking at this tmux pane.
+//
+// Env vars:
+//   PI_NOTIFIER=0           disable entirely
+//   PI_NOTIFIER_SOUND=/path override notification sound (.aiff)
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { exec, execFile } from "node:child_process";
 import * as path from "node:path";
+
+const DISABLED = process.env.PI_NOTIFIER === "0";
+const SOUND_PATH =
+  process.env.PI_NOTIFIER_SOUND || "/System/Library/Sounds/Blow.aiff";
 
 const execP = (cmd: string, timeoutMs = 1000): Promise<string> =>
   new Promise((resolve, reject) => {
@@ -39,17 +47,34 @@ const getFrontmostPid = async (): Promise<number | null> => {
   }
 };
 
-const getAncestorPids = async (startPid: number): Promise<Set<number>> => {
-  const ancestors = new Set<number>();
+// Cache ps output briefly so repeated focus checks don't re-scan the process
+// table every notification.
+let psCache: { at: number; parents: Map<number, number> } | null = null;
+const PS_TTL_MS = 2000;
+
+const getParentMap = async (): Promise<Map<number, number>> => {
+  const now = Date.now();
+  if (psCache && now - psCache.at < PS_TTL_MS) return psCache.parents;
+  const parents = new Map<number, number>();
   try {
     const out = await execP("ps -eo pid=,ppid=", 1500);
-    const parents = new Map<number, number>();
     for (const line of out.split("\n")) {
       const parts = line.trim().split(/\s+/);
       if (parts.length === 2) {
         parents.set(parseInt(parts[0], 10), parseInt(parts[1], 10));
       }
     }
+  } catch {
+    /* ignore */
+  }
+  psCache = { at: now, parents };
+  return parents;
+};
+
+const getAncestorPids = async (startPid: number): Promise<Set<number>> => {
+  const ancestors = new Set<number>();
+  try {
+    const parents = await getParentMap();
     let pid = startPid;
     while (pid > 1) {
       ancestors.add(pid);
@@ -112,7 +137,8 @@ const isTerminalFocused = async (): Promise<boolean> => {
 
 const debounce = new Map<string, number>();
 
-const escapeAS = (s: string) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+const escapeAS = (s: string) =>
+  s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r?\n/g, " ");
 
 const sendNotification = async (
   title: string,
@@ -122,6 +148,12 @@ const sendNotification = async (
   const now = Date.now();
   if ((debounce.get(key) ?? 0) > now - 1000) return;
   debounce.set(key, now);
+  // Prune entries older than 5s to keep the map bounded.
+  if (debounce.size > 32) {
+    for (const [k, t] of debounce) {
+      if (now - t > 5000) debounce.delete(k);
+    }
+  }
 
   try {
     await execFileP(
@@ -138,12 +170,7 @@ const sendNotification = async (
 };
 
 const playSound = (): void => {
-  execFile(
-    "afplay",
-    ["/System/Library/Sounds/Blow.aiff"],
-    { timeout: 5000 },
-    () => {},
-  );
+  execFile("afplay", [SOUND_PATH], { timeout: 5000 }, () => {});
 };
 
 const notify = async (projectName: string, message: string): Promise<void> => {
@@ -155,6 +182,7 @@ const notify = async (projectName: string, message: string): Promise<void> => {
 // --- Extension entry -------------------------------------------------------
 
 export default function (pi: ExtensionAPI) {
+  if (DISABLED) return;
   let projectName = path.basename(process.cwd());
 
   pi.on("session_start", async (_event, ctx) => {
