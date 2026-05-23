@@ -54,7 +54,6 @@ local function open_buf(file)
     local existing = bufs[file]
     local current_mtime = file_mtime(file)
     if existing and vim.api.nvim_buf_is_valid(existing) and mtimes[file] == current_mtime then return existing end
-    -- Stale or new: edit fresh.
     vim.cmd('silent! edit ' .. vim.fn.fnameescape(file))
     local b = vim.api.nvim_get_current_buf()
     bufs[file] = b
@@ -73,7 +72,6 @@ end
 
 local function find_col(bufnr, line_1idx, symbol)
     if not symbol or symbol == '' then
-        -- First non-whitespace.
         local line = vim.api.nvim_buf_get_lines(bufnr, line_1idx - 1, line_1idx, false)[1] or ''
         local s = line:find '%S'
         return s and (s - 1) or 0
@@ -103,7 +101,6 @@ local function range_start(range)
     return (s.line or 0) + 1, (s.character or 0) + 1
 end
 
--- Read one line of context at file:line for navigation results.
 local function read_line(file, line_1idx)
     local f = io.open(file, 'r')
     if not f then return '' end

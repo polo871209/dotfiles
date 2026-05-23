@@ -8,7 +8,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { exec, execFile } from "node:child_process";
 import * as path from "node:path";
 
-const DISABLED = process.env.PI_NOTIFIER === "0";
+const DISABLED =
+  process.env.PI_NOTIFIER === "0" || process.env.PI_IS_SUBAGENT === "1";
 const SOUND_PATH =
   process.env.PI_NOTIFIER_SOUND || "/System/Library/Sounds/Blow.aiff";
 
