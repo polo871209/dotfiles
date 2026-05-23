@@ -5,11 +5,7 @@
   "defaultThinkingLevel": "xhigh",
   "theme": "catppuccin-mocha",
   "quietStartup": true,
-  "packages": [
-    "npm:@gotgenes/pi-anthropic-auth",
-    "npm:pi-web-access",
-    "npm:pi-context"
-  ],
+  "packages": ["npm:pi-web-access"],
   "warnings": {
     "anthropicExtraUsage": false
   },

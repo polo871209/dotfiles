@@ -9,7 +9,10 @@ _G.PiFeedback = M
 
 local FORMAT_TIMEOUT_MS = 3000
 local CODEACTION_TIMEOUT_MS = 2000
-local OVERALL_BUDGET_MS = 10000
+-- Per-file budget so a slow first file doesn't starve later ones.
+-- TS side caps the whole call separately (see nvimCallTimeoutMs).
+local PER_FILE_BUDGET_MS = 4500
+local SETTLE_MS = 1000
 
 local FIXALL_KINDS = {
     'source.fixAll',
@@ -20,10 +23,21 @@ local function apply_code_actions(bufnr, remaining)
     local clients = vim.lsp.get_clients { bufnr = bufnr }
     if #clients == 0 then return false end
     local changed = false
+    -- Whole-buffer range. Cursor-based make_range_params yields (0,0)-(0,0)
+    -- in headless nvim, which some servers (vtsls, gopls) honor literally
+    -- and then return no actions.
+    local last_line = vim.api.nvim_buf_line_count(bufnr)
+    local full_range = {
+        start = { line = 0, character = 0 },
+        ['end'] = { line = last_line, character = 0 },
+    }
     for _, client in ipairs(clients) do
         local enc = client.offset_encoding or 'utf-16'
         for _, kind in ipairs(FIXALL_KINDS) do
-            local params = vim.lsp.util.make_range_params(0, enc) --[[@as table]]
+            local params = {
+                textDocument = vim.lsp.util.make_text_document_params(bufnr),
+                range = full_range,
+            }
             params.context = { only = { kind }, diagnostics = vim.diagnostic.get(bufnr) or {} }
             local timeout = math.min(CODEACTION_TIMEOUT_MS, remaining())
             if timeout <= 0 then break end
@@ -63,14 +77,13 @@ local function pull_diagnostics(bufnr, remaining)
 end
 
 function M.run(files)
-    local started_at = vim.uv.now()
-    local function remaining() return math.max(0, OVERALL_BUDGET_MS - (vim.uv.now() - started_at)) end
-
     local formatted = {}
     local bufs = {}
 
     for _, file in ipairs(files) do
         if type(file) == 'string' and vim.uv.fs_stat(file) then
+            local file_started = vim.uv.now()
+            local function remaining() return math.max(0, PER_FILE_BUDGET_MS - (vim.uv.now() - file_started)) end
             vim.cmd('silent! edit ' .. vim.fn.fnameescape(file))
             local bufnr = vim.api.nvim_get_current_buf()
             table.insert(bufs, bufnr)
@@ -113,7 +126,7 @@ function M.run(files)
     end
 
     -- Final settle for async publishDiagnostics.
-    vim.wait(math.min(1500, remaining()), function() return false end, 50)
+    vim.wait(SETTLE_MS, function() return false end, 50)
 
     local out = { formatted = formatted, diagnostics = {} }
     local sev = { 'error', 'warn', 'info', 'hint' }

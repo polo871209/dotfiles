@@ -25,7 +25,7 @@ vim.lsp.enable {
 }
 
 -- Neovim 0.11+ already maps globally: grn, gra, grr, gri, grt, K
-local hl_group = vim.api.nvim_create_augroup('lsp-highlight', { clear = false })
+local hl_group = vim.api.nvim_create_augroup('lsp-highlight', { clear = true })
 local detach_group = vim.api.nvim_create_augroup('lsp-detach', { clear = true })
 
 vim.api.nvim_create_autocmd('LspDetach', {
@@ -101,16 +101,29 @@ vim.api.nvim_create_autocmd('LspProgress', {
     end,
 })
 
--- Organize C/C++ includes on save via clangd's organizeImports code action
+-- Organize C/C++ includes on save via clangd's organizeImports code action.
+-- Must be synchronous: BufWritePre returns before async code_action {apply=true}
+-- lands its edit, leaving the buffer dirty post-save.
 vim.api.nvim_create_autocmd('BufWritePre', {
     pattern = { '*.c', '*.cpp', '*.h', '*.hpp' },
     group = vim.api.nvim_create_augroup('clangd-organize-imports', { clear = true }),
     callback = function(ev)
         local client = vim.lsp.get_clients({ bufnr = ev.buf, name = 'clangd' })[1]
         if not client then return end
-        vim.lsp.buf.code_action {
+        local enc = client.offset_encoding or 'utf-16'
+        local last_line = vim.api.nvim_buf_line_count(ev.buf)
+        local params = {
+            textDocument = vim.lsp.util.make_text_document_params(ev.buf),
+            range = {
+                start = { line = 0, character = 0 },
+                ['end'] = { line = last_line, character = 0 },
+            },
             context = { only = { 'source.organizeImports' }, diagnostics = {} },
-            apply = true,
         }
+        local res = client:request_sync('textDocument/codeAction', params, 1000, ev.buf)
+        if not res or not res.result then return end
+        for _, action in ipairs(res.result) do
+            if action.edit then pcall(vim.lsp.util.apply_workspace_edit, action.edit, enc) end
+        end
     end,
 })

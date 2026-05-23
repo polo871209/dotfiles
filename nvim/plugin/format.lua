@@ -1,10 +1,15 @@
-vim.pack.add {
-    'https://github.com/Wansmer/treesj',
-    'https://github.com/stevearc/conform.nvim',
-}
+vim.pack.add { 'https://github.com/stevearc/conform.nvim' }
 
-require('treesj').setup { use_default_keymaps = false }
-vim.keymap.set('n', '<leader>m', '<cmd>TSJToggle<cr>', { desc = 'Toggle split/join' })
+-- Lazy-load treesj behind its only keymap (Ɉ9ms off cold startup).
+local treesj_loaded = false
+vim.keymap.set('n', '<leader>m', function()
+    if not treesj_loaded then
+        treesj_loaded = true
+        vim.pack.add { 'https://github.com/Wansmer/treesj' }
+        require('treesj').setup { use_default_keymaps = false }
+    end
+    vim.cmd 'TSJToggle'
+end, { desc = 'Toggle split/join' })
 
 -- Use biome instead of prettier when biome config present in project
 local function biome_or_prettier(bufnr)

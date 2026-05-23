@@ -1,7 +1,7 @@
 ---
 name: researcher
 description: 'FIRST CHOICE for any unfamiliar tool/lib/repo/framework/concept. Spawn turn 1 — NEVER inline web_search, fetch_content, or shell-cat README/AGENTS.md to "orient" first. User-pasted URL to unknown thing = research, NOT a known-URL lookup. "Check out X", "explore this repo", "how does X work", "can we implement X" → delegate. Inline allowed ONLY for: (a) extracting a known specific fact from a known URL, (b) iterative drilling where next query depends on previous, (c) verbatim quoting. If in doubt, delegate.'
-tools: web_search, fetch_content, get_search_content, code_search
+tools: web_search, fetch_content, get_search_content, code_search, read, grep, find, ls, bash
 model: anthropic/claude-sonnet-4-6
 thinking: medium
 ---

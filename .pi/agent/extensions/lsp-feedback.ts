@@ -58,7 +58,12 @@ const ensureFeedbackLoaded = async (cwd: string): Promise<void> => {
   feedbackLoaded = true;
 };
 
-const NVIM_CALL_TIMEOUT_MS = 15_000;
+// Lua side enforces PER_FILE_BUDGET_MS = 4500 + ~1s settle. Match here
+// with headroom so the hard cap fires only on a wedged nvim.
+const PER_FILE_BUDGET_MS = 5_500;
+const BASE_TIMEOUT_MS = 3_000;
+const nvimCallTimeoutMs = (fileCount: number): number =>
+  BASE_TIMEOUT_MS + Math.max(1, fileCount) * PER_FILE_BUDGET_MS;
 const MAX_FILES = 25;
 const MAX_LINES_OUT = 50;
 const MAX_FIX_FILES = 5;
@@ -116,6 +121,31 @@ const isScratchPath = (abs: string): boolean => {
   return SKIP_PREFIXES.some((p) => abs.startsWith(p) || real.startsWith(p));
 };
 
+// Build-artifact / vendored dirs we never want to feed to LSP. Cheap path
+// segment match — avoids spawning `git check-ignore` per file.
+const IGNORED_SEGMENTS = new Set([
+  "node_modules",
+  "dist",
+  "build",
+  "out",
+  "target",
+  "vendor",
+  "coverage",
+  ".next",
+  ".nuxt",
+  ".turbo",
+  ".cache",
+  ".venv",
+  "venv",
+  "__pycache__",
+  ".git",
+]);
+const isIgnoredPath = (abs: string, cwd: string): boolean => {
+  const rel = path.relative(cwd, abs);
+  if (!rel || rel.startsWith("..")) return false;
+  return rel.split(path.sep).some((seg) => IGNORED_SEGMENTS.has(seg));
+};
+
 const extractPath = (input: unknown): string | undefined => {
   if (!input || typeof input !== "object") return;
   const i = input as Record<string, unknown>;
@@ -133,7 +163,7 @@ const runDriver = async (
   try {
     await ensureFeedbackLoaded(cwd);
     // Hard cap via AbortSignal in case nvim wedges.
-    const timeoutSignal = AbortSignal.timeout(NVIM_CALL_TIMEOUT_MS);
+    const timeoutSignal = AbortSignal.timeout(nvimCallTimeoutMs(files.length));
     const combined = signal
       ? AbortSignal.any([signal, timeoutSignal])
       : timeoutSignal;
@@ -266,12 +296,8 @@ const applyFixes = async (
     if (!fixed || fixed === original) continue;
     if (fixed.length < Math.min(20, original.length / 4)) continue;
     try {
-      // Backup original next to file so a bad LLM fix can be recovered.
-      try {
-        fs.writeFileSync(`${file}.lsp-feedback.bak`, original, "utf8");
-      } catch {
-        /* best effort */
-      }
+      // No backup — user has git. Sanity gates above (length floor,
+      // identity check) catch obvious bad outputs.
       fs.writeFileSync(file, fixed, "utf8");
       patched.push(file);
     } catch {
@@ -426,6 +452,7 @@ export default function (pi: ExtensionAPI) {
     const abs = toAbs(p, cwd);
     if (!fs.existsSync(abs)) return;
     if (isScratchPath(abs)) return;
+    if (isIgnoredPath(abs, cwd)) return;
     touched.add(abs);
   });
 
