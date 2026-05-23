@@ -1,17 +1,18 @@
-// lsp-feedback — after edits, run nvim headless to format touched files,
-// collect diagnostics, and show the result in a widget. LLM auto-fixes
-// (errors + warnings) run by default; opt out with PI_LSP_FEEDBACK_AUTO_FIX=0.
+// lsp-feedback — after edits, route touched files through the persistent
+// nvim owned by extensions/lsp/ to format, apply safe code-actions, and
+// collect diagnostics. Widget renders the result. LLM auto-fixes (errors +
+// warnings) run by default; opt out with PI_LSP_FEEDBACK_AUTO_FIX=0.
 import { complete } from "@earendil-works/pi-ai";
 import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { Container, Text } from "@earendil-works/pi-tui";
-import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { callLua, loadLua } from "./lsp/nvim";
 
 type Severity = "error" | "warn" | "info" | "hint";
 interface Diag {
@@ -28,14 +29,11 @@ interface DriverResult {
   diagnostics: Diag[];
 }
 
-// ESM-safe __dirname (jiti also injects __dirname; this works under both).
 const _here =
   typeof __dirname !== "undefined"
     ? __dirname
     : path.dirname(fileURLToPath(import.meta.url));
-const DRIVER = path.join(_here, "lsp-feedback.lua");
-// Log file for nvim stderr/parse errors. Writing to stdout/stderr corrupts
-// pi's TUI; route diagnostics-about-diagnostics here instead.
+const FEEDBACK_LUA = path.join(_here, "lsp-feedback.lua");
 const LOG_FILE = path.join(os.tmpdir(), "pi-lsp-feedback.log");
 const logDriver = (msg: string) => {
   try {
@@ -48,12 +46,21 @@ const logDriver = (msg: string) => {
     /* best effort */
   }
 };
-const NVIM_TIMEOUT_MS = 15_000;
+
+// Load _G.PiFeedback into the shared nvim once per session.
+let feedbackLoaded = false;
+const ensureFeedbackLoaded = async (cwd: string): Promise<void> => {
+  if (feedbackLoaded) return;
+  const src = fs.readFileSync(FEEDBACK_LUA, "utf8");
+  await loadLua(cwd, src);
+  feedbackLoaded = true;
+};
+
+const NVIM_CALL_TIMEOUT_MS = 15_000;
 const MAX_FILES = 25;
 const MAX_LINES_OUT = 50;
 const MAX_FIX_FILES = 5;
 const MAX_FILE_BYTES = 64 * 1024;
-const MARKER = "__LSP_FEEDBACK_JSON__";
 const WIDGET_KEY = "lsp-feedback";
 // Prefix each widget line with a thin vertical bar so the panel reads as a
 // clean block without width-dependent borders.
@@ -116,52 +123,29 @@ const extractPath = (input: unknown): string | undefined => {
   }
 };
 
-const runDriver = (
+const runDriver = async (
   files: string[],
   cwd: string,
   signal: AbortSignal | undefined,
-): Promise<DriverResult | null> =>
-  new Promise((resolve) => {
-    const child = spawn(
-      "nvim",
-      ["--headless", ...files, "+luafile " + DRIVER],
-      { cwd, stdio: ["ignore", "pipe", "pipe"], signal },
+): Promise<DriverResult | null> => {
+  try {
+    await ensureFeedbackLoaded(cwd);
+    // Hard cap via AbortSignal in case nvim wedges.
+    const timeoutSignal = AbortSignal.timeout(NVIM_CALL_TIMEOUT_MS);
+    const combined = signal
+      ? AbortSignal.any([signal, timeoutSignal])
+      : timeoutSignal;
+    return await callLua<DriverResult>(
+      cwd,
+      "return PiFeedback.run(...)",
+      [files],
+      combined,
     );
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (b) => (stdout += b.toString()));
-    child.stderr.on("data", (b) => (stderr += b.toString()));
-    const killer = setTimeout(() => {
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        /* ignore */
-      }
-    }, NVIM_TIMEOUT_MS);
-    child.on("error", (err) => {
-      clearTimeout(killer);
-      logDriver(`spawn error: ${err.message}`);
-      resolve(null);
-    });
-    child.on("close", () => {
-      clearTimeout(killer);
-      const idx = stdout.lastIndexOf(MARKER);
-      if (stderr.trim()) logDriver(`stderr: ${stderr.trim()}`);
-      if (idx < 0) {
-        logDriver("no JSON marker in stdout");
-        return resolve(null);
-      }
-      const json = stdout.slice(idx + MARKER.length).trim();
-      try {
-        resolve(JSON.parse(json) as DriverResult);
-      } catch (e) {
-        logDriver(
-          `JSON parse failed: ${e instanceof Error ? e.message : String(e)}`,
-        );
-        resolve(null);
-      }
-    });
-  });
+  } catch (e) {
+    logDriver(`run failed: ${e instanceof Error ? e.message : String(e)}`);
+    return null;
+  }
+};
 
 const sevTag: Record<Severity, string> = {
   error: "error",
