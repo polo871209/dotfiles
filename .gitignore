@@ -3,3 +3,9 @@ history.txt
 .zsh_history
 .pi/agent/auth.json
 .pi/agent/sessions/
+
+# Override global ignore (`npm/`) so we track shared extension deps.
+# node_modules/ inside still ignored by the global `node_modules/` rule.
+!.pi/agent/npm/
+!.pi/agent/npm/package.json
+!.pi/agent/npm/package-lock.json
