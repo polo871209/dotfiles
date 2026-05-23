@@ -4,47 +4,47 @@ local ignore = require 'ignore'
 local snacks = require 'snacks'
 
 snacks.setup {
-  bigfile = {},
-  indent = {},
-  input = {},
-  lazygit = {
-    configure = false,
-    win = { style = 'lazygit' },
-  },
-  picker = {
-    layout = { fullscreen = true, preset = 'telescope' },
-    formatters = {
-      file = {
-        min_width = 999,
-      },
+    bigfile = {},
+    indent = {},
+    input = {},
+    lazygit = {
+        configure = false,
+        win = { style = 'lazygit' },
     },
-    exclude = ignore.patterns,
-    sources = {
-      smart = {
-        filter = { cwd = true },
-      },
-      files = {
-        hidden = true,
-      },
+    picker = {
+        layout = { fullscreen = true, preset = 'telescope' },
+        formatters = {
+            file = {
+                min_width = 999,
+            },
+        },
+        exclude = ignore.patterns,
+        sources = {
+            smart = {
+                filter = { cwd = true },
+            },
+            files = {
+                hidden = true,
+            },
+        },
     },
-  },
-  gitbrowse = {
-    remote_patterns = {
-      { '^git@github%.com%-[^:]+:(.+)%.git$', 'https://github.com/%1' },
-      { '^git@github%.com%-[^:]+:(.+)$', 'https://github.com/%1' },
-      { '^(https?://.*)%.git$', '%1' },
-      { '^git@(.+):(.+)%.git$', 'https://%1/%2' },
-      { '%.git$', '' },
+    gitbrowse = {
+        remote_patterns = {
+            { '^git@github%.com%-[^:]+:(.+)%.git$', 'https://github.com/%1' },
+            { '^git@github%.com%-[^:]+:(.+)$', 'https://github.com/%1' },
+            { '^(https?://.*)%.git$', '%1' },
+            { '^git@(.+):(.+)%.git$', 'https://%1/%2' },
+            { '%.git$', '' },
+        },
     },
-  },
-  styles = {
-    lazygit = { width = 0.99, height = 0.99 },
-  },
-  notifier = {
-    level = vim.log.levels.INFO,
-  },
-  toggle = {},
-  words = {},
+    styles = {
+        lazygit = { width = 0.99, height = 0.99 },
+    },
+    notifier = {
+        level = vim.log.levels.INFO,
+    },
+    toggle = {},
+    words = {},
 }
 
 -- Picker keymaps
@@ -70,6 +70,6 @@ vim.keymap.set('n', '<leader>tn', function() snacks.notifier.hide() end, { desc 
 
 -- Toggle mappings (deferred so Snacks global is fully initialized)
 vim.schedule(function()
-  snacks.toggle.option('wrap', { name = 'Wrap' }):map '<leader>tw'
-  snacks.toggle.diagnostics():map '<leader>td'
+    snacks.toggle.option('wrap', { name = 'Wrap' }):map '<leader>tw'
+    snacks.toggle.diagnostics():map '<leader>td'
 end)

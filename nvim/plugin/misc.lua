@@ -1,9 +1,9 @@
 vim.pack.add {
-  'https://github.com/christoomey/vim-tmux-navigator',
-  'https://github.com/folke/flash.nvim',
-  'https://github.com/windwp/nvim-autopairs',
-  'https://github.com/NMAC427/guess-indent.nvim',
-  'https://github.com/lewis6991/gitsigns.nvim',
+    'https://github.com/christoomey/vim-tmux-navigator',
+    'https://github.com/folke/flash.nvim',
+    'https://github.com/windwp/nvim-autopairs',
+    'https://github.com/NMAC427/guess-indent.nvim',
+    'https://github.com/lewis6991/gitsigns.nvim',
 }
 
 -- Tmux navigation
@@ -20,13 +20,13 @@ require('nvim-autopairs').setup {}
 require('guess-indent').setup {}
 
 require('gitsigns').setup {
-  signs = {
-    add = { text = '+' },
-    change = { text = '~' },
-    delete = { text = '_' },
-    topdelete = { text = '‾' },
-    changedelete = { text = '~' },
-  },
+    signs = {
+        add = { text = '+' },
+        change = { text = '~' },
+        delete = { text = '_' },
+        topdelete = { text = '‾' },
+        changedelete = { text = '~' },
+    },
 }
 
 -- Ghostty supports OSC 9;4 natively for progress bars.
@@ -35,15 +35,15 @@ require('gitsigns').setup {
 -- via nvim_ui_send — tmux's allow-passthrough then forwards it to Ghostty.
 -- Handles all progress sources: 'lsp', 'vim.pack', etc.
 if vim.env.TMUX then
-  vim.api.nvim_create_autocmd('Progress', {
-    group = vim.api.nvim_create_augroup('nvim-tmux-osc', { clear = true }),
-    callback = function(ev)
-      local d = ev.data
-      -- state: 0=hidden, 1=running+percent, 2=error, 3=indeterminate, 4=warning
-      local done = d.status == 'success' or d.status == 'error'
-      local state = done and 0 or (d.percent and 1 or 3)
-      local pct = d.percent or 0
-      vim.api.nvim_ui_send(string.format('\027Ptmux;\027\027]9;4;%d;%d\007\027\\', state, pct))
-    end,
-  })
+    vim.api.nvim_create_autocmd('Progress', {
+        group = vim.api.nvim_create_augroup('nvim-tmux-osc', { clear = true }),
+        callback = function(ev)
+            local d = ev.data
+            -- state: 0=hidden, 1=running+percent, 2=error, 3=indeterminate, 4=warning
+            local done = d.status == 'success' or d.status == 'error'
+            local state = done and 0 or (d.percent and 1 or 3)
+            local pct = d.percent or 0
+            vim.api.nvim_ui_send(string.format('\027Ptmux;\027\027]9;4;%d;%d\007\027\\', state, pct))
+        end,
+    })
 end
