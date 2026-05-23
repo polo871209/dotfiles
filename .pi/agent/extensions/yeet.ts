@@ -10,7 +10,7 @@ import {
 import { Box, Text } from "@earendil-works/pi-tui";
 
 const MSG_PROMPT =
-  "Write a Conventional Commits message for the diff (see conventionalcommits.org v1.0.0). Format: `<type>(<scope>)!: <subject>` where type ∈ {feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert}; scope optional; `!` only for breaking changes. Subject: imperative mood, lowercase, ≤72 chars, no trailing period. Optional body after one blank line only if change is non-obvious; body MAY be multiple newline-separated paragraphs. Optional footers one blank line after body, each `Token: value` or `Token #value`; tokens use `-` instead of spaces (e.g. `Reviewed-by`, `Refs: #123`), except `BREAKING CHANGE` which stays uppercase with a space. No fences, no preamble. Output ONLY the message.";
+  "Write a Conventional Commits message for the diff. Format: `<type>(<scope>)!: <subject>` where type ∈ {feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert}; scope optional; `!` only for breaking changes. Subject: imperative mood, lowercase, ≤72 chars, no trailing period. Optional body after one blank line only if change is non-obvious; body MAY be multiple newline-separated paragraphs. Optional footers one blank line after body, each `Token: value` or `Token #value`; tokens use `-` instead of spaces (e.g. `Reviewed-by`, `Refs: #123`), except `BREAKING CHANGE` which stays uppercase with a space. No fences, no preamble. Output ONLY the message.";
 
 const YEET_MSG_TYPE = "yeet-marker";
 
@@ -68,10 +68,25 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      const diffstat = hasHead
-        ? (await git("diff", "HEAD", "--stat")).out
-        : wtStatus;
-      const diff = hasHead ? (await git("diff", "HEAD")).out : wtStatus;
+      // Make untracked files visible to `git diff` via intent-to-add, then
+      // undo so we don't leave index state behind. Without this, brand-new
+      // files are invisible in the diff and the commit message drifts.
+      const untracked = (
+        await git("ls-files", "--others", "--exclude-standard")
+      ).out
+        .split("\n")
+        .filter(Boolean);
+      if (untracked.length) await git("add", "-N", "--", ...untracked);
+      let diffstat: string;
+      let diff: string;
+      try {
+        diffstat = hasHead
+          ? (await git("diff", "HEAD", "--stat")).out
+          : wtStatus;
+        diff = hasHead ? (await git("diff", "HEAD")).out : wtStatus;
+      } finally {
+        if (untracked.length) await git("reset", "--", ...untracked);
+      }
       const diffSnippet =
         diff.length > 6000 ? diff.slice(0, 6000) + "\n…(truncated)" : diff;
       const hint = args?.trim() ? `\nUser hint: ${args.trim()}\n` : "";
