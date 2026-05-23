@@ -12,7 +12,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { callLua, loadLua } from "./lsp/nvim";
+import { callLua, isRunning, loadLua } from "./lsp/nvim";
 
 type Severity = "error" | "warn" | "info" | "hint";
 interface Diag {
@@ -48,9 +48,11 @@ const logDriver = (msg: string) => {
 };
 
 // Load _G.PiFeedback into the shared nvim once per session.
+// Re-check isRunning() so /lsp-restart (from lsp/index.ts) forces a reload
+// of _G.PiFeedback into the fresh nvim.
 let feedbackLoaded = false;
 const ensureFeedbackLoaded = async (cwd: string): Promise<void> => {
-  if (feedbackLoaded) return;
+  if (feedbackLoaded && isRunning()) return;
   const src = fs.readFileSync(FEEDBACK_LUA, "utf8");
   await loadLua(cwd, src);
   feedbackLoaded = true;
@@ -441,23 +443,5 @@ export default function (pi: ExtensionAPI) {
         e instanceof Error ? e.message : String(e),
       );
     });
-  });
-
-  pi.registerCommand?.("lsp-now", {
-    description: "Run lsp-feedback diagnostics on recently edited files",
-    handler: async (_args: string, ctx: ExtensionContext) => {
-      const files = touched.size > 0 ? Array.from(touched) : lastFiles;
-      if (files.length === 0) return;
-      await runFeedback(files, ctx, false);
-    },
-  });
-
-  pi.registerCommand?.("lsp-fix", {
-    description: "Run lsp-feedback and apply LLM fixes to recent diagnostics",
-    handler: async (_args: string, ctx: ExtensionContext) => {
-      const files = touched.size > 0 ? Array.from(touched) : lastFiles;
-      if (files.length === 0) return;
-      await runFeedback(files, ctx, true);
-    },
   });
 }

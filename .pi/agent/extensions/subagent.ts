@@ -1,0 +1,534 @@
+// /subagent — delegate work to an isolated `pi` child process. Single-layer
+// only: agents cannot spawn other subagents (PI_IS_SUBAGENT=1 in the child
+// env makes this extension early-exit before registering its tool).
+//
+// Agents live in pi's standard agents dir (`~/.pi/agent/agents/*.md`) as
+// markdown with YAML frontmatter:
+//   ---
+//   name: scout
+//   description: ...
+//   tools: read, grep, find, ls       # optional --tools allowlist
+//   model: anthropic/claude-haiku-4-5  # optional
+//   thinking: low                      # optional
+//   ---
+//   <system prompt body>
+//
+// Child is invoked with `--mode json -p` so we receive a structured event
+// stream (tool_execution_start/end, message_end) and can render a live TUI
+// while the agent works. Ctrl+o expands rows.
+
+import { spawn } from "node:child_process";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import {
+  getAgentDir,
+  getMarkdownTheme,
+  parseFrontmatter,
+  type ExtensionAPI,
+  type Theme,
+} from "@earendil-works/pi-coding-agent";
+import {
+  Container,
+  Markdown,
+  Spacer,
+  Text,
+  visibleWidth,
+} from "@earendil-works/pi-tui";
+import { Type } from "typebox";
+
+interface AgentConfig {
+  name: string;
+  description: string;
+  tools: string[];
+  model?: string;
+  thinking?: string;
+  systemPrompt: string;
+}
+
+interface ToolEvent {
+  toolCallId: string;
+  name: string;
+  argsPreview: string;
+  status: "running" | "done";
+}
+
+interface Progress {
+  agent: string;
+  task: string;
+  model: string;
+  status: "running" | "done" | "failed";
+  startedAt: number;
+  durationMs: number;
+  tools: ToolEvent[];
+  lastMessage: string;
+  output: string;
+  error?: string;
+}
+
+const AGENTS_DIR = path.join(getAgentDir(), "agents");
+const MAX_OUTPUT_BYTES = 32 * 1024;
+const UPDATE_INTERVAL_MS = 150;
+const TICK_INTERVAL_MS = 500;
+const COLLAPSED_TOOL_TAIL = 5;
+const ARG_PREVIEW_MAX = 60;
+const FORBIDDEN_TOOLS = new Set(["subagent"]);
+
+function loadAgents(): AgentConfig[] {
+  if (!fs.existsSync(AGENTS_DIR)) return [];
+  const out: AgentConfig[] = [];
+  for (const entry of fs.readdirSync(AGENTS_DIR)) {
+    if (!entry.endsWith(".md")) continue;
+    let content: string;
+    try {
+      content = fs.readFileSync(path.join(AGENTS_DIR, entry), "utf-8");
+    } catch {
+      continue;
+    }
+    const { frontmatter, body } =
+      parseFrontmatter<Record<string, string>>(content);
+    if (!frontmatter.name || !frontmatter.description) continue;
+    const tools = (frontmatter.tools || "")
+      .split(",")
+      .map((t) => t.trim())
+      .filter((t) => t && !FORBIDDEN_TOOLS.has(t));
+    out.push({
+      name: frontmatter.name,
+      description: frontmatter.description,
+      tools,
+      model: frontmatter.model || undefined,
+      thinking: frontmatter.thinking || undefined,
+      systemPrompt: body.trim(),
+    });
+  }
+  return out;
+}
+
+const formatDuration = (ms: number): string => {
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const m = Math.floor(ms / 60_000);
+  const s = Math.floor((ms % 60_000) / 1000);
+  return `${m}m${s}s`;
+};
+
+const headTruncate = (s: string, maxBytes: number): string => {
+  const buf = Buffer.from(s, "utf-8");
+  if (buf.length <= maxBytes) return s;
+  return buf.subarray(0, maxBytes).toString("utf-8") + "\n…(truncated)";
+};
+
+// Collapse whitespace runs so a multi-line arg stays renderable on one line.
+const flatten = (s: string): string => s.replace(/\s+/g, " ").trim();
+
+// One-line preview of common tool args. Falls back to a flattened JSON dump.
+const extractArgsPreview = (rawArgs: Record<string, unknown>): string => {
+  const a = rawArgs;
+  const cap = (s: string): string =>
+    s.length > ARG_PREVIEW_MAX ? s.slice(0, ARG_PREVIEW_MAX - 1) + "…" : s;
+  if (typeof a.command === "string") return cap(flatten(a.command));
+  if (typeof a.pattern === "string") return cap(flatten(a.pattern));
+  if (typeof a.query === "string") return `"${cap(flatten(a.query))}"`;
+  if (typeof a.url === "string") return cap(flatten(a.url));
+  if (typeof a.path === "string") return cap(flatten(a.path));
+  if (typeof a.file === "string") {
+    const sym = typeof a.symbol === "string" && a.symbol ? ` ${a.symbol}` : "";
+    const line = typeof a.line === "number" ? `:${a.line}` : "";
+    return cap(flatten(`${a.file}${line}${sym}`));
+  }
+  return cap(flatten(JSON.stringify(a)));
+};
+
+// Preserves ANSI escapes so colored rows truncate without leaking codes.
+const fitLine = (text: string, maxWidth: number): string => {
+  const flat = text.includes("\n") ? text.replace(/\r?\n/g, " ") : text;
+  if (visibleWidth(flat) <= maxWidth) return flat;
+  let out = "";
+  let w = 0;
+  for (let i = 0; i < flat.length; i++) {
+    const ch = flat[i];
+    if (ch === "\x1b") {
+      const m = flat.slice(i).match(/^\x1b\[[0-9;]*m/);
+      if (m) {
+        out += m[0];
+        i += m[0].length - 1;
+        continue;
+      }
+    }
+    if (w >= maxWidth - 1) return out + "…";
+    out += ch;
+    w++;
+  }
+  return out;
+};
+
+// Throttle leading + trailing.
+function throttle<F extends (...args: never[]) => void>(fn: F, ms: number): F {
+  let last = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return ((...args: never[]) => {
+    const now = Date.now();
+    const wait = ms - (now - last);
+    if (wait <= 0) {
+      last = now;
+      if (timer) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+      fn(...args);
+    } else if (!timer) {
+      timer = setTimeout(() => {
+        last = Date.now();
+        timer = undefined;
+        fn(...args);
+      }, wait);
+    }
+  }) as F;
+}
+
+const extractTextFromContent = (content: unknown): string => {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .filter(
+        (c: unknown): c is { type: "text"; text: string } =>
+          !!c &&
+          typeof c === "object" &&
+          (c as { type?: string }).type === "text" &&
+          typeof (c as { text?: unknown }).text === "string",
+      )
+      .map((c) => c.text)
+      .join("\n");
+  }
+  return "";
+};
+
+// Pluck the latest prose line from the assistant's text, skipping code blocks.
+const proseLastLine = (text: string): string => {
+  if (!text) return "";
+  let inFence = false;
+  let last = "";
+  for (const raw of text.split("\n")) {
+    if (raw.trimStart().startsWith("```")) {
+      inFence = !inFence;
+      continue;
+    }
+    if (!inFence && raw.trim()) last = raw.trim();
+  }
+  return last;
+};
+
+const buildParams = (agents: AgentConfig[]) =>
+  Type.Object({
+    agent: Type.Union(
+      agents.map((a) => Type.Literal(a.name)),
+      { description: "Which subagent to dispatch" },
+    ),
+    task: Type.String({
+      description:
+        "Self-contained task description. Include all context the agent needs — file paths, constraints, expected output format.",
+    }),
+  });
+
+type SubagentArgs = { agent: string; task: string };
+
+const statusIcon = (theme: Theme, p: Progress): string => {
+  if (p.status === "running") return theme.fg("warning", "⟳");
+  if (p.status === "failed") return theme.fg("error", "✗");
+  return theme.fg("success", "✓");
+};
+
+const renderCallComponent = (
+  args: SubagentArgs,
+  theme: Theme,
+  expanded: boolean,
+  width: number,
+) => {
+  const c = new Container();
+  const head = `${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("text", args.agent)}`;
+  if (!expanded) {
+    const preview = flatten(args.task);
+    const line = `${head} ${theme.fg("dim", "·")} ${theme.fg("dim", preview)}`;
+    c.addChild(new Text(fitLine(line, width), 0, 0));
+  } else {
+    c.addChild(new Text(head, 0, 0));
+    c.addChild(new Text(theme.fg("dim", `task: ${args.task}`), 0, 0));
+  }
+  return c;
+};
+
+const renderProgressComponent = (
+  p: Progress,
+  theme: Theme,
+  expanded: boolean,
+  width: number,
+) => {
+  const c = new Container();
+  const icon = statusIcon(theme, p);
+  const stats = `${p.tools.length} tools · ${formatDuration(p.durationMs)}`;
+  const model = expanded ? theme.fg("dim", ` (${p.model})`) : "";
+  const header = `${icon} ${theme.fg("toolTitle", theme.bold(p.agent))}${model} ${theme.fg("dim", "—")} ${theme.fg("dim", stats)}`;
+  c.addChild(new Text(fitLine(header, width), 0, 0));
+
+  const visibleTools = expanded ? p.tools : p.tools.slice(-COLLAPSED_TOOL_TAIL);
+  if (!expanded && p.tools.length > COLLAPSED_TOOL_TAIL) {
+    c.addChild(
+      new Text(
+        theme.fg(
+          "dim",
+          `  … (+${p.tools.length - COLLAPSED_TOOL_TAIL} earlier)`,
+        ),
+        0,
+        0,
+      ),
+    );
+  }
+  for (const t of visibleTools) {
+    const body = t.argsPreview ? `${t.name} ${t.argsPreview}` : t.name;
+    const row =
+      t.status === "running"
+        ? theme.fg("warning", `  ▸ ${body}`)
+        : theme.fg("muted", `  ✓ ${body}`);
+    c.addChild(new Text(fitLine(row, width), 0, 0));
+  }
+
+  if (p.lastMessage && p.status === "running") {
+    c.addChild(new Spacer(1));
+    c.addChild(
+      new Text(fitLine(theme.fg("text", `  ${p.lastMessage}`), width), 0, 0),
+    );
+  }
+
+  if (p.error) {
+    c.addChild(new Spacer(1));
+    c.addChild(new Text(theme.fg("error", `  ${p.error}`), 0, 0));
+  }
+
+  if (expanded && p.status !== "running" && p.output) {
+    c.addChild(new Spacer(1));
+    c.addChild(new Markdown(p.output, 0, 0, getMarkdownTheme()));
+  }
+
+  return c;
+};
+
+const initialProgress = (
+  agent: AgentConfig,
+  task: string,
+  model: string,
+): Progress => ({
+  agent: agent.name,
+  task,
+  model,
+  status: "running",
+  startedAt: Date.now(),
+  durationMs: 0,
+  tools: [],
+  lastMessage: "",
+  output: "",
+});
+
+export default function (pi: ExtensionAPI) {
+  if (process.env.PI_IS_SUBAGENT === "1") return;
+
+  const agents = loadAgents();
+  if (agents.length === 0) return;
+  const byName = new Map(agents.map((a) => [a.name, a]));
+  const agentList = agents
+    .map((a) => `  ${a.name}: ${a.description}`)
+    .join("\n");
+
+  const params = buildParams(agents);
+
+  pi.registerTool<typeof params, Progress>({
+    name: "subagent",
+    label: "Subagent",
+    description:
+      `Delegate a task to a specialized subagent running in an isolated process. ` +
+      `Returns text only — child inherits no context, so the task must be self-contained. ` +
+      `Use to keep this session focused (offload web research, recon, or end-to-end implementation).\n\n` +
+      `Available agents:\n${agentList}\n\n` +
+      `Subagents cannot spawn further subagents.`,
+    parameters: params,
+    renderShell: "self",
+
+    renderCall(args, theme, context) {
+      return renderCallComponent(
+        args as SubagentArgs,
+        theme,
+        context.expanded,
+        (process.stdout.columns ?? 100) - 2,
+      );
+    },
+
+    renderResult(result, options, theme, _context) {
+      const p = result.details as Progress | undefined;
+      const w = (process.stdout.columns ?? 100) - 2;
+      if (!p) {
+        return new Text(theme.fg("dim", "  …"), 0, 0);
+      }
+      return renderProgressComponent(p, theme, options.expanded, w);
+    },
+
+    async execute(_toolCallId, rawParams, signal, onUpdate, ctx) {
+      const args = rawParams as SubagentArgs;
+      const agent = byName.get(args.agent);
+      if (!agent) {
+        return {
+          content: [{ type: "text", text: `Unknown agent: ${args.agent}` }],
+          details: undefined as never,
+          error: `Unknown agent: ${args.agent}`,
+        };
+      }
+
+      const progress = initialProgress(
+        agent,
+        args.task,
+        agent.model ?? "default",
+      );
+
+      // Throttled push so render redraws don't pile up under fast event bursts.
+      const pushNow = () => {
+        progress.durationMs = Date.now() - progress.startedAt;
+        onUpdate?.({
+          content: [{ type: "text", text: "" }],
+          details: { ...progress, tools: [...progress.tools] },
+        });
+      };
+      const push = throttle(pushNow, UPDATE_INTERVAL_MS);
+
+      // Periodic tick so the duration ticks even when no events arrive.
+      const tick = setInterval(push, TICK_INTERVAL_MS);
+
+      const piArgs = [
+        "-p",
+        args.task,
+        "--mode",
+        "json",
+        "--no-session",
+        "--no-context-files",
+        "--system-prompt",
+        agent.systemPrompt,
+      ];
+      if (agent.tools.length > 0) piArgs.push("--tools", agent.tools.join(","));
+      if (agent.model) piArgs.push("--model", agent.model);
+      if (agent.thinking) piArgs.push("--thinking", agent.thinking);
+
+      const child = spawn("pi", piArgs, {
+        cwd: ctx.cwd,
+        stdio: ["ignore", "pipe", "pipe"],
+        signal,
+        env: { ...process.env, PI_IS_SUBAGENT: "1" },
+      });
+
+      let outBuf = "";
+      let stderrBuf = "";
+
+      const handleEvent = (ev: { type?: string; [k: string]: unknown }) => {
+        if (!ev || !ev.type) return;
+        switch (ev.type) {
+          case "tool_execution_start": {
+            const id = String(ev.toolCallId ?? "");
+            progress.tools.push({
+              toolCallId: id,
+              name: String(ev.toolName ?? "?"),
+              argsPreview: extractArgsPreview(
+                (ev.args as Record<string, unknown>) ?? {},
+              ),
+              status: "running",
+            });
+            push();
+            break;
+          }
+          case "tool_execution_end": {
+            const id = String(ev.toolCallId ?? "");
+            const hit = progress.tools.find((t) => t.toolCallId === id);
+            if (hit) hit.status = "done";
+            push();
+            break;
+          }
+          case "message_end": {
+            const msg = ev.message as
+              | { role?: string; content?: unknown }
+              | undefined;
+            if (!msg || msg.role !== "assistant") break;
+            const text = extractTextFromContent(msg.content);
+            if (text) {
+              progress.output = text;
+              const line = proseLastLine(text);
+              if (line) progress.lastMessage = line;
+            }
+            push();
+            break;
+          }
+        }
+      };
+
+      child.stdout.on("data", (c: Buffer) => {
+        outBuf += c.toString("utf-8");
+        let i: number;
+        while ((i = outBuf.indexOf("\n")) >= 0) {
+          const line = outBuf.slice(0, i);
+          outBuf = outBuf.slice(i + 1);
+          if (!line.trim()) continue;
+          try {
+            handleEvent(JSON.parse(line));
+          } catch {
+            /* non-JSON line, ignore */
+          }
+        }
+      });
+      child.stderr.on("data", (c: Buffer) => {
+        stderrBuf += c.toString("utf-8");
+      });
+
+      const {
+        code: exitCode,
+        killSignal,
+        spawnError,
+      } = await new Promise<{
+        code: number;
+        killSignal: NodeJS.Signals | null;
+        spawnError: Error | null;
+      }>((resolve) => {
+        child.on("close", (code, sig) =>
+          resolve({ code: code ?? -1, killSignal: sig, spawnError: null }),
+        );
+        child.on("error", (err) =>
+          resolve({ code: -1, killSignal: null, spawnError: err }),
+        );
+      });
+
+      clearInterval(tick);
+      progress.durationMs = Date.now() - progress.startedAt;
+
+      if (exitCode !== 0 || killSignal || spawnError) {
+        progress.status = "failed";
+        progress.error = spawnError
+          ? `spawn error: ${spawnError.message}`
+          : killSignal
+            ? `killed by ${killSignal} (parent aborted?)`
+            : `exit ${exitCode}`;
+        const detail =
+          stderrBuf.trim() || progress.output.trim() || "(no child output)";
+        return {
+          content: [
+            {
+              type: "text",
+              text: `subagent '${agent.name}' failed — ${progress.error}\n${detail}`,
+            },
+          ],
+          details: { ...progress, tools: [...progress.tools] },
+          error: `Subagent ${agent.name}: ${progress.error}`,
+        };
+      }
+
+      progress.status = "done";
+      const finalText = headTruncate(progress.output.trim(), MAX_OUTPUT_BYTES);
+      progress.output = finalText;
+      return {
+        content: [{ type: "text", text: finalText }],
+        details: { ...progress, tools: [...progress.tools] },
+      };
+    },
+  });
+}
