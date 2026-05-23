@@ -2,9 +2,7 @@
   "name": "pi-extensions",
   "private": true,
   "dependencies": {
-    "@gotgenes/pi-anthropic-auth": "^0.4.6",
     "neovim": "^5.3.0",
-    "pi-context": "^1.1.4",
     "pi-web-access": "^0.10.7"
   }
 }
