@@ -75,66 +75,66 @@ local filetype_group = vim.api.nvim_create_augroup('FileTypeSettings', { clear =
 
 -- Enable spell check for text files
 vim.api.nvim_create_autocmd('FileType', {
-  pattern = { 'markdown', 'text', 'gitcommit', 'plaintex' },
-  group = filetype_group,
-  callback = function() vim.opt_local.spell = true end,
+    pattern = { 'markdown', 'text', 'gitcommit', 'plaintex' },
+    group = filetype_group,
+    callback = function() vim.opt_local.spell = true end,
 })
 
 vim.api.nvim_create_autocmd('FileType', {
-  pattern = 'go',
-  group = filetype_group,
-  callback = function()
-    vim.opt_local.tabstop = 4
-    vim.opt_local.shiftwidth = 4
-  end,
+    pattern = 'go',
+    group = filetype_group,
+    callback = function()
+        vim.opt_local.tabstop = 4
+        vim.opt_local.shiftwidth = 4
+    end,
 })
 
 vim.api.nvim_create_autocmd('FileType', {
-  pattern = 'cue',
-  group = filetype_group,
-  callback = function()
-    vim.opt_local.tabstop = 4
-    vim.opt_local.shiftwidth = 4
-    vim.opt_local.expandtab = false
-  end,
+    pattern = 'cue',
+    group = filetype_group,
+    callback = function()
+        vim.opt_local.tabstop = 4
+        vim.opt_local.shiftwidth = 4
+        vim.opt_local.expandtab = false
+    end,
 })
 
 vim.api.nvim_create_autocmd('FileType', {
-  pattern = { 'c', 'cpp' },
-  group = filetype_group,
-  callback = function()
-    vim.opt_local.tabstop = 4
-    vim.opt_local.shiftwidth = 4
-    vim.opt_local.expandtab = true
-  end,
+    pattern = { 'c', 'cpp' },
+    group = filetype_group,
+    callback = function()
+        vim.opt_local.tabstop = 4
+        vim.opt_local.shiftwidth = 4
+        vim.opt_local.expandtab = true
+    end,
 })
 
 -- Filetype detection
 vim.filetype.add {
-  filename = {
-    ['.envrc'] = 'sh',
-    ['BUILD'] = 'bzl',
-    ['BUILD.bazel'] = 'bzl',
-    ['WORKSPACE'] = 'bzl',
-    ['WORKSPACE.bazel'] = 'bzl',
-    ['MODULE.bazel'] = 'bzl',
-  },
-  extension = { bzl = 'bzl' },
+    filename = {
+        ['.envrc'] = 'sh',
+        ['BUILD'] = 'bzl',
+        ['BUILD.bazel'] = 'bzl',
+        ['WORKSPACE'] = 'bzl',
+        ['WORKSPACE.bazel'] = 'bzl',
+        ['MODULE.bazel'] = 'bzl',
+    },
+    extension = { bzl = 'bzl' },
 }
 
 -- Highlight on yank
 vim.api.nvim_create_autocmd('TextYankPost', {
-  desc = 'Highlight when yanking text',
-  group = vim.api.nvim_create_augroup('kickstart-highlight-yank', { clear = true }),
-  callback = function() vim.hl.on_yank() end,
+    desc = 'Highlight when yanking text',
+    group = vim.api.nvim_create_augroup('kickstart-highlight-yank', { clear = true }),
+    callback = function() vim.hl.on_yank() end,
 })
 
 -- Quickfix window height
 vim.api.nvim_create_autocmd('FileType', {
-  pattern = 'qf',
-  group = vim.api.nvim_create_augroup('QuickfixHeight', { clear = true }),
-  callback = function()
-    local height = math.floor(vim.o.lines * 0.45)
-    vim.cmd('resize ' .. height)
-  end,
+    pattern = 'qf',
+    group = vim.api.nvim_create_augroup('QuickfixHeight', { clear = true }),
+    callback = function()
+        local height = math.floor(vim.o.lines * 0.45)
+        vim.cmd('resize ' .. height)
+    end,
 })

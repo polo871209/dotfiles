@@ -1,5 +1,5 @@
 return {
-  cmd = { 'cue', 'lsp', 'serve' },
-  filetypes = { 'cue' },
-  root_markers = { 'cue.mod', '.git' },
+    cmd = { 'cue', 'lsp', 'serve' },
+    filetypes = { 'cue' },
+    root_markers = { 'cue.mod', '.git' },
 }

@@ -34,7 +34,7 @@ require('mini.surround').setup()
 
 local starter = require 'mini.starter'
 starter.setup {
-  items = { starter.sections.recent_files(3, true) },
-  header = header_art,
-  footer = '',
+    items = { starter.sections.recent_files(3, true) },
+    header = header_art,
+    footer = '',
 }

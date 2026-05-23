@@ -1,16 +1,16 @@
 vim.pack.add {
-  { src = 'https://github.com/catppuccin/nvim', name = 'catppuccin' },
+    { src = 'https://github.com/catppuccin/nvim', name = 'catppuccin' },
 }
 
 require('catppuccin').setup {
-  transparent_background = true,
-  custom_highlights = function()
-    return {
-      -- Gruvbox-style popup backgrounds
-      NormalFloat = { bg = '#282828' },
-      FloatBorder = { bg = '#282828', fg = '#fabd2f' },
-    }
-  end,
+    transparent_background = true,
+    custom_highlights = function()
+        return {
+            -- Gruvbox-style popup backgrounds
+            NormalFloat = { bg = '#282828' },
+            FloatBorder = { bg = '#282828', fg = '#fabd2f' },
+        }
+    end,
 }
 
 vim.cmd.colorscheme 'catppuccin-mocha'

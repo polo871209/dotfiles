@@ -3,80 +3,80 @@ local dapui
 local loaded = false
 
 local function load_dap()
-  if loaded then return dap, dapui end
-  loaded = true
+    if loaded then return dap, dapui end
+    loaded = true
 
-  vim.pack.add {
-    'https://github.com/nvim-neotest/nvim-nio',
-    'https://github.com/rcarriga/nvim-dap-ui',
-    'https://github.com/theHamsta/nvim-dap-virtual-text',
-    'https://github.com/leoluz/nvim-dap-go',
-    'https://github.com/mfussenegger/nvim-dap-python',
-    'https://github.com/mfussenegger/nvim-dap',
-  }
+    vim.pack.add {
+        'https://github.com/nvim-neotest/nvim-nio',
+        'https://github.com/rcarriga/nvim-dap-ui',
+        'https://github.com/theHamsta/nvim-dap-virtual-text',
+        'https://github.com/leoluz/nvim-dap-go',
+        'https://github.com/mfussenegger/nvim-dap-python',
+        'https://github.com/mfussenegger/nvim-dap',
+    }
 
-  dap = require 'dap'
-  dapui = require 'dapui'
-  require('nvim-dap-virtual-text').setup {}
+    dap = require 'dap'
+    dapui = require 'dapui'
+    require('nvim-dap-virtual-text').setup {}
 
-  ---@diagnostic disable-next-line: missing-fields
-  dapui.setup {
-    icons = { expanded = '▾', collapsed = '▸', current_frame = '*' },
-    controls = {
-      icons = {
-        pause = '⏸',
-        play = '▶',
-        step_into = '⏎',
-        step_over = '⏭',
-        step_out = '⏮',
-        step_back = 'b',
-        run_last = '▶▶',
-        terminate = '⏹',
-        disconnect = '⏏',
-      },
-    },
-    layouts = {
-      {
-        elements = {
-          { id = 'scopes', size = 1 },
+    ---@diagnostic disable-next-line: missing-fields
+    dapui.setup {
+        icons = { expanded = '▾', collapsed = '▸', current_frame = '*' },
+        controls = {
+            icons = {
+                pause = '⏸',
+                play = '▶',
+                step_into = '⏎',
+                step_over = '⏭',
+                step_out = '⏮',
+                step_back = 'b',
+                run_last = '▶▶',
+                terminate = '⏹',
+                disconnect = '⏏',
+            },
         },
-        size = 40,
-        position = 'left',
-      },
-      {
-        elements = {
-          { id = 'repl', size = 1 },
+        layouts = {
+            {
+                elements = {
+                    { id = 'scopes', size = 1 },
+                },
+                size = 40,
+                position = 'left',
+            },
+            {
+                elements = {
+                    { id = 'repl', size = 1 },
+                },
+                size = 10,
+                position = 'bottom',
+            },
         },
-        size = 10,
-        position = 'bottom',
-      },
-    },
-  }
+    }
 
-  vim.api.nvim_set_hl(0, 'DapBreak', { fg = '#e51400' })
-  vim.api.nvim_set_hl(0, 'DapStop', { fg = '#ffcc00' })
-  local breakpoint_icons = { Breakpoint = '', BreakpointCondition = '', BreakpointRejected = '', LogPoint = '', Stopped = '' }
-  for type, icon in pairs(breakpoint_icons) do
-    local tp = 'Dap' .. type
-    local hl = (type == 'Stopped') and 'DapStop' or 'DapBreak'
-    vim.fn.sign_define(tp, { text = icon, texthl = hl, numhl = hl })
-  end
+    vim.api.nvim_set_hl(0, 'DapBreak', { fg = '#e51400' })
+    vim.api.nvim_set_hl(0, 'DapStop', { fg = '#ffcc00' })
+    local breakpoint_icons = { Breakpoint = '', BreakpointCondition = '', BreakpointRejected = '', LogPoint = '', Stopped = '' }
+    for type, icon in pairs(breakpoint_icons) do
+        local tp = 'Dap' .. type
+        local hl = (type == 'Stopped') and 'DapStop' or 'DapBreak'
+        vim.fn.sign_define(tp, { text = icon, texthl = hl, numhl = hl })
+    end
 
-  dap.listeners.after.event_initialized['dapui_config'] = dapui.open
-  dap.listeners.before.event_terminated['dapui_config'] = dapui.close
-  dap.listeners.before.event_exited['dapui_config'] = dapui.close
+    dap.listeners.after.event_initialized['dapui_config'] = dapui.open
+    dap.listeners.before.event_terminated['dapui_config'] = dapui.close
+    dap.listeners.before.event_exited['dapui_config'] = dapui.close
 
-  require('dap-go').setup {
-    delve = {
-      detached = vim.fn.has 'win32' == 0,
-    },
-  }
+    require('dap-go').setup {
+        delve = {
+            detached = vim.fn.has 'win32' == 0,
+        },
+    }
 
-  -- Use a uv-managed venv with debugpy installed; fall back to system python3.
-  local py = vim.fn.exepath 'python3'
-  require('dap-python').setup(py ~= '' and py or 'python3')
+    -- Use a uv-managed venv with debugpy installed; fall back to system python3.
+    local py = vim.fn.exepath 'python3'
+    require('dap-python').setup(py ~= '' and py or 'python3')
 
-  return dap, dapui
+    return dap, dapui
 end
 
 vim.keymap.set('n', '<leader>bc', function() load_dap().continue() end, { desc = 'Debug: Start/Continue' })
