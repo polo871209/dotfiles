@@ -57,7 +57,7 @@ export default function (pi: ExtensionAPI) {
     try {
       payload = JSON.parse(trimmed);
     } catch {
-      currentCtx?.ui?.notify?.(
+      currentCtx?.ui.notify(
         "tmux-bridge: dropped malformed JSON line",
         "warning",
       );
@@ -68,16 +68,16 @@ export default function (pi: ExtensionAPI) {
 
     const mode =
       payload.mode && VALID_MODES.has(payload.mode) ? payload.mode : "steer";
-    const idle = currentCtx?.isIdle?.() ?? true;
+    const idle = currentCtx?.isIdle() ?? true;
     // When idle, sendUserMessage triggers a turn immediately.
     // When streaming, deliverAs is required.
     const opts = idle ? undefined : { deliverAs: mode };
 
     try {
-      pi.sendUserMessage(text, opts as never);
+      pi.sendUserMessage(text, opts);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      currentCtx?.ui?.notify?.(`tmux-bridge: ${msg}`, "error");
+      currentCtx?.ui.notify(`tmux-bridge: ${msg}`, "error");
     }
   };
 
@@ -98,9 +98,14 @@ export default function (pi: ExtensionAPI) {
     });
 
   const start = async (ctx: ExtensionContext) => {
+    if (server) {
+      currentCtx = ctx;
+      return;
+    }
+    // Probe before claiming currentCtx: if another pi owns the socket we
+    // want no state, so handleLine (which can't fire anyway) stays inert.
+    if (await probeExistingListener()) return;
     currentCtx = ctx;
-    if (server) return;
-    if (await probeExistingListener()) return; // another pi owns the socket
     try {
       fs.mkdirSync(sockDir, { recursive: true, mode: 0o700 });
       fs.chmodSync(sockDir, 0o700);
@@ -115,7 +120,7 @@ export default function (pi: ExtensionAPI) {
       socket.on("data", (chunk: string) => {
         buf += chunk;
         if (buf.length > MAX_BUF) {
-          currentCtx?.ui?.notify?.(
+          currentCtx?.ui.notify(
             "tmux-bridge: oversize line dropped",
             "warning",
           );

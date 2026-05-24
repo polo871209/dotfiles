@@ -2,12 +2,12 @@
 // (does NOT pollute main conversation). Leaves a short marker entry in
 // history after success.
 
-import { complete } from "@earendil-works/pi-ai";
 import {
   BorderedLoader,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 import { Box, Text } from "@earendil-works/pi-tui";
+import { sideChannelComplete } from "./shared/llm";
 
 const MSG_PROMPT =
   "Write a Conventional Commits message for the diff. Format: `<type>(<scope>)!: <subject>` where type ∈ {feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert}; scope optional; `!` only for breaking changes. Subject: imperative mood, lowercase, ≤72 chars, no trailing period. Optional body after one blank line only if change is non-obvious; body MAY be multiple newline-separated paragraphs. Optional footers one blank line after body, each `Token: value` or `Token #value`; tokens use `-` instead of spaces (e.g. `Reviewed-by`, `Refs: #123`), except `BREAKING CHANGE` which stays uppercase with a space. No fences, no preamble. Output ONLY the message.";
@@ -100,46 +100,26 @@ export default function (pi: ExtensionAPI) {
             `yeet → ${ctx.model!.id}`,
           );
           loader.onAbort = () => done(null);
-          (async () => {
-            const auth = await ctx.modelRegistry.getApiKeyAndHeaders(
-              ctx.model!,
-            );
-            if (!auth.ok || !auth.apiKey) {
-              throw new Error(
-                auth.ok ? `No API key for ${ctx.model!.provider}` : auth.error,
-              );
-            }
-            const res = await complete(
-              ctx.model!,
-              {
-                systemPrompt: MSG_PROMPT,
-                messages: [
-                  {
-                    role: "user",
-                    content: [
-                      {
-                        type: "text",
-                        text: `${hint}Diffstat:\n${diffstat}\n\nDiff:\n${diffSnippet}`,
-                      },
-                    ],
-                    timestamp: Date.now(),
-                  } as never,
-                ],
-              },
-              {
-                apiKey: auth.apiKey,
-                headers: auth.headers,
-                signal: loader.signal,
-              },
-            );
-            if (res.stopReason === "aborted") return null;
-            return res.content
-              .filter(
-                (c): c is { type: "text"; text: string } => c.type === "text",
-              )
-              .map((c) => c.text)
-              .join("\n")
-              .trim();
+          (async (): Promise<string | null> => {
+            const r = await sideChannelComplete(ctx, {
+              systemPrompt: MSG_PROMPT,
+              messages: [
+                {
+                  role: "user",
+                  content: [
+                    {
+                      type: "text",
+                      text: `${hint}Diffstat:\n${diffstat}\n\nDiff:\n${diffSnippet}`,
+                    },
+                  ],
+                  timestamp: Date.now(),
+                },
+              ],
+              signal: loader.signal,
+            });
+            if (r.ok) return r.text;
+            if (r.reason === "aborted") return null;
+            throw new Error(r.error ?? r.reason);
           })()
             .then(done)
             .catch((e) => {
@@ -158,9 +138,9 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      // Sanitize: strip wrapping quotes/backticks, leading "Subject:" labels.
+      // Sanitize: strip wrapping quotes/backticks, common LLM prefix labels.
       const cleanMessage = message
-        .replace(/^\s*(?:subject:\s*)/i, "")
+        .replace(/^\s*(?:subject|title|commit(?:\s*message)?|message):\s*/i, "")
         .replace(/^["'`]+|["'`]+$/g, "")
         .trim();
       if (!cleanMessage) {

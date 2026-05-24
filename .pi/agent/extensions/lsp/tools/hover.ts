@@ -1,12 +1,9 @@
 import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
-import { callDriver } from "../nvim";
-import { normalizeAtPath, toAbs } from "../utils";
+import { runNavTool, type DriverErr } from "../utils";
 
-interface DriverHoverResult {
-  ok: boolean;
+interface DriverHoverResult extends DriverErr {
   text?: string;
-  error?: string;
 }
 
 export const hoverTool = defineTool({
@@ -33,28 +30,16 @@ export const hoverTool = defineTool({
     ),
   }),
   async execute(_id, params, signal, onUpdate, ctx) {
-    const file = toAbs(normalizeAtPath(params.file), ctx.cwd);
-    const progress = (text: string) =>
-      onUpdate?.({ content: [{ type: "text", text }], details: {} });
-    const res = await callDriver<DriverHoverResult>(
-      ctx.cwd,
+    return runNavTool<DriverHoverResult>(
       "hover",
-      [file, params.line, params.symbol ?? ""],
+      params,
+      ctx,
       signal,
-      progress,
+      onUpdate,
+      (res) => ({
+        text: res.text?.trim() || "No hover information",
+        details: { line: params.line },
+      }),
     );
-    if (!res.ok) {
-      return {
-        content: [
-          { type: "text", text: `LSP error: ${res.error ?? "unknown"}` },
-        ],
-        details: { success: false },
-      };
-    }
-    const text = res.text?.trim() || "No hover information";
-    return {
-      content: [{ type: "text", text }],
-      details: { success: true, file, line: params.line },
-    };
   },
 });

@@ -2,10 +2,12 @@
   "lastChangelogVersion": "0.75.5",
   "defaultProvider": "anthropic",
   "defaultModel": "claude-opus-4-7",
-  "defaultThinkingLevel": "xhigh",
+  "defaultThinkingLevel": "minimal",
   "theme": "catppuccin-mocha",
   "quietStartup": true,
-  "packages": ["npm:pi-web-access"],
+  "packages": [
+    "npm:pi-web-access"
+  ],
   "warnings": {
     "anthropicExtraUsage": false
   },

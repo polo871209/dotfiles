@@ -33,9 +33,7 @@ let cachedVenv: VenvInfo | null = null;
 
 function ensureVenv(): VenvInfo {
   if (cachedVenv) return cachedVenv;
-  const dir =
-    process.env.PI_EVAL_VENV_DIR ??
-    path.join(os.homedir(), ".cache", "pi-eval", "venv");
+  const dir = path.join(os.homedir(), ".cache", "pi-eval", "venv");
   const python = path.join(dir, "bin", "python");
   if (!fs.existsSync(python)) {
     fs.mkdirSync(path.dirname(dir), { recursive: true });
@@ -71,7 +69,7 @@ export class PyKernel {
   constructor(opts: PyKernelOptions) {
     const runnerPath = path.join(import.meta.dirname, "runner.py");
     const venv = ensureVenv();
-    const python = opts.python ?? process.env.PI_EVAL_PYTHON ?? venv.python;
+    const python = opts.python ?? venv.python;
     this.#proc = spawn(python, ["-u", runnerPath], {
       stdio: ["pipe", "pipe", "pipe", "pipe"],
       env: {
@@ -157,6 +155,9 @@ export class PyKernel {
       pending.timeout = setTimeout(() => {
         result.timedOut = true;
         result.error = result.error ?? `cell timed out after ${timeoutSec}s`;
+        // Remove before dispose: dispose's exit handler re-walks #pending and
+        // would double-finalize this entry otherwise.
+        this.#pending.delete(id);
         // Kill the kernel; state is lost, but we cannot interrupt cleanly
         // without an IPython-style control channel. Caller spawns a fresh one.
         this.dispose();

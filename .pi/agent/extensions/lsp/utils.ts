@@ -1,12 +1,64 @@
 // Shared formatting + path helpers for navigation tools.
 
 import * as path from "node:path";
+import type {
+  AgentToolResult,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
+import { callDriver } from "./nvim";
 
 export interface LspLocation {
   file: string;
   line: number;
   col: number;
   context: string;
+}
+
+export interface DriverErr {
+  ok: boolean;
+  error?: string;
+}
+
+export interface NavParams {
+  file: string;
+  line: number;
+  symbol?: string;
+}
+
+// Wraps the file → abs → callDriver → ok/err pattern shared by
+// hover/definition/references.
+export async function runNavTool<R extends DriverErr>(
+  driverFn: string,
+  params: NavParams,
+  ctx: ExtensionContext,
+  signal: AbortSignal | undefined,
+  onUpdate: ((r: AgentToolResult<unknown>) => void) | undefined,
+  render: (
+    res: R,
+    cwd: string,
+  ) => { text: string; details?: Record<string, unknown> },
+): Promise<AgentToolResult<unknown>> {
+  const file = toAbs(normalizeAtPath(params.file), ctx.cwd);
+  const progress = (text: string) =>
+    onUpdate?.({ content: [{ type: "text", text }], details: {} });
+  const res = await callDriver<R>(
+    ctx.cwd,
+    driverFn,
+    [file, params.line, params.symbol ?? ""],
+    signal,
+    progress,
+  );
+  if (!res.ok) {
+    return {
+      content: [{ type: "text", text: `LSP error: ${res.error ?? "unknown"}` }],
+      details: { success: false },
+    };
+  }
+  const out = render(res, ctx.cwd);
+  return {
+    content: [{ type: "text", text: out.text }],
+    details: { success: true, ...(out.details ?? {}) },
+  };
 }
 
 export const displayPath = (abs: string, cwd: string): string => {

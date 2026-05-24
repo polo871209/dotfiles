@@ -4,7 +4,6 @@
 // inside the kernel can call `tool.read({...})`, `tool.write(...)`, `tree(...)`
 // which round-trip back into this host extension via a local HTTP bridge.
 
-import { Type, type Static } from "typebox";
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
@@ -19,7 +18,7 @@ import {
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
-import type { TextContent } from "@earendil-works/pi-ai";
+import { Type, type Static, type TextContent } from "@earendil-works/pi-ai";
 import {
   registerBridgeSession,
   setBridgeSignal,
@@ -205,10 +204,10 @@ function formatResult(r: CellResult, idx: number): string {
 }
 
 export default function (pi: ExtensionAPI) {
-  // Node's default on unhandledRejection terminates the host process.
-  // Just *having* a listener suppresses that; pi has no global one we can
-  // rely on. Log eval-originated rejections, ignore the rest (some other
-  // listener will handle them).
+  // Node's default on unhandledRejection terminates the host. Just having a
+  // listener suppresses that, so we must NOT silently eat non-eval rejections
+  // — re-throw them via setImmediate so Node's normal uncaughtException path
+  // still fires for bugs in other extensions.
   const onUnhandled = (reason: unknown) => {
     const msg =
       reason instanceof Error
@@ -218,7 +217,11 @@ export default function (pi: ExtensionAPI) {
       process.stderr.write(
         `[eval extension] swallowed unhandled rejection: ${msg}\n`,
       );
+      return;
     }
+    setImmediate(() => {
+      throw reason;
+    });
   };
   process.on("unhandledRejection", onUnhandled);
 

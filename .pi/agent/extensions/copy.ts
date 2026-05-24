@@ -1,14 +1,12 @@
-// Replaces built-in /copy: opens picker when assistant response has fenced
-// code blocks. Monkey-patches InteractiveMode.prototype.handleCopyCommand so
-// no source patching of pi-coding-agent is needed.
-import {
-  InteractiveMode,
-  copyToClipboard,
-} from "@earendil-works/pi-coding-agent";
+// /copy-blocks — picker over fenced code blocks in the last assistant
+// response. /copy-all — copy entire session history (user + assistant)
+// as markdown. Built-in /copy (last assistant verbatim) is left alone.
+import { copyToClipboard } from "@earendil-works/pi-coding-agent";
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
+import { extractText } from "./shared/message";
 
 type Block = { lang?: string; code: string };
 
@@ -63,97 +61,18 @@ const previewText = (text: string): string => {
 const lineCount = (text: string): number =>
   text.length === 0 ? 1 : text.split("\n").length;
 
-type Proto = {
-  handleCopyCommand: () => Promise<void>;
-  session: { getLastAssistantText(): string | undefined };
-  showError(msg: string): void;
-  showStatus(msg: string): void;
-  showExtensionSelector(
-    title: string,
-    options: string[],
-    opts?: { signal?: AbortSignal; timeout?: number },
-  ): Promise<string | undefined>;
-};
-
-const installPatch = () => {
-  const proto = InteractiveMode.prototype as unknown as Proto;
-  // Guard against pi upgrades that rename/remove this method.
-  if (typeof proto.handleCopyCommand !== "function") {
-    console.warn(
-      "[copy] InteractiveMode.handleCopyCommand missing — pi version may have changed; skipping patch",
-    );
-    return;
+const lastAssistantText = (
+  ctx: ExtensionCommandContext,
+): string | undefined => {
+  const branch = ctx.sessionManager.getBranch();
+  for (let i = branch.length - 1; i >= 0; i--) {
+    const entry = branch[i];
+    if (entry.type !== "message") continue;
+    const m = entry.message as { role?: string; content?: unknown };
+    if (m.role !== "assistant") continue;
+    const text = extractText(m.content).trim();
+    if (text) return text;
   }
-  // Re-assign on every load so /reload picks up new code. We fully replace
-  // (no chaining), so reassignment is idempotent.
-  proto.handleCopyCommand = async function () {
-    const text = this.session.getLastAssistantText();
-    if (!text) {
-      this.showError("No agent messages to copy yet.");
-      return;
-    }
-    const blocks = extractCodeBlocks(text);
-
-    const copy = async (value: string, label: string) => {
-      try {
-        await copyToClipboard(value);
-        this.showStatus(`Copied ${label} to clipboard`);
-      } catch (error) {
-        this.showError(error instanceof Error ? error.message : String(error));
-      }
-    };
-
-    if (blocks.length === 0) {
-      await copy(text, "response");
-      return;
-    }
-    if (blocks.length === 1) {
-      await copy(blocks[0].code, "code block");
-      return;
-    }
-
-    const fullLabel = `Full response — ${lineCount(text)} lines`;
-    const blockLabels = blocks.map(
-      (b, i) =>
-        `Block ${i + 1} [${b.lang ?? "txt"}] — ${lineCount(b.code)}L — ${previewText(b.code)}`,
-    );
-    const options = [fullLabel, ...blockLabels];
-
-    const selected = await this.showExtensionSelector(
-      "Select content to copy",
-      options,
-    );
-    if (!selected) {
-      this.showStatus("Copy cancelled");
-      return;
-    }
-    if (selected === fullLabel) {
-      await copy(text, "response");
-      return;
-    }
-    const blockIdx = blockLabels.indexOf(selected);
-    if (blockIdx < 0) {
-      this.showError("Copy target not found.");
-      return;
-    }
-    await copy(blocks[blockIdx].code, `code block ${blockIdx + 1}`);
-  };
-};
-
-installPatch();
-
-const extractText = (content: unknown): string => {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .filter(
-      (c): c is { type: "text"; text: string } =>
-        !!c &&
-        typeof c === "object" &&
-        (c as { type?: unknown }).type === "text",
-    )
-    .map((c) => c.text)
-    .join("\n");
 };
 
 const formatSession = (ctx: ExtensionCommandContext): string => {
@@ -172,6 +91,60 @@ const formatSession = (ctx: ExtensionCommandContext): string => {
 };
 
 export default function (pi: ExtensionAPI) {
+  pi.registerCommand("copy-blocks", {
+    description:
+      "Pick a fenced code block from last assistant response and copy",
+    handler: async (_args, ctx) => {
+      const text = lastAssistantText(ctx);
+      if (!text) {
+        ctx.ui.notify("No assistant messages yet", "warning");
+        return;
+      }
+      const blocks = extractCodeBlocks(text);
+
+      const copy = async (value: string, label: string) => {
+        try {
+          await copyToClipboard(value);
+          ctx.ui.notify(`Copied ${label} to clipboard`, "info");
+        } catch (e) {
+          ctx.ui.notify(e instanceof Error ? e.message : String(e), "error");
+        }
+      };
+
+      if (blocks.length === 0) {
+        await copy(text, "response");
+        return;
+      }
+      if (blocks.length === 1) {
+        await copy(blocks[0].code, "code block");
+        return;
+      }
+
+      const fullLabel = `Full response — ${lineCount(text)} lines`;
+      const blockLabels = blocks.map(
+        (b, i) =>
+          `Block ${i + 1} [${b.lang ?? "txt"}] — ${lineCount(b.code)}L — ${previewText(b.code)}`,
+      );
+      const options = [fullLabel, ...blockLabels];
+
+      const selected = await ctx.ui.select("Select content to copy", options);
+      if (!selected) {
+        ctx.ui.notify("Copy cancelled", "info");
+        return;
+      }
+      if (selected === fullLabel) {
+        await copy(text, "response");
+        return;
+      }
+      const idx = blockLabels.indexOf(selected);
+      if (idx < 0) {
+        ctx.ui.notify("Copy target not found", "error");
+        return;
+      }
+      await copy(blocks[idx].code, `code block ${idx + 1}`);
+    },
+  });
+
   pi.registerCommand("copy-all", {
     description: "Copy entire session history (user + assistant) as markdown",
     handler: async (_args, ctx) => {
