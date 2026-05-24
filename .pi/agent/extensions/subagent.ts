@@ -73,6 +73,24 @@ const COLLAPSED_TOOL_TAIL = 5;
 const ARG_PREVIEW_MAX = 60;
 const FORBIDDEN_TOOLS = new Set(["subagent"]);
 
+function expandToolPatterns(patterns: string[], allNames: string[]): string[] {
+  const out = new Set<string>();
+  for (const p of patterns) {
+    if (!p.includes("*")) {
+      if (!FORBIDDEN_TOOLS.has(p)) out.add(p);
+      continue;
+    }
+    const re = new RegExp(
+      "^" + p.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$",
+    );
+    for (const n of allNames) {
+      if (FORBIDDEN_TOOLS.has(n)) continue;
+      if (re.test(n)) out.add(n);
+    }
+  }
+  return [...out];
+}
+
 function loadAgents(): AgentConfig[] {
   if (!fs.existsSync(AGENTS_DIR)) return [];
   const out: AgentConfig[] = [];
@@ -90,7 +108,7 @@ function loadAgents(): AgentConfig[] {
     const tools = (frontmatter.tools || "")
       .split(",")
       .map((t) => t.trim())
-      .filter((t) => t && !FORBIDDEN_TOOLS.has(t));
+      .filter((t) => t.length > 0);
     out.push({
       name: frontmatter.name,
       description: frontmatter.description,
@@ -409,7 +427,13 @@ export default function (pi: ExtensionAPI) {
         "--system-prompt",
         agent.systemPrompt,
       ];
-      if (agent.tools.length > 0) piArgs.push("--tools", agent.tools.join(","));
+      if (agent.tools.length > 0) {
+        const expanded = expandToolPatterns(
+          agent.tools,
+          pi.getAllTools().map((t) => t.name),
+        );
+        if (expanded.length > 0) piArgs.push("--tools", expanded.join(","));
+      }
       if (agent.model) piArgs.push("--model", agent.model);
       if (agent.thinking) piArgs.push("--thinking", agent.thinking);
 
