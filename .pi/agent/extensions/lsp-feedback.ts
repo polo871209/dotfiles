@@ -294,7 +294,17 @@ const applyFixes = async (
     }
     const fixed = await runFixerLLM(file, original, errs, ctx, signal);
     if (!fixed || fixed === original) continue;
-    if (fixed.length < Math.min(20, original.length / 4)) continue;
+    // Guard against truncated LLM output clobbering a working file.
+    // Require >=90% length retention AND matching brace/paren counts.
+    if (fixed.length < original.length * 0.9) continue;
+    const countChar = (s: string, c: string) => s.split(c).length - 1;
+    if (
+      countChar(fixed, "{") !== countChar(original, "{") ||
+      countChar(fixed, "}") !== countChar(original, "}") ||
+      countChar(fixed, "(") !== countChar(original, "(") ||
+      countChar(fixed, ")") !== countChar(original, ")")
+    )
+      continue;
     try {
       // No backup — user has git. Sanity gates above (length floor,
       // identity check) catch obvious bad outputs.

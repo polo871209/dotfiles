@@ -23,7 +23,7 @@ export const referencesTool = defineTool({
   name: "lsp_references",
   label: "LSP References",
   description:
-    "Find every usage of a symbol across the project (includes the declaration site itself). Output is truncated when large.",
+    "Find every USE of ONE symbol at file:line (requires anchor). Symbol-identity precise — no text-match false positives, handles re-exports. Beats grep for usage finding. codegraph_search returns DEFINITIONS not uses — for 'where is X called' THIS is the tool.",
   promptSnippet: "List all places that reference a symbol",
   promptGuidelines: [
     "Use lsp_references before renaming or changing a function's signature to find every caller.",
