@@ -35,6 +35,7 @@ import {
   visibleWidth,
 } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { extractText } from "./shared/message";
 
 interface AgentConfig {
   name: string;
@@ -203,23 +204,6 @@ function throttle<F extends (...args: never[]) => void>(fn: F, ms: number): F {
   }) as F;
 }
 
-const extractTextFromContent = (content: unknown): string => {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .filter(
-        (c: unknown): c is { type: "text"; text: string } =>
-          !!c &&
-          typeof c === "object" &&
-          (c as { type?: string }).type === "text" &&
-          typeof (c as { text?: unknown }).text === "string",
-      )
-      .map((c) => c.text)
-      .join("\n");
-  }
-  return "";
-};
-
 // Pluck the latest prose line from the assistant's text, skipping code blocks.
 const proseLastLine = (text: string): string => {
   if (!text) return "";
@@ -357,7 +341,7 @@ export default function (pi: ExtensionAPI) {
 
   const params = buildParams(agents);
 
-  pi.registerTool<typeof params, Progress>({
+  pi.registerTool<typeof params, Progress | undefined>({
     name: "subagent",
     label: "Subagent",
     description:
@@ -379,7 +363,7 @@ export default function (pi: ExtensionAPI) {
     },
 
     renderResult(result, options, theme, _context) {
-      const p = result.details as Progress | undefined;
+      const p = result.details;
       const w = (process.stdout.columns ?? 100) - 2;
       if (!p) {
         return new Text(theme.fg("dim", "  …"), 0, 0);
@@ -393,8 +377,7 @@ export default function (pi: ExtensionAPI) {
       if (!agent) {
         return {
           content: [{ type: "text", text: `Unknown agent: ${args.agent}` }],
-          details: undefined as never,
-          error: `Unknown agent: ${args.agent}`,
+          details: undefined,
         };
       }
 
@@ -475,7 +458,7 @@ export default function (pi: ExtensionAPI) {
               | { role?: string; content?: unknown }
               | undefined;
             if (!msg || msg.role !== "assistant") break;
-            const text = extractTextFromContent(msg.content);
+            const text = extractText(msg.content);
             if (text) {
               progress.output = text;
               const line = proseLastLine(text);

@@ -12,12 +12,13 @@
 // /btw again.
 //
 // Inspired by Claude Code's /btw command.
-import { complete, type UserMessage } from "@earendil-works/pi-ai";
 import {
   BorderedLoader,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
-import { Container, Text } from "@earendil-works/pi-tui";
+import { collectTextMessages } from "./shared/message";
+import { sideChannelComplete } from "./shared/llm";
+import { barWidget } from "./shared/widget";
 
 // Minimal caveman-mode system prompt. No edit/tool restrictions needed —
 // `complete()` is called with no `tools`, so the model has no edit ability.
@@ -25,8 +26,6 @@ const SIDE_PROMPT =
   "Caveman mode. One short sentence. No preamble. No suggestions. Plain text.";
 
 const WIDGET_KEY = "btw-answer";
-// Single-bar prefix per line, no width-dependent borders.
-const BAR = "▎ ";
 const MAX_WIDTH = 100;
 
 // crude word-wrap that respects existing newlines and code fences.
@@ -58,7 +57,7 @@ function wrap(text: string, width: number): string[] {
 export default function (pi: ExtensionAPI) {
   // Auto-clear the answer widget when the user submits their next prompt.
   pi.on("before_agent_start", async (_event, ctx) => {
-    ctx.ui.setWidget(WIDGET_KEY, undefined as never);
+    ctx.ui.setWidget(WIDGET_KEY, undefined);
   });
 
   pi.registerCommand("btw", {
@@ -78,53 +77,12 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      // Build context from current branch — keep only user/assistant text;
-      // drop tool calls/results to keep payload small for a side question.
-      const branch = ctx.sessionManager.getBranch();
-      const messages: UserMessage[] = [];
-      for (const entry of branch) {
-        if (entry.type !== "message") continue;
-        const m = entry.message;
-        if (!("role" in m)) continue;
-        if (m.role === "user") {
-          const text =
-            typeof m.content === "string"
-              ? m.content
-              : m.content
-                  .filter(
-                    (c): c is { type: "text"; text: string } =>
-                      c.type === "text",
-                  )
-                  .map((c) => c.text)
-                  .join("\n");
-          if (text) {
-            messages.push({
-              role: "user",
-              content: [{ type: "text", text }],
-              timestamp: m.timestamp ?? Date.now(),
-            });
-          }
-        } else if (m.role === "assistant") {
-          const text = m.content
-            .filter(
-              (c): c is { type: "text"; text: string } => c.type === "text",
-            )
-            .map((c) => c.text)
-            .join("\n");
-          if (text) {
-            messages.push({
-              role: "assistant" as never,
-              content: [{ type: "text", text }],
-              timestamp: m.timestamp ?? Date.now(),
-            } as never);
-          }
-        }
-      }
-      // Cap to last ~20 turns to keep side-question payload small.
-      const MAX_TURNS = 20;
-      if (messages.length > MAX_TURNS) {
-        messages.splice(0, messages.length - MAX_TURNS);
-      }
+      // Build context from current branch — user/assistant text only;
+      // drop tool calls/results to keep payload small. Cap last 20 turns.
+      const { messages } = collectTextMessages(
+        ctx.sessionManager.getBranch(),
+        20,
+      );
 
       messages.push({
         role: "user",
@@ -141,35 +99,15 @@ export default function (pi: ExtensionAPI) {
           );
           loader.onAbort = () => done(null);
 
-          const run = async () => {
-            const auth = await ctx.modelRegistry.getApiKeyAndHeaders(
-              ctx.model!,
-            );
-            if (!auth.ok || !auth.apiKey) {
-              throw new Error(
-                auth.ok ? `No API key for ${ctx.model!.provider}` : auth.error,
-              );
-            }
-            const response = await complete(
-              ctx.model!,
-              {
-                systemPrompt: SIDE_PROMPT,
-                messages: messages as never,
-              },
-              {
-                apiKey: auth.apiKey,
-                headers: auth.headers,
-                signal: loader.signal,
-              },
-            );
-            if (response.stopReason === "aborted") return null;
-            return response.content
-              .filter(
-                (c): c is { type: "text"; text: string } => c.type === "text",
-              )
-              .map((c) => c.text)
-              .join("\n")
-              .trim();
+          const run = async (): Promise<string | null> => {
+            const r = await sideChannelComplete(ctx, {
+              systemPrompt: SIDE_PROMPT,
+              messages,
+              signal: loader.signal,
+            });
+            if (r.ok) return r.text;
+            if (r.reason === "aborted") return null;
+            throw new Error(r.error ?? r.reason);
           };
 
           run()
@@ -196,22 +134,9 @@ export default function (pi: ExtensionAPI) {
       }
 
       const lines = ["btw", `Q: ${question}`, "", ...wrap(result, MAX_WIDTH)];
-      // Pass a factory function so we bypass pi's 10-line cap on
-      // array-style widgets (which truncates with "... (widget truncated)").
-      ctx.ui.setWidget(
-        WIDGET_KEY,
-        (_tui, theme) => {
-          const container = new Container();
-          lines.forEach((line, i) => {
-            const color = i === 0 ? "customMessageLabel" : "customMessageText";
-            container.addChild(
-              new Text(theme.fg(color, `${BAR}${line}`), 1, 0),
-            );
-          });
-          return container;
-        },
-        { placement: "aboveEditor" } as never,
-      );
+      ctx.ui.setWidget(WIDGET_KEY, barWidget(lines), {
+        placement: "aboveEditor",
+      });
     },
   });
 }

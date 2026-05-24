@@ -6,14 +6,9 @@ import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 import { attach, type NeovimClient } from "neovim";
 
-const _here =
-  typeof __dirname !== "undefined"
-    ? __dirname
-    : path.dirname(fileURLToPath(import.meta.url));
-const DRIVER_PATH = path.join(_here, "driver.lua");
+const DRIVER_PATH = path.join(import.meta.dirname, "driver.lua");
 const LOG_FILE = path.join(os.tmpdir(), "pi-lsp.log");
 
 const log = (msg: string) => {

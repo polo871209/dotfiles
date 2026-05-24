@@ -1,18 +1,18 @@
 // lsp-feedback — after edits, route touched files through the persistent
 // nvim owned by extensions/lsp/ to format, apply safe code-actions, and
 // collect diagnostics. Widget renders the result. LLM auto-fixes (errors +
-// warnings) run by default; opt out with PI_LSP_FEEDBACK_AUTO_FIX=0.
-import { complete } from "@earendil-works/pi-ai";
+// warnings) run unconditionally.
 import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { Container, Text } from "@earendil-works/pi-tui";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
 import { callLua, isRunning, loadLua } from "./lsp/nvim";
+import { displayPath, toAbs } from "./lsp/utils";
+import { sideChannelComplete } from "./shared/llm";
+import { barWidget } from "./shared/widget";
 
 type Severity = "error" | "warn" | "info" | "hint";
 interface Diag {
@@ -29,11 +29,7 @@ interface DriverResult {
   diagnostics: Diag[];
 }
 
-const _here =
-  typeof __dirname !== "undefined"
-    ? __dirname
-    : path.dirname(fileURLToPath(import.meta.url));
-const FEEDBACK_LUA = path.join(_here, "lsp-feedback.lua");
+const FEEDBACK_LUA = path.join(import.meta.dirname, "lsp-feedback.lua");
 const LOG_FILE = path.join(os.tmpdir(), "pi-lsp-feedback.log");
 const logDriver = (msg: string) => {
   try {
@@ -69,19 +65,17 @@ const MAX_LINES_OUT = 50;
 const MAX_FIX_FILES = 5;
 const MAX_FILE_BYTES = 64 * 1024;
 const WIDGET_KEY = "lsp-feedback";
-// Prefix each widget line with a thin vertical bar so the panel reads as a
-// clean block without width-dependent borders.
-const BAR = "▎ ";
-const AUTO_FIX = process.env.PI_LSP_FEEDBACK_AUTO_FIX !== "0";
+const AUTO_FIX = true;
 
 const FIXER_SYSTEM = `Fix only the listed LSP/lint issues in the file. Change nothing else; preserve all other code, comments, and formatting exactly. If unsure, leave it. Output the full corrected file in one fenced code block. No prose.`;
 
 const TRACKED_TOOLS = new Set(["edit", "write", "str_replace", "create"]);
 const FIXABLE_SEVERITIES: ReadonlySet<Severity> = new Set(["error", "warn"]);
 
+const GIT_WALK_MAX_DEPTH = 8;
 const isRebasing = (cwd: string): boolean => {
   let dir = cwd;
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < GIT_WALK_MAX_DEPTH; i++) {
     const gitDir = path.join(dir, ".git");
     if (fs.existsSync(gitDir)) {
       return (
@@ -97,9 +91,6 @@ const isRebasing = (cwd: string): boolean => {
   }
   return false;
 };
-
-const toAbs = (p: string, cwd: string): string =>
-  path.isAbsolute(p) ? p : path.resolve(cwd, p);
 
 // Skip throwaway scratch paths: /tmp, /var/folders/... (macOS $TMPDIR),
 // /private/tmp, /private/var/folders/...
@@ -193,12 +184,6 @@ const sevRank: Record<Severity, number> = {
   hint: 3,
 };
 
-const displayPath = (abs: string, cwd: string): string => {
-  const rel = path.relative(cwd, abs);
-  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return abs;
-  return rel;
-};
-
 const groupFixableByFile = (diags: Diag[]): Map<string, Diag[]> => {
   const m = new Map<string, Diag[]>();
   for (const d of diags) {
@@ -210,11 +195,11 @@ const groupFixableByFile = (diags: Diag[]): Map<string, Diag[]> => {
   return m;
 };
 
+// Require a fenced code block. Bare prose is rejected — too easy for a
+// short "no issues found" reply to clobber the source file.
 const extractCodeBlock = (text: string): string | null => {
   const m = text.match(/```[a-zA-Z0-9_+-]*\n([\s\S]*?)```/);
-  if (m) return m[1];
-  if (!/^\s*(I |Here|Sure|The |This )/i.test(text)) return text.trim();
-  return null;
+  return m ? m[1]! : null;
 };
 
 const runFixerLLM = async (
@@ -224,10 +209,6 @@ const runFixerLLM = async (
   ctx: ExtensionContext,
   signal: AbortSignal | undefined,
 ): Promise<string | null> => {
-  if (!ctx.model) return null;
-  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model);
-  if (!auth.ok || !auth.apiKey) return null;
-
   const diagText = diags
     .map(
       (d) =>
@@ -246,30 +227,19 @@ const runFixerLLM = async (
     "```",
   ].join("\n");
 
-  try {
-    const response = await complete(
-      ctx.model,
+  const r = await sideChannelComplete(ctx, {
+    systemPrompt: FIXER_SYSTEM,
+    messages: [
       {
-        systemPrompt: FIXER_SYSTEM,
-        messages: [
-          {
-            role: "user",
-            content: [{ type: "text", text: userText }],
-            timestamp: Date.now(),
-          },
-        ] as never,
+        role: "user",
+        content: [{ type: "text", text: userText }],
+        timestamp: Date.now(),
       },
-      { apiKey: auth.apiKey, headers: auth.headers, signal },
-    );
-    if (response.stopReason === "aborted") return null;
-    const text = response.content
-      .filter((c): c is { type: "text"; text: string } => c.type === "text")
-      .map((c) => c.text)
-      .join("\n");
-    return extractCodeBlock(text);
-  } catch {
-    return null;
-  }
+    ],
+    signal,
+  });
+  if (!r.ok) return null;
+  return extractCodeBlock(r.text);
 };
 
 const applyFixes = async (
@@ -428,20 +398,9 @@ export default function (pi: ExtensionAPI) {
         `  (skipped ${overflow} more file(s) over limit of ${MAX_FILES})`,
       );
     }
-    // Pass a factory function so we bypass pi's 10-line cap on array-style
-    // widgets (which truncates with "... (widget truncated)").
-    ctx.ui?.setWidget?.(
-      WIDGET_KEY,
-      (_tui, theme) => {
-        const container = new Container();
-        lines.forEach((line, i) => {
-          const color = i === 0 ? "customMessageLabel" : "customMessageText";
-          container.addChild(new Text(theme.fg(color, `${BAR}${line}`), 1, 0));
-        });
-        return container;
-      },
-      { placement: "aboveEditor" } as never,
-    );
+    ctx.ui.setWidget(WIDGET_KEY, barWidget(lines), {
+      placement: "aboveEditor",
+    });
   };
 
   pi.on("session_start", async (_event, ctx) => {
@@ -451,7 +410,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("before_agent_start", async (_event, ctx) => {
     reported = false;
-    ctx.ui?.setWidget?.(WIDGET_KEY, undefined as never);
+    ctx.ui.setWidget(WIDGET_KEY, undefined);
   });
 
   pi.on("tool_result", async (event) => {

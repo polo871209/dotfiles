@@ -1,17 +1,11 @@
 // notifier — macOS desktop notifications when pi finishes a turn and the
 // user is not currently looking at this tmux pane.
-//
-// Env vars:
-//   PI_NOTIFIER=0           disable entirely
-//   PI_NOTIFIER_SOUND=/path override notification sound (.aiff)
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { exec, execFile } from "node:child_process";
 import * as path from "node:path";
 
-const DISABLED =
-  process.env.PI_NOTIFIER === "0" || process.env.PI_IS_SUBAGENT === "1";
-const SOUND_PATH =
-  process.env.PI_NOTIFIER_SOUND || "/System/Library/Sounds/Blow.aiff";
+const DISABLED = process.env.PI_IS_SUBAGENT === "1";
+const SOUND_PATH = "/System/Library/Sounds/Blow.aiff";
 
 const execP = (cmd: string, timeoutMs = 1000): Promise<string> =>
   new Promise((resolve, reject) => {

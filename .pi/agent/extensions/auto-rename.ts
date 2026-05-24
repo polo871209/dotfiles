@@ -9,8 +9,9 @@
 // btw.ts). Each session is renamed at most once unless the user clears
 // the name manually.
 
-import { complete, type UserMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { collectTextMessages } from "./shared/message";
+import { sideChannelComplete } from "./shared/llm";
 
 const THRESHOLD = 3; // strictly more than this many user turns
 const SYSTEM_PROMPT =
@@ -38,51 +39,9 @@ export default function (pi: ExtensionAPI) {
 
     const branch = ctx.sessionManager.getBranch();
 
-    // Collect user/assistant text-only messages and count user turns.
-    const messages: UserMessage[] = [];
-    let userTurns = 0;
-    for (const entry of branch) {
-      if (entry.type !== "message") continue;
-      const m = entry.message;
-      if (!("role" in m)) continue;
-      if (m.role === "user") {
-        const text =
-          typeof m.content === "string"
-            ? m.content
-            : m.content
-                .filter(
-                  (c): c is { type: "text"; text: string } => c.type === "text",
-                )
-                .map((c) => c.text)
-                .join("\n");
-        if (!text) continue;
-        userTurns++;
-        messages.push({
-          role: "user",
-          content: [{ type: "text", text }],
-          timestamp: m.timestamp ?? Date.now(),
-        });
-      } else if (m.role === "assistant") {
-        const text = m.content
-          .filter((c): c is { type: "text"; text: string } => c.type === "text")
-          .map((c) => c.text)
-          .join("\n");
-        if (!text) continue;
-        messages.push({
-          role: "assistant" as never,
-          content: [{ type: "text", text }],
-          timestamp: m.timestamp ?? Date.now(),
-        } as never);
-      }
-    }
-
+    // First few turns are enough to name a session.
+    const { messages, userTurns } = collectTextMessages(branch, 12);
     if (userTurns <= THRESHOLD) return;
-
-    // Cap to last ~12 messages — first few turns are enough to name a session.
-    const MAX_MESSAGES = 12;
-    if (messages.length > MAX_MESSAGES) {
-      messages.splice(0, messages.length - MAX_MESSAGES);
-    }
 
     messages.push({
       role: "user",
@@ -97,23 +56,22 @@ export default function (pi: ExtensionAPI) {
 
     inFlight.add(sessionFile);
     try {
-      const auth = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model);
-      if (!auth.ok || !auth.apiKey) return;
-
-      const response = await complete(
-        ctx.model,
-        { systemPrompt: SYSTEM_PROMPT, messages: messages as never },
-        { apiKey: auth.apiKey, headers: auth.headers },
-      );
-      if (response.stopReason === "aborted") return;
-
-      const raw = response.content
-        .filter((c): c is { type: "text"; text: string } => c.type === "text")
-        .map((c) => c.text)
-        .join(" ")
-        .trim();
+      const result = await sideChannelComplete(ctx, {
+        systemPrompt: SYSTEM_PROMPT,
+        messages,
+        join: " ",
+      });
+      if (!result.ok) {
+        if (result.reason === "error") {
+          ctx.ui.notify(
+            `auto-rename failed: ${result.error ?? "unknown"}`,
+            "warning",
+          );
+        }
+        return;
+      }
       // Normalize: strip surrounding quotes, trailing punctuation, collapse ws.
-      const name = raw
+      const name = result.text
         .replace(/^["'`]+|["'`]+$/g, "")
         .replace(/[.!?,;:]+$/g, "")
         .replace(/\s+/g, " ")
@@ -130,12 +88,6 @@ export default function (pi: ExtensionAPI) {
       pi.setSessionName(name);
       done.add(sessionFile);
       ctx.ui.notify(`Session renamed: ${name}`, "info");
-    } catch (e) {
-      // Silent: renaming is best-effort.
-      ctx.ui.notify(
-        `auto-rename failed: ${e instanceof Error ? e.message : String(e)}`,
-        "warning",
-      );
     } finally {
       inFlight.delete(sessionFile);
     }

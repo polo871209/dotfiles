@@ -5,18 +5,15 @@ import {
   defineTool,
   truncateHead,
 } from "@earendil-works/pi-coding-agent";
-import { callDriver } from "../nvim";
 import {
   formatLocations,
-  normalizeAtPath,
-  toAbs,
+  runNavTool,
+  type DriverErr,
   type LspLocation,
 } from "../utils";
 
-interface DriverLocResult {
-  ok: boolean;
+interface DriverLocResult extends DriverErr {
   locations?: LspLocation[];
-  error?: string;
 }
 
 export const referencesTool = defineTool({
@@ -43,37 +40,28 @@ export const referencesTool = defineTool({
     ),
   }),
   async execute(_id, params, signal, onUpdate, ctx) {
-    const file = toAbs(normalizeAtPath(params.file), ctx.cwd);
-    const progress = (text: string) =>
-      onUpdate?.({ content: [{ type: "text", text }], details: {} });
-    const res = await callDriver<DriverLocResult>(
-      ctx.cwd,
+    return runNavTool<DriverLocResult>(
       "references",
-      [file, params.line, params.symbol ?? ""],
+      params,
+      ctx,
       signal,
-      progress,
+      onUpdate,
+      (res, cwd) => {
+        const locs = res.locations ?? [];
+        const full = formatLocations(locs, cwd, "reference(s)");
+        const t = truncateHead(full, {
+          maxLines: DEFAULT_MAX_LINES,
+          maxBytes: DEFAULT_MAX_BYTES,
+        });
+        let text = t.content;
+        if (t.truncated) {
+          text += `\n\n[truncated: shown ${t.outputLines}/${t.totalLines} lines]`;
+        }
+        return {
+          text,
+          details: { count: locs.length, truncated: t.truncated },
+        };
+      },
     );
-    if (!res.ok) {
-      return {
-        content: [
-          { type: "text", text: `LSP error: ${res.error ?? "unknown"}` },
-        ],
-        details: { success: false },
-      };
-    }
-    const locs = res.locations ?? [];
-    const full = formatLocations(locs, ctx.cwd, "reference(s)");
-    const t = truncateHead(full, {
-      maxLines: DEFAULT_MAX_LINES,
-      maxBytes: DEFAULT_MAX_BYTES,
-    });
-    let text = t.content;
-    if (t.truncated) {
-      text += `\n\n[truncated: shown ${t.outputLines}/${t.totalLines} lines]`;
-    }
-    return {
-      content: [{ type: "text", text }],
-      details: { success: true, count: locs.length, truncated: t.truncated },
-    };
   },
 });

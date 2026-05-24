@@ -1,24 +1,21 @@
 import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
-import { callDriver } from "../nvim";
 import {
   formatLocations,
-  normalizeAtPath,
-  toAbs,
+  runNavTool,
+  type DriverErr,
   type LspLocation,
 } from "../utils";
 
-interface DriverLocResult {
-  ok: boolean;
+interface DriverLocResult extends DriverErr {
   locations?: LspLocation[];
-  error?: string;
 }
 
 export const definitionTool = defineTool({
   name: "lsp_definition",
   label: "LSP Definition",
   description:
-    "Jump to canonical declaration of ONE symbol at file:line (requires anchor; resolves re-exports, overloads). For name-only search without an anchor, use codegraph_search first to get a location, then this for the canonical def.",
+    "Jump to canonical declaration of ONE symbol at file:line (requires anchor; resolves re-exports, overloads). For name-only search without an anchor, use codegraph_search or grep first to get a location, then this for the canonical def.",
   promptSnippet: "Find where a symbol is declared",
   promptGuidelines: [
     "Use lsp_definition to locate where a symbol is declared before modifying it or reading wider source.",
@@ -38,30 +35,19 @@ export const definitionTool = defineTool({
     ),
   }),
   async execute(_id, params, signal, onUpdate, ctx) {
-    const file = toAbs(normalizeAtPath(params.file), ctx.cwd);
-    const progress = (text: string) =>
-      onUpdate?.({ content: [{ type: "text", text }], details: {} });
-    const res = await callDriver<DriverLocResult>(
-      ctx.cwd,
+    return runNavTool<DriverLocResult>(
       "definition",
-      [file, params.line, params.symbol ?? ""],
+      params,
+      ctx,
       signal,
-      progress,
+      onUpdate,
+      (res, cwd) => {
+        const locs = res.locations ?? [];
+        return {
+          text: formatLocations(locs, cwd, "definition(s)"),
+          details: { count: locs.length },
+        };
+      },
     );
-    if (!res.ok) {
-      return {
-        content: [
-          { type: "text", text: `LSP error: ${res.error ?? "unknown"}` },
-        ],
-        details: { success: false },
-      };
-    }
-    const locs = res.locations ?? [];
-    return {
-      content: [
-        { type: "text", text: formatLocations(locs, ctx.cwd, "definition(s)") },
-      ],
-      details: { success: true, count: locs.length },
-    };
   },
 });
