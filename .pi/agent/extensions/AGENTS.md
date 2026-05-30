@@ -20,7 +20,7 @@ How each rule is wired — which extension implements which mechanism — is des
 
 - **`eval/`** — persistent Python + JS kernels with a loopback bridge so cells can call pi's own tools (`tool.read`, `tool.bash`, …). Data lives in kernel RAM, not conversation history. 10–100× token savings on "read 50 files, summarize" shape tasks. Full docs in `eval/README.md`.
 - **`lsp/`** — headless nvim singleton exposes `lsp_hover` / `lsp_definition` / `lsp_references`. Real LSP, not grep theater.
-- **`codegraph.ts`** — wraps [codegraph CLI](https://github.com/colbymchenry/codegraph) as `codegraph_status` / `_context` / `_search` / `_files`. Symbol-aware repo navigation. Probes `codegraph status` at load; tools register only if the cwd has an index (run `codegraph init -i` then restart pi).
+- **`codegraph.ts`** — wraps [codegraph CLI](https://github.com/colbymchenry/codegraph) as `codegraph_status` / `_context` / `_search` / `_files` / `_callers` / `_callees` / `_impact` / `_affected`. Symbol-aware repo navigation + call-graph (callers/callees), refactor blast-radius (`impact`), and test selection from changed files (`affected`). Probes `codegraph status` at load; tools register only if the cwd has an index (run `codegraph init` then restart pi). After any edit turn, fires `codegraph sync -q` (fire-and-forget) so CLI reads don't hit a stale graph — the auto-sync watcher only runs under `codegraph serve`, not one-shot CLI calls.
 - **`subagent.ts`** — `/subagent` delegates to a child `pi` process. Single-layer (no recursion). Agents live in `~/.pi/agent/agents/*.md` with YAML frontmatter.
 
 ### Cleaner context
