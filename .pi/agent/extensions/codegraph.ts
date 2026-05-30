@@ -1,6 +1,6 @@
 // codegraph — wrap codegraph CLI (https://github.com/colbymchenry/codegraph)
 // as native pi tools. Each tool shells out to `codegraph <subcmd> -j` and
-// returns the JSON. Project must be initialized first (`codegraph init -i`).
+// returns the JSON. Project must be initialized first (`codegraph init`).
 
 import { spawn, spawnSync } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -76,8 +76,31 @@ async function callCodegraph(
   };
 }
 
+const EDIT_TOOLS = new Set(["edit", "write", "str_replace", "create"]);
+
 export default function (pi: ExtensionAPI) {
-  if (!isCodegraphInitialized(process.cwd())) return;
+  const loadCwd = process.cwd();
+  if (!isCodegraphInitialized(loadCwd)) return;
+
+  // Keep the on-disk index fresh. CLI reads hit the graph directly; the
+  // file-watcher that auto-syncs runs only under `codegraph serve`, so in
+  // pi-only use the graph drifts after edits and returns stale
+  // callers/defs/impact. Sync once per turn after any edit. Fire-and-forget
+  // so turn-idle isn't delayed; sync only diffs changed files, so it's cheap.
+  let editedThisTurn = false;
+  pi.on("tool_result", async (event) => {
+    if (!event.isError && EDIT_TOOLS.has(event.toolName)) editedThisTurn = true;
+  });
+  pi.on("agent_end", async (_event, ctx) => {
+    if (!editedThisTurn) return;
+    editedThisTurn = false;
+    const child = spawn(CODEGRAPH_BIN, ["sync", "-q"], {
+      cwd: ctx.cwd ?? loadCwd,
+      stdio: "ignore",
+    });
+    child.on("error", () => {});
+    child.unref();
+  });
 
   pi.registerTool({
     name: "codegraph_status",
@@ -164,6 +187,100 @@ export default function (pi: ExtensionAPI) {
       if (a.filter) args.push("--filter", a.filter);
       if (a.pattern) args.push("--pattern", a.pattern);
       if (a.maxDepth) args.push("--max-depth", String(a.maxDepth));
+      return callCodegraph(args, ctx.cwd, signal);
+    },
+  });
+
+  pi.registerTool({
+    name: "codegraph_callers",
+    label: "CodeGraph callers",
+    description:
+      "Call-graph INBOUND: functions/methods that CALL <symbol>, looked up by name — NO anchor. Returns call edges only, not every reference. Differs from lsp_references, which needs a file:line anchor and returns all uses (reads, types, imports, not just calls). Use when you have a name and want its callers.",
+    parameters: Type.Object({
+      symbol: Type.String({ description: "Symbol name (function/method)" }),
+      limit: Type.Optional(
+        Type.Number({ description: "Max results (default 20)" }),
+      ),
+    }),
+    async execute(_id, raw, signal, _onUpdate, ctx) {
+      const a = raw as { symbol: string; limit?: number };
+      const args = ["callers", a.symbol, "-j"];
+      if (a.limit) args.push("-l", String(a.limit));
+      return callCodegraph(args, ctx.cwd, signal);
+    },
+  });
+
+  pi.registerTool({
+    name: "codegraph_callees",
+    label: "CodeGraph callees",
+    description:
+      "Call-graph OUTBOUND: functions/methods that <symbol> CALLS, by name — NO anchor. No lsp_* equivalent exists. Use to see what a function depends on / delegates to without reading its body.",
+    parameters: Type.Object({
+      symbol: Type.String({ description: "Symbol name (function/method)" }),
+      limit: Type.Optional(
+        Type.Number({ description: "Max results (default 20)" }),
+      ),
+    }),
+    async execute(_id, raw, signal, _onUpdate, ctx) {
+      const a = raw as { symbol: string; limit?: number };
+      const args = ["callees", a.symbol, "-j"];
+      if (a.limit) args.push("-l", String(a.limit));
+      return callCodegraph(args, ctx.cwd, signal);
+    },
+  });
+
+  pi.registerTool({
+    name: "codegraph_impact",
+    label: "CodeGraph impact",
+    description:
+      "Transitive blast radius: symbols that break if <symbol> changes (callers-of-callers up to depth). Run BEFORE a rename/refactor to scope breakage. Broader than one-hop codegraph_callers.",
+    parameters: Type.Object({
+      symbol: Type.String({ description: "Symbol name" }),
+      depth: Type.Optional(
+        Type.Number({ description: "Traversal depth (default 2, max 10)" }),
+      ),
+    }),
+    async execute(_id, raw, signal, _onUpdate, ctx) {
+      const a = raw as { symbol: string; depth?: number };
+      const args = ["impact", a.symbol, "-j"];
+      if (a.depth) args.push("-d", String(a.depth));
+      return callCodegraph(args, ctx.cwd, signal);
+    },
+  });
+
+  pi.registerTool({
+    name: "codegraph_affected",
+    label: "CodeGraph affected tests",
+    description:
+      "Test selection: given changed source files, returns test files that transitively depend on them (import-edge traversal). Feed it `git diff --name-only` output to pick which tests to run after an edit instead of the whole suite.",
+    parameters: Type.Object({
+      files: Type.Array(Type.String(), {
+        description: "Changed source file paths",
+      }),
+      depth: Type.Optional(
+        Type.Number({ description: "Max traversal depth (default 5)" }),
+      ),
+      filter: Type.Optional(
+        Type.String({
+          description: "Glob for test files, e.g. 'e2e/*.spec.ts'",
+        }),
+      ),
+    }),
+    async execute(_id, raw, signal, _onUpdate, ctx) {
+      const a = raw as { files: string[]; depth?: number; filter?: string };
+      if (!a.files?.length) {
+        const msg =
+          "codegraph_affected: provide at least one changed file path";
+        return {
+          content: [{ type: "text" as const, text: msg }],
+          details: undefined,
+          error: msg,
+        };
+      }
+      const args = ["affected", "-j"];
+      if (a.depth) args.push("-d", String(a.depth));
+      if (a.filter) args.push("-f", a.filter);
+      args.push(...a.files);
       return callCodegraph(args, ctx.cwd, signal);
     },
   });
