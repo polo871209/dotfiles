@@ -38,11 +38,18 @@ const spawnNvim = async (
   onProgress: ProgressFn | undefined,
 ): Promise<NvimSession> => {
   onProgress?.("starting nvim…");
-  const proc = spawn("nvim", ["--embed", "--headless"], {
-    cwd,
-    stdio: ["pipe", "pipe", "pipe"],
-    env: process.env,
-  });
+  // pi_agent flag (set pre-config via --cmd) lets the nvim config skip purely
+  // cosmetic plugins headless, keeping only LSP/format/lint. Faster warm-spawn,
+  // identical servers/rules. See plugin/*.lua guards.
+  const proc = spawn(
+    "nvim",
+    ["--embed", "--headless", "--cmd", "lua vim.g.pi_agent=true"],
+    {
+      cwd,
+      stdio: ["pipe", "pipe", "pipe"],
+      env: process.env,
+    },
+  );
 
   proc.on("exit", (code, signal) => {
     log(`nvim exited code=${code} signal=${signal}`);
@@ -97,14 +104,22 @@ export const shutdownNvim = (): void => {
   if (!session) return;
   const { proc } = session;
   session = null;
+  // proc.killed only means a signal was sent, not that the process died.
+  // Track real exit so the SIGKILL fallback actually fires on a nvim that
+  // ignores SIGTERM (headless --embed can linger) -> no orphans.
+  let exited = false;
+  proc.once("exit", () => {
+    exited = true;
+  });
   try {
     proc.kill("SIGTERM");
-    // Force-kill if it lingers.
     setTimeout(() => {
-      try {
-        if (!proc.killed) proc.kill("SIGKILL");
-      } catch {
-        /* ignore */
+      if (!exited) {
+        try {
+          proc.kill("SIGKILL");
+        } catch {
+          /* ignore */
+        }
       }
     }, 1000).unref();
   } catch {

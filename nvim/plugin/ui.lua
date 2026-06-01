@@ -1,3 +1,6 @@
+-- Agent nvim skips cosmetic plugins.
+if vim.g.pi_agent then return end
+
 vim.pack.add {
     'https://github.com/folke/todo-comments.nvim',
     'https://github.com/wurli/visimatch.nvim',
