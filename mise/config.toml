@@ -1,35 +1,41 @@
 [tools]
 # Languages / runtimes
+bun = "latest"
+cue = "latest"
 go = "latest"
 node = "latest"
 python = "latest"
-zig = "latest"
-bun = "latest"
-cue = "latest"
-uv = "latest"
 ruff = "latest"
 tree-sitter = "latest"
+uv = "latest"
+zig = "latest"
 
 # LSPs
-"npm:bash-language-server" = "latest"
-"go:golang.org/x/tools/gopls" = "latest"
-"npm:vscode-langservers-extracted" = "latest"
 "aqua:grafana/jsonnet-language-server" = "latest"
-"aqua:LuaLS/lua-language-server" = "latest"
-"pipx:pyrefly" = "latest"
-"github:withered-magic/starpls" = { version = "latest", exe = "starpls" }
-"aqua:tamasfe/taplo" = "latest"
 "aqua:hashicorp/terraform-ls" = "latest"
-"npm:@vtsls/language-server" = "latest"
-"npm:yaml-language-server" = "latest"
+"aqua:LuaLS/lua-language-server" = "latest"
+"aqua:tamasfe/taplo" = "latest"
 "aqua:zigtools/zls" = "latest"
+"github:withered-magic/starpls" = { version = "latest", exe = "starpls" }
+"go:golang.org/x/tools/gopls" = "latest"
+"npm:@vtsls/language-server" = "latest"
+"npm:bash-language-server" = "latest"
+"npm:vscode-langservers-extracted" = "latest"
+"npm:yaml-language-server" = "latest"
+"pipx:pyrefly" = "latest"
 
 # Formatters / linters / debuggers
 "aqua:bazelbuild/buildtools/buildifier" = "latest"
 "aqua:go-delve/delve" = "latest"
+"aqua:golangci/golangci-lint" = "latest"
 "aqua:hadolint/hadolint" = "latest"
-"aqua:koalaman/shellcheck" = "latest"
-"npm:prettier" = "latest"
-"npm:@earendil-works/pi-coding-agent" = "latest"
-"npm:@colbymchenry/codegraph" = "latest"
 "aqua:JohnnyMorganz/StyLua" = "latest"
+"aqua:koalaman/shellcheck" = "latest"
+"aqua:terraform-linters/tflint" = "latest"
+"npm:eslint_d" = "latest"
+"npm:prettier" = "latest"
+semgrep = "latest"
+
+# Other
+"npm:@colbymchenry/codegraph" = "latest"
+"npm:@earendil-works/pi-coding-agent" = "latest"

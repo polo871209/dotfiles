@@ -1,3 +1,6 @@
+-- Agent nvim skips cosmetic plugins.
+if vim.g.pi_agent then return end
+
 local ignore = require 'ignore'
 
 -- Resize neo-tree window to fit the longest visible node.

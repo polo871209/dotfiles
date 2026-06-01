@@ -1,3 +1,6 @@
+-- Agent nvim skips cosmetic plugins.
+if vim.g.pi_agent then return end
+
 vim.pack.add {
     'https://github.com/christoomey/vim-tmux-navigator',
     'https://github.com/folke/flash.nvim',

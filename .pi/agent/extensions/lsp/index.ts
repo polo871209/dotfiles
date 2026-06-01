@@ -1,5 +1,6 @@
 // lsp — agent-callable LSP navigation tools backed by a persistent headless
-// nvim. Lazy-spawns on first tool call; tears down on session shutdown.
+// nvim. Warm-spawned by lsp-feedback on session_start (else lazy on first
+// tool call); tears down on session shutdown.
 // Diagnostics live in lsp-feedback (push after edits); these are pull-only
 // for navigation: hover, definition, references.
 
@@ -26,7 +27,7 @@ export default function (pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       if (!isRunning()) {
         ctx.ui.notify(
-          "nvim not running (will start on first lsp_* call)",
+          "nvim not running (warms at session_start; else on first lsp_* call)",
           "info",
         );
         return;

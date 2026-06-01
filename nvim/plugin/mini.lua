@@ -1,3 +1,6 @@
+-- Agent nvim skips cosmetic plugins.
+if vim.g.pi_agent then return end
+
 -- https://emojicombos.com/one-piece
 local header_art = [[⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
                     ⣀⣀⣀⣀⣀⣀⣀⣀⣀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀

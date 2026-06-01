@@ -1,3 +1,6 @@
+-- Agent nvim skips cosmetic plugins.
+if vim.g.pi_agent then return end
+
 vim.pack.add {
     { src = 'https://github.com/catppuccin/nvim', name = 'catppuccin' },
 }

@@ -1,5 +1,10 @@
+---@diagnostic disable: undefined-field
 -- Clear search highlights
 vim.keymap.set('n', '<Esc>', '<cmd>nohlsearch<CR>')
+
+-- Buffer navigation
+vim.keymap.set({ 'n', 'i' }, '<C-,>', '<cmd>bprevious<CR>', { desc = 'Previous Buffer' })
+vim.keymap.set({ 'n', 'i' }, '<C-.>', '<cmd>bnext<CR>', { desc = 'Next Buffer' })
 
 -- Split screen
 vim.keymap.set('n', '<leader>-', '<cmd>split<CR>', { desc = 'Horizontal Split' })
@@ -80,7 +85,7 @@ vim.keymap.set('n', '<leader>rf', function()
     vim.cmd 'w'
     if last_run_term and last_run_term:buf_valid() then last_run_term:close() end
     local cmd, root = get_run_cmd()
-    local height = math.floor(vim.o.lines * 0.4)
+    local height = math.floor(vim.o.lines * 0.6)
     last_run_term = _G.Snacks.terminal.open(cmd, {
         cwd = root,
         auto_close = false,

@@ -14,6 +14,26 @@ local CODEACTION_TIMEOUT_MS = 2000
 local PER_FILE_BUDGET_MS = 4500
 local SETTLE_MS = 1000
 
+-- Async + network-bound linters don't finish inside the per-file budget, so
+-- their diagnostics land after M.run returns (inconsistent + orphan jobs).
+-- Skip here; they run on save in interactive nvim (see plugin/lint.lua).
+local SLOW_LINTERS = {
+    semgrep = true,
+}
+
+local function run_fast_lint(bufnr)
+    local ok, lint = pcall(require, 'lint')
+    if not ok then return end
+    local names = lint.linters_by_ft[vim.bo[bufnr].filetype]
+    if not names then return end
+    local allowed = {}
+    for _, name in ipairs(names) do
+        if not SLOW_LINTERS[name] then table.insert(allowed, name) end
+    end
+    if #allowed == 0 then return end
+    pcall(function() lint.try_lint(allowed) end)
+end
+
 local FIXALL_KINDS = {
     'source.fixAll',
     'source.organizeImports',
@@ -107,7 +127,7 @@ function M.run(files)
             vim.wait(math.min(2000, remaining()), function() return #vim.lsp.get_clients { bufnr = bufnr } > 0 end, 50)
 
             pull_diagnostics(bufnr, remaining)
-            pcall(function() require('lint').try_lint() end)
+            run_fast_lint(bufnr)
             vim.wait(math.min(800, remaining()), function() return false end, 50)
 
             -- 3) Safe auto-fixes (organizeImports + source.fixAll).
@@ -121,7 +141,7 @@ function M.run(files)
             end
 
             pull_diagnostics(bufnr, remaining)
-            pcall(function() require('lint').try_lint() end)
+            run_fast_lint(bufnr)
         end
     end
 

@@ -406,6 +406,12 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     cwd = ctx.cwd ?? process.cwd();
     reset();
+    // Warm nvim + feedback lua in the background so the first edit skips spawn
+    // + init.lua + LSP-attach. Deferred a tick to keep the sync prefix (file
+    // read + spawn syscall) off pi's startup path.
+    setTimeout(() => {
+      void ensureFeedbackLoaded(cwd).catch(() => {});
+    }, 0);
   });
 
   pi.on("before_agent_start", async (_event, ctx) => {
