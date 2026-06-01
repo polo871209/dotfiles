@@ -1,11 +1,21 @@
-// notifier — macOS desktop notifications when pi finishes a turn and the
-// user is not currently looking at this tmux pane.
+// notifier — desktop notification when pi finishes a turn and this tmux pane
+// isn't focused. ghostty OSC 777 (via tmux passthrough) where possible, else
+// osascript. ghostty forces subtitle = window title, so we set it to the
+// project name -> "pi" / "<project>" / "<message>".
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { exec, execFile } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import * as path from "node:path";
 
 const DISABLED = process.env.PI_IS_SUBAGENT === "1";
 const SOUND_PATH = "/System/Library/Sounds/Blow.aiff";
+const ESC = "\x1b";
+const BEL = "\x07";
+
+const isGhostty = (): boolean =>
+  process.env.TERM_PROGRAM === "ghostty" ||
+  !!process.env.GHOSTTY_RESOURCES_DIR ||
+  !!process.env.GHOSTTY_BIN_DIR;
 
 const execP = (cmd: string, timeoutMs = 1000): Promise<string> =>
   new Promise((resolve, reject) => {
@@ -132,16 +142,9 @@ const isTerminalFocused = async (): Promise<boolean> => {
 
 const debounce = new Map<string, number>();
 
-const escapeAS = (s: string) =>
-  s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r?\n/g, " ");
-
-const sendNotification = async (
-  title: string,
-  message: string,
-): Promise<void> => {
-  const key = `${title}\x00${message}`;
+const shouldThrottle = (key: string): boolean => {
   const now = Date.now();
-  if ((debounce.get(key) ?? 0) > now - 1000) return;
+  if ((debounce.get(key) ?? 0) > now - 1000) return true;
   debounce.set(key, now);
   // Prune entries older than 5s to keep the map bounded.
   if (debounce.size > 32) {
@@ -149,7 +152,108 @@ const sendNotification = async (
       if (now - t > 5000) debounce.delete(k);
     }
   }
+  return false;
+};
 
+const escapeAS = (s: string) =>
+  s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\r?\n/g, " ");
+
+// OSC 777 fields are ';'-separated; control chars / ';' would corrupt the
+// sequence, so neutralise them.
+const sanitizeOsc = (s: string): string =>
+  s.replace(/[\x00-\x1f\x7f]/g, " ").replace(/;/g, ":");
+
+// Inside tmux an OSC must be wrapped in a DCS passthrough or tmux swallows it
+// (needs `set -g allow-passthrough on`). Every inner ESC byte is doubled.
+const wrapPassthrough = (raw: string): string =>
+  process.env.TMUX_PANE
+    ? `${ESC}Ptmux;${raw.replace(/\x1b/g, ESC + ESC)}${ESC}\\`
+    : raw;
+
+const titleSeq = (title: string): string =>
+  wrapPassthrough(`${ESC}]0;${sanitizeOsc(title)}${BEL}`);
+const notifySeq = (title: string, body: string): string =>
+  wrapPassthrough(
+    `${ESC}]777;notify;${sanitizeOsc(title)};${sanitizeOsc(body)}${BEL}`,
+  );
+
+const delay = (ms: number): Promise<void> =>
+  new Promise((r) => setTimeout(r, ms));
+
+// ghostty applies title changes async; wait so the notification subtitle isn't
+// stale.
+const GHOSTTY_TITLE_SETTLE_MS = 300;
+
+// tmux only forwards passthrough from visible panes (pane_active irrelevant).
+const isPaneVisible = async (): Promise<boolean> => {
+  const pane = process.env.TMUX_PANE;
+  if (!pane) return true;
+  try {
+    const out = await execFileP("tmux", [
+      "display-message",
+      "-t",
+      pane,
+      "-p",
+      "#{session_attached} #{window_active}",
+    ]);
+    const [attached, win] = out.split(" ");
+    return attached === "1" && win === "1";
+  } catch {
+    return false;
+  }
+};
+
+// When pi's pane is hidden, find a visible pane to carry the passthrough (same
+// ghostty surface). null = nothing visible (fully detached).
+const getVisiblePaneTty = async (): Promise<string | null> => {
+  try {
+    const out = await execFileP("tmux", [
+      "list-panes",
+      "-a",
+      "-F",
+      "#{pane_tty} #{session_attached} #{window_active} #{pane_active}",
+    ]);
+    for (const line of out.split("\n")) {
+      const [tty, attached, win, paneActive] = line.trim().split(" ");
+      if (attached === "1" && win === "1" && paneActive === "1" && tty) {
+        return tty;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+};
+
+// false = no ghostty target, caller should use osascript. Sets the window
+// title first because ghostty renders it as the notification subtitle.
+const sendGhostty = async (project: string, body: string): Promise<boolean> => {
+  if (!isGhostty()) return false;
+
+  // pi's pane hidden -> route through a visible pane's tty (tmux drops
+  // passthrough from hidden panes). stdout otherwise — works under pi's
+  // takeOverStdout (reroutes to fd2, same pty tmux reads, same as OSC 52).
+  let carrierTty: string | null = null;
+  if (process.env.TMUX_PANE && !(await isPaneVisible())) {
+    carrierTty = await getVisiblePaneTty();
+    if (!carrierTty) return false;
+  }
+  const emit = (seq: string): void => {
+    if (carrierTty) writeFileSync(carrierTty, seq);
+    else process.stdout.write(seq);
+  };
+
+  try {
+    emit(titleSeq(project));
+    await delay(GHOSTTY_TITLE_SETTLE_MS);
+    emit(notifySeq("pi", body));
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const sendOsascript = async (title: string, message: string): Promise<void> => {
   try {
     await execFileP(
       "osascript",
@@ -170,7 +274,12 @@ const playSound = (): void => {
 
 const notify = async (projectName: string, message: string): Promise<void> => {
   if (await isTerminalFocused()) return;
-  await sendNotification(`pi - ${projectName}`, message);
+  if (shouldThrottle(`${projectName}\x00${message}`)) return;
+  // When ghostty is the focused app (e.g. another tmux window) it suppresses
+  // its own OSC banner — sound only. That's ghostty's design, not overridable.
+  if (!(await sendGhostty(projectName, message))) {
+    await sendOsascript(`pi - ${projectName}`, message);
+  }
   playSound();
 };
 
