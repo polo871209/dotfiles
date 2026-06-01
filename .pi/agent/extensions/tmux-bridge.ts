@@ -11,6 +11,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { Box, Text } from "@earendil-works/pi-tui";
 import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as net from "node:net";
@@ -50,10 +51,38 @@ export default function (pi: ExtensionAPI) {
 
   const VALID_MODES = new Set(["steer", "followUp"]);
 
+  // Files pushed from nvim arrive as a custom message so the LLM gets full
+  // content (convertToLlm maps custom -> user) while the TUI shows one compact
+  // line. The file body lives in the user's editor, so we never expand it here.
+  pi.registerMessageRenderer("nvim-file", (message, _opts, theme) => {
+    const d = message.details as
+      | { path: string; sline: number; eline: number; lines: number }
+      | undefined;
+    const label = d
+      ? `${d.path} (L${d.sline}-${d.eline}, ${d.lines} lines)`
+      : "file context";
+    const box = new Box(0, 1, (t) => theme.bg("customMessageBg", t));
+    box.addChild(new Text(theme.fg("accent", label), 0, 0));
+    return box;
+  });
+
+  type FilePayload = {
+    path: string;
+    sline: number;
+    eline: number;
+    ft?: string;
+    content: string;
+  };
+
   const handleLine = (line: string) => {
     const trimmed = line.trim();
     if (!trimmed) return;
-    let payload: { text?: string; mode?: "steer" | "followUp" };
+    let payload: {
+      text?: string;
+      prompt?: string;
+      file?: FilePayload;
+      mode?: "steer" | "followUp";
+    };
     try {
       payload = JSON.parse(trimmed);
     } catch {
@@ -63,8 +92,6 @@ export default function (pi: ExtensionAPI) {
       );
       return;
     }
-    const text = payload.text;
-    if (!text || typeof text !== "string") return;
 
     const mode =
       payload.mode && VALID_MODES.has(payload.mode) ? payload.mode : "steer";
@@ -74,6 +101,33 @@ export default function (pi: ExtensionAPI) {
     const opts = idle ? undefined : { deliverAs: mode };
 
     try {
+      const f = payload.file;
+      if (f && typeof f.content === "string" && typeof f.path === "string") {
+        // Inject the file as a custom message (full content -> LLM, compact in
+        // TUI), then the question as the user message that triggers the turn.
+        const block = `${f.path} (focus L${f.sline}-L${f.eline}):\n\`\`\`${f.ft ?? ""}\n${f.content}\n\`\`\``;
+        // nextTurn queues the file so prompt() injects it right after the user
+        // message (agent-session pushes pending nextTurn msgs below the prompt),
+        // making it render under the input instead of above it.
+        pi.sendMessage(
+          {
+            customType: "nvim-file",
+            content: block,
+            display: true,
+            details: {
+              path: f.path,
+              sline: f.sline,
+              eline: f.eline,
+              lines: f.content.split("\n").length,
+            },
+          },
+          { deliverAs: "nextTurn" },
+        );
+        pi.sendUserMessage(payload.prompt ?? "", opts);
+        return;
+      }
+      const text = payload.text;
+      if (!text || typeof text !== "string") return;
       pi.sendUserMessage(text, opts);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
