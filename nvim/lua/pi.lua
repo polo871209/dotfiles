@@ -76,15 +76,15 @@ local function socket_path()
     return nil, 'No pi listener for this tmux session. Is .pi/extensions/tmux-bridge.ts loaded?\nTried: ' .. table.concat(paths, ', ')
 end
 
---- Send a JSON line ({"text": ...}) to the pi socket. Fully async.
----@param text string
-local function send(text)
+--- Send a JSON object as one line to the pi socket. Fully async.
+---@param obj table
+local function send(obj)
     local sock, err = socket_path()
     if not sock then
         notify(err or 'pi socket not found', vim.log.levels.ERROR)
         return
     end
-    local payload = vim.json.encode { text = text } .. '\n'
+    local payload = vim.json.encode(obj) .. '\n'
     vim.system({ 'nc', '-U', '-w', '1', sock }, { stdin = payload, text = true, timeout = TIMEOUT }, function(result)
         if result.code ~= 0 then
             notify('Failed to send to pi: ' .. (result.stderr or 'unknown error'), vim.log.levels.ERROR)
@@ -134,8 +134,18 @@ function M.send_selection()
 
     vim.ui.input({ prompt = 'pi: ' }, function(input)
         if not input or input == '' then return end
-        local text = string.format('%s\n\n%s (L%d-L%d):\n```%s\n%s\n```', input, filepath, sline, eline, ft, selection)
-        send(text)
+        -- Send the whole file so pi answers with zero extra read round-trip (pi's
+        -- edit/write read from disk at exec time, so editing never needs a prior
+        -- read either). The bridge injects it as a collapsed custom message so the
+        -- conversation stays compact; the selection just marks the focus range.
+        local all = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), '\n')
+        -- tmux-bridge drops socket lines >256KB; for big files send a reference and
+        -- let pi read them itself instead of the message being silently dropped.
+        if #all <= 200000 then
+            send { prompt = input, file = { path = filepath, sline = sline, eline = eline, ft = ft, content = all } }
+        else
+            send { text = string.format('%s\n\nRe: %s lines %d-%d. Read the file for full context.', input, filepath, sline, eline) }
+        end
     end)
 end
 
@@ -175,7 +185,7 @@ function M.send_diagnostics()
 
     local filepath = vim.fn.fnamemodify(bufname, ':.')
     local text = 'Please review these diagnostics and help me fix them.\n\n' .. filepath .. ':\n' .. table.concat(lines, '\n')
-    send(text)
+    send { text = text }
 end
 
 return M

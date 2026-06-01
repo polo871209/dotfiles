@@ -37,9 +37,9 @@ How each rule is wired — which extension implements which mechanism — is des
 
 ### Outside-pi surface
 
-- **`tmux-bridge.ts`** — Unix socket at `$TMPDIR/pi-tmux-<id>/bridge.sock` for cross-pane push into the running session. Two clients in this dotfiles:
+- **`tmux-bridge.ts`** — Unix socket at `$TMPDIR/pi-tmux-<id>/bridge.sock` for cross-pane push into the running session. Accepts `{"text"}` (plain) or `{"prompt", "file":{path,sline,eline,ft,content}}`; the latter sends the prompt as the user message and queues the file as an `nvim-file` custom message via `deliverAs:"nextTurn"` so it's injected just below the prompt (full content → LLM via convertToLlm, rendered as one compact `path (L…, N lines)` line so the conversation stays small) — gives the model the whole file with no read round-trip (pi's edit/write read from disk, so editing needs no prior read either). Two clients in this dotfiles:
   - `tmux/pi-send` — shell CLI, writes `{"text": "..."}` JSON lines.
-  - `nvim/lua/pi.lua` — `<leader><leader>` (visual) sends selection + prompt; `<leader>da` (normal) sends current buffer diagnostics. Probes macOS `DARWIN_USER_TEMP_DIR` since nvim's `$TMPDIR` differs from Node's `os.tmpdir()`.
+  - `nvim/lua/pi.lua` — `<leader><leader>` (visual) sends the whole buffer + prompt + focus range (falls back to a `{"text"}` reference for buffers >200KB, under the bridge's 256KB socket-line cap); `<leader>da` (normal) sends current buffer diagnostics. Probes macOS `DARWIN_USER_TEMP_DIR` since nvim's `$TMPDIR` differs from Node's `os.tmpdir()`.
 - **`notifier.ts`** — macOS notification when pi finishes a turn _and_ this tmux pane is not focused.
 
 ### TUI taste
