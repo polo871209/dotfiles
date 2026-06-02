@@ -16,5 +16,6 @@
   },
   "branchSummary": {
     "reserveTokens": 32768
-  }
+  },
+  "hideThinkingBlock": true
 }
