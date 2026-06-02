@@ -67,7 +67,7 @@ const MAX_FILE_BYTES = 64 * 1024;
 const WIDGET_KEY = "lsp-feedback";
 const AUTO_FIX = true;
 
-const FIXER_SYSTEM = `Fix only the listed LSP/lint issues in the file. Change nothing else; preserve all other code, comments, and formatting exactly. If unsure, leave it. Output the full corrected file in one fenced code block. No prose.`;
+const FIXER_SYSTEM = `Fix only the listed LSP/lint issues in the file. Change nothing else; preserve all other code, comments, and formatting exactly. Fix the root cause — don't suppress a diagnostic with an ignore/disable directive (\`---@diagnostic\`, \`@ts-ignore\`, \`# noqa\`, etc.). If you can't genuinely resolve an issue, leave it as-is so it stays reported. Output the full corrected file in one fenced code block. No prose.`;
 
 const TRACKED_TOOLS = new Set(["edit", "write", "str_replace", "create"]);
 const FIXABLE_SEVERITIES: ReadonlySet<Severity> = new Set(["error", "warn"]);
@@ -401,6 +401,18 @@ export default function (pi: ExtensionAPI) {
     ctx.ui.setWidget(WIDGET_KEY, barWidget(lines), {
       placement: "aboveEditor",
     });
+
+    // Nudge so unfixed issues don't sit silently in the widget — the auto-fix
+    // couldn't (or wouldn't) resolve these; go check them.
+    const unfixed = final.diagnostics.filter((d) =>
+      FIXABLE_SEVERITIES.has(d.severity),
+    ).length;
+    if (unfixed > 0) {
+      ctx.ui.notify(
+        `lsp-feedback: ${unfixed} unfixed issue(s) — check the widget`,
+        "warning",
+      );
+    }
   };
 
   pi.on("session_start", async (_event, ctx) => {
