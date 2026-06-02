@@ -36,12 +36,61 @@ lint.linters.semgrep = {
     end,
 }
 
+-- zlint: third-party Zig linter with its own semantic analyzer (zls/ast-check
+-- only catch syntax + compile errors). Catches unsafe undefined, swallowed
+-- errors, dead decls, no-print, etc. NDJSON output, one object per line.
+local zlint_sev = {
+    err = vim.diagnostic.severity.ERROR,
+    error = vim.diagnostic.severity.ERROR,
+    warn = vim.diagnostic.severity.WARN,
+    warning = vim.diagnostic.severity.WARN,
+    info = vim.diagnostic.severity.INFO,
+}
+lint.linters.zlint = {
+    -- zlint (v0.8.1) emits nothing for absolute paths, so cd into the file's
+    -- dir and pass its basename. Wrap in sh to make that hermetic regardless
+    -- of nvim's cwd.
+    cmd = 'sh',
+    stdin = false,
+    append_fname = false,
+    args = {
+        '-c',
+        'cd "$(dirname "$1")" && zlint --format json "$(basename "$1")"',
+        'sh',
+        function() return vim.api.nvim_buf_get_name(0) end,
+    },
+    stream = 'stdout',
+    ignore_exitcode = true,
+    parser = function(output, _)
+        local diagnostics = {}
+        for line in vim.gsplit(output, '\n', { trimempty = true }) do
+            local ok, d = pcall(vim.json.decode, line)
+            if ok and d and d.labels and d.labels[1] then
+                local s = d.labels[1].start or {}
+                local e = d.labels[1]['end'] or {}
+                table.insert(diagnostics, {
+                    source = 'zlint',
+                    code = d.code,
+                    message = type(d.help) == 'string' and (d.message .. '\n' .. d.help) or d.message,
+                    lnum = (s.line or 1) - 1,
+                    col = (s.column or 1) - 1,
+                    end_lnum = (e.line or s.line or 1) - 1,
+                    end_col = (e.column or s.column or 1) - 1,
+                    severity = zlint_sev[d.level] or vim.diagnostic.severity.WARN,
+                })
+            end
+        end
+        return diagnostics
+    end,
+}
+
 lint.linters_by_ft = {
     dockerfile = { 'hadolint' },
     go = { 'golangcilint', 'semgrep' },
     python = { 'ruff', 'semgrep' },
     terraform = { 'tflint' },
     typescript = { 'eslint_d', 'semgrep' },
+    zig = { 'zlint' },
 }
 
 -- Global hadolint ignores (DL3007: latest tag)
@@ -53,16 +102,13 @@ local SLOW_LINTERS = { semgrep = true }
 
 local function lint_buf(on_save)
     if not vim.bo.modifiable then return end
-    -- Slow linters run only on save, and never under the headless agent nvim
-    -- (its lsp-feedback loop handles diagnostics on its own cadence).
-    if on_save and not vim.g.pi_agent then
-        lint.try_lint()
-        return
-    end
     local names = lint.linters_by_ft[vim.bo.filetype]
     if not names then return end
-    local fast = vim.tbl_filter(function(n) return not SLOW_LINTERS[n] end, names)
-    if #fast > 0 then lint.try_lint(fast) end
+    -- On save run everything (except under headless agent nvim, whose
+    -- lsp-feedback loop drives diagnostics on its own cadence). Otherwise
+    -- skip slow (network) linters.
+    if not (on_save and not vim.g.pi_agent) then names = vim.tbl_filter(function(n) return not SLOW_LINTERS[n] end, names) end
+    if #names > 0 then lint.try_lint(names) end
 end
 
 local lint_augroup = vim.api.nvim_create_augroup('lint', { clear = true })
