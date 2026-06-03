@@ -185,16 +185,16 @@ The JS kernel runs in-process (`node:vm` context) but uses the same loopback HTT
 
 ## Files
 
-| File           | LOC  | Role                                                                                                                                                                                                                        |
-| -------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `index.ts`     | ~310 | Extension entry. Registers tool, manages per-session kernels + bridge lifecycle, routes cells by language, forwards pi built-ins via `createXxxTool` factories.                                                             |
-| `bridge.ts`    | ~130 | Single shared `node:http` server on a random loopback port. Multiplexes sessions by id; bearer-token gated. `server.unref()` so it never holds the event loop alone.                                                        |
-| `py-kernel.ts` | ~230 | Spawns `python3 -u runner.py` from the managed venv, JSON-line stdin protocol + fd 3 events. Streams stdout / stderr / display to the host via `onProgress` callback. Handles timeout (kill + respawn) and reset.           |
-| `runner.py`    | ~120 | Long-lived Python loop. Reads stdin JSON, execs cells with stdout/stderr redirected to fd 3, emits stream / display / done. Captures last expression value via AST.                                                         |
-| `prelude.py`   | ~140 | Defines `tool` proxy (over urllib), `display`, `read`, `write`, `tree`, `install`. Exec'd into globals at kernel boot.                                                                                                      |
-| `js-kernel.ts` | ~280 | `node:vm` context per session; each cell wrapped as `(async () => {…})()` for top-level await; last-expression auto-return via heuristic; `tool.*` proxy via global `fetch` (with `Connection: close` to avoid keep-alive). |
-| `types.ts`     | ~55  | Wire protocol types: `Cell`, `CellResult`, `KernelRequest`, `KernelEvent`, `BridgeRequest`, `BridgeResponse`.                                                                                                               |
-| `eval.test.ts` | ~250 | `node:test` suite — bridge auth, py kernel (state/stdout/errors/tool callback/onProgress/reset), js kernel (top-level await/state/console/tool callback/errors).                                                            |
+| File           | LOC  | Role                                                                                                                                                                                                                                                                             |
+| -------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `index.ts`     | ~310 | Extension entry. Registers tool, manages per-session kernels + bridge lifecycle, routes cells by language, forwards pi built-ins via `createXxxTool` factories.                                                                                                                  |
+| `bridge.ts`    | ~130 | Single shared `node:http` server on a random loopback port. Multiplexes sessions by id; bearer-token gated. `server.unref()` so it never holds the event loop alone.                                                                                                             |
+| `py-kernel.ts` | ~230 | Spawns `python3 -u runner.py` from the managed venv, JSON-line stdin protocol + fd 3 events. Streams stdout / stderr / display to the host via `onProgress` callback. Handles timeout (kill + respawn), reset, and exposes `alive` so a dead kernel is recycled on the next run. |
+| `runner.py`    | ~120 | Long-lived Python loop. Reads stdin JSON, execs cells with stdout/stderr redirected to fd 3, emits stream / display / done. Captures last expression value via AST.                                                                                                              |
+| `prelude.py`   | ~140 | Defines `tool` proxy (over urllib), `display`, `read`, `write`, `tree`, `install`. Exec'd into globals at kernel boot.                                                                                                                                                           |
+| `js-kernel.ts` | ~280 | `node:vm` context per session; each cell wrapped as `(async () => {…})()` for top-level await; last-expression auto-return via heuristic; `tool.*` proxy via global `fetch` (with `Connection: close` to avoid keep-alive).                                                      |
+| `types.ts`     | ~55  | Wire protocol types: `Cell`, `CellResult`, `KernelRequest`, `KernelEvent`, `BridgeRequest`, `BridgeResponse`.                                                                                                                                                                    |
+| `eval.test.ts` | ~250 | `node:test` suite — bridge auth, py kernel (state/stdout/errors/tool callback/onProgress/reset), js kernel (top-level await/state/console/tool callback/errors).                                                                                                                 |
 
 ## Tests
 
@@ -234,6 +234,12 @@ The 3,000-line raw data **lives in the Python subprocess's RAM**, never crosses 
 - ✅ Phase 3: Pi built-in tool forwarding (read/write/edit/bash/grep/find/ls), abort signal plumbing, progressive `onUpdate` results.
 - ✅ Phase 4: Managed Python 3.14 venv at `~/.cache/pi-eval/venv`, `install()` helper.
 - ✅ Phase 5: Live stdout streaming (per-write `onProgress`), `node:test` suite.
+- ✅ Phase 6: Crash resilience — a dead Python kernel (OOM kill, native segfault, `os._exit`, host crash) is detected via `PyKernel.alive` and transparently respawned by `ensurePyKernel` on the next cell, instead of staying cached and throwing `"python kernel has exited"` for the rest of the session. Stdin EPIPE is guarded (finalize pending + respawn, never a process-wide uncaughtException), and `runner.py` runs a parent-watchdog daemon that `os._exit`s when reparented, so kernels don't leak as zombies after a host SIGKILL.
+- ✅ Phase 7: Host-crash containment — pi installs **no** `unhandledRejection`/`uncaughtException` handler, so the eval extension's handler is the only one process-wide. It now **logs and swallows** every unhandled rejection (eval-origin or not) and **never re-throws** — the previous `setImmediate(throw)` turned recoverable async hiccups (a dying kernel pipe, an aborted bridge fetch) into hard pi exits. `execute()` is wrapped in a catch-all that returns the failure as a normal tool error (`eval failed (host error): …`) instead of rejecting — a rejected `execute()` surfaces in pi as `"No result provided"` and can escalate to a crash. The handler is also de-duplicated across hot reloads (`process.off` before `process.on`), since a reload re-runs the extension entry without firing `session_shutdown`.
+
+### Crash recovery vs oh-my-pi
+
+Ported from oh-my-pi's kernel lifecycle: instant exit detection + `isAlive()` guard + respawn-on-next-call (their findings #1/#2/#6), stdin EPIPE guard (#3), and the subprocess parent-watchdog (#7). Not ported (deliberate, see gaps below): SIGINT soft-interrupt escalation ladder, heartbeat/idle-timeout split, pre-spawn runtime probe, and the `startingSessions` concurrent-spawn dedup — pi serializes tool calls per session and timeout already falls back to kill+respawn, so the cost outweighs the value for a personal setup.
 
 ## What omp does that we don't
 

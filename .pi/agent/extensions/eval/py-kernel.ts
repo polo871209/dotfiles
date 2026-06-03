@@ -96,6 +96,10 @@ export class PyKernel {
     (this.#proc.stderr as { unref?: () => void } | null)?.unref?.();
     (eventStream as { unref?: () => void }).unref?.();
 
+    // Broken pipe on stdin (kernel died between an alive check and a write)
+    // emits 'error'; without a listener Node turns it into a process-wide
+    // uncaughtException. Swallow it — the exit handler does the real cleanup.
+    this.#proc.stdin?.on("error", () => {});
     // Discard child stdout (user code redirects to fd 3 anyway); surface stderr
     // to the host stderr for boot diagnostics.
     this.#proc.stdout?.resume();
@@ -108,7 +112,10 @@ export class PyKernel {
       // No explicit hello; the runner is ready as soon as it starts reading
       // stdin. Resolve next tick.
       queueMicrotask(resolve);
-      this.#proc.once("error", reject);
+      this.#proc.once("error", (err) => {
+        this.#closed = true;
+        reject(err);
+      });
       this.#proc.once("exit", (code) => {
         this.#closed = true;
         for (const pending of this.#pending.values()) {
@@ -124,6 +131,10 @@ export class PyKernel {
 
   ready(): Promise<void> {
     return this.#ready;
+  }
+
+  get alive(): boolean {
+    return !this.#closed;
   }
 
   async run(
@@ -187,7 +198,23 @@ export class PyKernel {
 
   #send(req: KernelRequest): void {
     const line = JSON.stringify(req) + "\n";
-    this.#proc.stdin?.write(line);
+    try {
+      this.#proc.stdin?.write(line);
+    } catch (err) {
+      // Kernel died between the alive check and this write. Finalize the
+      // matching pending so the caller gets an error result instead of a hung
+      // promise; mark closed so the next run respawns.
+      this.#closed = true;
+      const msg = `python kernel write failed: ${err instanceof Error ? err.message : String(err)}`;
+      const pending = this.#pending.get(req.id);
+      if (pending) {
+        this.#pending.delete(req.id);
+        pending.result.error = pending.result.error ?? msg;
+        this.#finalize(pending);
+      }
+      this.#pendingResets.get(req.id)?.();
+      this.#pendingResets.delete(req.id);
+    }
   }
 
   #onEventChunk(chunk: string): void {

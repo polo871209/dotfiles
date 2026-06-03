@@ -12,10 +12,30 @@ import io
 import json
 import os
 import sys
+import threading
+import time
 import traceback
 from contextlib import redirect_stderr, redirect_stdout
 
 PRELUDE_PATH = os.path.join(os.path.dirname(__file__), "prelude.py")
+
+
+def _start_parent_watchdog() -> None:
+    """Self-terminate if reparented: when the host (pi) is SIGKILL'd the kernel
+    is otherwise orphaned and lingers, leaking RAM across pi restarts."""
+    if os.name != "posix":
+        return
+    ppid = os.getppid()
+    if ppid <= 1:
+        return
+
+    def _watch() -> None:
+        while True:
+            if os.getppid() != ppid:
+                os._exit(0)
+            time.sleep(5)
+
+    threading.Thread(target=_watch, daemon=True).start()
 
 
 class _StreamForwarder(io.TextIOBase):
@@ -68,6 +88,7 @@ def _exec_cell(code: str, g: dict) -> object:
 
 
 def main() -> None:
+    _start_parent_watchdog()
     globals_dict = _build_globals()
     stdout_fwd = _StreamForwarder("stdout", globals_dict)
     stderr_fwd = _StreamForwarder("stderr", globals_dict)
