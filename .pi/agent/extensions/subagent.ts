@@ -71,17 +71,32 @@ const MAX_OUTPUT_BYTES = 32 * 1024;
 const UPDATE_INTERVAL_MS = 150;
 const TICK_INTERVAL_MS = 500;
 const COLLAPSED_TOOL_TAIL = 5;
-// Child can exit while a grandchild (nvim/kernel) holds the stdio pipe, so
-// `close` never fires. Resolve on `exit` then drain: STDIO_DRAIN_IDLE_MS of
-// quiet flushes buffered output; STDIO_DRAIN_HARD_MS caps a noisy grandchild.
-const STDIO_DRAIN_IDLE_MS = 1500;
-const STDIO_DRAIN_HARD_MS = 6000;
-// On the agent's terminal message, give the child a grace window to self-exit
-// before SIGTERM → SIGKILL, so a lingering pi process can't hang the tool.
-const FINAL_STOP_GRACE_MS = 1500;
+// A grandchild (nvim/kernel) can keep the child's stdio pipe open after the
+// child exits, so the ChildProcess `close` event (process end + stdio closed)
+// would never fire. We resolve only on `close`, and a post-exit stdio guard
+// guarantees it: once the child exits, destroy the parent's unended pipe
+// handles after STDIO_IDLE_MS of quiet (or the STDIO_HARD_MS cap for a chatty
+// grandchild), which forces `close`.
+const STDIO_IDLE_MS = 2000;
+const STDIO_HARD_MS = 8000;
+// A pi child can print its terminal assistant message yet linger without
+// exiting. After a clean stop: grace, then SIGTERM → SIGKILL. A kill we issue
+// here is success drainage, NOT a failure (see classification below).
+const FINAL_STOP_GRACE_MS = 1000;
 const FINAL_HARD_KILL_MS = 3000;
 const ARG_PREVIEW_MAX = 60;
 const FORBIDDEN_TOOLS = new Set(["subagent"]);
+
+const trySignal = (
+  child: { kill: (s: NodeJS.Signals) => boolean },
+  sig: NodeJS.Signals,
+): boolean => {
+  try {
+    return child.kill(sig);
+  } catch {
+    return false;
+  }
+};
 
 function expandToolPatterns(patterns: string[], allNames: string[]): string[] {
   const out = new Set<string>();
@@ -432,36 +447,87 @@ export default function (pi: ExtensionAPI) {
       const child = spawn("pi", piArgs, {
         cwd: ctx.cwd,
         stdio: ["ignore", "pipe", "pipe"],
-        signal,
+        windowsHide: true,
+        // Abort handled manually below so we can escalate SIGTERM → SIGKILL
+        // when a grandchild keeps the child alive; spawn's own `signal` only
+        // sends one SIGTERM and emits an AbortError on the child.
         env: { ...process.env, PI_IS_SUBAGENT: "1" },
       });
 
       let outBuf = "";
       let stderrBuf = "";
+      let childExited = false;
+      let cleanStopSeen = false; // terminal assistant stop, no error/tool call
+      let assistantError = ""; // provider/agent error surfaced in a message
+      let forcedTermination = false; // we SIGTERM/SIGKILL'd a lingering child
+      let aborted = false; // parent AbortSignal fired
 
+      // Post-stop drain: the child can print its final message yet linger.
       let finalDrainTimer: ReturnType<typeof setTimeout> | undefined;
       let finalHardKillTimer: ReturnType<typeof setTimeout> | undefined;
-      let childExited = false;
+      const clearFinalDrain = () => {
+        if (finalDrainTimer) clearTimeout(finalDrainTimer);
+        if (finalHardKillTimer) clearTimeout(finalHardKillTimer);
+        finalDrainTimer = finalHardKillTimer = undefined;
+      };
       const startFinalDrain = () => {
         if (childExited || finalDrainTimer) return;
         finalDrainTimer = setTimeout(() => {
           if (childExited) return;
-          try {
-            child.kill("SIGTERM");
-          } catch {
-            /* ignore */
-          }
+          forcedTermination = trySignal(child, "SIGTERM") || forcedTermination;
           finalHardKillTimer = setTimeout(() => {
-            try {
-              child.kill("SIGKILL");
-            } catch {
-              /* ignore */
-            }
+            if (childExited) return;
+            forcedTermination =
+              trySignal(child, "SIGKILL") || forcedTermination;
           }, FINAL_HARD_KILL_MS);
           finalHardKillTimer.unref?.();
         }, FINAL_STOP_GRACE_MS);
         finalDrainTimer.unref?.();
       };
+
+      // Post-exit stdio guard: once the child exits, force its (maybe
+      // grandchild-held) pipes closed so `close` fires. Tracks `end` so a
+      // clean exit isn't delayed.
+      let stdoutEnded = false;
+      let stderrEnded = false;
+      let idleTimer: ReturnType<typeof setTimeout> | undefined;
+      let hardTimer: ReturnType<typeof setTimeout> | undefined;
+      const clearStdioGuard = () => {
+        if (idleTimer) clearTimeout(idleTimer);
+        if (hardTimer) clearTimeout(hardTimer);
+        idleTimer = hardTimer = undefined;
+      };
+      const destroyUnended = () => {
+        if (!stdoutEnded) child.stdout?.destroy();
+        if (!stderrEnded) child.stderr?.destroy();
+      };
+      const armIdle = () => {
+        if (!childExited) return;
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(destroyUnended, STDIO_IDLE_MS);
+        idleTimer.unref?.();
+      };
+      child.stdout.on("end", () => {
+        stdoutEnded = true;
+        if (stderrEnded) clearStdioGuard();
+      });
+      child.stderr.on("end", () => {
+        stderrEnded = true;
+        if (stdoutEnded) clearStdioGuard();
+      });
+
+      // Parent abort: SIGTERM, then SIGKILL if the child ignores it.
+      const onAbort = () => {
+        if (childExited) return;
+        aborted = true;
+        trySignal(child, "SIGTERM");
+        const t = setTimeout(() => {
+          if (!childExited) trySignal(child, "SIGKILL");
+        }, FINAL_HARD_KILL_MS);
+        t.unref?.();
+      };
+      if (signal?.aborted) onAbort();
+      else signal?.addEventListener("abort", onAbort, { once: true });
 
       const handleEvent = (ev: { type?: string; [k: string]: unknown }) => {
         if (!ev || !ev.type) return;
@@ -488,7 +554,12 @@ export default function (pi: ExtensionAPI) {
           }
           case "message_end": {
             const msg = ev.message as
-              | { role?: string; content?: unknown; stopReason?: string }
+              | {
+                  role?: string;
+                  content?: unknown;
+                  stopReason?: string;
+                  errorMessage?: string;
+                }
               | undefined;
             if (!msg || msg.role !== "assistant") break;
             const text = extractText(msg.content);
@@ -497,8 +568,19 @@ export default function (pi: ExtensionAPI) {
               const line = proseLastLine(text);
               if (line) progress.lastMessage = line;
             }
+            if (msg.errorMessage) assistantError = String(msg.errorMessage);
             push();
-            if (msg.stopReason === "stop") startFinalDrain();
+            // Drain only on a genuine terminal stop — a stop carrying a tool
+            // call still has work pending.
+            const hasToolCall =
+              Array.isArray(msg.content) &&
+              msg.content.some(
+                (p) => (p as { type?: string } | null)?.type === "toolCall",
+              );
+            if (msg.stopReason === "stop" && !hasToolCall) {
+              if (!msg.errorMessage) cleanStopSeen = true;
+              startFinalDrain();
+            }
             break;
           }
         }
@@ -522,82 +604,68 @@ export default function (pi: ExtensionAPI) {
         stderrBuf += c.toString("utf-8");
       });
 
-      const {
-        code: exitCode,
-        killSignal,
-        spawnError,
-      } = await new Promise<{
-        code: number;
-        killSignal: NodeJS.Signals | null;
+      const { code, sig, spawnError } = await new Promise<{
+        code: number | null;
+        sig: NodeJS.Signals | null;
         spawnError: Error | null;
       }>((resolve) => {
         let settled = false;
-        let exit: { code: number; sig: NodeJS.Signals | null } | null = null;
-        let idleTimer: ReturnType<typeof setTimeout> | undefined;
-        let hardTimer: ReturnType<typeof setTimeout> | undefined;
         const settle = (r: {
-          code: number;
-          killSignal: NodeJS.Signals | null;
+          code: number | null;
+          sig: NodeJS.Signals | null;
           spawnError: Error | null;
         }) => {
           if (settled) return;
           settled = true;
-          if (idleTimer) clearTimeout(idleTimer);
-          if (hardTimer) clearTimeout(hardTimer);
+          clearFinalDrain();
+          clearStdioGuard();
           resolve(r);
         };
-        const resolveExit = () => {
-          child.stdout?.destroy();
-          child.stderr?.destroy();
-          settle({
-            code: exit?.code ?? -1,
-            killSignal: exit?.sig ?? null,
-            spawnError: null,
-          });
-        };
-        // Reset the drain clock on each post-exit chunk so buffered final
-        // output still flushes before we destroy the pipes.
-        const armDrain = () => {
-          if (idleTimer) clearTimeout(idleTimer);
-          idleTimer = setTimeout(resolveExit, STDIO_DRAIN_IDLE_MS);
-          idleTimer.unref?.();
-        };
-        child.stdout.on("data", () => {
-          if (exit) armDrain();
-        });
-        child.on("exit", (code, sig) => {
+        // Re-arm the idle countdown on each post-exit chunk so buffered final
+        // output still flushes before the pipes are destroyed.
+        child.stdout.on("data", armIdle);
+        child.stderr.on("data", armIdle);
+        child.on("exit", () => {
           childExited = true;
-          if (finalDrainTimer) clearTimeout(finalDrainTimer);
-          if (finalHardKillTimer) clearTimeout(finalHardKillTimer);
-          exit = { code: code ?? -1, sig };
-          armDrain();
-          // Hard cap in case stdout never quiets (grandchild keeps writing).
-          hardTimer = setTimeout(resolveExit, STDIO_DRAIN_HARD_MS);
-          hardTimer.unref?.();
+          clearFinalDrain();
+          armIdle();
+          if (!hardTimer) {
+            hardTimer = setTimeout(destroyUnended, STDIO_HARD_MS);
+            hardTimer.unref?.();
+          }
         });
-        // If the pipes do close cleanly, take it immediately.
-        child.on("close", (code, sig) =>
-          settle({
-            code: code ?? exit?.code ?? -1,
-            killSignal: sig ?? exit?.sig ?? null,
-            spawnError: null,
-          }),
+        // `close` = process ended AND stdio closed: the only safe resolve.
+        child.on("close", (c, s) =>
+          settle({ code: c, sig: s, spawnError: null }),
         );
         child.on("error", (err) =>
-          settle({ code: -1, killSignal: null, spawnError: err }),
+          settle({ code: null, sig: null, spawnError: err }),
         );
       });
 
       clearInterval(tick);
       progress.durationMs = Date.now() - progress.startedAt;
 
-      if (exitCode !== 0 || killSignal || spawnError) {
+      // A SIGTERM/SIGKILL we issued to drain a lingering—but successful—child
+      // is not a failure; only a parent abort or a real bad exit is.
+      const drainedAfterStop =
+        forcedTermination && cleanStopSeen && !assistantError;
+      const failed =
+        spawnError != null ||
+        aborted ||
+        (!drainedAfterStop && (sig != null || (code != null && code !== 0)));
+
+      if (failed) {
         progress.status = "failed";
         progress.error = spawnError
           ? `spawn error: ${spawnError.message}`
-          : killSignal
-            ? `killed by ${killSignal} (parent aborted?)`
-            : `exit ${exitCode}`;
+          : aborted
+            ? "aborted by parent"
+            : assistantError
+              ? assistantError
+              : sig
+                ? `killed by ${sig}`
+                : `exit ${code}`;
         const detail =
           stderrBuf.trim() || progress.output.trim() || "(no child output)";
         return {
