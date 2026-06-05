@@ -120,20 +120,17 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      const fullLabel = `Full response — ${lineCount(text)} lines`;
       const blockLabels = blocks.map(
         (b, i) =>
           `Block ${i + 1} [${b.lang ?? "txt"}] — ${lineCount(b.code)}L — ${previewText(b.code)}`,
       );
-      const options = [fullLabel, ...blockLabels];
 
-      const selected = await ctx.ui.select("Select content to copy", options);
+      const selected = await ctx.ui.select(
+        "Select content to copy",
+        blockLabels,
+      );
       if (!selected) {
         ctx.ui.notify("Copy cancelled", "info");
-        return;
-      }
-      if (selected === fullLabel) {
-        await copy(text, "response");
         return;
       }
       const idx = blockLabels.indexOf(selected);

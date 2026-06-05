@@ -1,7 +1,8 @@
 -- pi-lsp driver — loaded once into the persistent --embed nvim that lsp/
--- owns. Exposes _G.PiLsp = { hover, definition, references, status } for the
--- navigation tools. Caches one buffer per file (mtime-invalidated) so repeat
--- queries are warm.
+-- owns. Exposes _G.PiLsp = { hover, definition, references, rename,
+-- implementation, type_definition, document_symbols, diagnostics, status }
+-- for the nav tools.
+-- Caches one buffer per file (mtime-invalidated) so repeat queries are warm.
 
 local M = {}
 _G.PiLsp = M
@@ -193,6 +194,86 @@ function M.references(file, line, symbol)
     return { ok = true, locations = locations }
 end
 
+-- Shared body for position → location-list methods (definition-shaped).
+local function loc_request(file, line, symbol, method)
+    local b = open_buf(file)
+    local params, err = make_position_params(b, line, symbol)
+    if not params then return { ok = false, error = err } end
+    local ok, res = pcall(vim.lsp.buf_request_sync, b, method, params, REQ_TIMEOUT_MS)
+    if not ok then return { ok = false, error = 'request failed' } end
+    return { ok = true, locations = normalize_locations(res) }
+end
+
+function M.implementation(file, line, symbol) return loc_request(file, line, symbol, 'textDocument/implementation') end
+
+function M.type_definition(file, line, symbol) return loc_request(file, line, symbol, 'textDocument/typeDefinition') end
+
+-- LSP SymbolKind enum (1-indexed) → label.
+local SYMBOL_KINDS = {
+    'file',
+    'module',
+    'namespace',
+    'package',
+    'class',
+    'method',
+    'property',
+    'field',
+    'constructor',
+    'enum',
+    'interface',
+    'function',
+    'variable',
+    'constant',
+    'string',
+    'number',
+    'boolean',
+    'array',
+    'object',
+    'key',
+    'null',
+    'enum-member',
+    'struct',
+    'event',
+    'operator',
+    'type-param',
+}
+
+-- documentSymbol returns either hierarchical DocumentSymbol[] (has .children,
+-- .selectionRange) or flat SymbolInformation[] (has .location). Flatten both
+-- to a depth-tagged list.
+local function flatten_doc_symbols(items, out, depth)
+    for _, s in ipairs(items or {}) do
+        local line, col = 0, 0
+        if s.location then
+            line, col = range_start(s.location.range)
+        elseif s.selectionRange or s.range then
+            line, col = range_start(s.selectionRange or s.range)
+        end
+        table.insert(out, {
+            name = s.name,
+            kind = SYMBOL_KINDS[s.kind] or tostring(s.kind),
+            line = line,
+            col = col,
+            depth = depth,
+            detail = s.detail and (s.detail:gsub('\r?\n', ' ')) or nil,
+        })
+        if s.children then flatten_doc_symbols(s.children, out, depth + 1) end
+    end
+end
+
+function M.document_symbols(file)
+    local b = open_buf(file)
+    if #vim.lsp.get_clients { bufnr = b } == 0 then return { ok = false, error = 'no LSP attached' } end
+    local params = { textDocument = vim.lsp.util.make_text_document_params(b) }
+    local ok, res = pcall(vim.lsp.buf_request_sync, b, 'textDocument/documentSymbol', params, REQ_TIMEOUT_MS)
+    if not ok or not res then return { ok = false, error = 'request failed' } end
+    local out = {}
+    for _, r in pairs(res) do
+        if r.result then flatten_doc_symbols(r.result, out, 0) end
+    end
+    return { ok = true, symbols = out }
+end
+
 local function changed_uris(workspace_edit)
     local uris = {}
     if workspace_edit.documentChanges then
@@ -249,6 +330,77 @@ function M.rename(file, line, symbol, new_name)
     end
     table.sort(written)
     return { ok = true, files = written, count = #written }
+end
+
+-- Async + network-bound linters (semgrep) don't finish inside a pull and
+-- leave orphan jobs; skip them here. They run on save in interactive nvim.
+local SLOW_LINTERS = { semgrep = true }
+
+local function run_fast_lint(bufnr)
+    local ok, lint = pcall(require, 'lint')
+    if not ok then return end
+    local names = lint.linters_by_ft[vim.bo[bufnr].filetype]
+    if not names then return end
+    local allowed = {}
+    for _, name in ipairs(names) do
+        if not SLOW_LINTERS[name] then table.insert(allowed, name) end
+    end
+    if #allowed == 0 then return end
+    pcall(function() lint.try_lint(allowed) end)
+end
+
+local function pull_diagnostics(bufnr)
+    for _, client in ipairs(vim.lsp.get_clients { bufnr = bufnr }) do
+        local caps = client.server_capabilities or {}
+        if caps.diagnosticProvider then
+            local params = { textDocument = vim.lsp.util.make_text_document_params(bufnr) }
+            pcall(vim.lsp.buf_request_sync, bufnr, 'textDocument/diagnostic', params, 1500)
+        end
+    end
+end
+
+-- Pull-only diagnostics for the given files. Unlike PiFeedback.run this never
+-- formats, applies code-actions, or writes — read-only verification the agent
+-- can call instead of a slow full `tsc`. Reuses the warm buffer cache.
+function M.diagnostics(files)
+    local sev = { 'error', 'warn', 'info', 'hint' }
+    local out = { ok = true, diagnostics = {} }
+    local opened = {}
+    for _, file in ipairs(files) do
+        if type(file) == 'string' and vim.uv.fs_stat(file) then
+            local b = open_buf(file)
+            table.insert(opened, b)
+            pull_diagnostics(b)
+            run_fast_lint(b)
+        end
+    end
+    -- Most servers (vtsls, gopls) PUSH diagnostics async after attach rather
+    -- than answering the pull synchronously, and they lag a beat. Wait until
+    -- any buffer reports something, capped — a genuinely clean file just pays
+    -- the cap (still far cheaper than a full tsc).
+    local function any_diags()
+        for _, b in ipairs(opened) do
+            if vim.api.nvim_buf_is_valid(b) and #vim.diagnostic.get(b) > 0 then return true end
+        end
+        return false
+    end
+    vim.wait(3000, any_diags, 100)
+    for _, bufnr in ipairs(opened) do
+        if vim.api.nvim_buf_is_valid(bufnr) then
+            for _, d in ipairs(vim.diagnostic.get(bufnr)) do
+                table.insert(out.diagnostics, {
+                    file = vim.api.nvim_buf_get_name(bufnr),
+                    line = (d.lnum or 0) + 1,
+                    col = (d.col or 0) + 1,
+                    severity = sev[d.severity] or 'info',
+                    source = d.source,
+                    code = d.code and tostring(d.code) or nil,
+                    message = (d.message or ''):gsub('\r?\n', ' '),
+                })
+            end
+        end
+    end
+    return out
 end
 
 function M.status()

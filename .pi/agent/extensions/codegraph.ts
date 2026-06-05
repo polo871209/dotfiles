@@ -106,7 +106,7 @@ export default function (pi: ExtensionAPI) {
     name: "codegraph_status",
     label: "CodeGraph status",
     description:
-      "Inspect codegraph index: file count, node count, languages, pending changes. Cheap.",
+      "Inspect codegraph index: file count, node count, languages, pending changes.",
     parameters: Type.Object({}),
     async execute(_id, _raw, signal, _onUpdate, ctx) {
       return callCodegraph(["status", "-j"], ctx.cwd, signal);
@@ -143,7 +143,7 @@ export default function (pi: ExtensionAPI) {
     name: "codegraph_search",
     label: "CodeGraph search",
     description:
-      "Find symbol DEFINITIONS by name (FTS5, scored, kind-filtered). Use when you have a name but no file:line anchor yet. Returns definition sites only — for USES of a known symbol use lsp_references. Beats grep on precision for symbols (kind-typed, no text noise) but MISSES strings, comments, and cross-file duplicate-pattern detection — pair with grep for those.",
+      "Find symbol DEFINITIONS by name (kind-filtered). Use when you have a name but no file:line anchor yet. Returns definition sites only — for USES of a known symbol use lsp_references. Beats grep on precision for symbols but MISSES strings, comments, and cross-file duplicate-pattern detection — pair with grep for those.",
     parameters: Type.Object({
       query: Type.String({ description: "Symbol name or fragment" }),
       kind: Type.Optional(

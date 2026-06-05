@@ -87,10 +87,25 @@ const FINAL_HARD_KILL_MS = 3000;
 const ARG_PREVIEW_MAX = 60;
 const FORBIDDEN_TOOLS = new Set(["subagent"]);
 
+// Signal the child's whole process GROUP, not just the child PID. The child
+// `pi` spawns grandchildren (its own nvim, slow web fetches); if we only hit
+// the child it can sit blocked in a grandchild and ignore SIGTERM, and a
+// surviving grandchild keeps the stdio pipe open so `close` never fires.
+// Killing the group (-pid, requires the child spawned `detached`) reaches the
+// entire subtree at once. Falls back to a direct child kill if the group send
+// fails (e.g. group already gone).
 const trySignal = (
-  child: { kill: (s: NodeJS.Signals) => boolean },
+  child: { pid?: number; kill: (s: NodeJS.Signals) => boolean },
   sig: NodeJS.Signals,
 ): boolean => {
+  if (typeof child.pid === "number") {
+    try {
+      process.kill(-child.pid, sig);
+      return true;
+    } catch {
+      // group gone or not a leader — fall through to direct kill
+    }
+  }
   try {
     return child.kill(sig);
   } catch {
@@ -448,9 +463,15 @@ export default function (pi: ExtensionAPI) {
         cwd: ctx.cwd,
         stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
-        // Abort handled manually below so we can escalate SIGTERM → SIGKILL
-        // when a grandchild keeps the child alive; spawn's own `signal` only
-        // sends one SIGTERM and emits an AbortError on the child.
+        // New process group so we can SIGTERM/SIGKILL the whole subtree (child
+        // + its grandchildren) via trySignal's `-pid`. Abort is handled
+        // manually below so we can escalate SIGTERM → SIGKILL; spawn's own
+        // `signal` only sends one SIGTERM to the child PID alone.
+        // POSIX-only: bare `spawn("pi")` and `process.kill(-pid)` don't work on
+        // Windows (pi is a .cmd shim; negative PIDs are unsupported). For a
+        // Windows-portable spawn see nicobailon/pi-subagents `getPiSpawnCommand`
+        // (resolves the node CLI script instead of the shim).
+        detached: true,
         env: { ...process.env, PI_IS_SUBAGENT: "1" },
       });
 

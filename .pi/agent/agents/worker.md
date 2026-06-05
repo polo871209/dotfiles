@@ -1,6 +1,6 @@
 ---
 name: worker
-description: End-to-end code implementation. Reads, writes, edits, runs shell. Use for self-contained tasks where the parent session shouldn't be cluttered with implementation details.
+description: End-to-end code implementation. Provide same set of tools. Use for self-contained tasks where the parent session shouldn't be cluttered with implementation details.
 thinking: medium
 ---
 

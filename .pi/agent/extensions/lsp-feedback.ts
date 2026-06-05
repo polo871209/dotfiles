@@ -1,7 +1,7 @@
 // lsp-feedback — after edits, route touched files through the persistent
 // nvim owned by extensions/lsp/ to format, apply safe code-actions, and
-// collect diagnostics. Widget renders the result. LLM auto-fixes (errors +
-// warnings) run unconditionally.
+// collect diagnostics. Widget renders the result. LLM auto-fixes (all
+// severities) run unconditionally.
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -65,12 +65,19 @@ const MAX_LINES_OUT = 50;
 const MAX_FIX_FILES = 5;
 const MAX_FILE_BYTES = 64 * 1024;
 const WIDGET_KEY = "lsp-feedback";
-const AUTO_FIX = true;
+// Auto-fix is on by default; `/lsp-fix off` flips it per session, `/lsp-fix`
+// runs the fixer once on the last touched files on demand.
+const AUTO_FIX_DEFAULT = true;
 
 const FIXER_SYSTEM = `Fix only the listed LSP/lint issues in the file. Change nothing else; preserve all other code, comments, and formatting exactly. Fix the root cause — don't suppress a diagnostic with an ignore/disable directive (\`---@diagnostic\`, \`@ts-ignore\`, \`# noqa\`, etc.). If you can't genuinely resolve an issue, leave it as-is so it stays reported. Output the full corrected file in one fenced code block. No prose.`;
 
 const TRACKED_TOOLS = new Set(["edit", "write", "str_replace", "create"]);
-const FIXABLE_SEVERITIES: ReadonlySet<Severity> = new Set(["error", "warn"]);
+const FIXABLE_SEVERITIES: ReadonlySet<Severity> = new Set([
+  "error",
+  "warn",
+  "info",
+  "hint",
+]);
 
 const GIT_WALK_MAX_DEPTH = 8;
 const isRebasing = (cwd: string): boolean => {
@@ -202,6 +209,23 @@ const extractCodeBlock = (text: string): string | null => {
   return m ? m[1]! : null;
 };
 
+const countChar = (s: string, c: string) => s.split(c).length - 1;
+
+// Guard against truncated/garbled LLM output clobbering a working file.
+// `=== original` is a legit "nothing to fix" reply, so it passes (the caller
+// skips writing it). null / <90% length / unbalanced braces|parens fail.
+const isSafeFix = (original: string, fixed: string | null): fixed is string => {
+  if (fixed === null) return false;
+  if (fixed === original) return true;
+  if (fixed.length < original.length * 0.9) return false;
+  return (
+    countChar(fixed, "{") === countChar(original, "{") &&
+    countChar(fixed, "}") === countChar(original, "}") &&
+    countChar(fixed, "(") === countChar(original, "(") &&
+    countChar(fixed, ")") === countChar(original, ")")
+  );
+};
+
 const runFixerLLM = async (
   file: string,
   content: string,
@@ -262,22 +286,15 @@ const applyFixes = async (
     } catch {
       continue;
     }
-    const fixed = await runFixerLLM(file, original, errs, ctx, signal);
-    if (!fixed || fixed === original) continue;
-    // Guard against truncated LLM output clobbering a working file.
-    // Require >=90% length retention AND matching brace/paren counts.
-    if (fixed.length < original.length * 0.9) continue;
-    const countChar = (s: string, c: string) => s.split(c).length - 1;
-    if (
-      countChar(fixed, "{") !== countChar(original, "{") ||
-      countChar(fixed, "}") !== countChar(original, "}") ||
-      countChar(fixed, "(") !== countChar(original, "(") ||
-      countChar(fixed, ")") !== countChar(original, ")")
-    )
-      continue;
+    let fixed = await runFixerLLM(file, original, errs, ctx, signal);
+    // A truncated/unbalanced first response is often transient — retry once.
+    if (!isSafeFix(original, fixed)) {
+      fixed = await runFixerLLM(file, original, errs, ctx, signal);
+    }
+    if (!isSafeFix(original, fixed) || fixed === original) continue;
     try {
-      // No backup — user has git. Sanity gates above (length floor,
-      // identity check) catch obvious bad outputs.
+      // No backup — user has git. isSafeFix above (length floor, brace
+      // balance, identity check) catches obvious bad outputs.
       fs.writeFileSync(file, fixed, "utf8");
       patched.push(file);
     } catch {
@@ -328,7 +345,7 @@ const buildWidgetLines = (
       lines.push(`  … (+${diags.length - shown.length} more)`);
     }
   } else if (fixed.length > 0) {
-    lines.push("all errors and warnings fixed ✓");
+    lines.push("all diagnostics fixed ✓");
   }
   return lines;
 };
@@ -337,6 +354,7 @@ export default function (pi: ExtensionAPI) {
   const touched = new Set<string>();
   let lastFiles: string[] = [];
   let reported = false;
+  let autoFix = AUTO_FIX_DEFAULT;
   let cwd = process.cwd();
 
   const reset = () => {
@@ -451,11 +469,29 @@ export default function (pi: ExtensionAPI) {
     reported = true;
     // Fire-and-forget: return immediately so pi marks the turn idle.
     // The widget appears when the background work finishes.
-    void runFeedback(lastFiles, ctx, AUTO_FIX).catch((e) => {
+    void runFeedback(lastFiles, ctx, autoFix).catch((e) => {
       console.error(
         "[lsp-feedback] background run failed:",
         e instanceof Error ? e.message : String(e),
       );
     });
+  });
+
+  pi.registerCommand("lsp-fix", {
+    description:
+      "lsp-feedback auto-fix: `on`/`off` toggles it per session; no arg runs the LLM fixer once on the last touched files.",
+    handler: async (args, ctx) => {
+      const arg = args.trim().toLowerCase();
+      if (arg === "on" || arg === "off") {
+        autoFix = arg === "on";
+        ctx.ui.notify(`lsp-feedback auto-fix ${arg}`, "info");
+        return;
+      }
+      if (lastFiles.length === 0) {
+        ctx.ui.notify("lsp-fix: no recently touched files to fix", "info");
+        return;
+      }
+      await runFeedback(lastFiles, ctx, true);
+    },
   });
 }
