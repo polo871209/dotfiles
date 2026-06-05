@@ -40,3 +40,4 @@ semgrep = "latest"
 # Other
 "npm:@colbymchenry/codegraph" = "latest"
 "npm:@earendil-works/pi-coding-agent" = "latest"
+"github:max-sixty/worktrunk" = { version = "latest", exe = "wt" }

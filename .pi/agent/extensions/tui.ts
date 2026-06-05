@@ -146,6 +146,7 @@ interface EditorWithOverlay {
   autocompleteState?: unknown;
   autocompleteList?: { render(width: number): string[] };
   autocompleteMaxVisible?: number;
+  focused?: boolean;
   tui: TUI;
   __overlay?: {
     handle: OverlayHandle | null;
@@ -190,6 +191,11 @@ const syncOverlay = (editor: EditorWithOverlay, editorHeight: number) => {
         width: overlayWidth,
         maxHeight: overlayMaxHeight,
         nonCapturing: true,
+        // Only render while the editor holds focus. A selector (ctx.ui.select,
+        // model/settings pickers) swaps the editor out of the tree and takes
+        // focus, so editor.render stops firing and can't hide this overlay —
+        // without this gate it lingers on top of the selector and blocks it.
+        visible: () => editor.focused === true,
       });
       s.lastEditorHeight = editorHeight;
     }

@@ -37,7 +37,7 @@ const execFileP = (
     });
   });
 
-// --- Focus detection (ported from opencode/plugins/notifier.ts) -----------
+// Focus detection. Ported from opencode/plugins/notifier.ts.
 
 const getFrontmostPid = async (): Promise<number | null> => {
   try {
@@ -137,8 +137,6 @@ const isTerminalFocused = async (): Promise<boolean> => {
     return false;
   }
 };
-
-// --- Notification delivery -------------------------------------------------
 
 const debounce = new Map<string, number>();
 
@@ -282,8 +280,6 @@ const notify = async (projectName: string, message: string): Promise<void> => {
   }
   playSound();
 };
-
-// --- Extension entry -------------------------------------------------------
 
 export default function (pi: ExtensionAPI) {
   if (DISABLED) return;

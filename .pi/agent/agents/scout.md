@@ -1,6 +1,6 @@
 ---
 name: scout
-description: 'Codebase recon, read-only. "Where is X?", "how does Y work?", architecture maps, cross-file call sites. Returns synthesized findings (file:line refs + summary) — keeps raw file contents out of parent context.'
+description: 'Recon of THIS working tree, read-only. Any question whose answer lives in the local repo — "where is X?", "how does our Y work?", architecture maps, cross-file call sites, tracing local code. Returns synthesized findings (file:line refs + summary) — keeps raw file contents out of parent context. (Unfamiliar external libs/frameworks → researcher.)'
 tools: read, grep, find, ls, lsp_*, codegraph_*
 model: anthropic/claude-sonnet-4-6
 thinking: low

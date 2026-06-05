@@ -1,4 +1,5 @@
 history.txt
+.worktrees/
 .zcompdump
 .zsh_history
 .pi/agent/auth.json
