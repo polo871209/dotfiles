@@ -113,6 +113,14 @@ end, { desc = 'Follow link / file under cursor' })
 vim.keymap.set('n', '<leader>lg', function() snacks.lazygit() end, { desc = '[L]azy[g]it' })
 vim.keymap.set('n', '<leader>gb', function() snacks.git.blame_line() end, { desc = '[G]it [B]lame Line' })
 vim.keymap.set('n', '<leader>gB', function() snacks.gitbrowse() end, { desc = '[G]it [B]rowse' })
+vim.keymap.set('n', '<leader>gP', function()
+    local url = vim.fn.systemlist('gh pr view --json url -q .url')[1]
+    if vim.v.shell_error ~= 0 or not url or url == '' then
+        snacks.notify.warn 'No PR found for current branch'
+        return
+    end
+    vim.ui.open(url)
+end, { desc = '[G]it [P]R view' })
 vim.keymap.set('n', '<leader>tn', function() snacks.notifier.hide() end, { desc = 'Dismiss All [N]otifications' })
 
 -- Toggle mappings (deferred so Snacks global is fully initialized)

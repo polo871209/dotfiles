@@ -1,10 +1,8 @@
 typeset -U path
 path=(
   ~/.local/share/mise/shims
-  ~/dotfiles/scripts
   ~/.local/bin
   "$GOPATH/bin"
-  /opt/homebrew/opt/llvm/bin
   /opt/homebrew/opt/libpq/bin
   /Applications/Obsidian.app/Contents/MacOS
   $path
@@ -59,7 +57,6 @@ _eval_cache() {
 
 _eval_cache carapace carapace "" carapace _carapace
 
-# ZSH Plugin Sources — hardcode prefix to avoid forking brew each startup (~20ms)
 source /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh
 source /opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 
