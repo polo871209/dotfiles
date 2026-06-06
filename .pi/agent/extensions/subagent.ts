@@ -15,7 +15,7 @@
 //
 // Child is invoked with `--mode json -p` so we receive a structured event
 // stream (tool_execution_start/end, message_end) and can render a live TUI
-// while the agent works. Ctrl+o expands rows.
+// while the agent works.
 
 import { spawn } from "node:child_process";
 import * as fs from "node:fs";
@@ -23,6 +23,7 @@ import * as path from "node:path";
 import {
   getAgentDir,
   getMarkdownTheme,
+  keyText,
   parseFrontmatter,
   type ExtensionAPI,
   type Theme,
@@ -70,7 +71,6 @@ const AGENTS_DIR = path.join(getAgentDir(), "agents");
 const MAX_OUTPUT_BYTES = 32 * 1024;
 const UPDATE_INTERVAL_MS = 150;
 const TICK_INTERVAL_MS = 500;
-const COLLAPSED_TOOL_TAIL = 5;
 // A grandchild (nvim/kernel) can keep the child's stdio pipe open after the
 // child exits, so the ChildProcess `close` event (process end + stdio closed)
 // would never fire. We resolve only on `close`, and a post-exit stdio guard
@@ -278,52 +278,28 @@ const statusIcon = (theme: Theme, p: Progress): string => {
   return theme.fg("success", "✓");
 };
 
-const renderCallComponent = (
-  args: SubagentArgs,
-  theme: Theme,
-  expanded: boolean,
-  width: number,
-) => {
+const renderCallComponent = (args: SubagentArgs, theme: Theme) => {
   const c = new Container();
   const head = `${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("text", args.agent)}`;
-  if (!expanded) {
-    const preview = flatten(args.task);
-    const line = `${head} ${theme.fg("dim", "·")} ${theme.fg("dim", preview)}`;
-    c.addChild(new Text(fitLine(line, width), 0, 0));
-  } else {
-    c.addChild(new Text(head, 0, 0));
-    c.addChild(new Text(theme.fg("dim", `task: ${args.task}`), 0, 0));
-  }
+  c.addChild(new Text(head, 0, 0));
+  c.addChild(new Text(theme.fg("dim", `task: ${args.task}`), 0, 0));
   return c;
 };
 
 const renderProgressComponent = (
   p: Progress,
   theme: Theme,
-  expanded: boolean,
   width: number,
+  expanded: boolean,
 ) => {
   const c = new Container();
   const icon = statusIcon(theme, p);
   const stats = `${p.tools.length} tools · ${formatDuration(p.durationMs)}`;
-  const model = expanded ? theme.fg("dim", ` (${p.model})`) : "";
+  const model = theme.fg("dim", ` (${p.model})`);
   const header = `${icon} ${theme.fg("toolTitle", theme.bold(p.agent))}${model} ${theme.fg("dim", "—")} ${theme.fg("dim", stats)}`;
   c.addChild(new Text(fitLine(header, width), 0, 0));
 
-  const visibleTools = expanded ? p.tools : p.tools.slice(-COLLAPSED_TOOL_TAIL);
-  if (!expanded && p.tools.length > COLLAPSED_TOOL_TAIL) {
-    c.addChild(
-      new Text(
-        theme.fg(
-          "dim",
-          `  … (+${p.tools.length - COLLAPSED_TOOL_TAIL} earlier)`,
-        ),
-        0,
-        0,
-      ),
-    );
-  }
-  for (const t of visibleTools) {
+  for (const t of p.tools) {
     const body = t.argsPreview ? `${t.name} ${t.argsPreview}` : t.name;
     const row =
       t.status === "running"
@@ -344,9 +320,15 @@ const renderProgressComponent = (
     c.addChild(new Text(theme.fg("error", `  ${p.error}`), 0, 0));
   }
 
-  if (expanded && p.status !== "running" && p.output) {
+  if (p.status !== "running" && p.output) {
     c.addChild(new Spacer(1));
-    c.addChild(new Markdown(p.output, 0, 0, getMarkdownTheme()));
+    if (expanded) {
+      c.addChild(new Markdown(p.output, 0, 0, getMarkdownTheme()));
+    } else {
+      const lines = p.output.split("\n").length;
+      const hint = `  ${lines} line${lines === 1 ? "" : "s"} (${keyText("app.tools.expand")} to expand)`;
+      c.addChild(new Text(theme.fg("dim", hint), 0, 0));
+    }
   }
 
   return c;
@@ -392,22 +374,17 @@ export default function (pi: ExtensionAPI) {
     parameters: params,
     renderShell: "self",
 
-    renderCall(args, theme, context) {
-      return renderCallComponent(
-        args as SubagentArgs,
-        theme,
-        context.expanded,
-        (process.stdout.columns ?? 100) - 2,
-      );
+    renderCall(args, theme) {
+      return renderCallComponent(args as SubagentArgs, theme);
     },
 
-    renderResult(result, options, theme, _context) {
+    renderResult(result, options, theme) {
       const p = result.details;
       const w = (process.stdout.columns ?? 100) - 2;
       if (!p) {
         return new Text(theme.fg("dim", "  …"), 0, 0);
       }
-      return renderProgressComponent(p, theme, options.expanded, w);
+      return renderProgressComponent(p, theme, w, options.expanded);
     },
 
     async execute(_toolCallId, rawParams, signal, onUpdate, ctx) {

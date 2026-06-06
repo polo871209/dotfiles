@@ -1,17 +1,21 @@
-theme = Gruvbox Dark
+# Appearance
 font-family = "FiraCode Nerd Font Mono"
 font-size = 16
+theme = Gruvbox Dark
 
-maximize = true
-macos-titlebar-style = hidden
+# Window
 macos-option-as-alt = true
+macos-titlebar-style = hidden
+maximize = true
 window-padding-x = 16
 window-padding-y = 10
 
+# Behavior
 copy-on-select = clipboard
 scrollback-limit = 500000
 shell-integration-features = cursor,sudo,title,ssh-env,ssh-terminfo
 
+# Keybinds
 # Pi: make Alt+Backspace delete previous word (ESC + DEL)
 # https://pi.dev/docs/latest/terminal-setup
 keybind = alt+backspace=text:\x1b\x7f

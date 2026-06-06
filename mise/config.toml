@@ -10,6 +10,42 @@ tree-sitter = "latest"
 uv = "latest"
 zig = "latest"
 
+# Editors
+neovim = "latest"
+
+# Shell / CLI tools
+"aqua:joshmedeski/sesh" = "latest"
+"github:veirt/weathr" = "latest"
+atuin = "latest"
+bat = "latest"
+carapace = "latest"
+direnv = "latest"
+eza = "latest"
+fastfetch = "latest"
+fd = "latest"
+fzf = "latest"
+jq = "latest"
+just = "latest"
+oh-my-posh = "latest"
+ripgrep = "latest"
+tmux = "latest"
+yq = "latest"
+zoxide = "latest"
+
+# Git / GitHub
+"github:googleworkspace/cli" = { version = "latest", exe = "gws" }
+gh = "latest"
+lazygit = "latest"
+
+# Kubernetes / cloud / containers
+"aqua:docker/cli" = "latest"
+apko = "latest"
+cloud-sql-proxy = "2"
+dive = "latest"
+k9s = "latest"
+kubectx = "latest"
+kubectl = "latest"
+
 # LSPs
 "aqua:grafana/jsonnet-language-server" = "latest"
 "aqua:hashicorp/terraform-ls" = "latest"
@@ -35,9 +71,10 @@ zig = "latest"
 "github:DonIsaac/zlint" = "latest"
 "npm:eslint_d" = "latest"
 "npm:prettier" = "latest"
+prek = "latest"
 semgrep = "latest"
 
 # Other
+"github:max-sixty/worktrunk" = { version = "latest", exe = "wt" }
 "npm:@colbymchenry/codegraph" = "latest"
 "npm:@earendil-works/pi-coding-agent" = "latest"
-"github:max-sixty/worktrunk" = { version = "latest", exe = "wt" }

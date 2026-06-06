@@ -56,11 +56,9 @@ export default function (pi: ExtensionAPI) {
   // line. The file body lives in the user's editor, so we never expand it here.
   pi.registerMessageRenderer("nvim-file", (message, _opts, theme) => {
     const d = message.details as
-      | { path: string; sline: number; eline: number; lines: number }
+      | { path: string; sline: number; eline: number }
       | undefined;
-    const label = d
-      ? `${d.path} (L${d.sline}-${d.eline}, ${d.lines} lines)`
-      : "file context";
+    const label = d ? `${d.path} (L${d.sline}-${d.eline})` : "file context";
     const box = new Box(0, 1, (t) => theme.bg("customMessageBg", t));
     box.addChild(new Text(theme.fg("accent", label), 0, 0));
     return box;
@@ -105,7 +103,21 @@ export default function (pi: ExtensionAPI) {
       if (f && typeof f.content === "string" && typeof f.path === "string") {
         // Inject the file as a custom message (full content -> LLM, compact in
         // TUI), then the question as the user message that triggers the turn.
-        const block = `${f.path} (focus L${f.sline}-L${f.eline}):\n\`\`\`${f.ft ?? ""}\n${f.content}\n\`\`\``;
+        // Prefix every line with a real file line-number gutter so the model
+        // cites the editor's actual lines instead of recounting the snippet
+        // (which drifts on files with headers/comments).
+        const srcLines = f.content.split("\n");
+        const width = String(srcLines.length).length;
+        const numbered = srcLines
+          .map((l, i) => `${String(i + 1).padStart(width)} | ${l}`)
+          .join("\n");
+        const block =
+          `${f.path} — ENTIRE file below; do NOT read it again, you already have all of it. ` +
+          `Each line is prefixed with a display-only line-number gutter ("N | code"). ` +
+          `Use those numbers to cite lines exactly — never recount or renumber. ` +
+          `The gutter is NOT part of the file: strip the "N | " prefix when quoting code or matching text for an edit. ` +
+          `The user is asking about lines ${f.sline}-${f.eline}.\n` +
+          `\`\`\`${f.ft ?? ""}\n${numbered}\n\`\`\``;
         // nextTurn queues the file so prompt() injects it right after the user
         // message (agent-session pushes pending nextTurn msgs below the prompt),
         // making it render under the input instead of above it.
@@ -118,7 +130,6 @@ export default function (pi: ExtensionAPI) {
               path: f.path,
               sline: f.sline,
               eline: f.eline,
-              lines: f.content.split("\n").length,
             },
           },
           { deliverAs: "nextTurn" },
