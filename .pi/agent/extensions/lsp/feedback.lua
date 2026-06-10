@@ -1,8 +1,8 @@
--- lsp-feedback driver — loaded into the persistent --embed nvim that
--- extensions/lsp/ owns. Exposes _G.PiFeedback.run(files) which formats,
--- applies safe LSP code-actions (fixAll, organizeImports), and returns
--- diagnostics. Mirrors the original per-call headless pipeline but reuses
--- the shared nvim so we skip spawn + init.lua load each agent turn.
+-- Feedback driver for the lsp subsystem — loaded into the shared --embed nvim.
+-- Exposes _G.PiFeedback.format(files) (fast format-only, for the inline
+-- per-edit hook) and _G.PiFeedback.run(files) (format + safe LSP code-actions
+-- (fixAll, organizeImports) + diagnostics, for the batched turn-end pass).
+-- Reuses the shared nvim so we skip spawn + init.lua load each agent turn.
 
 local M = {}
 _G.PiFeedback = M
@@ -94,6 +94,28 @@ local function pull_diagnostics(bufnr, remaining)
             pcall(vim.lsp.buf_request_sync, bufnr, 'textDocument/diagnostic', params, math.min(1500, remaining()))
         end
     end
+end
+
+-- Fast, format-only pass for the inline (per-edit) hook. Just conform/LSP
+-- formatting + write; NO diagnostic settle, NO code-actions (those stay in the
+-- batched M.run at turn end). Keeps per-edit latency to a formatter call so the
+-- agent's edit result can be amended with the formatted bytes synchronously.
+function M.format(files)
+    local formatted = {}
+    for _, file in ipairs(files) do
+        if type(file) == 'string' and vim.uv.fs_stat(file) then
+            vim.cmd('silent! edit ' .. vim.fn.fnameescape(file))
+            local bufnr = vim.api.nvim_get_current_buf()
+            pcall(function() vim.cmd 'filetype detect' end)
+            if try_format(bufnr) then
+                pcall(function()
+                    vim.api.nvim_buf_call(bufnr, function() vim.cmd 'silent! write' end)
+                end)
+                table.insert(formatted, vim.api.nvim_buf_get_name(bufnr))
+            end
+        end
+    end
+    return { formatted = formatted }
 end
 
 function M.run(files)

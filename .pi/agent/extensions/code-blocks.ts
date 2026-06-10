@@ -1,4 +1,4 @@
-// code-bat — replace pi's code-block syntax highlighter with `bat`.
+// code-blocks — replace pi's code-block syntax highlighter with `bat`.
 //
 // Pi renders fenced code blocks via `pi-tui`'s `Markdown` component, which
 // calls `theme.highlightCode(text, lang)` on each render to colorize lines.
@@ -121,13 +121,13 @@ const batHighlight: HighlightFn = (code: string, lang?: string) => {
   return result;
 };
 
-const PATCH_TAG = "__codeBatPatched";
+const PATCH_TAG = "__codeBlocksPatched";
 const installPatch = () => {
   const proto = Markdown.prototype as unknown as {
     render(width: number): string[];
     theme?: { highlightCode?: HighlightFn };
   };
-  // Find the original render: walk past any prior code-bat wrappers from
+  // Find the original render: walk past any prior code-blocks wrappers from
   // previous /reload runs so we don't stack wrappers (which causes earlier
   // wrappers to clobber our highlightCode assignment).
   let origRender = proto.render as unknown as {

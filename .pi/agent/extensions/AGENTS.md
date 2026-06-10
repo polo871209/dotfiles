@@ -20,21 +20,20 @@ How each rule is wired — which extension implements which mechanism — is des
 ### Bigger toolbox for the model
 
 - **`eval/`** — persistent Python + JS kernels the model runs code in; cells can call pi's own tools and keep bulk data out of history. For "read N files, aggregate, summarize" work.
-- **`lsp/`** — symbol-precise LSP tools: `lsp_hover` (type/docs), `lsp_definition` / `lsp_type_definition` / `lsp_implementation`, `lsp_references`, `lsp_document_symbols` (file outline), `lsp_rename` (workspace-wide), `lsp_diagnostics` (on-demand, read-only per-file error/warning check instead of a full `tsc`).
+- **`lsp/`** — the LSP subsystem. Symbol-precise nav tools: `lsp_hover` (type/docs), `lsp_definition` / `lsp_type_definition` / `lsp_implementation`, `lsp_references`, `lsp_document_symbols` (file outline), `lsp_rename` (workspace-wide), `lsp_diagnostics` (on-demand, read-only per-file error/warning check instead of a full `tsc`). Also the post-edit feedback pass (`lsp/feedback/`): formats your edits and auto-fixes their diagnostics via an LLM loop (root-cause, no ignore directives), surfacing changes back so you needn't re-read; leftovers fire a `notify`. `/lsp-fix on|off` toggles auto-fix per session; `/lsp-fix` alone runs it on demand over the last touched files.
 - **`codegraph.ts`** — symbol-aware repo navigation + call-graph over the [codegraph CLI](https://github.com/colbymchenry/codegraph): `codegraph_status` / `_context` / `_search` / `_files` / `_callers` / `_callees` / `_impact` (blast-radius) / `_affected` (test selection). Registers only if the cwd has a codegraph index.
-- **`github-pr.ts`** — `github_pr` fetches a PR as signal-only markdown (metadata, description, changed files, failing checks, unresolved human review comments). Drops commit/timeline noise, resolved threads, and bot comments; diff is opt-in via `diff:true`. Use instead of `gh pr view`.
+- **`github-pr.ts`** — `github_pr` fetches a PR as signal-only markdown (metadata, description, changed files, failing checks, unresolved review threads — including bot inline findings like CodeRabbit). Drops commit/timeline noise, resolved threads, and bot release-note/walkthrough issue comments; diff is opt-in via `diff:true`. Use instead of `gh pr view`.
 - **`subagent.ts`** — `/subagent` delegates a task to an isolated child `pi` process (single-layer, no recursion). Agents defined in `~/.pi/agent/agents/*.md`. For offloading research/recon/implementation off the main thread.
-- **`worktree.ts`** — `worktree_create` / `worktree_list` / `worktree_merge` / `worktree_remove`: agent-driven git worktrees keyed by branch. For isolating a line of work in its own checkout and landing it on trunk (rebase + test-gate + fast-forward) with cleanup. Registers only when the `wt` binary is present.
+- **`worktree.ts`** — `worktree_create` / `worktree_list` / `worktree_publish` / `worktree_remove`: agent-driven git worktrees keyed by branch. Feature branches fork off the default branch and finish by pushing to origin for a PR — never merged into trunk locally. Registers only when the `wt` binary is present.
 
 ### Cleaner context
 
 - **`btw.ts`** — `/btw <q>` asks a side-channel question; Q + A never enter session history. For quick asides without polluting the main thread.
 - **`folder-context.ts`** — injects a folder's `AGENTS.md` / `CLAUDE.md` / `README.md` when the agent touches a path in it; re-injects if the file changes on disk.
-- **`lsp-feedback.ts`** (+ `lsp-feedback.lua`) — after every edit, formats the file and auto-fixes its diagnostics via an LLM loop (root-cause, no ignore directives); leftovers fire a `notify` for manual review. `/lsp-fix on|off` toggles auto-fix per session; `/lsp-fix` alone runs it on demand over the last touched files.
 
 ### Workflow shortcuts
 
-- **`yeet.ts`** — `/yeet` stages, commits (LLM writes the Conventional Commits msg), and pushes. Side-channel msg gen — doesn't pollute history.
+- **`yeet.ts`** — `/yeet` stages, commits (LLM writes the Conventional Commits msg, informed by the recent conversation for intent), and pushes. Side-channel msg gen — doesn't pollute history.
 - **`copy.ts`** — `/copy-blocks` picks a fenced code block from the last assistant response; `/copy-all` copies the full session as markdown. Built-in `/copy` unchanged.
 - **`auto-rename.ts`** — names the session after 3+ turns via a stateless LLM call. Kills the default `2025-05-24T09-21-…` slugs.
 
@@ -45,8 +44,8 @@ How each rule is wired — which extension implements which mechanism — is des
 
 ### TUI taste
 
-- **`tui.ts`** — layout tweaks: padding, input-line color, slim footer, bottom-pinned editor, floating autocomplete overlay.
-- **`code-bat.ts`** — renders markdown code blocks through `bat` for syntax highlight.
+- **`tui.ts`** — layout tweaks: padding, input-line color, slim footer, bottom-pinned editor, floating autocomplete overlay, full-width overlays inset to match the padding.
+- **`code-blocks.ts`** — renders markdown code blocks through `bat` for syntax highlight.
 
 ## Layout
 
@@ -56,6 +55,6 @@ extensions/
 ├── node_modules → ../npm/node_modules
 ├── *.ts          single-file extensions
 ├── eval/         persistent kernels + bridge
-├── lsp/          headless nvim singleton + nav tools
+├── lsp/          nvim singleton, nav tools + post-edit feedback
 └── shared/       side-channel LLM helper, message extraction, widget factory
 ```

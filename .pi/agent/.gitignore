@@ -1,0 +1,3 @@
+# Machine-local: absolute project paths differ per laptop. Untrack until pi
+# supports relative/glob trust paths.
+trust.json

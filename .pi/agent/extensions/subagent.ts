@@ -10,6 +10,8 @@
 //   tools: read, grep, find, ls       # optional --tools allowlist
 //   model: anthropic/claude-haiku-4-5  # optional
 //   thinking: low                      # optional
+//   idleTimeout: 120                   # optional, seconds (stall watchdog)
+//   maxDuration: 600                   # optional, seconds (wall-clock cap)
 //   ---
 //   <system prompt body>
 //
@@ -44,6 +46,8 @@ interface AgentConfig {
   tools: string[];
   model?: string;
   thinking?: string;
+  idleTimeoutMs?: number;
+  maxDurationMs?: number;
   systemPrompt: string;
 }
 
@@ -68,9 +72,31 @@ interface Progress {
 }
 
 const AGENTS_DIR = path.join(getAgentDir(), "agents");
+// Off-by-default lifecycle tracing. Set PI_SUBAGENT_DEBUG=1 to append JSONL
+// state transitions to the log below; inspect it after a stuck run to see which
+// stall class fired (live-hang: no clean stop + child alive + a tool still
+// running, vs. post-stop pipe-hold: cleanStopSeen + !childExited + pipes
+// unended). No behavior change — purely observational.
+const DEBUG = process.env.PI_SUBAGENT_DEBUG === "1";
+const DEBUG_LOG = path.join(getAgentDir(), "logs", "subagent-debug.jsonl");
+const HEARTBEAT_MS = 15_000;
+const dbg = (fields: Record<string, unknown>): void => {
+  if (!DEBUG) return;
+  try {
+    fs.mkdirSync(path.dirname(DEBUG_LOG), { recursive: true });
+    fs.appendFileSync(
+      DEBUG_LOG,
+      JSON.stringify({ t: new Date().toISOString(), ...fields }) + "\n",
+    );
+  } catch {
+    /* logging is best-effort */
+  }
+};
 const MAX_OUTPUT_BYTES = 32 * 1024;
 const UPDATE_INTERVAL_MS = 150;
-const TICK_INTERVAL_MS = 500;
+// 1s: the tick only refreshes the elapsed-time display; a faster cadence just
+// repaints the widget for a cosmetic timer and adds flicker.
+const TICK_INTERVAL_MS = 1000;
 // A grandchild (nvim/kernel) can keep the child's stdio pipe open after the
 // child exits, so the ChildProcess `close` event (process end + stdio closed)
 // would never fire. We resolve only on `close`, and a post-exit stdio guard
@@ -84,7 +110,22 @@ const STDIO_HARD_MS = 8000;
 // here is success drainage, NOT a failure (see classification below).
 const FINAL_STOP_GRACE_MS = 1000;
 const FINAL_HARD_KILL_MS = 3000;
+// Watchdogs for a child that hangs while still alive (the unhandled stall
+// class). Two independent guards:
+//   - idle: no JSON event AND no tool in flight for this long → a model/loop
+//     stall. Gated on "no tool running" so a legitimately slow tool (a long
+//     build/test emits start, then silence until end) is never false-killed.
+//   - wall-clock: absolute cap that also catches a genuinely hung tool or a
+//     runaway tool loop. Generous so real long agents finish.
+// Both overridable per-agent via frontmatter (idleTimeout / maxDuration, secs).
+const DEFAULT_IDLE_TIMEOUT_MS = 120_000;
+const DEFAULT_MAX_DURATION_MS = 600_000;
 const ARG_PREVIEW_MAX = 60;
+// Keep the live widget short: a tall component redrawn every tick flickers and
+// buries the conversation. Cap visible tool rows (tail while running) and the
+// echoed task.
+const MAX_VISIBLE_TOOLS = 6;
+const TASK_PREVIEW_MAX = 140;
 const FORBIDDEN_TOOLS = new Set(["subagent"]);
 
 // Signal the child's whole process GROUP, not just the child PID. The child
@@ -149,12 +190,18 @@ function loadAgents(): AgentConfig[] {
       .split(",")
       .map((t) => t.trim())
       .filter((t) => t.length > 0);
+    const secsToMs = (v: string | undefined): number | undefined => {
+      const n = Number(v);
+      return Number.isFinite(n) && n > 0 ? n * 1000 : undefined;
+    };
     out.push({
       name: frontmatter.name,
       description: frontmatter.description,
       tools,
       model: frontmatter.model || undefined,
       thinking: frontmatter.thinking || undefined,
+      idleTimeoutMs: secsToMs(frontmatter.idleTimeout),
+      maxDurationMs: secsToMs(frontmatter.maxDuration),
       systemPrompt: body.trim(),
     });
   }
@@ -282,7 +329,14 @@ const renderCallComponent = (args: SubagentArgs, theme: Theme) => {
   const c = new Container();
   const head = `${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("text", args.agent)}`;
   c.addChild(new Text(head, 0, 0));
-  c.addChild(new Text(theme.fg("dim", `task: ${args.task}`), 0, 0));
+  // First line only, capped — the full task is often a multi-paragraph prompt
+  // we don't want echoed into the conversation.
+  const firstLine = args.task.split("\n", 1)[0] ?? "";
+  const taskPreview =
+    firstLine.length > TASK_PREVIEW_MAX
+      ? firstLine.slice(0, TASK_PREVIEW_MAX - 1) + "…"
+      : firstLine + (args.task.includes("\n") ? " …" : "");
+  c.addChild(new Text(theme.fg("dim", `task: ${taskPreview}`), 0, 0));
   return c;
 };
 
@@ -299,13 +353,24 @@ const renderProgressComponent = (
   const header = `${icon} ${theme.fg("toolTitle", theme.bold(p.agent))}${model} ${theme.fg("dim", "—")} ${theme.fg("dim", stats)}`;
   c.addChild(new Text(fitLine(header, width), 0, 0));
 
-  for (const t of p.tools) {
-    const body = t.argsPreview ? `${t.name} ${t.argsPreview}` : t.name;
-    const row =
-      t.status === "running"
-        ? theme.fg("warning", `  ▸ ${body}`)
-        : theme.fg("muted", `  ✓ ${body}`);
-    c.addChild(new Text(fitLine(row, width), 0, 0));
+  // While running, show only the tail of the tool list (header already carries
+  // the total count). Once done, collapse the rows away unless expanded.
+  if (p.status === "running" || expanded) {
+    const start = expanded
+      ? 0
+      : Math.max(0, p.tools.length - MAX_VISIBLE_TOOLS);
+    if (start > 0) {
+      c.addChild(new Text(theme.fg("dim", `  … ${start} earlier`), 0, 0));
+    }
+    for (let i = start; i < p.tools.length; i++) {
+      const t = p.tools[i]!;
+      const body = t.argsPreview ? `${t.name} ${t.argsPreview}` : t.name;
+      const row =
+        t.status === "running"
+          ? theme.fg("warning", `  ▸ ${body}`)
+          : theme.fg("muted", `  ✓ ${body}`);
+      c.addChild(new Text(fitLine(row, width), 0, 0));
+    }
   }
 
   if (p.lastMessage && p.status === "running") {
@@ -413,8 +478,39 @@ export default function (pi: ExtensionAPI) {
       };
       const push = throttle(pushNow, UPDATE_INTERVAL_MS);
 
-      // Periodic tick so the duration ticks even when no events arrive.
-      const tick = setInterval(push, TICK_INTERVAL_MS);
+      // Periodic tick: refresh the duration display and run the watchdogs.
+      const onTick = () => {
+        push();
+        if (childExited || watchdogReason) return;
+        const now = Date.now();
+        if (now - progress.startedAt > maxMs) {
+          fireWatchdog("timeout");
+        } else if (
+          !progress.tools.some((t) => t.status === "running") &&
+          now - lastEventAt > idleMs
+        ) {
+          fireWatchdog("idle");
+        }
+      };
+      const tick = setInterval(onTick, TICK_INTERVAL_MS);
+
+      // Heartbeat trace: when the child goes quiet, record how long it's been
+      // idle and what tool (if any) is still running — this is the fingerprint
+      // of a live-hang. Off unless PI_SUBAGENT_DEBUG=1.
+      const heartbeat = DEBUG
+        ? setInterval(() => {
+            if (childExited) return;
+            const running = progress.tools
+              .filter((t) => t.status === "running")
+              .map((t) => `${t.name} ${t.argsPreview}`);
+            log("heartbeat", {
+              idleMs: Date.now() - lastEventAt,
+              running,
+              cleanStopSeen,
+            });
+          }, HEARTBEAT_MS)
+        : undefined;
+      heartbeat?.unref?.();
 
       const piArgs = [
         "-p",
@@ -452,13 +548,43 @@ export default function (pi: ExtensionAPI) {
         env: { ...process.env, PI_IS_SUBAGENT: "1" },
       });
 
+      const log = (phase: string, extra?: Record<string, unknown>) =>
+        dbg({
+          agent: agent.name,
+          pid: child.pid,
+          phase,
+          sinceStartMs: Date.now() - progress.startedAt,
+          ...extra,
+        });
+      log("spawn", { piArgs });
+
       let outBuf = "";
       let stderrBuf = "";
       let childExited = false;
+      let lastEventAt = Date.now(); // any JSON event from the child
       let cleanStopSeen = false; // terminal assistant stop, no error/tool call
       let assistantError = ""; // provider/agent error surfaced in a message
       let forcedTermination = false; // we SIGTERM/SIGKILL'd a lingering child
       let aborted = false; // parent AbortSignal fired
+      let watchdogReason = ""; // "idle" | "timeout" once a watchdog kills it
+
+      const idleMs = agent.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
+      const maxMs = agent.maxDurationMs ?? DEFAULT_MAX_DURATION_MS;
+
+      // Kill a child that is alive but stalled. Not a clean stop, so this is a
+      // genuine failure — we still surface whatever partial output was captured.
+      const fireWatchdog = (reason: "idle" | "timeout") => {
+        if (childExited || watchdogReason) return;
+        watchdogReason = reason;
+        log("watchdog", { reason, idleMs, maxMs });
+        forcedTermination = trySignal(child, "SIGTERM") || forcedTermination;
+        const t = setTimeout(() => {
+          if (!childExited)
+            forcedTermination =
+              trySignal(child, "SIGKILL") || forcedTermination;
+        }, FINAL_HARD_KILL_MS);
+        t.unref?.();
+      };
 
       // Post-stop drain: the child can print its final message yet linger.
       let finalDrainTimer: ReturnType<typeof setTimeout> | undefined;
@@ -507,10 +633,12 @@ export default function (pi: ExtensionAPI) {
       };
       child.stdout.on("end", () => {
         stdoutEnded = true;
+        log("stdout_end", { childExited });
         if (stderrEnded) clearStdioGuard();
       });
       child.stderr.on("end", () => {
         stderrEnded = true;
+        log("stderr_end", { childExited });
         if (stdoutEnded) clearStdioGuard();
       });
 
@@ -518,6 +646,7 @@ export default function (pi: ExtensionAPI) {
       const onAbort = () => {
         if (childExited) return;
         aborted = true;
+        log("abort");
         trySignal(child, "SIGTERM");
         const t = setTimeout(() => {
           if (!childExited) trySignal(child, "SIGKILL");
@@ -529,6 +658,7 @@ export default function (pi: ExtensionAPI) {
 
       const handleEvent = (ev: { type?: string; [k: string]: unknown }) => {
         if (!ev || !ev.type) return;
+        lastEventAt = Date.now();
         switch (ev.type) {
           case "tool_execution_start": {
             const id = String(ev.toolCallId ?? "");
@@ -575,6 +705,11 @@ export default function (pi: ExtensionAPI) {
               msg.content.some(
                 (p) => (p as { type?: string } | null)?.type === "toolCall",
               );
+            if (msg.errorMessage)
+              log("assistant_error", { error: assistantError });
+            if (msg.stopReason === "stop") {
+              log("stop", { hasToolCall, hasError: !!msg.errorMessage });
+            }
             if (msg.stopReason === "stop" && !hasToolCall) {
               if (!msg.errorMessage) cleanStopSeen = true;
               startFinalDrain();
@@ -625,6 +760,7 @@ export default function (pi: ExtensionAPI) {
         child.stderr.on("data", armIdle);
         child.on("exit", () => {
           childExited = true;
+          log("exit", { stdoutEnded, stderrEnded });
           clearFinalDrain();
           armIdle();
           if (!hardTimer) {
@@ -633,15 +769,17 @@ export default function (pi: ExtensionAPI) {
           }
         });
         // `close` = process ended AND stdio closed: the only safe resolve.
-        child.on("close", (c, s) =>
-          settle({ code: c, sig: s, spawnError: null }),
-        );
+        child.on("close", (c, s) => {
+          log("close", { code: c, sig: s });
+          settle({ code: c, sig: s, spawnError: null });
+        });
         child.on("error", (err) =>
           settle({ code: null, sig: null, spawnError: err }),
         );
       });
 
       clearInterval(tick);
+      if (heartbeat) clearInterval(heartbeat);
       progress.durationMs = Date.now() - progress.startedAt;
 
       // A SIGTERM/SIGKILL we issued to drain a lingering—but successful—child
@@ -651,19 +789,36 @@ export default function (pi: ExtensionAPI) {
       const failed =
         spawnError != null ||
         aborted ||
+        watchdogReason !== "" ||
         (!drainedAfterStop && (sig != null || (code != null && code !== 0)));
+
+      log("settle", {
+        code,
+        sig,
+        spawnError: spawnError?.message,
+        aborted,
+        cleanStopSeen,
+        forcedTermination,
+        drainedAfterStop,
+        failed,
+      });
 
       if (failed) {
         progress.status = "failed";
+        const lastTool = progress.tools.at(-1)?.name;
         progress.error = spawnError
           ? `spawn error: ${spawnError.message}`
           : aborted
             ? "aborted by parent"
             : assistantError
               ? assistantError
-              : sig
-                ? `killed by ${sig}`
-                : `exit ${code}`;
+              : watchdogReason === "timeout"
+                ? `timed out after ${formatDuration(maxMs)} (wall clock)`
+                : watchdogReason === "idle"
+                  ? `stalled — no activity for ${formatDuration(idleMs)}${lastTool ? ` (last tool: ${lastTool})` : ""}`
+                  : sig
+                    ? `killed by ${sig}`
+                    : `exit ${code}`;
         const detail =
           stderrBuf.trim() || progress.output.trim() || "(no child output)";
         return {

@@ -8,6 +8,7 @@ vim.lsp.config('*', {
 })
 
 vim.lsp.enable {
+    'asm_lsp',
     'bashls',
     'clangd',
     'cue',
