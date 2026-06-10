@@ -251,7 +251,7 @@ export default function (pi: ExtensionAPI) {
     name: "eval",
     label: "Eval",
     description:
-      'Run code in persistent Python and JavaScript kernels. Each language has one kernel per session; state persists across cells and across separate tool calls. Set `language: "py"` or `language: "js"` per cell. Call `install("pkg1", "pkg2")` to add Python packages; they persist across pi restarts. Inside any cell, call `tool.<name>({...})` to invoke pi built-in tools: `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls` use their normal pi argument schemas; `tree({path,max_depth})` is an extra helper. Shortcuts: `read(path)`, `write(path,content)`, `tree(path)`. JS cells support top-level await; in JS use `globalThis` / `state` to persist values across cells.',
+      'Run code in persistent Python and JavaScript kernels. Each language has one kernel per session; state persists across cells and across separate tool calls. Set `language: "py"` or `language: "js"` per cell. Call `install("pkg1", "pkg2")` to add Python packages; they persist across pi restarts. Inside any cell, call `tool.<name>({...})` to invoke pi built-in tools: `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls` use their normal pi argument schemas; `tree({path,max_depth})` is an extra helper. Shortcuts: `read(path)`, `write(path,content)`, `tree(path)`. JS cells support top-level await, `require(...)` and `await import(...)` for node builtins / npm packages / absolute paths; use `globalThis` / `state` to persist values across cells.',
     promptSnippet:
       "eval: persistent py + js kernels; share state across tool calls; `tool.*` proxy invokes pi tools (read/write/edit/bash/grep/find/ls/tree).",
     parameters: EvalParams,
@@ -266,9 +266,23 @@ export default function (pi: ExtensionAPI) {
 
         const results: CellResult[] = [];
         let firstError: number | null = null;
-        const emit = (extra?: Partial<{ status: string }>) => {
+        // Every streamed update MUST be a valid AgentToolResult. pi's renderer
+        // runs getTextOutput(result) → result.content.filter(...) on each
+        // partial; a bare { results } (no content) crashes it with
+        // "Cannot read properties of undefined (reading 'filter')".
+        const toUpdate = (snapshot: CellResult[], status?: string) => {
+          const text =
+            snapshot.map((r, i) => formatResult(r, i)).join("\n\n") ||
+            status ||
+            "running…";
+          return {
+            content: [{ type: "text" as const, text }],
+            details: { results: snapshot },
+          };
+        };
+        const emit = (status?: string) => {
           try {
-            onUpdate?.({ results, ...extra } as unknown as never);
+            onUpdate?.(toUpdate(results, status));
           } catch {}
         };
 
@@ -285,13 +299,12 @@ export default function (pi: ExtensionAPI) {
                 state.js = null;
               }
             }
-            emit({
-              status: `[${i + 1}/${params.cells.length}] ${cell.language}${cell.title ? " " + cell.title : ""}`,
-            });
+            emit(
+              `[${i + 1}/${params.cells.length}] ${cell.language}${cell.title ? " " + cell.title : ""}`,
+            );
             const onProgress = (partial: CellResult) => {
-              const snapshot = [...results, partial];
               try {
-                onUpdate?.({ results: snapshot } as unknown as never);
+                onUpdate?.(toUpdate([...results, partial]));
               } catch {}
             };
             let r: CellResult;

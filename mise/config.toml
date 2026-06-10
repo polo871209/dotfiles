@@ -1,3 +1,7 @@
+[settings]
+# Avoid compiling Python from source; use precompiled builds
+python.compile = false
+
 [tools]
 # Languages / runtimes
 bun = "latest"
@@ -40,13 +44,16 @@ lazygit = "latest"
 # Kubernetes / cloud / containers
 "aqua:docker/cli" = "latest"
 apko = "latest"
+cloudflared = "latest"
 cloud-sql-proxy = "2"
 dive = "latest"
 k9s = "latest"
 kubectx = "latest"
 kubectl = "latest"
+kubens = "latest"
 
 # LSPs
+"github:bergercookie/asm-lsp" = "latest"
 "aqua:grafana/jsonnet-language-server" = "latest"
 "aqua:hashicorp/terraform-ls" = "latest"
 "aqua:LuaLS/lua-language-server" = "latest"
@@ -78,3 +85,5 @@ semgrep = "latest"
 "github:max-sixty/worktrunk" = { version = "latest", exe = "wt" }
 "npm:@colbymchenry/codegraph" = "latest"
 "npm:@earendil-works/pi-coding-agent" = "latest"
+yt-dlp = { version = "latest", rename_exe = "yt-dlp" }
+ffmpeg = "latest"

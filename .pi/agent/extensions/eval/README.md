@@ -246,7 +246,7 @@ Ported from oh-my-pi's kernel lifecycle: instant exit detection + `isAlive()` gu
 These are real gaps. Skipped because the engineering cost was disproportionate to the value for a personal dotfiles setup.
 
 - **IPython kernel.** omp uses real IPython (ZMQ, rich display, soft cell-interrupt). We use raw `python3 -u` with `exec()`. We lose rich display (pandas DataFrame → text repr, not pretty HTML) and timeout means kill + respawn, not soft interrupt.
-- **JS npm imports.** omp does AST rewriting to support `import x from "pkg"` in JS cells via Bun.Worker. We use `node:vm` which doesn't support real `import`. Workaround: `await import("/abs/path/to/module.js")`.
+- **JS static `import` statements.** omp does AST rewriting to support top-level `import x from "pkg"` syntax in JS cells via Bun.Worker. We use `node:vm`, where a cell isn't a module, so the `import ... from` _statement_ form can't work. Runtime module loading does work, though: `require("pkg")` / `require("node:fs")` / `require("/abs/path")` are injected, and `await import("pkg")` resolves through Node's real loader.
 - **Subagent integration.** omp's `task` tool returns schema-validated objects; cells read them via `output(taskId)`. We don't have a `task` tool to forward.
 - **Forwarding extension/MCP tools.** We forward only the 7 built-ins. Other pi extensions' tools and MCP tools aren't reachable through `tool.*`. To expose one, add an arm to `bridgeHandler` in `index.ts`.
 - **TUI rendering polish.** omp renders each cell as a Jupyter-card with title/timing/inline images. We render plain text.

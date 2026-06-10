@@ -104,7 +104,7 @@ alias st="tmux source-file ${XDG_CONFIG_HOME:-$HOME}/tmux/tmux.conf"
 alias sz="source ${ZDOTDIR:-$HOME}/.zshrc"
 alias tf="terraform"
 alias up="brew update && brew upgrade && brew cleanup && mise upgrade && mise prune -y && pi update"
-alias brewdump="brew bundle dump --force --file=~/dotfiles/Brewfile --formula --cask --tap --mas"
+alias brewdump="brew bundle dump --force --file=~/dotfiles/Brewfile --formula --cask --tap --mas --no-describe"
 
 ## Bat
 export BAT_PAGER="less -iRFK"

@@ -2,15 +2,16 @@
   "name": "pi-extensions",
   "private": true,
   "dependencies": {
+    "@juicesharp/rpiv-ask-user-question": "^1.20.0",
     "neovim": "^5.4.0",
     "pi-web-access": "^0.10.7"
   },
   "devDependencies": {
-    "@earendil-works/pi-agent-core": "^0.75.5",
-    "@earendil-works/pi-ai": "^0.75.5",
-    "@earendil-works/pi-coding-agent": "^0.75.5",
-    "@earendil-works/pi-tui": "^0.75.5",
-    "@types/node": "^22.0.0",
-    "typebox": "^1.1.38"
+    "@earendil-works/pi-agent-core": "^0.79.4",
+    "@earendil-works/pi-ai": "^0.79.4",
+    "@earendil-works/pi-coding-agent": "^0.79.4",
+    "@earendil-works/pi-tui": "^0.79.4",
+    "@types/node": "^25.9.3",
+    "typebox": "^1.2.11"
   }
 }

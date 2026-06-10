@@ -1,13 +1,15 @@
-// lsp — agent-callable LSP navigation tools backed by a persistent headless
-// nvim. Warm-spawned by lsp-feedback on session_start (else lazy on first
-// tool call); tears down on session shutdown.
-// lsp-feedback pushes diagnostics automatically after edits; lsp_diagnostics
-// here is the on-demand pull (read-only, no format/fix). Plus navigation:
-// hover, definition, type-definition, implementation, references, rename,
-// document symbols.
+// lsp — the LSP subsystem, backed by a persistent headless nvim it owns
+// (warm-spawned at session_start by the feedback pass, else lazy on first tool
+// call; torn down on session shutdown). Two halves:
+//   - Navigation tools (pull): hover, definition, type-definition,
+//     implementation, references, rename, document symbols, and the on-demand
+//     read-only lsp_diagnostics.
+//   - Feedback pass (push, ./feedback): formats edits inline and runs batched
+//     diagnostics + LLM auto-fix after a turn. See ./feedback/index.ts.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { callDriver, isRunning, shutdownNvim } from "./nvim";
+import { registerFeedback } from "./feedback";
 import { hoverTool } from "./tools/hover";
 import { definitionTool } from "./tools/definition";
 import { referencesTool } from "./tools/references";
@@ -31,6 +33,8 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(implementationTool);
   pi.registerTool(typeDefinitionTool);
   pi.registerTool(documentSymbolsTool);
+
+  registerFeedback(pi);
 
   pi.registerCommand("lsp-status", {
     description:

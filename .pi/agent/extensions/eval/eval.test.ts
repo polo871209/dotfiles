@@ -226,6 +226,28 @@ describe("JsKernel", () => {
     assert.equal(r.value, 42);
   });
 
+  it("exposes require for node builtins and packages", async () => {
+    const k = await make();
+    const r = await k.run(
+      'typeof require("node:fs").readFileSync',
+      5,
+      undefined,
+    );
+    assert.equal(r.value, "function");
+    assert.equal(r.error, null);
+  });
+
+  it("supports dynamic import()", async () => {
+    const k = await make();
+    const r = await k.run(
+      'const p = await import("node:path"); p.basename("/a/b.txt")',
+      5,
+      undefined,
+    );
+    assert.equal(r.value, "b.txt");
+    assert.equal(r.error, null);
+  });
+
   it("supports top-level await", async () => {
     const k = await make();
     const r = await k.run(

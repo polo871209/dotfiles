@@ -8,7 +8,19 @@
 // - Last-expression auto-return uses a regex heuristic, not a full parser.
 
 import * as vm from "node:vm";
+import { createRequire } from "node:module";
 import type { CellResult, DisplayItem } from "./types";
+
+// CommonJS require resolved from this file, so cells can `require("node:fs")`,
+// installed npm packages (extensions' node_modules), or any absolute path.
+const cellRequire = createRequire(import.meta.url);
+
+// Lets `await import("pkg")` inside a cell resolve through Node's real module
+// loader instead of throwing "dynamic import callback invoked without ...".
+// Guarded: only present on Node ≥ 20.10.
+const dynamicImport = (
+  vm as unknown as { constants?: { USE_MAIN_CONTEXT_DEFAULT_LOADER?: symbol } }
+).constants?.USE_MAIN_CONTEXT_DEFAULT_LOADER;
 
 export interface JsKernelOptions {
   bridgeUrl: string;
@@ -198,7 +210,13 @@ export class JsKernel {
       btoa,
       structuredClone,
       crypto,
+      process,
+      require: cellRequire,
+      global: undefined as unknown,
     };
+    // `global` self-reference so Node-style code reading `global` works
+    // (`globalThis` is already provided by the vm context).
+    sandbox.global = sandbox;
     // tool + __emit_display are non-enumerable so cells returning globalThis
     // (e.g. `state`) don't dump the host scaffolding into JSON output.
     Object.defineProperty(sandbox, "tool", {
@@ -272,6 +290,9 @@ export class JsKernel {
         filename: "<cell>",
         timeout: timeoutSec * 1000,
         displayErrors: true,
+        ...(dynamicImport
+          ? { importModuleDynamically: dynamicImport as never }
+          : {}),
       }) as Promise<unknown>;
       result.value = await promise;
     } catch (err) {
