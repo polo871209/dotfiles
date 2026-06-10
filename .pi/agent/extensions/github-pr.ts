@@ -1,9 +1,10 @@
-// github-pr — fetch a PR as signal-only markdown, instead of the agent
-// shelling out to `gh pr view` and dragging in noise. Drops commit-message
-// timeline, force-push/deploy/rename events, resolved review threads, and
-// bot release-note comments (coderabbit, sonarqube, dependabot, …). Keeps
-// what a reviewer actually needs: metadata, diff, failing checks, and
-// UNRESOLVED human review comments.
+// github-pr — fetch a PR as signal-only markdown. Drops timeline noise,
+// resolved threads, and bot summary comments; keeps metadata, checks, and
+// unresolved threads (incl. bot inline findings like CodeRabbit).
+//
+// Diff is OFF by default: on the PR branch the agent reads local files, which
+// serves review and editing in one pass. A diff is only a patch — agent
+// re-reads to edit anyway. Pull diff only when code isn't reachable locally.
 
 import { spawn } from "node:child_process";
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
@@ -13,9 +14,8 @@ import { Type } from "typebox";
 const MAX_DIFF_BYTES = 48 * 1024;
 const MAX_BODY_BYTES = 6 * 1024;
 
-// Bot authors whose comments are release-note / scan-summary noise, not review
-// feedback. Login suffix "[bot]" covers GitHub Apps; the set covers App
-// accounts that present as normal users.
+// Bot authors whose summary comments are noise. "[bot]" suffix covers GitHub
+// Apps; the set covers App accounts presenting as normal users.
 const BOT_LOGINS = new Set([
   "coderabbitai",
   "dependabot",
@@ -33,11 +33,18 @@ function isBot(login: string, typename?: string): boolean {
   return l.includes("coderabbit") || l.includes("sonarqube");
 }
 
-// Strip auto-generated comment blocks (coderabbit release notes etc.) embedded
-// in the PR body. They sit between HTML comment fences.
+// Strip HTML comment fences (fingerprinting, cr-comment markers) from review
+// thread bodies, keeping the finding text + proposed diff.
+function stripHtmlComments(s: string): string {
+  return s
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+// Strip auto-generated blocks (coderabbit release notes etc.) from the PR body.
 function cleanBody(body: string): string {
-  // Drop whole auto-generated blocks (coderabbit release notes etc.): the
-  // visible text sits *between* an opening and a matching "end of" fence.
+  // Visible text sits between an opening and matching "end of" fence.
   let b = body.replace(
     /<!--\s*This is an auto-generated comment[\s\S]*?end of auto-generated comment[\s\S]*?-->/gi,
     "",
@@ -142,7 +149,7 @@ export default function (pi: ExtensionAPI) {
       return new Text(theme.fg("dim", `  ${s}`), 0, 0);
     },
     description:
-      "Fetch a GitHub pull request as signal-only markdown. USE THIS instead of `gh pr view` / `gh api` whenever the user gives a PR URL or number. Returns: title, state, base←head, author, mergeability, review decision, cleaned description, changed-file list with line counts, a check summary (only non-passing checks listed), and UNRESOLVED human review comments. The unified diff is OFF by default (the branch is usually checked out locally — read files directly); pass diff:true only when the code isn't reachable. Deliberately OMITS commit-message history, force-push/deploy/rename timeline events, resolved/outdated review threads, and bot release-note comments (coderabbit, sonarqube, dependabot) — that noise wastes context.",
+      "Fetch a GitHub PR (URL or number) as signal-only markdown: metadata, description, changed files, failing checks, and unresolved review threads. Use instead of `gh pr view`. diff:true to include the unified diff.",
     parameters: params,
     async execute(_id, raw, signal, _onUpdate, _ctx) {
       const a = raw as {
@@ -357,11 +364,11 @@ export default function (pi: ExtensionAPI) {
           if (unfetchedC > 0)
             out.push(`\n_(+${unfetchedC} earlier comment(s) not fetched)_`);
 
+          // Bots are NOT filtered out of review threads: inline findings
+          // (CodeRabbit etc.) are line-anchored and actionable, unlike their
+          // summary issue comments above.
           const threads = pr.reviewThreads.nodes.filter(
-            (t) =>
-              (a.includeResolved || (!t.isResolved && !t.isOutdated)) &&
-              (a.includeBots ||
-                !isBot(t.comments.nodes[0]?.author?.login ?? "")),
+            (t) => a.includeResolved || (!t.isResolved && !t.isOutdated),
           );
           nThreads = threads.length;
           if (threads.length) {
@@ -373,7 +380,9 @@ export default function (pi: ExtensionAPI) {
                 (t.isOutdated ? " [outdated]" : "");
               out.push(`\n${loc}${flags}`);
               for (const c of t.comments.nodes) {
-                out.push(`- **@${c.author?.login ?? "?"}**: ${c.body.trim()}`);
+                out.push(
+                  `- **@${c.author?.login ?? "?"}**: ${stripHtmlComments(c.body)}`,
+                );
               }
             }
           }

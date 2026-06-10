@@ -22,9 +22,9 @@ How each rule is wired — which extension implements which mechanism — is des
 - **`eval/`** — persistent Python + JS kernels the model runs code in; cells can call pi's own tools and keep bulk data out of history. For "read N files, aggregate, summarize" work.
 - **`lsp/`** — symbol-precise LSP tools: `lsp_hover` (type/docs), `lsp_definition` / `lsp_type_definition` / `lsp_implementation`, `lsp_references`, `lsp_document_symbols` (file outline), `lsp_rename` (workspace-wide), `lsp_diagnostics` (on-demand, read-only per-file error/warning check instead of a full `tsc`).
 - **`codegraph.ts`** — symbol-aware repo navigation + call-graph over the [codegraph CLI](https://github.com/colbymchenry/codegraph): `codegraph_status` / `_context` / `_search` / `_files` / `_callers` / `_callees` / `_impact` (blast-radius) / `_affected` (test selection). Registers only if the cwd has a codegraph index.
-- **`github-pr.ts`** — `github_pr` fetches a PR as signal-only markdown (metadata, description, changed files, failing checks, unresolved human review comments). Drops commit/timeline noise, resolved threads, and bot comments; diff is opt-in via `diff:true`. Use instead of `gh pr view`.
+- **`github-pr.ts`** — `github_pr` fetches a PR as signal-only markdown (metadata, description, changed files, failing checks, unresolved review threads — including bot inline findings like CodeRabbit). Drops commit/timeline noise, resolved threads, and bot release-note/walkthrough issue comments; diff is opt-in via `diff:true`. Use instead of `gh pr view`.
 - **`subagent.ts`** — `/subagent` delegates a task to an isolated child `pi` process (single-layer, no recursion). Agents defined in `~/.pi/agent/agents/*.md`. For offloading research/recon/implementation off the main thread.
-- **`worktree.ts`** — `worktree_create` / `worktree_list` / `worktree_merge` / `worktree_remove`: agent-driven git worktrees keyed by branch. For isolating a line of work in its own checkout and landing it on trunk (rebase + test-gate + fast-forward) with cleanup. Registers only when the `wt` binary is present.
+- **`worktree.ts`** — `worktree_create` / `worktree_list` / `worktree_publish` / `worktree_remove`: agent-driven git worktrees keyed by branch. Feature branches fork off the default branch and finish by pushing to origin for a PR — never merged into trunk locally. Registers only when the `wt` binary is present.
 
 ### Cleaner context
 
@@ -34,7 +34,7 @@ How each rule is wired — which extension implements which mechanism — is des
 
 ### Workflow shortcuts
 
-- **`yeet.ts`** — `/yeet` stages, commits (LLM writes the Conventional Commits msg), and pushes. Side-channel msg gen — doesn't pollute history.
+- **`yeet.ts`** — `/yeet` stages, commits (LLM writes the Conventional Commits msg, informed by the recent conversation for intent), and pushes. Side-channel msg gen — doesn't pollute history.
 - **`copy.ts`** — `/copy-blocks` picks a fenced code block from the last assistant response; `/copy-all` copies the full session as markdown. Built-in `/copy` unchanged.
 - **`auto-rename.ts`** — names the session after 3+ turns via a stateless LLM call. Kills the default `2025-05-24T09-21-…` slugs.
 

@@ -1,11 +1,13 @@
 // worktree — agent-driven git worktrees for parallel/isolated development.
-// Create a branch's worktree, see status across all worktrees, and merge a
-// finished branch back into trunk (rebase + test-gate + fast-forward) with
-// cleanup. Worktrees nest under ./.worktrees/<branch> in the current repo.
+// Create a feature branch's worktree off the default branch, see status
+// across all worktrees, and publish a finished branch to origin for a PR.
+// Trunk is never merged into locally — PRs are the only landing path.
+// Worktrees nest under ./.worktrees/<branch> in the current repo.
 // Tools key off branch name and use absolute paths, so they work without a
 // persistent shell directory. Registers only when the `wt` binary is present.
 
 import { spawn, spawnSync } from "node:child_process";
+import { appendFileSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -43,6 +45,31 @@ function run(
       resolve({ stdout, stderr: stderr + String(e), code: 1 }),
     );
   });
+}
+
+// Keep the nested .worktrees/ dir out of main's `git status` by adding it to
+// the repo's local exclude (.git/info/exclude) — no tracked-file change.
+function ensureWorktreesExcluded(cwd: string): void {
+  const probe = spawnSync("git", ["-C", cwd, "rev-parse", "--git-common-dir"], {
+    encoding: "utf-8",
+  });
+  if (probe.status !== 0) return;
+  let dir = probe.stdout.trim();
+  if (!dir) return;
+  if (!path.isAbsolute(dir)) dir = path.resolve(cwd, dir);
+  const exclude = path.join(dir, "info", "exclude");
+  try {
+    const cur = readFileSync(exclude, "utf-8");
+    if (cur.split(/\r?\n/).some((l) => l.trim() === ".worktrees/")) return;
+    appendFileSync(
+      exclude,
+      cur.endsWith("\n") ? ".worktrees/\n" : "\n.worktrees/\n",
+    );
+  } catch {
+    try {
+      appendFileSync(exclude, ".worktrees/\n");
+    } catch {}
+  }
 }
 
 const relPath = (abs: string, cwd: string): string => {
@@ -88,24 +115,19 @@ const createTool = defineTool({
   name: "worktree_create",
   label: "Create Worktree",
   description:
-    "Create an isolated worktree + branch off trunk and get back its absolute path. Use to start a new line of work without disturbing the main checkout; do file edits under the returned path. Reuses the worktree if the branch already has one.",
-  promptSnippet: "Start an isolated worktree for a new branch",
+    "Create an isolated worktree + feature branch off the default branch and get back its absolute path. Use to start a new line of work without disturbing the main checkout; do file edits under the returned path. Reuses the worktree if the branch already has one.",
+  promptSnippet: "Start an isolated worktree for a new feature branch",
   promptGuidelines: [
     "After this returns a path, do all Read/Edit/Bash for that work under the absolute worktree path — the agent has no persistent cwd.",
-    "When the work is done and verified, finish with worktree_merge to land it on trunk.",
+    "When the work is done and verified, finish with worktree_publish so a PR can be opened. Never merge into the default branch locally.",
   ],
   parameters: Type.Object({
     branch: Type.String({ description: "Branch name to create or reuse." }),
-    base: Type.Optional(
-      Type.String({
-        description: "Base branch to fork from. Defaults to trunk.",
-      }),
-    ),
   }),
   async execute(_id, params, signal, _onUpdate, ctx) {
-    const p = params as { branch: string; base?: string };
+    const p = params as { branch: string };
+    ensureWorktreesExcluded(ctx.cwd);
     const args = ["-C", ctx.cwd, "switch", "-c", p.branch];
-    if (p.base) args.push("-b", p.base);
     args.push("--format=json", "--no-cd", "-y");
     const res = await run(args, ctx.cwd, signal);
     if (res.code !== 0)
@@ -186,42 +208,44 @@ const listTool = defineTool({
   },
 });
 
-const mergeTool = defineTool({
-  name: "worktree_merge",
-  label: "Merge Worktree",
+const publishTool = defineTool({
+  name: "worktree_publish",
+  label: "Publish Worktree",
   description:
-    "Land a branch's worktree onto trunk: rebase onto trunk, run the project's pre-merge test gate, fast-forward merge, then remove the worktree and branch. Squashes to one commit by default. Aborts on rebase conflict or failing tests. Use when a branch's work is finished and verified.",
-  promptSnippet: "Merge a finished worktree branch into trunk and clean up",
+    "Push a finished worktree branch to origin so a PR can be opened. Refuses if the worktree has uncommitted changes. Never merges into the default branch — PR review is the only landing path. Keep the worktree until the PR is merged, then worktree_remove.",
+  promptSnippet: "Push a finished worktree branch to origin for a PR",
   promptGuidelines: [
-    "Only merge after the work is verified — pre-merge hooks run as a local gate but tests should already pass.",
-    "On conflict or hook failure the merge aborts and nothing lands; resolve, then retry.",
+    "Only publish after the work is committed and verified.",
+    "PR creation and merging are the user's job unless explicitly asked.",
   ],
   parameters: Type.Object({
-    branch: Type.String({ description: "Branch whose worktree to merge." }),
-    noSquash: Type.Optional(
-      Type.Boolean({ description: "Preserve individual commits (no squash)." }),
-    ),
-    noFf: Type.Optional(
-      Type.Boolean({
-        description: "Create a merge commit instead of fast-forward.",
-      }),
-    ),
+    branch: Type.String({ description: "Branch whose worktree to publish." }),
   }),
   async execute(_id, params, signal, _onUpdate, ctx) {
-    const p = params as { branch: string; noSquash?: boolean; noFf?: boolean };
+    const p = params as { branch: string };
     const wtPath = await pathForBranch(p.branch, ctx.cwd, signal);
     if (!wtPath) return fail(`no worktree found for branch ${p.branch}`);
-    const args = ["-C", wtPath, "merge", "--format=json", "-y"];
-    if (p.noSquash) args.push("--no-squash");
-    if (p.noFf) args.push("--no-ff");
-    const res = await run(args, ctx.cwd, signal);
-    if (res.code !== 0)
-      return fail(`merge aborted (nothing landed):\n${res.stderr.trim()}`);
+    const status = spawnSync("git", ["-C", wtPath, "status", "--porcelain"], {
+      encoding: "utf-8",
+    });
+    if (status.status !== 0)
+      return fail(`git status failed:\n${status.stderr}`);
+    if (status.stdout.trim())
+      return fail(
+        `worktree has uncommitted changes — commit them first:\n${status.stdout.trim()}`,
+      );
+    const push = spawnSync(
+      "git",
+      ["-C", wtPath, "push", "-u", "origin", p.branch],
+      { encoding: "utf-8" },
+    );
+    if (push.status !== 0) return fail(`push failed:\n${push.stderr.trim()}`);
+    // GitHub prints a "Create a pull request" URL on stderr of a first push.
     return {
       content: [
         {
           type: "text" as const,
-          text: `Merged ${p.branch} into trunk; worktree removed.\n${res.stderr.trim()}`,
+          text: `Pushed ${p.branch} to origin — ready for PR.\n${push.stderr.trim()}`,
         },
       ],
       details: { success: true, branch: p.branch },
@@ -267,6 +291,6 @@ export default function (pi: ExtensionAPI) {
   if (probe.error || probe.status !== 0) return;
   pi.registerTool(createTool);
   pi.registerTool(listTool);
-  pi.registerTool(mergeTool);
+  pi.registerTool(publishTool);
   pi.registerTool(removeTool);
 }

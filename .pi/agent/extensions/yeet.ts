@@ -8,9 +8,10 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Box, Text } from "@earendil-works/pi-tui";
 import { sideChannelComplete } from "./shared/llm";
+import { collectTextMessages, extractText } from "./shared/message";
 
 const MSG_PROMPT =
-  "Write a Conventional Commits message for the diff. Format: `<type>(<scope>)!: <subject>` where type ∈ {feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert}; scope optional; `!` only for breaking changes. Subject: imperative mood, lowercase, ≤72 chars, no trailing period. Optional body after one blank line only if change is non-obvious; body MAY be multiple newline-separated paragraphs. Optional footers one blank line after body, each `Token: value` or `Token #value`; tokens use `-` instead of spaces (e.g. `Reviewed-by`, `Refs: #123`), except `BREAKING CHANGE` which stays uppercase with a space. No fences, no preamble. Output ONLY the message.";
+  "Write a Conventional Commits message for the diff. Conversation context (if present) tells you WHY the change was made — use it for intent/scope, but describe only what the diff actually changes. Format: `<type>(<scope>)!: <subject>` where type ∈ {feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert}; scope optional; `!` only for breaking changes. Subject: imperative mood, lowercase, ≤72 chars, no trailing period. Optional body after one blank line only if change is non-obvious; body MAY be multiple newline-separated paragraphs. Optional footers one blank line after body, each `Token: value` or `Token #value`; tokens use `-` instead of spaces (e.g. `Reviewed-by`, `Refs: #123`), except `BREAKING CHANGE` which stays uppercase with a space. No fences, no preamble. Output ONLY the message.";
 
 const YEET_MSG_TYPE = "yeet-marker";
 
@@ -91,6 +92,22 @@ export default function (pi: ExtensionAPI) {
         diff.length > 6000 ? diff.slice(0, 6000) + "\n…(truncated)" : diff;
       const hint = args?.trim() ? `\nUser hint: ${args.trim()}\n` : "";
 
+      // Recent conversation (last ~3 exchanges) so the message captures
+      // intent, not just the mechanical diff.
+      const { messages: recent } = collectTextMessages(
+        ctx.sessionManager.getBranch(),
+        6,
+      );
+      const convo = recent
+        .map((m) => {
+          const text = extractText(m.content);
+          const capped =
+            text.length > 1200 ? text.slice(0, 1200) + "…(truncated)" : text;
+          return `${m.role}: ${capped}`;
+        })
+        .join("\n---\n");
+      const convoBlock = convo ? `Conversation context:\n${convo}\n\n` : "";
+
       // 1) Side-channel LLM call for commit message (not in main session).
       const message = await ctx.ui.custom<string | null>(
         (tui, theme, _kb, done) => {
@@ -109,7 +126,7 @@ export default function (pi: ExtensionAPI) {
                   content: [
                     {
                       type: "text",
-                      text: `${hint}Diffstat:\n${diffstat}\n\nDiff:\n${diffSnippet}`,
+                      text: `${hint}${convoBlock}Diffstat:\n${diffstat}\n\nDiff:\n${diffSnippet}`,
                     },
                   ],
                   timestamp: Date.now(),
