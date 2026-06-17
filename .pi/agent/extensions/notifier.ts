@@ -17,7 +17,7 @@ const isGhostty = (): boolean =>
   !!process.env.GHOSTTY_RESOURCES_DIR ||
   !!process.env.GHOSTTY_BIN_DIR;
 
-const execP = (cmd: string, timeoutMs = 1000): Promise<string> =>
+const execP = (cmd: string, timeoutMs = 2000): Promise<string> =>
   new Promise((resolve, reject) => {
     exec(cmd, { timeout: timeoutMs }, (err, stdout) => {
       if (err) reject(err);
@@ -28,7 +28,7 @@ const execP = (cmd: string, timeoutMs = 1000): Promise<string> =>
 const execFileP = (
   file: string,
   args: string[],
-  timeoutMs = 1000,
+  timeoutMs = 2000,
 ): Promise<string> =>
   new Promise((resolve, reject) => {
     execFile(file, args, { timeout: timeoutMs }, (err, stdout) => {
@@ -41,10 +41,14 @@ const execFileP = (
 
 const getFrontmostPid = async (): Promise<number | null> => {
   try {
-    const out = await execFileP("osascript", [
-      "-e",
-      'tell application "System Events" to get unix id of first application process whose frontmost is true',
-    ]);
+    const out = await execFileP(
+      "osascript",
+      [
+        "-e",
+        'tell application "System Events" to get unix id of first application process whose frontmost is true',
+      ],
+      2500,
+    );
     const pid = parseInt(out, 10);
     return Number.isFinite(pid) ? pid : null;
   } catch {
@@ -93,16 +97,32 @@ const getAncestorPids = async (startPid: number): Promise<Set<number>> => {
   return ancestors;
 };
 
-const getTmuxClientPid = async (): Promise<number | null> => {
+// PIDs of every tmux client attached to *our* session. The same session can be
+// attached from multiple ghostty windows; any of them being frontmost counts as
+// focus, so we must check them all (picking a single client_pid misfires).
+const getOurSessionClientPids = async (): Promise<number[]> => {
   try {
-    const args = process.env.TMUX_PANE
-      ? ["display-message", "-t", process.env.TMUX_PANE, "-p", "#{client_pid}"]
-      : ["display-message", "-p", "#{client_pid}"];
-    const out = await execFileP("tmux", args);
-    const pid = parseInt(out, 10);
-    return Number.isFinite(pid) ? pid : null;
+    const pane = process.env.TMUX_PANE;
+    const sessArgs = pane
+      ? ["display-message", "-t", pane, "-p", "#{session_name}"]
+      : ["display-message", "-p", "#{session_name}"];
+    const ourSession = await execFileP("tmux", sessArgs);
+    const out = await execFileP("tmux", [
+      "list-clients",
+      "-F",
+      "#{client_pid} #{client_session}",
+    ]);
+    const pids: number[] = [];
+    for (const line of out.split("\n")) {
+      const idx = line.indexOf(" ");
+      if (idx < 0) continue;
+      const pid = parseInt(line.slice(0, idx), 10);
+      const sess = line.slice(idx + 1).trim();
+      if (Number.isFinite(pid) && sess === ourSession) pids.push(pid);
+    }
+    return pids;
   } catch {
-    return null;
+    return [];
   }
 };
 
@@ -128,10 +148,17 @@ const isTerminalFocused = async (): Promise<boolean> => {
   try {
     const front = await getFrontmostPid();
     if (front === null) return false;
-    const clientPid = await getTmuxClientPid();
-    if (clientPid === null) return false;
-    const ancestors = await getAncestorPids(clientPid);
-    if (!ancestors.has(front)) return false;
+    const clientPids = await getOurSessionClientPids();
+    if (clientPids.length === 0) return false;
+    let frontIsOurClient = false;
+    for (const pid of clientPids) {
+      const ancestors = await getAncestorPids(pid);
+      if (ancestors.has(front)) {
+        frontIsOurClient = true;
+        break;
+      }
+    }
+    if (!frontIsOurClient) return false;
     return isTmuxPaneActive();
   } catch {
     return false;
@@ -223,28 +250,41 @@ const getVisiblePaneTty = async (): Promise<string | null> => {
   return null;
 };
 
-// false = no ghostty target, caller should use osascript. Sets the window
-// title first because ghostty renders it as the notification subtitle.
-const sendGhostty = async (project: string, body: string): Promise<boolean> => {
+// false = no ghostty target, caller should use osascript.
+//
+// ghostty renders the window title as the notification subtitle, so on our own
+// (visible) pane we briefly set it to the project name, fire the notification,
+// then restore pi's title — otherwise the project name stays stuck in the
+// titlebar (pi only re-asserts its title on session changes, not per turn).
+//
+// When pi's pane is hidden we route through a visible pane's tty (tmux drops
+// passthrough from hidden panes) and skip the title dance entirely: changing a
+// different window's title would just pollute it with no benefit, so that
+// notification simply inherits whatever subtitle the carrier window already has.
+const sendGhostty = async (
+  project: string,
+  body: string,
+  restoreTitle: string,
+): Promise<boolean> => {
   if (!isGhostty()) return false;
 
-  // pi's pane hidden -> route through a visible pane's tty (tmux drops
-  // passthrough from hidden panes). stdout otherwise — works under pi's
-  // takeOverStdout (reroutes to fd2, same pty tmux reads, same as OSC 52).
-  let carrierTty: string | null = null;
-  if (process.env.TMUX_PANE && !(await isPaneVisible())) {
-    carrierTty = await getVisiblePaneTty();
-    if (!carrierTty) return false;
-  }
-  const emit = (seq: string): void => {
-    if (carrierTty) writeFileSync(carrierTty, seq);
-    else process.stdout.write(seq);
-  };
-
   try {
-    emit(titleSeq(project));
+    if (process.env.TMUX_PANE && !(await isPaneVisible())) {
+      const carrierTty = await getVisiblePaneTty();
+      if (!carrierTty) return false;
+      writeFileSync(carrierTty, notifySeq("pi", body));
+      return true;
+    }
+
+    // Own pane, visible. stdout works under pi's takeOverStdout (reroutes to
+    // fd2, same pty tmux reads, same as OSC 52).
+    process.stdout.write(titleSeq(project));
     await delay(GHOSTTY_TITLE_SETTLE_MS);
-    emit(notifySeq("pi", body));
+    process.stdout.write(notifySeq("pi", body));
+    // Wait before restoring so ghostty captures the project title for the
+    // banner before the title reverts (title application is async/debounced).
+    await delay(GHOSTTY_TITLE_SETTLE_MS);
+    process.stdout.write(titleSeq(restoreTitle));
     return true;
   } catch {
     return false;
@@ -270,12 +310,30 @@ const playSound = (): void => {
   execFile("afplay", [SOUND_PATH], { timeout: 5000 }, () => {});
 };
 
-const notify = async (projectName: string, message: string): Promise<void> => {
+// Reconstruct the title pi assigns (interactive-mode.updateTerminalTitle) so we
+// can restore it after temporarily setting the project name for the banner.
+const APP_TITLE = "\u03c0";
+const piTitle = (projectName: string, sessionName?: string): string =>
+  sessionName
+    ? `${APP_TITLE} - ${sessionName} - ${projectName}`
+    : `${APP_TITLE} - ${projectName}`;
+
+const notify = async (
+  projectName: string,
+  message: string,
+  sessionName: string | undefined,
+): Promise<void> => {
   if (await isTerminalFocused()) return;
   if (shouldThrottle(`${projectName}\x00${message}`)) return;
   // When ghostty is the focused app (e.g. another tmux window) it suppresses
   // its own OSC banner — sound only. That's ghostty's design, not overridable.
-  if (!(await sendGhostty(projectName, message))) {
+  if (
+    !(await sendGhostty(
+      projectName,
+      message,
+      piTitle(projectName, sessionName),
+    ))
+  ) {
     await sendOsascript(`pi - ${projectName}`, message);
   }
   playSound();
@@ -290,6 +348,6 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("agent_end", async () => {
-    await notify(projectName, "Turn complete");
+    await notify(projectName, "Turn complete", pi.getSessionName());
   });
 }

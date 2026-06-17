@@ -57,3 +57,5 @@
 	process = git-lfs filter-process
 [url "git@github.com:"]
 	insteadOf = https://github.com/
+[url "git@github.com-qashier:qashierpos/"]
+	insteadOf = git@github.com:qashierpos/

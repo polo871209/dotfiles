@@ -6,10 +6,10 @@
 // serves review and editing in one pass. A diff is only a patch — agent
 // re-reads to edit anyway. Pull diff only when code isn't reachable locally.
 
-import { spawn } from "node:child_process";
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { run } from "./shared/exec";
 
 const MAX_DIFF_BYTES = 48 * 1024;
 const MAX_BODY_BYTES = 6 * 1024;
@@ -55,24 +55,6 @@ function cleanBody(body: string): string {
     b = b.slice(0, MAX_BODY_BYTES) + "\n…[body truncated]";
   }
   return b;
-}
-
-function run(
-  cmd: string,
-  args: string[],
-  signal?: AbortSignal,
-): Promise<{ stdout: string; stderr: string; code: number }> {
-  return new Promise((resolve) => {
-    const child = spawn(cmd, args, { signal });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
-    child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
-    child.on("close", (code) => resolve({ stdout, stderr, code: code ?? -1 }));
-    child.on("error", (err) =>
-      resolve({ stdout: "", stderr: err.message, code: -1 }),
-    );
-  });
 }
 
 function parsePr(pr: string): { number: number; repo?: string } | null {

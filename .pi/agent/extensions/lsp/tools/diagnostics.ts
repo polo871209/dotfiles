@@ -39,7 +39,7 @@ export const diagnosticsTool = defineTool({
   name: "lsp_diagnostics",
   label: "LSP Diagnostics",
   description:
-    "LSP + linter diagnostics for one or more files — type errors, lint warnings, etc. Faster than a project-wide `tsc`/`eslint` run, scoped to the files you pass. Read-only: never formats, fixes, or writes. Do NOT call this to verify or check files you just edited — diagnostics run automatically after every edit, so editing is never a trigger. Use ONLY when the user explicitly asks for diagnostics, or to inspect a reported error you have not yet seen.",
+    "LSP + linter diagnostics for one or more files — type errors, lint warnings, etc., scoped to the files you pass. Read-only: never formats, fixes, or writes. Do NOT call this to verify or check files you just edited — post-edit checks are handled for you, so editing is never a trigger. Use ONLY when the user explicitly asks for diagnostics, or to inspect a reported error you have not yet seen.",
   promptSnippet: "Check a file's errors/warnings on demand (not after edits)",
   promptGuidelines: [
     "Editing a file is NOT a reason to call lsp_diagnostics — post-edit checks happen automatically.",

@@ -1,6 +1,7 @@
 import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import {
+  anchorGuidelines,
   formatLocations,
   runNavTool,
   type DriverErr,
@@ -28,10 +29,10 @@ export const implementationTool = defineTool({
   description:
     "Find concrete implementations of the interface / abstract method / symbol at file:line (requires anchor). Use when sitting on an interface or abstract declaration and you need the real implementors. Differs from lsp_definition (goes to the declaration, not the implementors).",
   promptSnippet: "Find implementations of an interface/abstract symbol",
-  promptGuidelines: [
+  promptGuidelines: anchorGuidelines(
     "Anchor on an interface, abstract method, or trait member; returns the concrete implementors.",
-    "Re-read the file to confirm line numbers first. Stale coordinates return 'No implementation(s) found' silently.",
-  ],
+    "lsp_implementation",
+  ),
   parameters: anchorParams,
   async execute(_id, params, signal, onUpdate, ctx) {
     return runNavTool<DriverLocResult>(
@@ -57,10 +58,10 @@ export const typeDefinitionTool = defineTool({
   description:
     "Jump to the TYPE declaration of the symbol at file:line (requires anchor) — e.g. from a variable to the interface/class/type it is typed as. Differs from lsp_definition, which goes to the value/declaration site.",
   promptSnippet: "Jump from a value to the type it's declared as",
-  promptGuidelines: [
+  promptGuidelines: anchorGuidelines(
     "Anchor on a variable, parameter, or field; returns where its TYPE is declared.",
-    "Re-read the file to confirm line numbers first. Stale coordinates return 'No type definition(s) found' silently.",
-  ],
+    "lsp_type_definition",
+  ),
   parameters: anchorParams,
   async execute(_id, params, signal, onUpdate, ctx) {
     return runNavTool<DriverLocResult>(

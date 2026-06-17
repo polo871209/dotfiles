@@ -1,6 +1,6 @@
 import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
-import { runNavTool, type DriverErr } from "../utils";
+import { anchorGuidelines, runNavTool, type DriverErr } from "../utils";
 
 interface DriverHoverResult extends DriverErr {
   text?: string;
@@ -12,10 +12,10 @@ export const hoverTool = defineTool({
   description:
     "Type signature + docs for ONE symbol at file:line (requires anchor). Use when you already have a location and want type info without reading source. codegraph_* tools do NOT return type signatures — this is the only way.",
   promptSnippet: "Read a symbol's type and docs without opening the file",
-  promptGuidelines: [
+  promptGuidelines: anchorGuidelines(
     "Use lsp_hover to inspect a symbol's type or signature without reading the whole source file.",
-    "Re-read the file to confirm line numbers before calling lsp_hover. Stale coordinates return 'No hover information' silently.",
-  ],
+    "lsp_hover",
+  ),
   parameters: Type.Object({
     file: Type.String({ description: "Absolute or cwd-relative file path." }),
     line: Type.Number({

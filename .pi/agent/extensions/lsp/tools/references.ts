@@ -6,6 +6,7 @@ import {
   truncateHead,
 } from "@earendil-works/pi-coding-agent";
 import {
+  anchorGuidelines,
   formatLocations,
   runNavTool,
   type DriverErr,
@@ -20,12 +21,12 @@ export const referencesTool = defineTool({
   name: "lsp_references",
   label: "LSP References",
   description:
-    "Find every USE of ONE symbol at file:line (requires anchor). Symbol-identity precise — no text-match false positives, handles re-exports. Beats grep for usage finding. codegraph_search returns DEFINITIONS not uses — for 'where is X called' THIS is the tool.",
+    "Find every USE of ONE symbol at file:line (requires anchor). More reliable than grep for usage finding — no false hits from substring matches, and follows re-exports. codegraph_search returns DEFINITIONS not uses — for 'where is X called' THIS is the tool.",
   promptSnippet: "List all places that reference a symbol",
-  promptGuidelines: [
+  promptGuidelines: anchorGuidelines(
     "Use lsp_references before renaming or changing a function's signature to find every caller.",
-    "Re-read the file to confirm line numbers before calling lsp_references. Stale coordinates return 'No reference(s) found' silently.",
-  ],
+    "lsp_references",
+  ),
   parameters: Type.Object({
     file: Type.String({ description: "Absolute or cwd-relative file path." }),
     line: Type.Number({

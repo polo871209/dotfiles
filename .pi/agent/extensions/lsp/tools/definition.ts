@@ -1,6 +1,7 @@
 import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import {
+  anchorGuidelines,
   formatLocations,
   runNavTool,
   type DriverErr,
@@ -17,10 +18,10 @@ export const definitionTool = defineTool({
   description:
     "Jump to canonical declaration of ONE symbol at file:line (requires anchor; resolves re-exports, overloads). For name-only search without an anchor, use codegraph_search or grep first to get a location, then this for the canonical def.",
   promptSnippet: "Find where a symbol is declared",
-  promptGuidelines: [
+  promptGuidelines: anchorGuidelines(
     "Use lsp_definition to locate where a symbol is declared before modifying it or reading wider source.",
-    "Re-read the file to confirm line numbers before calling lsp_definition. Stale coordinates return 'No definition(s) found' silently.",
-  ],
+    "lsp_definition",
+  ),
   parameters: Type.Object({
     file: Type.String({ description: "Absolute or cwd-relative file path." }),
     line: Type.Number({

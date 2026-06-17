@@ -16,6 +16,7 @@ import {
   BorderedLoader,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
+import { visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { collectTextMessages } from "./shared/message";
 import { sideChannelComplete } from "./shared/llm";
 import { barWidget } from "./shared/widget";
@@ -28,7 +29,8 @@ const SIDE_PROMPT =
 const WIDGET_KEY = "btw-answer";
 const MAX_WIDTH = 100;
 
-// crude word-wrap that respects existing newlines and code fences.
+// Word-wrap that respects existing newlines and code fences. Width is measured
+// with visibleWidth so multi-byte glyphs / ANSI don't miscount.
 function wrap(text: string, width: number): string[] {
   const out: string[] = [];
   let inFence = false;
@@ -38,18 +40,11 @@ function wrap(text: string, width: number): string[] {
       out.push(raw);
       continue;
     }
-    if (inFence || raw.length <= width) {
+    if (inFence || visibleWidth(raw) <= width) {
       out.push(raw);
       continue;
     }
-    let line = raw;
-    while (line.length > width) {
-      let cut = line.lastIndexOf(" ", width);
-      if (cut <= 0) cut = width;
-      out.push(line.slice(0, cut));
-      line = line.slice(cut).replace(/^\s+/, "");
-    }
-    if (line.length > 0) out.push(line);
+    out.push(...wrapTextWithAnsi(raw, width));
   }
   return out;
 }

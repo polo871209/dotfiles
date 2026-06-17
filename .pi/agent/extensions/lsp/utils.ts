@@ -61,6 +61,16 @@ export async function runNavTool<R extends DriverErr>(
   };
 }
 
+// Shared promptGuidelines for the anchor-based nav tools: a one-line purpose
+// plus the re-read-before-calling reminder. Keeps the five tools consistent.
+export const anchorGuidelines = (
+  purpose: string,
+  toolName: string,
+): string[] => [
+  purpose,
+  `Re-read the file to confirm line numbers before calling ${toolName}.`,
+];
+
 export const displayPath = (abs: string, cwd: string): string => {
   if (!abs) return abs;
   const rel = path.relative(cwd, abs);

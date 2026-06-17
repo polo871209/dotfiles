@@ -79,7 +79,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("lsp-restart", {
-    description: "Kill the persistent nvim. Next lsp_* call respawns cold.",
+    description: "Reset the LSP server; the next navigation call starts fresh.",
     handler: async (_args, ctx) => {
       const was = isRunning();
       shutdownNvim();

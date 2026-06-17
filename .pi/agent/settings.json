@@ -1,13 +1,12 @@
 {
-  "lastChangelogVersion": "0.79.4",
+  "lastChangelogVersion": "0.79.10",
   "defaultProvider": "anthropic",
   "defaultModel": "claude-opus-4-8",
-  "defaultThinkingLevel": "medium",
+  "defaultThinkingLevel": "low",
   "theme": "catppuccin-mocha",
   "quietStartup": true,
   "packages": [
-    "npm:pi-web-access",
-    "npm:@juicesharp/rpiv-ask-user-question"
+    "npm:pi-web-access"
   ],
   "warnings": {
     "anthropicExtraUsage": false

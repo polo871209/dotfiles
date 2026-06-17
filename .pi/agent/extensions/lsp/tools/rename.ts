@@ -1,7 +1,13 @@
 import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import { callDriver } from "../nvim";
-import { displayPath, normalizeAtPath, toAbs, type DriverErr } from "../utils";
+import {
+  anchorGuidelines,
+  displayPath,
+  normalizeAtPath,
+  toAbs,
+  type DriverErr,
+} from "../utils";
 
 interface RenameResult extends DriverErr {
   files?: string[];
@@ -15,9 +21,11 @@ export const renameTool = defineTool({
     "Rename ONE symbol at file:line everywhere across the project (requires anchor). Workspace-wide LSP refactor — updates every reference in every file and writes changed files to disk. Symbol-identity precise: no text-match false hits, handles imports/re-exports/overloads. Use this instead of grep+edit when renaming a function, class, variable, or type.",
   promptSnippet: "Rename a symbol across the whole project",
   promptGuidelines: [
-    "Anchor at the symbol's definition or any usage; new_name replaces it everywhere it resolves.",
-    "Re-read the file to confirm line numbers before calling. Stale coordinates rename the wrong token or fail silently.",
-    "Writes changed files directly to disk. Review with git diff after — undo via git if wrong.",
+    ...anchorGuidelines(
+      "Anchor at the symbol's definition or any usage; new_name replaces it everywhere it resolves.",
+      "lsp_rename",
+    ),
+    "Applies across the whole project and changes files — review with git diff after; undo via git if wrong.",
   ],
   parameters: Type.Object({
     file: Type.String({ description: "Absolute or cwd-relative file path." }),
