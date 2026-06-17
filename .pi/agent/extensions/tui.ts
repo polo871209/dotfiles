@@ -20,7 +20,7 @@ import {
   visibleWidth,
 } from "@earendil-works/pi-tui";
 
-const PAD = 5;
+import { PAD } from "./shared/config";
 
 // Pi reloads extensions with moduleCache:false, so this module's
 // top-level state is re-bound on /new while the prototype patch from
@@ -205,54 +205,6 @@ const syncOverlay = (editor: EditorWithOverlay, editorHeight: number) => {
   }
 };
 
-// Inset full-width overlays (e.g. the ask_user_question dialog, which hardcodes
-// width:"100%" + zero margins) by PAD columns so they align with the padded
-// conversation/editor instead of spanning edge-to-edge. The TUI clamps overlay
-// width to termWidth - horizontal margins, so this just narrows + recenters.
-// Overlays that request an explicit numeric width (our autocomplete dropdown)
-// are left untouched.
-type OverlayMargin = {
-  top?: number;
-  right?: number;
-  bottom?: number;
-  left?: number;
-};
-interface ShowOverlayOptions {
-  width?: unknown;
-  margin?: OverlayMargin | number;
-}
-
-const installOverlayPaddingPatch = () => {
-  const proto = TUI.prototype as unknown as {
-    showOverlay(
-      component: Component,
-      options?: ShowOverlayOptions,
-    ): OverlayHandle;
-    __overlayPadded?: boolean;
-  };
-
-  if (proto.__overlayPadded) return;
-  proto.__overlayPadded = true;
-  const orig = proto.showOverlay;
-  proto.showOverlay = function (component, options) {
-    if (options && options.width === "100%") {
-      const m: OverlayMargin =
-        typeof options.margin === "number"
-          ? {
-              top: options.margin,
-              right: options.margin,
-              bottom: options.margin,
-              left: options.margin,
-            }
-          : { ...options.margin };
-      m.left = Math.max(m.left ?? 0, PAD);
-      m.right = Math.max(m.right ?? 0, PAD);
-      options = { ...options, margin: m };
-    }
-    return orig.call(this, component, options);
-  };
-};
-
 const installAutocompleteAbovePatch = () => {
   const proto = Editor.prototype as unknown as {
     render(width: number): string[];
@@ -386,7 +338,6 @@ const installFooter = (pi: ExtensionAPI) => {
 };
 
 installPaddingPatch();
-installOverlayPaddingPatch();
 installAutocompleteAbovePatch();
 
 export default function (pi: ExtensionAPI) {

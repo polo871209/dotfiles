@@ -432,7 +432,7 @@ export default function (pi: ExtensionAPI) {
     label: "Subagent",
     description:
       `Delegate a task to a specialized subagent running in an isolated process. ` +
-      `Returns text only — child inherits no context, so the task must be self-contained. ` +
+      `Returns text only, and the task must include all context the subagent needs to act. ` +
       `Use to keep this session focused (offload web research, recon, or end-to-end implementation).\n\n` +
       `Available agents:\n${agentList}\n\n` +
       `Subagents cannot spawn further subagents.`,

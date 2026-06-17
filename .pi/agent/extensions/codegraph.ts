@@ -5,6 +5,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { run } from "./shared/exec";
 
 const CODEGRAPH_BIN = "codegraph";
 const MAX_OUTPUT_BYTES = 64 * 1024;
@@ -28,26 +29,6 @@ function isCodegraphInitialized(cwd: string): boolean {
   }
 }
 
-function runCodegraph(
-  args: string[],
-  cwd: string,
-  signal?: AbortSignal,
-): Promise<{ stdout: string; stderr: string; code: number }> {
-  return new Promise((resolve) => {
-    const child = spawn(CODEGRAPH_BIN, args, { cwd, signal });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
-    child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
-    child.on("close", (code: number | null) =>
-      resolve({ stdout, stderr, code: code ?? -1 }),
-    );
-    child.on("error", (err: Error) =>
-      resolve({ stdout: "", stderr: err.message, code: -1 }),
-    );
-  });
-}
-
 function truncate(s: string): string {
   if (s.length <= MAX_OUTPUT_BYTES) return s;
   return (
@@ -61,7 +42,7 @@ async function callCodegraph(
   cwd: string,
   signal?: AbortSignal,
 ) {
-  const { stdout, stderr, code } = await runCodegraph(args, cwd, signal);
+  const { stdout, stderr, code } = await run(CODEGRAPH_BIN, args, signal, cwd);
   if (code !== 0) {
     const msg = stderr.trim() || stdout.trim() || `codegraph exit ${code}`;
     return {
@@ -252,7 +233,7 @@ export default function (pi: ExtensionAPI) {
     name: "codegraph_affected",
     label: "CodeGraph affected tests",
     description:
-      "Test selection: given changed source files, returns test files that transitively depend on them (import-edge traversal). Feed it `git diff --name-only` output to pick which tests to run after an edit instead of the whole suite.",
+      "Test selection: given changed source files, returns test files that transitively depend on them. Feed it `git diff --name-only` output to pick which tests to run after an edit instead of the whole suite.",
     parameters: Type.Object({
       files: Type.Array(Type.String(), {
         description: "Changed source file paths",
