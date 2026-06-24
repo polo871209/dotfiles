@@ -261,8 +261,7 @@ export function validateQuestionnaire(typed: QuestionParams): ValidationResult {
 // Answer formatting + LLM-facing envelope.
 
 export const DECLINE_MESSAGE = "User declined to answer questions";
-const ENVELOPE_PREFIX = "User has answered your questions:";
-const ENVELOPE_SUFFIX = "You can now continue with the user's answers in mind.";
+const ENVELOPE_PREFIX = "User answered:";
 const CHAT_CONTINUATION_MESSAGE =
   "User wants to chat about this. Continue the conversation to help them decide.";
 export const CHAT_SUMMARY_MESSAGE = "User wants to chat about this";
@@ -319,8 +318,5 @@ export function buildQuestionnaireResponse(
       cancelled: true,
     });
   }
-  return buildToolResult(
-    `${ENVELOPE_PREFIX} ${segments.join(" ")} ${ENVELOPE_SUFFIX}`,
-    result,
-  );
+  return buildToolResult(`${ENVELOPE_PREFIX} ${segments.join(" ")}`, result);
 }

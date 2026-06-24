@@ -431,7 +431,7 @@ export default function (pi: ExtensionAPI) {
     name: "subagent",
     label: "Subagent",
     description:
-      `Delegate a task to a specialized subagent running in an isolated process. ` +
+      `Delegate a task to a specialized subagent running in isolation. ` +
       `Returns text only, and the task must include all context the subagent needs to act. ` +
       `Use to keep this session focused (offload web research, recon, or end-to-end implementation).\n\n` +
       `Available agents:\n${agentList}\n\n` +
@@ -819,8 +819,10 @@ export default function (pi: ExtensionAPI) {
                   : sig
                     ? `killed by ${sig}`
                     : `exit ${code}`;
-        const detail =
-          stderrBuf.trim() || progress.output.trim() || "(no child output)";
+        const detail = headTruncate(
+          stderrBuf.trim() || progress.output.trim() || "(no child output)",
+          MAX_OUTPUT_BYTES / 4,
+        );
         return {
           content: [
             {

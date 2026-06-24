@@ -29,7 +29,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("yeet", {
-    description: "Stage and commit current repo changes",
+    description: "Stage, commit, and push current repo changes",
     handler: async (args, ctx) => {
       if (!ctx.hasUI) {
         ctx.ui.notify("/yeet requires interactive mode", "error");

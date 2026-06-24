@@ -1,6 +1,7 @@
 // codegraph — wrap codegraph CLI (https://github.com/colbymchenry/codegraph)
-// as native pi tools. Each tool shells out to `codegraph <subcmd> -j` and
-// returns the JSON. Project must be initialized first (`codegraph init`).
+// as native pi tools. Each tool shells out to `codegraph <subcmd>` and projects
+// the result to a compact, token-lean form for the model (raw JSON kept in
+// `details`). Project must be initialized first (`codegraph init`).
 
 import { spawn, spawnSync } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -8,7 +9,8 @@ import { Type } from "typebox";
 import { run } from "./shared/exec";
 
 const CODEGRAPH_BIN = "codegraph";
-const MAX_OUTPUT_BYTES = 64 * 1024;
+const MAX_ROWS = 40;
+const MAX_TEXT_BYTES = 32 * 1024;
 
 // Probe at extension load: register tools only if the index exists for cwd.
 // Agent sees tool → tool works. No "check status first" hedging needed.
@@ -29,18 +31,104 @@ function isCodegraphInitialized(cwd: string): boolean {
   }
 }
 
-function truncate(s: string): string {
-  if (s.length <= MAX_OUTPUT_BYTES) return s;
-  return (
-    s.slice(0, MAX_OUTPUT_BYTES) +
-    `\n\n…[truncated at ${MAX_OUTPUT_BYTES} bytes]`
+function truncateText(s: string): string {
+  if (s.length <= MAX_TEXT_BYTES) return s;
+  return `${s.slice(0, MAX_TEXT_BYTES)}\n\n…[truncated at ${MAX_TEXT_BYTES} bytes]`;
+}
+
+// Compact a row list with an "N of M" header and a narrowing hint.
+function rowBlock(rows: string[], total: number, hint: string): string {
+  if (total === 0) return "0 results";
+  const shown = rows.slice(0, MAX_ROWS);
+  const head =
+    total > shown.length
+      ? `Showing ${shown.length} of ${total}${hint ? ` — ${hint}` : ""}`
+      : `${total} result${total === 1 ? "" : "s"}`;
+  return [head, ...shown].join("\n");
+}
+
+type Node = {
+  name: string;
+  kind: string;
+  filePath: string;
+  startLine: number;
+};
+const loc = (n: Node) => `${n.filePath}:${n.startLine}`;
+const nodeRow = (n: Node) => `${n.name}  ${n.kind}  ${loc(n)}`;
+
+function fmtStatus(s: Record<string, unknown>): string {
+  const kinds = Object.entries((s.nodesByKind as Record<string, number>) ?? {})
+    .map(([k, v]) => `${k}=${v}`)
+    .join(" ");
+  const p = (s.pendingChanges as Record<string, number>) ?? {};
+  return [
+    `files=${s.fileCount} nodes=${s.nodeCount} edges=${s.edgeCount}`,
+    `languages=${((s.languages as string[]) ?? []).join(",")}`,
+    kinds && `kinds: ${kinds}`,
+    `pending: +${p.added ?? 0} ~${p.modified ?? 0} -${p.removed ?? 0}`,
+    s.lastIndexed && `lastIndexed=${s.lastIndexed}`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function fmtQuery(
+  arr: Array<{ node: Node & { isExported?: boolean } }>,
+): string {
+  const rows = arr.map(
+    (r) => `${nodeRow(r.node)}${r.node.isExported ? "  [exported]" : ""}`,
   );
+  return rowBlock(rows, arr.length, "add kind/limit to narrow");
+}
+
+function fmtFiles(
+  arr: Array<{ path: string; language: string; nodeCount: number }>,
+): string {
+  const rows = arr.map((f) => `${f.path}  ${f.language}  nodes=${f.nodeCount}`);
+  return rowBlock(rows, arr.length, "add filter/pattern to narrow");
+}
+
+function fmtEdges(symbol: string, arr: Node[], label: string): string {
+  if (!arr.length) return `${symbol}: 0 ${label}`;
+  const shown = arr.slice(0, MAX_ROWS).map(nodeRow);
+  const head =
+    arr.length > shown.length
+      ? `${symbol}: ${shown.length} of ${arr.length} ${label} (raise limit for more)`
+      : `${symbol}: ${arr.length} ${label}`;
+  return [head, ...shown].join("\n");
+}
+
+function fmtImpact(j: {
+  symbol: string;
+  depth: number;
+  nodeCount: number;
+  edgeCount: number;
+  affected: Node[];
+}): string {
+  const head = `${j.symbol} depth=${j.depth}: ${j.nodeCount} affected, ${j.edgeCount} edges`;
+  const shown = j.affected.slice(0, MAX_ROWS).map(nodeRow);
+  const note =
+    j.affected.length > shown.length
+      ? `\n…${j.affected.length - shown.length} more (raise depth/limit)`
+      : "";
+  return [head, ...shown].join("\n") + note;
+}
+
+function fmtAffected(j: {
+  changedFiles: string[];
+  affectedTests: string[];
+  totalDependentsTraversed: number;
+}): string {
+  const head = `changed: ${j.changedFiles.length} file(s) → ${j.affectedTests.length} affected test(s) (traversed ${j.totalDependentsTraversed})`;
+  if (!j.affectedTests.length) return `${head}\n0 tests affected`;
+  return [head, ...j.affectedTests.slice(0, MAX_ROWS)].join("\n");
 }
 
 async function callCodegraph(
   args: string[],
   cwd: string,
   signal?: AbortSignal,
+  format?: (json: unknown) => string,
 ) {
   const { stdout, stderr, code } = await run(CODEGRAPH_BIN, args, signal, cwd);
   if (code !== 0) {
@@ -51,8 +139,19 @@ async function callCodegraph(
       error: msg,
     };
   }
+  if (format) {
+    try {
+      const json = JSON.parse(stdout);
+      return {
+        content: [{ type: "text" as const, text: format(json) }],
+        details: json,
+      };
+    } catch {
+      // Fall through to raw text on unexpected shape.
+    }
+  }
   return {
-    content: [{ type: "text" as const, text: truncate(stdout) }],
+    content: [{ type: "text" as const, text: truncateText(stdout) }],
     details: undefined,
   };
 }
@@ -90,7 +189,9 @@ export default function (pi: ExtensionAPI) {
       "Inspect codegraph index: file count, node count, languages, pending changes.",
     parameters: Type.Object({}),
     async execute(_id, _raw, signal, _onUpdate, ctx) {
-      return callCodegraph(["status", "-j"], ctx.cwd, signal);
+      return callCodegraph(["status", "-j"], ctx.cwd, signal, (j) =>
+        fmtStatus(j as Record<string, unknown>),
+      );
     },
   });
 
@@ -98,24 +199,20 @@ export default function (pi: ExtensionAPI) {
     name: "codegraph_context",
     label: "CodeGraph context",
     description:
-      'Conceptual cross-file flow ("how does data flow X→Y", multi-file feature trace, what-calls-what chains). NO anchor needed. Returns entry-point symbols + related nodes + snippets. WRONG tool for literal API/identifier surface ("where is `pi.foo` registered", "every file that calls X", "find duplicate pattern Z") — semantic search drifts on those; use grep or codegraph_search. If first call drifts off-topic, pivot to grep — do NOT retry rephrased. lsp_* CANNOT replace this — LSP requires an anchor.',
+      'Conceptual cross-file flow ("how does data flow X→Y", multi-file feature trace, what-calls-what chains). NO anchor needed. Returns relevant symbols\' source + call paths in one shot. WRONG tool for literal API/identifier surface ("where is `pi.foo` registered", "every file that calls X", "find duplicate pattern Z") — semantic search drifts on those; use grep or codegraph_search. If first call drifts off-topic, pivot to grep — do NOT retry rephrased. lsp_* CANNOT replace this — LSP requires an anchor.',
     parameters: Type.Object({
       task: Type.String({
         description:
           "Natural-language description of what you're trying to understand, e.g. 'how authentication middleware processes requests'",
       }),
-      maxNodes: Type.Optional(
-        Type.Number({ description: "Max symbols to include (default 50)" }),
-      ),
-      maxCode: Type.Optional(
-        Type.Number({ description: "Max code blocks (default 10)" }),
+      maxFiles: Type.Optional(
+        Type.Number({ description: "Max files to include source from" }),
       ),
     }),
     async execute(_id, raw, signal, _onUpdate, ctx) {
-      const a = raw as { task: string; maxNodes?: number; maxCode?: number };
-      const args = ["context", a.task, "-f", "json"];
-      if (a.maxNodes) args.push("-n", String(a.maxNodes));
-      if (a.maxCode) args.push("-c", String(a.maxCode));
+      const a = raw as { task: string; maxFiles?: number };
+      const args = ["explore", a.task];
+      if (a.maxFiles) args.push("--max-files", String(a.maxFiles));
       return callCodegraph(args, ctx.cwd, signal);
     },
   });
@@ -142,7 +239,9 @@ export default function (pi: ExtensionAPI) {
       const args = ["query", a.query, "-j"];
       if (a.kind) args.push("-k", a.kind);
       if (a.limit) args.push("-l", String(a.limit));
-      return callCodegraph(args, ctx.cwd, signal);
+      return callCodegraph(args, ctx.cwd, signal, (j) =>
+        fmtQuery(j as Array<{ node: Node & { isExported?: boolean } }>),
+      );
     },
   });
 
@@ -168,7 +267,11 @@ export default function (pi: ExtensionAPI) {
       if (a.filter) args.push("--filter", a.filter);
       if (a.pattern) args.push("--pattern", a.pattern);
       if (a.maxDepth) args.push("--max-depth", String(a.maxDepth));
-      return callCodegraph(args, ctx.cwd, signal);
+      return callCodegraph(args, ctx.cwd, signal, (j) =>
+        fmtFiles(
+          j as Array<{ path: string; language: string; nodeCount: number }>,
+        ),
+      );
     },
   });
 
@@ -187,7 +290,10 @@ export default function (pi: ExtensionAPI) {
       const a = raw as { symbol: string; limit?: number };
       const args = ["callers", a.symbol, "-j"];
       if (a.limit) args.push("-l", String(a.limit));
-      return callCodegraph(args, ctx.cwd, signal);
+      return callCodegraph(args, ctx.cwd, signal, (j) => {
+        const d = j as { symbol: string; callers: Node[] };
+        return fmtEdges(d.symbol, d.callers ?? [], "callers");
+      });
     },
   });
 
@@ -206,7 +312,10 @@ export default function (pi: ExtensionAPI) {
       const a = raw as { symbol: string; limit?: number };
       const args = ["callees", a.symbol, "-j"];
       if (a.limit) args.push("-l", String(a.limit));
-      return callCodegraph(args, ctx.cwd, signal);
+      return callCodegraph(args, ctx.cwd, signal, (j) => {
+        const d = j as { symbol: string; callees: Node[] };
+        return fmtEdges(d.symbol, d.callees ?? [], "callees");
+      });
     },
   });
 
@@ -225,7 +334,17 @@ export default function (pi: ExtensionAPI) {
       const a = raw as { symbol: string; depth?: number };
       const args = ["impact", a.symbol, "-j"];
       if (a.depth) args.push("-d", String(a.depth));
-      return callCodegraph(args, ctx.cwd, signal);
+      return callCodegraph(args, ctx.cwd, signal, (j) =>
+        fmtImpact(
+          j as {
+            symbol: string;
+            depth: number;
+            nodeCount: number;
+            edgeCount: number;
+            affected: Node[];
+          },
+        ),
+      );
     },
   });
 
@@ -262,7 +381,15 @@ export default function (pi: ExtensionAPI) {
       if (a.depth) args.push("-d", String(a.depth));
       if (a.filter) args.push("-f", a.filter);
       args.push(...a.files);
-      return callCodegraph(args, ctx.cwd, signal);
+      return callCodegraph(args, ctx.cwd, signal, (j) =>
+        fmtAffected(
+          j as {
+            changedFiles: string[];
+            affectedTests: string[];
+            totalDependentsTraversed: number;
+          },
+        ),
+      );
     },
   });
 }

@@ -1,6 +1,6 @@
 ---
 name: writing-skills
-description: Read before writing or editing any agent skill (SKILL.md file) or any file inside a skill folder (scripts/, references/, assets/).
+description: Read before writing or editing any agent skill (SKILL.md or files in scripts/, references/, assets/), or any agent-facing tool or extension. Covers structure, discoverability, and token-lean output design.
 ---
 
 # Writing Agent Skills
@@ -122,6 +122,26 @@ Bundle deterministic scripts for repetitive/fragile ops.
 - Don't assume packages installed — list deps in SKILL.md.
 - Plan → validate → execute pattern for batch/destructive ops: write a plan file, validate with script, then apply.
 
+### Output design (agent-facing scripts, tools, extensions)
+
+Anything an agent reads as output — script stdout, a custom tool's result, an extension's injected context — must minimize tokens and round-trips. Token saving is the goal:
+
+- **Compact format**: tabular/compact over JSON (~40% fewer tokens). Convert at the output boundary; keep internal logic on JSON.
+- **Minimal default schema**: 3–4 fields per list row, not 10. Offer a flag/param to request more.
+- **Truncate + hint**: never omit big text — show a preview, total size, and a `--full`-style escape hatch.
+- **Inline aggregates**: totals (`30 of 847`) and cheap derived status, so the agent skips a follow-up call.
+- **Definitive empty states**: explicit "0 X found", not blank.
+- **Content first**: a no-arg invocation shows live data, not help text.
+- **Next steps**: end list/mutation output with a few complete next-step commands (placeholders for runtime values); omit on self-contained output.
+- **Idempotent mutations**: desired-state-already-true is success, not an error.
+- **Channels & exit codes** (CLIs): stdout = data + structured errors with a fix command, stderr = progress/debug, exit 0 success/no-op, 1 error, 2 usage.
+
+Tools & extensions specifically:
+
+- A tool's `name` + `description` + param schema are its discoverability surface — apply the frontmatter rules (§2): terse, trigger-shaped, no redundant params.
+- Don't register a tool/extension that duplicates a capability the agent already has.
+- Context injected every turn costs tokens on every message — keep it minimal and directory-scoped.
+
 ---
 
 ## 7. Workflows & Feedback Loops
@@ -141,10 +161,7 @@ Validator can be a script or a reference doc (e.g. `STYLE_GUIDE.md`).
 ## 8. Anti-patterns
 
 - Time-sensitive info ("as of 2025..."). Use an "old patterns" section if historical context needed.
-- Windows paths (`scripts\foo.py`).
 - Offering multiple approaches when one suffices.
-- Deeply nested references.
-- Re-explaining things the model already knows ("a PDF is a document format...").
 - Long library code inside `scripts/` — keep scripts tiny + single-purpose.
 
 ---
@@ -173,31 +190,6 @@ Before shipping, run two cheap checks with a fresh LLM:
 
 Then build ≥3 real evals, baseline without skill, iterate until baseline beaten.
 
+**Drift guard**: if SKILL.md duplicates content the code/CLI already prints (e.g. generated from a home view), generate it instead of hand-copying, and add a CI `--check` step that fails on staleness.
+
 Develop iteratively: use one agent instance to author, another fresh instance to consume. Observe where the consumer struggles; refine.
-
----
-
-## Checklist
-
-Core:
-
-- [ ] `name` matches directory, lowercase-hyphen
-- [ ] `description` has what + when + negative triggers, third person, ≤1024 chars
-- [ ] SKILL.md <500 lines
-- [ ] Refs one level deep, TOC for >100 lines
-- [ ] Consistent terminology
-- [ ] No time-sensitive info
-- [ ] Forward slashes only
-
-Scripts:
-
-- [ ] Handle errors with descriptive output
-- [ ] No magic constants
-- [ ] Execute-vs-read intent stated
-- [ ] Dependencies listed
-
-Testing:
-
-- [ ] Discovery test passed
-- [ ] Logic walkthrough passed
-- [ ] ≥3 evals, tested across model sizes

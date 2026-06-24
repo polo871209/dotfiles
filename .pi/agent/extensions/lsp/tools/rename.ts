@@ -23,7 +23,6 @@ export const renameTool = defineTool({
   promptGuidelines: [
     ...anchorGuidelines(
       "Anchor at the symbol's definition or any usage; new_name replaces it everywhere it resolves.",
-      "lsp_rename",
     ),
     "Applies across the whole project and changes files — review with git diff after; undo via git if wrong.",
   ],

@@ -31,7 +31,6 @@ export const implementationTool = defineTool({
   promptSnippet: "Find implementations of an interface/abstract symbol",
   promptGuidelines: anchorGuidelines(
     "Anchor on an interface, abstract method, or trait member; returns the concrete implementors.",
-    "lsp_implementation",
   ),
   parameters: anchorParams,
   async execute(_id, params, signal, onUpdate, ctx) {
@@ -60,7 +59,6 @@ export const typeDefinitionTool = defineTool({
   promptSnippet: "Jump from a value to the type it's declared as",
   promptGuidelines: anchorGuidelines(
     "Anchor on a variable, parameter, or field; returns where its TYPE is declared.",
-    "lsp_type_definition",
   ),
   parameters: anchorParams,
   async execute(_id, params, signal, onUpdate, ctx) {

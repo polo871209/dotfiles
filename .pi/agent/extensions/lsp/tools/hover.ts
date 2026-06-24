@@ -14,7 +14,6 @@ export const hoverTool = defineTool({
   promptSnippet: "Read a symbol's type and docs without opening the file",
   promptGuidelines: anchorGuidelines(
     "Use lsp_hover to inspect a symbol's type or signature without reading the whole source file.",
-    "lsp_hover",
   ),
   parameters: Type.Object({
     file: Type.String({ description: "Absolute or cwd-relative file path." }),

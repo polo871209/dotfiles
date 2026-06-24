@@ -1,6 +1,6 @@
 vim.pack.add { 'https://github.com/stevearc/conform.nvim' }
 
--- Lazy-load treesj behind its only keymap (Ɉ9ms off cold startup).
+-- Lazy-load treesj behind its only keymap (~9ms off cold startup).
 local treesj_loaded = false
 vim.keymap.set('n', '<leader>m', function()
     if not treesj_loaded then

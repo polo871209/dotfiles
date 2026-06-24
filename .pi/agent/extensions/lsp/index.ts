@@ -38,11 +38,11 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerCommand("lsp-status", {
     description:
-      "Show LSP nvim status: running? open buffers? attached clients?",
+      "Show LSP server status: running, open buffers, attached clients.",
     handler: async (_args, ctx) => {
       if (!isRunning()) {
         ctx.ui.notify(
-          "nvim not running (warms at session_start; else on first lsp_* call)",
+          "LSP server not running — starts automatically on first use.",
           "info",
         );
         return;

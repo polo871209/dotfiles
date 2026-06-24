@@ -196,7 +196,7 @@ async function ensureJsKernel(state: SessionState): Promise<JsKernel> {
 }
 
 function formatResult(r: CellResult, idx: number): string {
-  const head = `[${idx + 1}/${r.title || "cell"}] (${r.durationMs}ms${r.timedOut ? " TIMEOUT" : ""})`;
+  const head = `[${idx + 1}/${r.title || "cell"}]${r.timedOut ? " TIMEOUT" : ""}`;
   const parts = [head];
   if (r.stdout) parts.push(r.stdout.trimEnd());
   if (r.stderr) parts.push(`stderr:\n${r.stderr.trimEnd()}`);
@@ -251,7 +251,7 @@ export default function (pi: ExtensionAPI) {
     name: "eval",
     label: "Eval",
     description:
-      'Run code in persistent Python and JavaScript kernels. Each language has one kernel per session; state persists across cells and across separate tool calls. Set `language: "py"` or `language: "js"` per cell. Call `install("pkg1", "pkg2")` to add Python packages; they persist across pi restarts. Inside any cell, call `tool.<name>({...})` to invoke pi built-in tools: `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls` use their normal pi argument schemas; `tree({path,max_depth})` is an extra helper. Shortcuts: `read(path)`, `write(path,content)`, `tree(path)`. JS cells support top-level await, `require(...)` and `await import(...)` for node builtins / npm packages / absolute paths; use `globalThis` / `state` to persist values across cells.',
+      'Run code in persistent Python and JavaScript kernels. Each language has one kernel per session; state persists across cells and across separate tool calls. Set `language: "py"` or `language: "js"` per cell. Call `install("pkg1", "pkg2")` to add Python packages; they persist across pi restarts. Inside any cell, call `tool.<name>({...})` to invoke pi built-in tools: `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls` use their normal pi argument schemas; `tree({path,max_depth})` is an extra helper. Shortcuts: `read(path)`, `write(path,content)`, `tree(path)`. JS cells support top-level await and package imports; use `globalThis` / `state` to persist values across cells.',
     promptSnippet:
       "eval: persistent py + js kernels; share state across tool calls; `tool.*` proxy invokes pi tools (read/write/edit/bash/grep/find/ls/tree).",
     parameters: EvalParams,
