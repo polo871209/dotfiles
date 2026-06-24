@@ -310,6 +310,41 @@ const playSound = (): void => {
   execFile("afplay", [SOUND_PATH], { timeout: 5000 }, () => {});
 };
 
+// Reflect the agent's status in this pane's tmux window name so the tab makes
+// it obvious at a glance which agent is busy / waiting / done. Renaming pins
+// the name (disables tmux automatic-rename), which is what we want per window.
+const setWindowStatus = (status: "busy" | "ask" | "idle" | "done"): void => {
+  const pane = process.env.TMUX_PANE;
+  if (!pane) return;
+  execFile(
+    "tmux",
+    ["rename-window", "-t", pane, `${APP_TITLE}-${status}`],
+    { timeout: 2000 },
+    () => {},
+  );
+};
+
+// "done" means the turn finished while you weren't looking. Poll for focus
+// returning to this pane and flip done -> idle so the tab distinguishes "just
+// finished" from "you've already seen it". Any new activity cancels the poll.
+let donePoll: ReturnType<typeof setInterval> | null = null;
+const stopDonePoll = (): void => {
+  if (donePoll) {
+    clearInterval(donePoll);
+    donePoll = null;
+  }
+};
+const startDonePoll = (): void => {
+  if (!process.env.TMUX_PANE || donePoll) return;
+  donePoll = setInterval(async () => {
+    if (await isTerminalFocused()) {
+      setWindowStatus("idle");
+      stopDonePoll();
+    }
+  }, 2000);
+  donePoll.unref?.();
+};
+
 // Reconstruct the title pi assigns (interactive-mode.updateTerminalTitle) so we
 // can restore it after temporarily setting the project name for the banner.
 const APP_TITLE = "\u03c0";
@@ -345,9 +380,34 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     projectName = path.basename(ctx.cwd ?? process.cwd());
+    stopDonePoll();
+    setWindowStatus("idle");
+  });
+
+  pi.on("agent_start", async () => {
+    stopDonePoll();
+    setWindowStatus("busy");
+  });
+
+  pi.on("tool_execution_start", async (event) => {
+    if (event.toolName === "ask_user_question") setWindowStatus("ask");
+  });
+
+  pi.on("tool_execution_end", async (event) => {
+    if (event.toolName === "ask_user_question") setWindowStatus("busy");
   });
 
   pi.on("agent_end", async () => {
+    if (await isTerminalFocused()) {
+      setWindowStatus("idle");
+    } else {
+      setWindowStatus("done");
+      startDonePoll();
+    }
     await notify(projectName, "Turn complete", pi.getSessionName());
+  });
+
+  pi.on("session_shutdown", async () => {
+    stopDonePoll();
   });
 }

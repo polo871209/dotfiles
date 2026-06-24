@@ -3,7 +3,7 @@
   "private": true,
   "dependencies": {
     "neovim": "^5.4.0",
-    "pi-web-access": "^0.10.7"
+    "pi-web-access": "^0.13.0"
   },
   "devDependencies": {
     "@earendil-works/pi-agent-core": "^0.79.6",

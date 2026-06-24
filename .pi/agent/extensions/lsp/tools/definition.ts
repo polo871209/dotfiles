@@ -20,7 +20,6 @@ export const definitionTool = defineTool({
   promptSnippet: "Find where a symbol is declared",
   promptGuidelines: anchorGuidelines(
     "Use lsp_definition to locate where a symbol is declared before modifying it or reading wider source.",
-    "lsp_definition",
   ),
   parameters: Type.Object({
     file: Type.String({ description: "Absolute or cwd-relative file path." }),

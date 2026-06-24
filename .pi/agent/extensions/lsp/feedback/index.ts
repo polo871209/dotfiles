@@ -238,37 +238,38 @@ export function registerFeedback(pi: ExtensionAPI): void {
     ctx.ui.setWidget(WIDGET_KEY, undefined);
   });
 
-  pi.on("tool_result", async (event) => {
-    if (event.isError) return;
-    if (!TRACKED_TOOLS.has(event.toolName)) return;
-    const p = extractPath(event.input);
-    if (!p) return;
-    const abs = toAbs(p, cwd);
+  // Format one file in place, register it for the batched diagnostics pass, and
+  // return a note describing the format delta (undefined if skipped/unchanged).
+  const processFile = async (abs: string): Promise<string | undefined> => {
     if (!fs.existsSync(abs)) return;
     if (isScratchPath(abs)) return;
     if (isIgnoredPath(abs, cwd)) return;
     touched.add(abs);
-
-    // Inline format-on-save: format this file now and fold the result into the
-    // agent's own edit result message. Keeps the agent's view synced to disk
-    // (no re-read) without injecting a separate context entry. The slow
-    // diagnostics + LLM auto-fix still run batched at agent_end.
     try {
       const before = fs.readFileSync(abs, "utf8");
       if (Buffer.byteLength(before) > MAX_FILE_BYTES) return;
       if (!(await formatFile(abs, cwd))) return;
       const after = fs.readFileSync(abs, "utf8");
       if (after === before) return;
-      const note = changeNote(
-        before,
-        after,
-        displayPath(abs, cwd),
-        "auto-formatted",
-      );
-      return { content: [...event.content, { type: "text", text: note }] };
+      return changeNote(before, after, displayPath(abs, cwd), "auto-formatted");
     } catch {
       return;
     }
+  };
+
+  // Inline format-on-save: format each touched file and fold the deltas into
+  // the agent's own tool result, keeping its view synced to disk (no re-read)
+  // without a separate context entry. The slow diagnostics + LLM auto-fix run
+  // batched at agent_end over the same `touched` set.
+  pi.on("tool_result", async (event) => {
+    if (event.isError) return;
+
+    if (!TRACKED_TOOLS.has(event.toolName)) return;
+    const p = extractPath(event.input);
+    if (!p) return;
+    const note = await processFile(toAbs(p, cwd));
+    if (note)
+      return { content: [...event.content, { type: "text", text: note }] };
   });
 
   pi.on("agent_end", async (_event, ctx) => {

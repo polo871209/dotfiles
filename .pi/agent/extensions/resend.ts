@@ -85,7 +85,7 @@ interface AgentContinuable {
 export default function resendExtension(pi: ExtensionAPI): void {
   pi.registerCommand("resend", {
     description:
-      "Resend: re-run the agent on the current transcript (no message appended)",
+      "Re-run the agent on the current transcript (no message appended)",
     handler: async (_args, ctx) => resend(ctx),
   });
 }

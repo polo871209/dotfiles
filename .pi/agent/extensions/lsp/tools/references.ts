@@ -25,7 +25,6 @@ export const referencesTool = defineTool({
   promptSnippet: "List all places that reference a symbol",
   promptGuidelines: anchorGuidelines(
     "Use lsp_references before renaming or changing a function's signature to find every caller.",
-    "lsp_references",
   ),
   parameters: Type.Object({
     file: Type.String({ description: "Absolute or cwd-relative file path." }),

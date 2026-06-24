@@ -1,17 +1,19 @@
 // folder-context — when the agent touches a path via read/edit/write/grep/
 // find/ls, walk from that path's dir up to (but NOT including) the session
-// cwd and inject every ancestor's AGENTS.md (or CLAUDE.md, or README.md).
-// cwd itself is skipped — pi already loads the cwd's AGENTS.md as project
-// context. Paths outside cwd are ignored.
+// cwd and inject every ancestor's AGENTS.md (or CLAUDE.md). cwd itself is
+// skipped — pi already loads the cwd's AGENTS.md as project context. Paths
+// outside cwd are ignored.
 //
-// Priority per dir: AGENTS.md > CLAUDE.md > README.md. A candidate re-injects
-// only if its on-disk mtime changed since last load (picks up edits).
+// Priority per dir: AGENTS.md > CLAUDE.md. README.md is intentionally NOT a
+// candidate — it's unbounded prose, and as steer context it rides every
+// subsequent turn. A candidate re-injects only if its on-disk mtime changed
+// since last load (picks up edits).
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-const CANDIDATES = ["AGENTS.md", "CLAUDE.md", "README.md"] as const;
+const CANDIDATES = ["AGENTS.md", "CLAUDE.md"] as const;
 const TARGET_TOOLS = new Set(["read", "edit", "write", "grep", "find", "ls"]);
 
 export default function (pi: ExtensionAPI) {

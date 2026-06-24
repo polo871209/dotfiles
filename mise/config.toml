@@ -69,7 +69,7 @@ kubens = "latest"
 
 # Formatters / linters / debuggers
 "aqua:bazelbuild/buildtools/buildifier" = "latest"
-"aqua:go-delve/delve" = "latest"
+"go:github.com/go-delve/delve/cmd/dlv" = "latest"
 "aqua:golangci/golangci-lint" = "latest"
 "aqua:hadolint/hadolint" = "latest"
 "aqua:JohnnyMorganz/StyLua" = "latest"
