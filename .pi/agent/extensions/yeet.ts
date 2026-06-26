@@ -11,7 +11,7 @@ import { sideChannelComplete } from "./shared/llm";
 import { collectTextMessages, extractText } from "./shared/message";
 
 const MSG_PROMPT =
-  "Write a Conventional Commits message for the diff. Conversation context (if present) tells you WHY the change was made — use it for intent/scope, but describe only what the diff actually changes. Format: `<type>(<scope>)!: <subject>` where type ∈ {feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert}; scope optional; `!` only for breaking changes. Subject: imperative mood, lowercase, ≤72 chars, no trailing period. Optional body after one blank line only if change is non-obvious; body MAY be multiple newline-separated paragraphs. Optional footers one blank line after body, each `Token: value` or `Token #value`; tokens use `-` instead of spaces (e.g. `Reviewed-by`, `Refs: #123`), except `BREAKING CHANGE` which stays uppercase with a space. No fences, no preamble. Output ONLY the message.";
+  "Write a Conventional Commits message for the diff. Conversation context (if present) tells you WHY the change was made — use it for intent/scope, but describe only what the diff actually changes. Format: `<type>(<scope>)!: <subject>` where type ∈ {feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert}; scope optional; `!` only for breaking changes. Subject: imperative mood, lowercase, ≤72 chars, no trailing period. Optional body after one blank line only if change is non-obvious; body MAY be multiple newline-separated paragraphs. Optional footers one blank line after body, each `Token: value` or `Token #value`; tokens use `-` instead of spaces (e.g. `Reviewed-by`, `Refs: #123`), except `BREAKING CHANGE` which stays uppercase with a space. Recent commit subjects (if present) show this repo's established type/scope vocabulary and phrasing — match them; reuse an existing scope when the change touches the same area rather than inventing a new one. No fences, no preamble. Output ONLY the message.";
 
 const YEET_MSG_TYPE = "yeet-marker";
 
@@ -108,6 +108,19 @@ export default function (pi: ExtensionAPI) {
         .join("\n---\n");
       const convoBlock = convo ? `Conversation context:\n${convo}\n\n` : "";
 
+      // Recent commit subjects so the message matches the repo's established
+      // type/scope vocabulary and phrasing.
+      const log = await git("log", "-10", "--no-merges", "--format=%s");
+      const historyBlock =
+        log.ok && log.out
+          ? `Recent commit subjects (style reference):\n${log.out}\n\n`
+          : "";
+
+      // Branch name often encodes ticket/scope (e.g. feat/auth-xyz).
+      const branch = (await git("symbolic-ref", "--quiet", "--short", "HEAD"))
+        .out;
+      const branchBlock = branch ? `Current branch: ${branch}\n\n` : "";
+
       // 1) Side-channel LLM call for commit message (not in main session).
       const message = await ctx.ui.custom<string | null>(
         (tui, theme, _kb, done) => {
@@ -126,7 +139,7 @@ export default function (pi: ExtensionAPI) {
                   content: [
                     {
                       type: "text",
-                      text: `${hint}${convoBlock}Diffstat:\n${diffstat}\n\nDiff:\n${diffSnippet}`,
+                      text: `${hint}${branchBlock}${historyBlock}${convoBlock}Diffstat:\n${diffstat}\n\nDiff:\n${diffSnippet}`,
                     },
                   ],
                   timestamp: Date.now(),
@@ -189,8 +202,11 @@ export default function (pi: ExtensionAPI) {
       const sha = (await git("rev-parse", "--short", "HEAD")).out;
       const subject = cleanMessage.split("\n")[0];
 
-      // 3) Push.
-      const push = await git("push");
+      // 3) Push. New branches have no upstream yet — retry with --set-upstream.
+      let push = await git("push");
+      if (!push.ok && /no upstream branch|--set-upstream/i.test(push.stderr)) {
+        push = await git("push", "-u", "origin", "HEAD");
+      }
       const pushNote = push.ok
         ? "pushed"
         : `push failed: ${
