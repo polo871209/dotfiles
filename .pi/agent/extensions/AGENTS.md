@@ -44,6 +44,7 @@ Read referenced `.md` files completely and follow their cross-references before 
 ### Workflow shortcuts
 
 - **`resend.ts`** — `/resend` re-runs the agent on the current transcript with nothing appended. For when you abort a prompt mid-stream or it stalls and auto-retry gives up: restarts inference on your message as-is, no duplicate.
+- **`gate.ts`** — `/gate [intent]` spins out a background agent that validates the current branch (intent → rebase → review → lsp diagnostics → test → comment-cleanup → lint, auto-fixing safe issues) and, on a clean verdict, lands the gated result back onto the branch once it's no longer checked out — your checkout stays free to keep working or switch branches meanwhile.
 - **`yeet.ts`** — `/yeet` stages, commits with an auto-written Conventional Commits message (informed by the recent conversation for intent), and pushes.
 - **`copy.ts`** — `/copy-blocks` picks a fenced code block from the last assistant response; `/copy-all` copies the full session as markdown. Built-in `/copy` unchanged.
 - **`auto-rename.ts`** — names the session after 3+ turns. Kills the default `2025-05-24T09-21-…` slugs.
