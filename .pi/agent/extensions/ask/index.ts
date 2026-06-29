@@ -24,7 +24,6 @@ import {
 } from "./schema";
 import { buildItemsForQuestion, QuestionnaireSession } from "./session";
 import type { WrappingSelectItem } from "./widgets";
-import { PAD } from "../shared/config";
 
 const ERROR_NO_UI = "Error: UI not available (running in non-interactive mode)";
 
@@ -103,6 +102,9 @@ export function registerAskUserQuestionTool(pi: ExtensionAPI): void {
         buildItemsForQuestion(q),
       );
 
+      // Inline (non-overlay): replaces the editor instead of floating over the
+      // scrollback, so the conversation stays visible and is pushed up above the
+      // dialog rather than hidden behind it.
       const result = await ctx.ui.custom<QuestionnaireResult>(
         (tui, theme, _kb, done) =>
           new QuestionnaireSession({
@@ -112,17 +114,6 @@ export function registerAskUserQuestionTool(pi: ExtensionAPI): void {
             itemsByTab,
             done,
           }).component,
-        {
-          overlay: true,
-          overlayOptions: {
-            anchor: "bottom-center",
-            width: "100%",
-            maxHeight: "100%",
-            // PAD mirrors the harness gutter so the full-width dialog aligns
-            // with the padded conversation/editor instead of bleeding edge-to-edge.
-            margin: { left: PAD, right: PAD, bottom: 0 },
-          },
-        },
       );
 
       return buildQuestionnaireResponse(result, typed);

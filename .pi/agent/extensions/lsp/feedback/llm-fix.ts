@@ -1,5 +1,8 @@
-// LLM auto-fixer: feed a file + its diagnostics to a side-channel completion,
-// take back the full corrected file, write it if it passes safety checks.
+// LLM last-resort fixer: when deterministic LSP code-actions can't clear an
+// error/warning, feed the file + its diagnostics to a side-channel completion,
+// take back the full corrected file, and write it only if it passes safety
+// checks. This is the ONLY non-deterministic step in the pipeline (see
+// pipeline.ts); it never runs unless a real error/warning survived code-fix.
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import { sideChannelComplete } from "../../shared/llm";
@@ -8,19 +11,22 @@ import type { Diag, Severity } from "./types";
 
 const MAX_FIX_FILES = 5;
 
-export const FIXABLE_SEVERITIES: ReadonlySet<Severity> = new Set([
+// Only errors and warnings engage the LLM. Mechanical info/hint issues (unused
+// imports, ordering, etc.) are left to the deterministic code-actions that ran
+// first, or simply reported. Keeps the LLM focused on what actually needs
+// reasoning and avoids it deleting "unused" code on a whim.
+export const LLM_TARGET_SEVERITIES: ReadonlySet<Severity> = new Set([
   "error",
   "warn",
-  "info",
-  "hint",
 ]);
 
-const FIXER_SYSTEM = `Fix only the listed LSP/lint issues in the file. Change nothing else; preserve all other code, comments, and formatting exactly. Fix the root cause — don't suppress a diagnostic with an ignore/disable directive (\`---@diagnostic\`, \`@ts-ignore\`, \`# noqa\`, etc.). If you can't genuinely resolve an issue, leave it as-is so it stays reported. Output the full corrected file in one fenced code block. No prose.`;
+const FIXER_SYSTEM = `You fix LSP/lint issues in a source file. Resolve EVERY listed issue at its root cause in ONE pass — work through them one by one, reason about what the code is trying to do, and infer missing imports, types, signatures, or fixes from how each symbol is used elsewhere in the file. Make the minimal real change that makes each diagnostic genuinely go away. Do NOT suppress with an ignore/disable directive (\`---@diagnostic\`, \`@ts-ignore\`, \`# noqa\`, etc.). Change nothing unrelated: preserve all other code, comments, and formatting exactly. Leave an issue unfixed if it truly cannot be resolved from this file alone, OR if it concerns a version pin or version mismatch (dependency/package/tool/language version, incompatible/outdated version, "requires version x", version constraint) — never touch versions. Output the full corrected file in one fenced code block. No prose.`;
 
-const groupFixableByFile = (diags: Diag[]): Map<string, Diag[]> => {
+// Group only the LLM-target diagnostics (error/warn) by file.
+const groupTargetsByFile = (diags: Diag[]): Map<string, Diag[]> => {
   const m = new Map<string, Diag[]>();
   for (const d of diags) {
-    if (!FIXABLE_SEVERITIES.has(d.severity)) continue;
+    if (!LLM_TARGET_SEVERITIES.has(d.severity)) continue;
     const arr = m.get(d.file) ?? [];
     arr.push(d);
     m.set(d.file, arr);
@@ -38,8 +44,8 @@ const extractCodeBlock = (text: string): string | null => {
 const countChar = (s: string, c: string) => s.split(c).length - 1;
 
 // Guard against truncated/garbled LLM output clobbering a working file.
-// `=== original` is a legit "nothing to fix" reply, so it passes (the caller
-// skips writing it). null / <90% length / unbalanced braces|parens fail.
+// An identical reply is a legit "nothing to fix" (the caller skips writing it).
+// null / <90% length / unbalanced braces|parens fail.
 const isSafeFix = (original: string, fixed: string | null): fixed is string => {
   if (fixed === null) return false;
   if (fixed === original) return true;
@@ -92,14 +98,14 @@ const runFixerLLM = async (
   return extractCodeBlock(r.text);
 };
 
-// Returns the files written plus their pre-fix content (so the caller can diff
-// old→new for the agent).
+// Run the LLM fixer over each file that still has an error/warning. Returns the
+// files written plus their pre-fix content (so the caller can diff old→new).
 export const applyFixes = async (
   diags: Diag[],
   ctx: ExtensionContext,
   signal: AbortSignal | undefined,
 ): Promise<{ file: string; before: string }[]> => {
-  const targets = Array.from(groupFixableByFile(diags).entries()).slice(
+  const targets = Array.from(groupTargetsByFile(diags).entries()).slice(
     0,
     MAX_FIX_FILES,
   );
@@ -114,11 +120,9 @@ export const applyFixes = async (
     } catch {
       continue;
     }
-    let fixed = await runFixerLLM(file, original, errs, ctx, signal);
-    // A truncated/unbalanced first response is often transient — retry once.
-    if (!isSafeFix(original, fixed)) {
-      fixed = await runFixerLLM(file, original, errs, ctx, signal);
-    }
+    const fixed = await runFixerLLM(file, original, errs, ctx, signal);
+    // Single pass, no retry: a stronger prompt over the full file, not another
+    // round. Unsafe/unchanged output is skipped so it stays reported.
     if (!isSafeFix(original, fixed) || fixed === original) continue;
     try {
       // No backup — user has git. isSafeFix above (length floor, brace

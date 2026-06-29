@@ -332,29 +332,33 @@ function M.rename(file, line, symbol, new_name)
     return { ok = true, files = written, count = #written }
 end
 
--- Async + network-bound linters (semgrep) don't finish inside a pull and
--- leave orphan jobs; skip them here. They run on save in interactive nvim.
-local SLOW_LINTERS = { semgrep = true }
+-- Shared lint/diagnostic helpers on _G.PiLspShared; feedback.lua (loaded after,
+-- into the same nvim) reuses them instead of duplicating.
+_G.PiLspShared = _G.PiLspShared or {}
 
-local function run_fast_lint(bufnr)
+-- Async/network linters (semgrep) leave orphan jobs in a sync pull; skip here.
+_G.PiLspShared.SLOW_LINTERS = { semgrep = true }
+
+function _G.PiLspShared.run_fast_lint(bufnr)
     local ok, lint = pcall(require, 'lint')
     if not ok then return end
     local names = lint.linters_by_ft[vim.bo[bufnr].filetype]
     if not names then return end
     local allowed = {}
     for _, name in ipairs(names) do
-        if not SLOW_LINTERS[name] then table.insert(allowed, name) end
+        if not _G.PiLspShared.SLOW_LINTERS[name] then table.insert(allowed, name) end
     end
     if #allowed == 0 then return end
     pcall(function() lint.try_lint(allowed) end)
 end
 
-local function pull_diagnostics(bufnr)
+-- timeout: max ms to wait for each server's pull response.
+function _G.PiLspShared.pull_diagnostics(bufnr, timeout)
     for _, client in ipairs(vim.lsp.get_clients { bufnr = bufnr }) do
         local caps = client.server_capabilities or {}
         if caps.diagnosticProvider then
             local params = { textDocument = vim.lsp.util.make_text_document_params(bufnr) }
-            pcall(vim.lsp.buf_request_sync, bufnr, 'textDocument/diagnostic', params, 1500)
+            pcall(vim.lsp.buf_request_sync, bufnr, 'textDocument/diagnostic', params, timeout)
         end
     end
 end
@@ -370,21 +374,27 @@ function M.diagnostics(files)
         if type(file) == 'string' and vim.uv.fs_stat(file) then
             local b = open_buf(file)
             table.insert(opened, b)
-            pull_diagnostics(b)
-            run_fast_lint(b)
+            _G.PiLspShared.pull_diagnostics(b, 1500)
+            _G.PiLspShared.run_fast_lint(b)
         end
     end
-    -- Most servers (vtsls, gopls) PUSH diagnostics async after attach rather
-    -- than answering the pull synchronously, and they lag a beat. Wait until
-    -- any buffer reports something, capped — a genuinely clean file just pays
-    -- the cap (still far cheaper than a full tsc).
-    local function any_diags()
+    -- Servers push diagnostics async and lag; across files some report later.
+    -- Wait until the total count stops growing, not just the first buffer, so
+    -- multi-file calls don't drop stragglers. Capped; a clean set pays the cap.
+    local function total_diags()
+        local n = 0
         for _, b in ipairs(opened) do
-            if vim.api.nvim_buf_is_valid(b) and #vim.diagnostic.get(b) > 0 then return true end
+            if vim.api.nvim_buf_is_valid(b) then n = n + #vim.diagnostic.get(b) end
         end
-        return false
+        return n
     end
-    vim.wait(3000, any_diags, 100)
+    local last = -1
+    vim.wait(3000, function()
+        local n = total_diags()
+        if n > 0 and n == last then return true end
+        last = n
+        return false
+    end, 150)
     for _, bufnr in ipairs(opened) do
         if vim.api.nvim_buf_is_valid(bufnr) then
             for _, d in ipairs(vim.diagnostic.get(bufnr)) do

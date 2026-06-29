@@ -25,9 +25,9 @@ cask "logi-options+"
 cask "microsoft-teams"
 cask "obsidian"
 cask "orbstack"
+cask "shottr"
 cask "spotify"
 cask "telegram"
 cask "whatsapp"
 cask "zen"
 mas "PDFgear 2", id: 6469021132
-mas "Xnip", id: 1221250572
