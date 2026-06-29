@@ -14,34 +14,38 @@ local CODEACTION_TIMEOUT_MS = 2000
 local PER_FILE_BUDGET_MS = 4500
 local SETTLE_MS = 1000
 
--- Async + network-bound linters don't finish inside the per-file budget, so
--- their diagnostics land after M.run returns (inconsistent + orphan jobs).
--- Skip here; they run on save in interactive nvim (see plugin/lint.lua).
-local SLOW_LINTERS = {
-    semgrep = true,
-}
-
-local function run_fast_lint(bufnr)
-    local ok, lint = pcall(require, 'lint')
-    if not ok then return end
-    local names = lint.linters_by_ft[vim.bo[bufnr].filetype]
-    if not names then return end
-    local allowed = {}
-    for _, name in ipairs(names) do
-        if not SLOW_LINTERS[name] then table.insert(allowed, name) end
-    end
-    if #allowed == 0 then return end
-    pcall(function() lint.try_lint(allowed) end)
-end
+-- run_fast_lint + pull_diagnostics live on _G.PiLspShared (driver.lua).
+local run_fast_lint = function(bufnr) _G.PiLspShared.run_fast_lint(bufnr) end
 
 local FIXALL_KINDS = {
     'source.fixAll',
     'source.organizeImports',
 }
 
+-- Conservative guard: only apply a code-action whose WorkspaceEdit is confined
+-- to the current buffer's own file. Anything that would touch another file (or
+-- a create/rename/delete file op) is skipped so an on-demand fix never edits
+-- code unrelated to the diagnostic.
+local function edit_is_single_file(workspace_edit, self_file)
+    local function same(uri) return uri ~= nil and vim.uri_to_fname(uri) == self_file end
+    if workspace_edit.documentChanges then
+        for _, change in ipairs(workspace_edit.documentChanges) do
+            if not (change.textDocument and same(change.textDocument.uri)) then return false end
+        end
+        return true
+    elseif workspace_edit.changes then
+        for uri, _ in pairs(workspace_edit.changes) do
+            if not same(uri) then return false end
+        end
+        return true
+    end
+    return false
+end
+
 local function apply_code_actions(bufnr, remaining)
     local clients = vim.lsp.get_clients { bufnr = bufnr }
     if #clients == 0 then return false end
+    local self_file = vim.api.nvim_buf_get_name(bufnr)
     local changed = false
     -- Whole-buffer range. Cursor-based make_range_params yields (0,0)-(0,0)
     -- in headless nvim, which some servers (vtsls, gopls) honor literally
@@ -65,7 +69,7 @@ local function apply_code_actions(bufnr, remaining)
             if ok and results then
                 for _, res in pairs(results) do
                     for _, action in ipairs(res.result or {}) do
-                        if action.edit then
+                        if action.edit and edit_is_single_file(action.edit, self_file) then
                             pcall(vim.lsp.util.apply_workspace_edit, action.edit, enc)
                             changed = true
                         end
@@ -85,16 +89,7 @@ local function try_format(bufnr)
     return vim.api.nvim_buf_get_changedtick(bufnr) ~= before
 end
 
-local function pull_diagnostics(bufnr, remaining)
-    local clients = vim.lsp.get_clients { bufnr = bufnr }
-    for _, client in ipairs(clients) do
-        local caps = client.server_capabilities or {}
-        if caps.diagnosticProvider then
-            local params = { textDocument = vim.lsp.util.make_text_document_params(bufnr) }
-            pcall(vim.lsp.buf_request_sync, bufnr, 'textDocument/diagnostic', params, math.min(1500, remaining()))
-        end
-    end
-end
+local function pull_diagnostics(bufnr, remaining) _G.PiLspShared.pull_diagnostics(bufnr, math.min(1500, remaining())) end
 
 -- Fast, format-only pass for the inline (per-edit) hook. Just conform/LSP
 -- formatting + write; NO diagnostic settle, NO code-actions (those stay in the

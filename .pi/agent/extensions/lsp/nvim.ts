@@ -129,6 +129,16 @@ export const shutdownNvim = (): void => {
 
 export const isRunning = (): boolean => session !== null;
 
+// Serialize lua chunks: `vim.wait` pumps the event loop and can run a second
+// chunk mid-call, mutating shared buffer state. Chain each after the last.
+let queueTail: Promise<unknown> = Promise.resolve();
+const noop = () => {};
+const enqueue = <T>(task: () => Promise<T>): Promise<T> => {
+  const run = queueTail.then(task, task);
+  queueTail = run.then(noop, noop);
+  return run;
+};
+
 // Run arbitrary Lua in the persistent nvim, racing against an abort signal.
 // Code should `return` a JSON-safe value (table, string, number, bool, nil).
 export const callLua = async <T = unknown>(
@@ -139,16 +149,18 @@ export const callLua = async <T = unknown>(
   onProgress?: ProgressFn,
 ): Promise<T> => {
   const client = await getNvim(cwd, onProgress);
-  const call = client.lua(code, args as never) as Promise<T>;
-  if (!signal) return call;
-  if (signal.aborted) throw new Error("aborted");
+  if (signal?.aborted) throw new Error("aborted");
+  const exec = enqueue(() => client.lua(code, args as never) as Promise<T>);
+  if (!signal) return exec;
+  // Abort just stops awaiting: the queued lua can't be cancelled and runs to
+  // completion in nvim (bounded by lua-side budgets).
   return new Promise<T>((resolve, reject) => {
     const onAbort = () => {
       signal.removeEventListener("abort", onAbort);
       reject(new Error("aborted"));
     };
     signal.addEventListener("abort", onAbort, { once: true });
-    call.then(
+    exec.then(
       (v) => {
         signal.removeEventListener("abort", onAbort);
         resolve(v);

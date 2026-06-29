@@ -196,8 +196,7 @@ export interface QuestionnaireResult {
 // semantic guards only; no_ui stays inline at the call site.
 
 export type ValidationResult =
-  | { ok: true }
-  | { ok: false; error: QuestionnaireError; message: string };
+  { ok: true } | { ok: false; error: QuestionnaireError; message: string };
 
 export function validateQuestionnaire(typed: QuestionParams): ValidationResult {
   if (typed.questions.length === 0) {
@@ -289,8 +288,11 @@ export function formatAnswerScalar(
   }
 }
 
-function buildAnswerSegment(a: QuestionAnswer): string {
-  return `"${a.question}"="${formatAnswerScalar(a, "envelope")}".`;
+function buildAnswerSegment(a: QuestionAnswer, echoQuestion: boolean): string {
+  const answer = formatAnswerScalar(a, "envelope");
+  // Single-question calls: the question is still fresh in the agent's context
+  // (it emitted the tool call this turn), so echoing it back is dead tokens.
+  return echoQuestion ? `"${a.question}"="${answer}"` : answer;
 }
 
 export function buildToolResult(text: string, details: QuestionnaireResult) {
@@ -308,9 +310,10 @@ export function buildQuestionnaireResponse(
     });
   }
   const segments: string[] = [];
+  const echoQuestion = params.questions.length > 1;
   for (let i = 0; i < params.questions.length; i++) {
     const a = result.answers.find((x) => x.questionIndex === i);
-    if (a) segments.push(buildAnswerSegment(a));
+    if (a) segments.push(buildAnswerSegment(a, echoQuestion));
   }
   if (segments.length === 0) {
     return buildToolResult(DECLINE_MESSAGE, {

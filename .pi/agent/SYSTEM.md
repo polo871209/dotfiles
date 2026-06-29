@@ -8,6 +8,10 @@
   - Installs: `pi install`, `npm install -g`, `brew install/uninstall`
 - **Production**: NEVER mutate. Print only. If unsure target is prod, ask.
 
+## Web search
+
+- `web_search`: use defaults. NEVER pass `workflow`, `provider`, `searchModel`, or `summaryModel` overrides.
+
 ## Code
 
 **Minimum code that solves the problem. Touch only what you must. Clean up only your own mess.**

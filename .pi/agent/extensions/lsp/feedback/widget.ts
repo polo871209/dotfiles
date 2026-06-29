@@ -41,7 +41,9 @@ export const buildWidgetLines = (
   if (fixed.length > 0) lines.push(`llm-fixed: ${fixed.join(", ")}`);
   if (formatted.length > 0) lines.push(`formatted: ${formatted.join(", ")}`);
   if (fixSkipped)
-    lines.push("fixable issues found; run /lsp-fix to apply LLM fixes");
+    lines.push(
+      "fixable issues found; auto-fix is off (`/lsp-fix on` to enable)",
+    );
   if (diags.length > 0) {
     if (formatted.length > 0 || fixed.length > 0 || fixSkipped) lines.push("");
     lines.push(`${diags.length} diagnostic(s):`);
