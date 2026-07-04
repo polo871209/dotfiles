@@ -1,0 +1,23 @@
+#!/usr/bin/env zsh
+# Rename each herdr tab after its running command, falling back to "zsh" when idle.
+# Sourced from .zshrc; renames run detached to avoid prompt latency.
+if [[ "$HERDR_ENV" == 1 && -n "$HERDR_TAB_ID" ]] && command -v herdr >/dev/null 2>&1; then
+  autoload -Uz add-zsh-hook
+  typeset -g _herdr_tab_name=""
+
+  _herdr_rename() {
+    [[ "$1" == "$_herdr_tab_name" ]] && return
+    _herdr_tab_name="$1"
+    herdr tab rename "$HERDR_TAB_ID" "$1" >/dev/null 2>&1 &!
+  }
+
+  _herdr_preexec() {
+    local cmd="${${1%% *}:t}"
+    [[ -n "$cmd" ]] && _herdr_rename "$cmd"
+  }
+
+  _herdr_precmd() { _herdr_rename "zsh" }
+
+  add-zsh-hook preexec _herdr_preexec
+  add-zsh-hook precmd _herdr_precmd
+fi

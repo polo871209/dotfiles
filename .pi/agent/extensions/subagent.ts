@@ -19,9 +19,11 @@
 // stream (tool_execution_start/end, message_end) and can render a live TUI
 // while the agent works.
 
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
+import { promisify } from "node:util";
 import {
   getAgentDir,
   getMarkdownTheme,
@@ -154,6 +156,42 @@ const trySignal = (
   }
 };
 
+const execFileAsync = promisify(execFile);
+
+// Herdr-aware execution: when running inside herdr, spawn the subagent as a
+// real interactive pi in its own pane instead of a headless JSON subprocess.
+// Trades the per-tool live widget for a pane you can watch/scroll/intervene
+// in directly; completion and status come from herdr's own pi integration
+// (herdr-agent-state.ts loads inside that pane too) instead of parsed JSON
+// events.
+const HERDR_POLL_MS = 1000;
+
+function herdrActive(): boolean {
+  return process.env.HERDR_ENV === "1" && !!process.env.HERDR_WORKSPACE_ID;
+}
+
+async function herdrJson<T>(args: string[]): Promise<T | undefined> {
+  try {
+    const { stdout } = await execFileAsync("herdr", args, {
+      timeout: 10_000,
+    });
+    return JSON.parse(stdout) as T;
+  } catch {
+    return undefined;
+  }
+}
+
+async function herdrRun(args: string[]): Promise<boolean> {
+  try {
+    await execFileAsync("herdr", args, { timeout: 10_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 function expandToolPatterns(patterns: string[], allNames: string[]): string[] {
   const out = new Set<string>();
   for (const p of patterns) {
@@ -172,8 +210,19 @@ function expandToolPatterns(patterns: string[], allNames: string[]): string[] {
   return [...out];
 }
 
+function loadDefaultSystemPrompt(): string {
+  try {
+    return fs
+      .readFileSync(path.join(getAgentDir(), "SYSTEM.md"), "utf-8")
+      .trim();
+  } catch {
+    return "";
+  }
+}
+
 function loadAgents(): AgentConfig[] {
   if (!fs.existsSync(AGENTS_DIR)) return [];
+  const defaultSystemPrompt = loadDefaultSystemPrompt();
   const out: AgentConfig[] = [];
   for (const entry of fs.readdirSync(AGENTS_DIR)) {
     if (!entry.endsWith(".md")) continue;
@@ -202,7 +251,12 @@ function loadAgents(): AgentConfig[] {
       thinking: frontmatter.thinking || undefined,
       idleTimeoutMs: secsToMs(frontmatter.idleTimeout),
       maxDurationMs: secsToMs(frontmatter.maxDuration),
-      systemPrompt: body.trim(),
+      // Default rules first so the agent's own body can override where it
+      // must (e.g. worker can't use ask_user_question, so it overrides the
+      // ambiguity rule).
+      systemPrompt: [defaultSystemPrompt, body.trim()]
+        .filter(Boolean)
+        .join("\n\n---\n\n"),
     });
   }
   return out;
@@ -415,6 +469,230 @@ const initialProgress = (
   output: "",
 });
 
+function toolsFlagValue(
+  agent: AgentConfig,
+  pi: ExtensionAPI,
+): string | undefined {
+  if (agent.tools.length === 0) return undefined;
+  const expanded = expandToolPatterns(
+    agent.tools,
+    pi.getAllTools().map((t) => t.name),
+  );
+  return expanded.length > 0 ? expanded.join(",") : undefined;
+}
+
+// Run a subagent as a real interactive pi inside its own herdr pane. Status
+// comes from herdr's own pi integration (herdr-agent-state.ts loads inside
+// that pane too, reporting working/blocked/idle for it same as any other pi
+// session) instead of a parsed JSON event stream.
+async function runInHerdr(
+  pi: ExtensionAPI,
+  agent: AgentConfig,
+  task: string,
+  cwd: string,
+  progress: Progress,
+  push: () => void,
+  signal: AbortSignal | undefined,
+): Promise<{
+  content: { type: "text"; text: string }[];
+  details: Progress;
+  error?: string;
+}> {
+  const target = `sub-${agent.name}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+
+  const sysFile = path.join(os.tmpdir(), `pi-subagent-sys-${target}.txt`);
+  const taskFile = path.join(os.tmpdir(), `pi-subagent-task-${target}.txt`);
+  fs.writeFileSync(sysFile, agent.systemPrompt, "utf-8");
+  fs.writeFileSync(taskFile, task, "utf-8");
+  const cleanupFiles = () => {
+    try {
+      fs.unlinkSync(sysFile);
+    } catch {
+      /* best effort */
+    }
+    try {
+      fs.unlinkSync(taskFile);
+    } catch {
+      /* best effort */
+    }
+  };
+
+  const toolsFlag = toolsFlagValue(agent, pi);
+  const parts = [
+    "pi",
+    "--no-session",
+    "--no-context-files",
+    `--system-prompt "$(cat '${sysFile}')"`,
+  ];
+  if (toolsFlag) parts.push(`--tools ${toolsFlag}`);
+  if (agent.model) parts.push(`--model ${agent.model}`);
+  if (agent.thinking) parts.push(`--thinking ${agent.thinking}`);
+  parts.push(`"$(cat '${taskFile}')"`);
+  const shCmd = parts.join(" ");
+
+  // `agent start` runs the command as the pane's native process from
+  // creation — unlike `pane split` + `pane run`, there's no race against a
+  // fresh shell not being ready yet to receive a second, separately-typed
+  // command.
+  const startResp = await herdrJson<Record<string, any>>([
+    "agent",
+    "start",
+    target,
+    "--workspace",
+    process.env.HERDR_WORKSPACE_ID!,
+    "--tab",
+    process.env.HERDR_TAB_ID!,
+    "--cwd",
+    cwd,
+    "--split",
+    "right",
+    "--env",
+    "PI_IS_SUBAGENT=1",
+    "--no-focus",
+    "--",
+    "zsh",
+    "-lc",
+    shCmd,
+  ]);
+
+  const paneId: string | undefined = startResp?.result?.agent?.pane_id;
+
+  if (!paneId) {
+    cleanupFiles();
+    progress.status = "failed";
+    progress.error = "herdr agent start failed";
+    return {
+      content: [
+        {
+          type: "text",
+          text: `subagent '${agent.name}' failed — could not open herdr pane`,
+        },
+      ],
+      details: { ...progress },
+      error: `Subagent ${agent.name}: herdr agent start failed`,
+    };
+  }
+
+  // Split defaults to 50/50; shrink the new pane to ~30% (--direction right
+  // grows the original/first pane, shrinking the second/new one).
+  await herdrRun([
+    "pane",
+    "resize",
+    "--direction",
+    "right",
+    "--amount",
+    "0.2",
+    "--pane",
+    paneId,
+  ]);
+
+  let seenWorking = false;
+  let aborted = false;
+  const onAbort = () => {
+    aborted = true;
+  };
+  if (signal?.aborted) onAbort();
+  else signal?.addEventListener("abort", onAbort, { once: true });
+
+  const maxMs = agent.maxDurationMs ?? DEFAULT_MAX_DURATION_MS;
+  let finalStatus: "idle" | "blocked" | "timeout" | "aborted" = "idle";
+
+  while (true) {
+    if (aborted) {
+      finalStatus = "aborted";
+      break;
+    }
+    if (Date.now() - progress.startedAt > maxMs) {
+      finalStatus = "timeout";
+      break;
+    }
+
+    const info = await herdrJson<Record<string, any>>(["pane", "get", paneId]);
+    const status: string | undefined = info?.result?.pane?.agent_status;
+    if (status === "working") seenWorking = true;
+    progress.lastMessage = status ? `herdr: ${status}` : "herdr: starting…";
+    push();
+
+    if (seenWorking && status === "idle") {
+      finalStatus = "idle";
+      break;
+    }
+    if (status === "blocked") {
+      finalStatus = "blocked";
+      break;
+    }
+    if (!status && seenWorking) {
+      finalStatus = "idle"; // pane/agent vanished after having started
+      break;
+    }
+
+    await sleep(HERDR_POLL_MS);
+  }
+
+  progress.durationMs = Date.now() - progress.startedAt;
+
+  if (finalStatus === "aborted" || finalStatus === "timeout") {
+    await herdrRun(["pane", "send-keys", paneId, "ctrl+c"]);
+    await sleep(300);
+    await herdrRun(["pane", "close", paneId]);
+    cleanupFiles();
+    progress.status = "failed";
+    progress.error =
+      finalStatus === "timeout"
+        ? `timed out after ${formatDuration(maxMs)} (wall clock)`
+        : "aborted by parent";
+    return {
+      content: [
+        { type: "text", text: `subagent '${agent.name}' ${progress.error}` },
+      ],
+      details: { ...progress },
+      error: `Subagent ${agent.name}: ${progress.error}`,
+    };
+  }
+
+  // "visible" only returns what currently fits on screen — wrong here since
+  // the answer can scroll off during a long run. By now real scrollback has
+  // accumulated, so "recent-unwrapped" (unlike right after pane creation) works.
+  const readResp = await herdrJson<Record<string, any>>([
+    "pane",
+    "read",
+    paneId,
+    "--source",
+    "recent-unwrapped",
+    "--lines",
+    "400",
+  ]);
+  const rawOutput: string =
+    readResp?.result?.text ?? readResp?.result?.content ?? "";
+  const finalText = headTruncate(rawOutput.trim(), MAX_OUTPUT_BYTES);
+  cleanupFiles();
+
+  if (finalStatus === "blocked") {
+    progress.status = "failed";
+    progress.error =
+      "subagent pane is blocked — needs manual attention (left open for review)";
+    progress.output = finalText;
+    return {
+      content: [
+        {
+          type: "text",
+          text: `subagent '${agent.name}' is blocked in herdr pane ${paneId} — check it directly.\n${finalText}`,
+        },
+      ],
+      details: { ...progress },
+      error: `Subagent ${agent.name}: blocked, see pane ${paneId}`,
+    };
+  }
+
+  await herdrRun(["pane", "close", paneId]);
+  progress.status = "done";
+  progress.output = finalText;
+  return {
+    content: [{ type: "text", text: finalText }],
+    details: { ...progress },
+  };
+}
+
 export default function (pi: ExtensionAPI) {
   if (process.env.PI_IS_SUBAGENT === "1") return;
 
@@ -477,6 +755,18 @@ export default function (pi: ExtensionAPI) {
         });
       };
       const push = throttle(pushNow, UPDATE_INTERVAL_MS);
+
+      if (herdrActive()) {
+        return await runInHerdr(
+          pi,
+          agent,
+          args.task,
+          ctx.cwd,
+          progress,
+          push,
+          signal,
+        );
+      }
 
       // Periodic tick: refresh the duration display and run the watchdogs.
       const onTick = () => {

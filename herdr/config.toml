@@ -1,0 +1,60 @@
+onboarding = false
+
+[theme]
+name = "gruvbox"
+
+[theme.custom]
+accent = "#b4befe" # lavender
+
+[terminal]
+new_cwd = "~/dotfiles" # also the empty-state spawn dir
+shell_mode = "auto"    # login shells on macOS
+
+[keys]
+close_pane = "prefix+x"
+close_tab = "prefix+ampersand"
+copy_mode = "prefix+["
+split_horizontal = "prefix+minus"
+
+toggle_sidebar = "prefix+b"
+workspace_picker = "prefix+s"
+settings = ""                 # freed for workspace_picker
+
+# zoxide workspace picker
+[[keys.command]]
+key = "prefix+k"
+type = "pane"
+command = "~/.config/herdr/sesh"
+description = "zoxide workspace picker"
+
+# lazygit
+[[keys.command]]
+key = "prefix+l"
+type = "pane"
+command = "lazygit"
+description = "lazygit"
+
+# URL picker: fzf over the focused pane's output
+
+[[keys.command]]
+key = "prefix+u"
+type = "pane"
+command = "urls=$(herdr pane read \"$HERDR_ACTIVE_PANE_ID\" --source recent-unwrapped --lines 200 | grep -oE '(https?|ftp|file)://[-A-Za-z0-9+&@#/%?=~_|!:,.;]*[-A-Za-z0-9+&@#/%=~_|]' | awk '!seen[$0]++' | tail -r); [ -n \"$urls\" ] || exit 0; choice=$(printf '%s\\n' \"$urls\" | fzf --no-preview --prompt '> '); [ -n \"$choice\" ] || exit 0; printf '%s\\n' \"$choice\" | while IFS= read -r u; do open \"$u\"; done"
+description = "pick a URL from pane output"
+
+[ui]
+sidebar_width = 20
+sidebar_min_width = 14
+mouse_capture = true
+pane_gaps = false
+prompt_new_tab_name = false
+sidebar_collapsed_mode = "hidden"
+
+[ui.sound]
+enabled = true
+
+[ui.toast]
+delivery = "herdr"
+
+[ui.toast.herdr]
+position = "bottom-right"

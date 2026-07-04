@@ -1,9 +1,8 @@
-// Customizes pi TUI: padding, input text color, slim footer, pins the
-// editor (and its overlay autocomplete) to the bottom of the viewport
-// even when the conversation is short, and renders the autocomplete
-// dropdown as a floating overlay above the editor — the dropdown
-// covers the conversation lines underneath instead of pushing the
-// editor up or reserving a permanent gap.
+// Customizes pi TUI: input text color, slim footer, pins the editor to the
+// bottom of the viewport even when the conversation is short, and renders the
+// autocomplete dropdown as a floating overlay above the editor — the dropdown
+// covers the conversation lines underneath instead of pushing the editor up or
+// reserving a permanent gap.
 import {
   CustomEditor,
   type ExtensionAPI,
@@ -20,21 +19,15 @@ import {
   visibleWidth,
 } from "@earendil-works/pi-tui";
 
-import { PAD } from "./shared/config";
-
-// Pi reloads extensions with moduleCache:false, so this module's
-// top-level state is re-bound on /new while the prototype patch from
-// the first load stays in place. Stash the editor reference on the
-// TUI instance itself so the patch always reads the live binding,
-// not a stale module-local variable.
+// Pi reloads extensions with moduleCache:false, so this module's top-level
+// state is re-bound on /new while the prototype patch from the first load stays
+// in place. Stash the editor reference on the TUI instance itself so the patch
+// always reads the live binding, not a stale module-local variable.
 const PINNED_EDITOR_KEY = "__piPinnedEditor";
 
-const getPinnedEditor = (tui: TUI): Component | null => {
-  return (
-    (tui as unknown as Record<string, Component | null>)[PINNED_EDITOR_KEY] ??
-    null
-  );
-};
+const getPinnedEditor = (tui: TUI): Component | null =>
+  (tui as unknown as Record<string, Component | null>)[PINNED_EDITOR_KEY] ??
+  null;
 
 const setPinnedEditor = (tui: TUI, editor: Component): void => {
   (tui as unknown as Record<string, Component | null>)[PINNED_EDITOR_KEY] =
@@ -49,38 +42,22 @@ const containsComponent = (node: Component, target: Component): boolean => {
   return false;
 };
 
-const RESET = "\x1b[0m";
-const BORDER = /^(?:\x1b\[[0-9;]*m)*[─ ↑↓0-9more]+(?:\x1b\[[0-9;]*m)*$/;
-
-const colorInputLine = (line: string, theme: PiTheme) => {
-  if (BORDER.test(line)) return line;
-  const input = theme.getFgAnsi("text");
-  return `${input}${line.replaceAll(RESET, `${RESET}${input}`)}${RESET}`;
-};
-
-// Patch TUI.render to: (1) reserve PAD columns of horizontal padding,
-// (2) split children at the editor and fill the gap above it with
-// blank lines so the editor (and overlay anchored bottom-left of the
-// terminal) sits at the bottom of the viewport even on a fresh
-// session. As the conversation grows the filler shrinks to 0 and the
-// normal scrolling behavior takes over.
-const installPaddingPatch = () => {
+// Patch TUI.render to split children at the editor and fill the gap above it
+// with blank lines so the editor (and its bottom-anchored autocomplete overlay)
+// sits at the bottom of the viewport even on a fresh session. As the
+// conversation grows the filler shrinks to 0 and normal scrolling takes over.
+const installBottomPinPatch = () => {
   const proto = TUI.prototype as unknown as {
     render(width: number): string[];
     children: Component[];
     terminal: { rows: number; columns: number };
-    __padded?: boolean;
+    __bottomPinned?: boolean;
   };
 
-  if (proto.__padded) return;
-
-  proto.__padded = true;
+  if (proto.__bottomPinned) return;
+  proto.__bottomPinned = true;
   const origRender = proto.render;
   proto.render = function (width: number): string[] {
-    const inner = Math.max(1, width - 2 * PAD);
-    const pad = " ".repeat(PAD);
-
-    let lines: string[];
     const editor = getPinnedEditor(this as unknown as TUI);
     let editorIdx = -1;
     if (editor) {
@@ -92,29 +69,31 @@ const installPaddingPatch = () => {
       }
     }
 
-    if (editorIdx > 0) {
-      const before: string[] = [];
-      for (let i = 0; i < editorIdx; i++) {
-        before.push(...this.children[i].render(inner));
-      }
-      const rest: string[] = [];
-      for (let i = editorIdx; i < this.children.length; i++) {
-        rest.push(...this.children[i].render(inner));
-      }
-      const filler = Math.max(
-        0,
-        this.terminal.rows - before.length - rest.length,
-      );
-      lines =
-        filler > 0
-          ? [...before, ...new Array<string>(filler).fill(""), ...rest]
-          : [...before, ...rest];
-    } else {
-      lines = origRender.call(this, inner);
-    }
+    if (editorIdx <= 0) return origRender.call(this, width);
 
-    return lines.map((l: string) => pad + l);
+    const before: string[] = [];
+    for (let i = 0; i < editorIdx; i++)
+      before.push(...this.children[i].render(width));
+    const rest: string[] = [];
+    for (let i = editorIdx; i < this.children.length; i++)
+      rest.push(...this.children[i].render(width));
+    const filler = Math.max(
+      0,
+      this.terminal.rows - before.length - rest.length,
+    );
+    return filler > 0
+      ? [...before, ...new Array<string>(filler).fill(""), ...rest]
+      : [...before, ...rest];
   };
+};
+
+const RESET = "\x1b[0m";
+const BORDER = /^(?:\x1b\[[0-9;]*m)*[─ ↑↓0-9more]+(?:\x1b\[[0-9;]*m)*$/;
+
+const colorInputLine = (line: string, theme: PiTheme) => {
+  if (BORDER.test(line)) return line;
+  const input = theme.getFgAnsi("text");
+  return `${input}${line.replaceAll(RESET, `${RESET}${input}`)}${RESET}`;
 };
 
 // Render the autocomplete dropdown as a floating overlay above the
@@ -176,10 +155,8 @@ const syncOverlay = (editor: EditorWithOverlay, editorHeight: number) => {
       if (s.handle) s.handle.hide();
       const termWidth = tui.terminal.columns;
       const overlayMaxHeight = (editor.autocompleteMaxVisible ?? 5) + 1;
-      // Match TUI's horizontal padding so the overlay aligns with the
-      // editor's content columns.
-      const overlayCol = PAD;
-      const overlayWidth = Math.max(1, termWidth - 2 * PAD);
+      const overlayCol = 0;
+      const overlayWidth = termWidth;
       // Anchor bottom-left and lift by (footer + editor height) so the
       // overlay's bottom edge sits one row above the editor regardless
       // of how many items the list currently renders. TUI re-runs anchor
@@ -337,7 +314,7 @@ const installFooter = (pi: ExtensionAPI) => {
   });
 };
 
-installPaddingPatch();
+installBottomPinPatch();
 installAutocompleteAbovePatch();
 
 export default function (pi: ExtensionAPI) {

@@ -100,7 +100,6 @@ alias o="open ."
 alias oc="opencode --port --continue"
 p() { clear; command pi --continue "$@"; clear; }
 alias pwd='printf %s "$PWD" | pbcopy'
-alias st="tmux source-file ${XDG_CONFIG_HOME:-$HOME}/tmux/tmux.conf"
 alias sz="source ${ZDOTDIR:-$HOME}/.zshrc"
 alias tf="terraform"
 alias up="brew update && brew upgrade -y && brew cleanup && mise upgrade && mise prune -y && pi update && pi update --extensions"
@@ -149,5 +148,12 @@ _eval_cache direnv   direnv   ""  direnv hook zsh
 _eval_cache zoxide   zoxide   ""  zoxide init zsh
 _eval_cache atuin    atuin    ""  atuin init zsh
 unfunction _eval_cache
+
+# herdr: auto-rename tabs to the running command, then build the π/nvim/zsh
+# layout on a fresh workspace (bootstrap execs pi if so)
+if [[ "$HERDR_ENV" == 1 ]]; then
+  source "${XDG_CONFIG_HOME:-$HOME/.config}/herdr/tab-autoname"
+  source "${XDG_CONFIG_HOME:-$HOME/.config}/herdr/bootstrap"
+fi
 
 eval "$(oh-my-posh init zsh --config "${XDG_CONFIG_HOME}/ohmyposh/config.yaml")"

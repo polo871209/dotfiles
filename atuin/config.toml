@@ -119,25 +119,25 @@ workspaces = true
 ## For details on the supported regular expression syntax, see
 ## https://docs.rs/regex/latest/regex/#syntax
 history_filter = [
-  # Screen clearing — no value in history
-  "^cls$",
-  "^clear$",
+	# Screen clearing — no value in history
+	"^cls$",
+	"^clear$",
 
-  # Bare directory listing with no useful args
-  "^ls$",
-  "^ls -la?$",
+	# Bare directory listing with no useful args
+	"^ls$",
+	"^ls -la?$",
 
-  # Navigation noise
-  "^cd$",
-  "^cd \\.\\.$",
-  "^cd -$",
-  "^pwd$",
+	# Navigation noise
+	"^cd$",
+	"^cd \\.\\.$",
+	"^cd -$",
+	"^pwd$",
 
-  # Bare zoxide with no destination
-  "^z$",
+	# Bare zoxide with no destination
+	"^z$",
 
-  # Bare commands with 1-3 chars and no args — aliases not worth searching back for
-  "^.{1,3}$",
+	# Bare commands with 1-3 chars and no args — aliases not worth searching back for
+	"^.{1,3}$",
 ]
 
 ## prevent commands run with cwd matching any of these regexes from being written
@@ -231,7 +231,6 @@ enter_accept = true
 #   "podman",
 #   "port",
 #   "systemctl",
-#   "tmux",
 #   "yarn",
 # ]
 
@@ -318,22 +317,6 @@ autostart = true
 ## Default filter mode can be overridden with the filter_mode setting.
 filters = ["global", "workspace"]
 
-[tmux]
-## Enable using atuin with tmux popup (requires tmux >= 3.2)
-## When enabled and running inside tmux, Atuin will use a popup window for interactive search.
-## Set to false to disable the popup.
-## This can also be controlled with the ATUIN_TMUX_POPUP environment variable.
-## Note: tmux popup is currently supported in zsh, bash, and fish shells.
-enabled = false
-
-## Width of the tmux popup window
-## Can be a percentage, or integer (e.g. "100" means 100 characters wide)
-# width = "95%"
-
-## Height of the tmux popup window
-## Can be a percentage, or integer (e.g. "100" means 100 lines tall)
-# height = "95%"
-
 [ui]
 ## Columns to display in the interactive search, from left to right.
 ## The selection indicator (" > ") is always shown first implicitly.
@@ -383,6 +366,6 @@ enabled = false
 [keymap.emacs]
 # When cursor is already at the start, copy the selected command instead of exiting
 "left" = [
-  { when = "cursor-at-start", action = "copy" },
-  { action = "cursor-left" },
+	{ when = "cursor-at-start", action = "copy" },
+	{ action = "cursor-left" },
 ]

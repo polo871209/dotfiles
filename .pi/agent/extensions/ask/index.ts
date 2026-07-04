@@ -105,16 +105,25 @@ export function registerAskUserQuestionTool(pi: ExtensionAPI): void {
       // Inline (non-overlay): replaces the editor instead of floating over the
       // scrollback, so the conversation stays visible and is pushed up above the
       // dialog rather than hidden behind it.
-      const result = await ctx.ui.custom<QuestionnaireResult>(
-        (tui, theme, _kb, done) =>
-          new QuestionnaireSession({
-            tui,
-            theme,
-            params: typed,
-            itemsByTab,
-            done,
-          }).component,
-      );
+      pi.events.emit("herdr:blocked", {
+        active: true,
+        label: "awaiting your answer",
+      });
+      let result: QuestionnaireResult;
+      try {
+        result = await ctx.ui.custom<QuestionnaireResult>(
+          (tui, theme, _kb, done) =>
+            new QuestionnaireSession({
+              tui,
+              theme,
+              params: typed,
+              itemsByTab,
+              done,
+            }).component,
+        );
+      } finally {
+        pi.events.emit("herdr:blocked", { active: false });
+      }
 
       return buildQuestionnaireResponse(result, typed);
     },
