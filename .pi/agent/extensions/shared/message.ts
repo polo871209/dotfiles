@@ -1,7 +1,7 @@
 // Shared helpers for extracting text from pi message content and walking
 // session branches. Used by extensions that build side-channel LLM payloads
 // (auto-rename, btw, copy, subagent, yeet, lsp-feedback).
-import type { Message } from "@earendil-works/pi-ai";
+import type { Message } from "@earendil-works/pi-ai/compat";
 
 // Pi messages carry content as either a plain string or an array of typed
 // parts. This pulls text-typed parts out and joins with newlines.

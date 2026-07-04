@@ -1,6 +1,8 @@
-// /subagent — delegate work to an isolated `pi` child process. Single-layer
-// only: agents cannot spawn other subagents (PI_IS_SUBAGENT=1 in the child
-// env makes this extension early-exit before registering its tool).
+// /subagent — delegate work to an isolated `pi` running as a real interactive
+// agent inside its own herdr pane. Single-layer only: agents cannot spawn
+// other subagents (PI_IS_SUBAGENT=1 in the child env makes this extension
+// early-exit before registering its tool). Herdr-only: outside herdr there is
+// no pane to run the child in, so the tool is not registered at all.
 //
 // Agents live in pi's standard agents dir (`~/.pi/agent/agents/*.md`) as
 // markdown with YAML frontmatter:
@@ -10,16 +12,15 @@
 //   tools: read, grep, find, ls       # optional --tools allowlist
 //   model: anthropic/claude-haiku-4-5  # optional
 //   thinking: low                      # optional
-//   idleTimeout: 120                   # optional, seconds (stall watchdog)
 //   maxDuration: 600                   # optional, seconds (wall-clock cap)
 //   ---
 //   <system prompt body>
 //
-// Child is invoked with `--mode json -p` so we receive a structured event
-// stream (tool_execution_start/end, message_end) and can render a live TUI
-// while the agent works.
+// Status comes from herdr's own pi integration (herdr-agent-state.ts loads
+// inside the child pane too, reporting working/blocked/idle for it same as
+// any other pi session) instead of a parsed JSON event stream.
 
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -40,7 +41,6 @@ import {
   visibleWidth,
 } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { extractText } from "./shared/message";
 
 interface AgentConfig {
   name: string;
@@ -48,16 +48,8 @@ interface AgentConfig {
   tools: string[];
   model?: string;
   thinking?: string;
-  idleTimeoutMs?: number;
   maxDurationMs?: number;
   systemPrompt: string;
-}
-
-interface ToolEvent {
-  toolCallId: string;
-  name: string;
-  argsPreview: string;
-  status: "running" | "done";
 }
 
 interface Progress {
@@ -67,107 +59,26 @@ interface Progress {
   status: "running" | "done" | "failed";
   startedAt: number;
   durationMs: number;
-  tools: ToolEvent[];
   lastMessage: string;
   output: string;
   error?: string;
 }
 
 const AGENTS_DIR = path.join(getAgentDir(), "agents");
-// Off-by-default lifecycle tracing. Set PI_SUBAGENT_DEBUG=1 to append JSONL
-// state transitions to the log below; inspect it after a stuck run to see which
-// stall class fired (live-hang: no clean stop + child alive + a tool still
-// running, vs. post-stop pipe-hold: cleanStopSeen + !childExited + pipes
-// unended). No behavior change — purely observational.
-const DEBUG = process.env.PI_SUBAGENT_DEBUG === "1";
-const DEBUG_LOG = path.join(getAgentDir(), "logs", "subagent-debug.jsonl");
-const HEARTBEAT_MS = 15_000;
-const dbg = (fields: Record<string, unknown>): void => {
-  if (!DEBUG) return;
-  try {
-    fs.mkdirSync(path.dirname(DEBUG_LOG), { recursive: true });
-    fs.appendFileSync(
-      DEBUG_LOG,
-      JSON.stringify({ t: new Date().toISOString(), ...fields }) + "\n",
-    );
-  } catch {
-    /* logging is best-effort */
-  }
-};
 const MAX_OUTPUT_BYTES = 32 * 1024;
 const UPDATE_INTERVAL_MS = 150;
-// 1s: the tick only refreshes the elapsed-time display; a faster cadence just
-// repaints the widget for a cosmetic timer and adds flicker.
-const TICK_INTERVAL_MS = 1000;
-// A grandchild (nvim/kernel) can keep the child's stdio pipe open after the
-// child exits, so the ChildProcess `close` event (process end + stdio closed)
-// would never fire. We resolve only on `close`, and a post-exit stdio guard
-// guarantees it: once the child exits, destroy the parent's unended pipe
-// handles after STDIO_IDLE_MS of quiet (or the STDIO_HARD_MS cap for a chatty
-// grandchild), which forces `close`.
-const STDIO_IDLE_MS = 2000;
-const STDIO_HARD_MS = 8000;
-// A pi child can print its terminal assistant message yet linger without
-// exiting. After a clean stop: grace, then SIGTERM → SIGKILL. A kill we issue
-// here is success drainage, NOT a failure (see classification below).
-const FINAL_STOP_GRACE_MS = 1000;
-const FINAL_HARD_KILL_MS = 3000;
-// Watchdogs for a child that hangs while still alive (the unhandled stall
-// class). Two independent guards:
-//   - idle: no JSON event AND no tool in flight for this long → a model/loop
-//     stall. Gated on "no tool running" so a legitimately slow tool (a long
-//     build/test emits start, then silence until end) is never false-killed.
-//   - wall-clock: absolute cap that also catches a genuinely hung tool or a
-//     runaway tool loop. Generous so real long agents finish.
-// Both overridable per-agent via frontmatter (idleTimeout / maxDuration, secs).
-const DEFAULT_IDLE_TIMEOUT_MS = 120_000;
-const DEFAULT_MAX_DURATION_MS = 600_000;
-const ARG_PREVIEW_MAX = 60;
-// Keep the live widget short: a tall component redrawn every tick flickers and
-// buries the conversation. Cap visible tool rows (tail while running) and the
-// echoed task.
-const MAX_VISIBLE_TOOLS = 6;
 const TASK_PREVIEW_MAX = 140;
 const FORBIDDEN_TOOLS = new Set(["subagent"]);
-
-// Signal the child's whole process GROUP, not just the child PID. The child
-// `pi` spawns grandchildren (its own nvim, slow web fetches); if we only hit
-// the child it can sit blocked in a grandchild and ignore SIGTERM, and a
-// surviving grandchild keeps the stdio pipe open so `close` never fires.
-// Killing the group (-pid, requires the child spawned `detached`) reaches the
-// entire subtree at once. Falls back to a direct child kill if the group send
-// fails (e.g. group already gone).
-const trySignal = (
-  child: { pid?: number; kill: (s: NodeJS.Signals) => boolean },
-  sig: NodeJS.Signals,
-): boolean => {
-  if (typeof child.pid === "number") {
-    try {
-      process.kill(-child.pid, sig);
-      return true;
-    } catch {
-      // group gone or not a leader — fall through to direct kill
-    }
-  }
-  try {
-    return child.kill(sig);
-  } catch {
-    return false;
-  }
-};
+const DEFAULT_MAX_DURATION_MS = 600_000;
+// Tight enough to reliably beat herdr's default 1s notification delay when we
+// release the pane's agent report right after detecting completion (see
+// releaseNotification below).
+const HERDR_POLL_MS = 300;
 
 const execFileAsync = promisify(execFile);
 
-// Herdr-aware execution: when running inside herdr, spawn the subagent as a
-// real interactive pi in its own pane instead of a headless JSON subprocess.
-// Trades the per-tool live widget for a pane you can watch/scroll/intervene
-// in directly; completion and status come from herdr's own pi integration
-// (herdr-agent-state.ts loads inside that pane too) instead of parsed JSON
-// events.
-const HERDR_POLL_MS = 1000;
-
 function herdrActive(): boolean {
-  return process.env.HERDR_ENV === "1" && !!process.env.HERDR_WORKSPACE_ID;
+  return process.env.HERDR_ENV === "1" && !!process.env.HERDR_PANE_ID;
 }
 
 async function herdrJson<T>(args: string[]): Promise<T | undefined> {
@@ -190,7 +101,91 @@ async function herdrRun(args: string[]): Promise<boolean> {
   }
 }
 
+// `pane read` prints plain text, not JSON (unlike every other herdr
+// subcommand) — must not go through herdrJson's JSON.parse.
+async function herdrText(args: string[]): Promise<string> {
+  try {
+    const { stdout } = await execFileAsync("herdr", args, {
+      timeout: 10_000,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    return stdout;
+  } catch {
+    return "";
+  }
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Shared herdr panel: concurrent subagents stack inside one fixed-width
+// column (30% of the main pane) instead of each carving its own slice out of
+// the main pane. The first subagent splits the main pane; later concurrent
+// ones split the previous subagent's pane downward, so the panel's total
+// width never grows with agent count. A simple promise chain serializes the
+// split/close calls that mutate the shared panel list so concurrent
+// executions can't race each other's layout changes.
+const PANEL_WIDTH_RATIO = 0.7; // main pane keeps 70%, panel column gets 30%
+let panel: string[] = [];
+let panelChain: Promise<unknown> = Promise.resolve();
+
+function withPanelLock<T>(fn: () => Promise<T>): Promise<T> {
+  const result = panelChain.then(fn, fn);
+  panelChain = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+
+async function acquirePanelSlot(
+  cwd: string,
+  env: Record<string, string>,
+): Promise<string | undefined> {
+  return withPanelLock(async () => {
+    const envArgs = Object.entries(env).flatMap(([k, v]) => [
+      "--env",
+      `${k}=${v}`,
+    ]);
+    const anchor = panel.at(-1);
+    const resp = anchor
+      ? await herdrJson<Record<string, any>>([
+          "pane",
+          "split",
+          anchor,
+          "--direction",
+          "down",
+          "--ratio",
+          "0.5",
+          "--cwd",
+          cwd,
+          "--no-focus",
+          ...envArgs,
+        ])
+      : await herdrJson<Record<string, any>>([
+          "pane",
+          "split",
+          process.env.HERDR_PANE_ID!,
+          "--direction",
+          "right",
+          "--ratio",
+          String(PANEL_WIDTH_RATIO),
+          "--cwd",
+          cwd,
+          "--no-focus",
+          ...envArgs,
+        ]);
+    const paneId: string | undefined = resp?.result?.pane?.pane_id;
+    if (paneId) panel.push(paneId);
+    return paneId;
+  });
+}
+
+async function releasePanelSlot(paneId: string): Promise<void> {
+  await withPanelLock(async () => {
+    await herdrRun(["pane", "close", paneId]);
+    panel = panel.filter((id) => id !== paneId);
+  });
+}
 
 function expandToolPatterns(patterns: string[], allNames: string[]): string[] {
   const out = new Set<string>();
@@ -249,7 +244,6 @@ function loadAgents(): AgentConfig[] {
       tools,
       model: frontmatter.model || undefined,
       thinking: frontmatter.thinking || undefined,
-      idleTimeoutMs: secsToMs(frontmatter.idleTimeout),
       maxDurationMs: secsToMs(frontmatter.maxDuration),
       // Default rules first so the agent's own body can override where it
       // must (e.g. worker can't use ask_user_question, so it overrides the
@@ -274,27 +268,6 @@ const headTruncate = (s: string, maxBytes: number): string => {
   const buf = Buffer.from(s, "utf-8");
   if (buf.length <= maxBytes) return s;
   return buf.subarray(0, maxBytes).toString("utf-8") + "\n…(truncated)";
-};
-
-// Collapse whitespace runs so a multi-line arg stays renderable on one line.
-const flatten = (s: string): string => s.replace(/\s+/g, " ").trim();
-
-// One-line preview of common tool args. Falls back to a flattened JSON dump.
-const extractArgsPreview = (rawArgs: Record<string, unknown>): string => {
-  const a = rawArgs;
-  const cap = (s: string): string =>
-    s.length > ARG_PREVIEW_MAX ? s.slice(0, ARG_PREVIEW_MAX - 1) + "…" : s;
-  if (typeof a.command === "string") return cap(flatten(a.command));
-  if (typeof a.pattern === "string") return cap(flatten(a.pattern));
-  if (typeof a.query === "string") return `"${cap(flatten(a.query))}"`;
-  if (typeof a.url === "string") return cap(flatten(a.url));
-  if (typeof a.path === "string") return cap(flatten(a.path));
-  if (typeof a.file === "string") {
-    const sym = typeof a.symbol === "string" && a.symbol ? ` ${a.symbol}` : "";
-    const line = typeof a.line === "number" ? `:${a.line}` : "";
-    return cap(flatten(`${a.file}${line}${sym}`));
-  }
-  return cap(flatten(JSON.stringify(a)));
 };
 
 // Preserves ANSI escapes so colored rows truncate without leaking codes.
@@ -344,21 +317,6 @@ function throttle<F extends (...args: never[]) => void>(fn: F, ms: number): F {
   }) as F;
 }
 
-// Pluck the latest prose line from the assistant's text, skipping code blocks.
-const proseLastLine = (text: string): string => {
-  if (!text) return "";
-  let inFence = false;
-  let last = "";
-  for (const raw of text.split("\n")) {
-    if (raw.trimStart().startsWith("```")) {
-      inFence = !inFence;
-      continue;
-    }
-    if (!inFence && raw.trim()) last = raw.trim();
-  }
-  return last;
-};
-
 const buildParams = (agents: AgentConfig[]) =>
   Type.Object({
     agent: Type.Union(
@@ -402,30 +360,9 @@ const renderProgressComponent = (
 ) => {
   const c = new Container();
   const icon = statusIcon(theme, p);
-  const stats = `${p.tools.length} tools · ${formatDuration(p.durationMs)}`;
   const model = theme.fg("dim", ` (${p.model})`);
-  const header = `${icon} ${theme.fg("toolTitle", theme.bold(p.agent))}${model} ${theme.fg("dim", "—")} ${theme.fg("dim", stats)}`;
+  const header = `${icon} ${theme.fg("toolTitle", theme.bold(p.agent))}${model} ${theme.fg("dim", "—")} ${theme.fg("dim", formatDuration(p.durationMs))}`;
   c.addChild(new Text(fitLine(header, width), 0, 0));
-
-  // While running, show only the tail of the tool list (header already carries
-  // the total count). Once done, collapse the rows away unless expanded.
-  if (p.status === "running" || expanded) {
-    const start = expanded
-      ? 0
-      : Math.max(0, p.tools.length - MAX_VISIBLE_TOOLS);
-    if (start > 0) {
-      c.addChild(new Text(theme.fg("dim", `  … ${start} earlier`), 0, 0));
-    }
-    for (let i = start; i < p.tools.length; i++) {
-      const t = p.tools[i]!;
-      const body = t.argsPreview ? `${t.name} ${t.argsPreview}` : t.name;
-      const row =
-        t.status === "running"
-          ? theme.fg("warning", `  ▸ ${body}`)
-          : theme.fg("muted", `  ✓ ${body}`);
-      c.addChild(new Text(fitLine(row, width), 0, 0));
-    }
-  }
 
   if (p.lastMessage && p.status === "running") {
     c.addChild(new Spacer(1));
@@ -464,7 +401,6 @@ const initialProgress = (
   status: "running",
   startedAt: Date.now(),
   durationMs: 0,
-  tools: [],
   lastMessage: "",
   output: "",
 });
@@ -481,10 +417,25 @@ function toolsFlagValue(
   return expanded.length > 0 ? expanded.join(",") : undefined;
 }
 
-// Run a subagent as a real interactive pi inside its own herdr pane. Status
-// comes from herdr's own pi integration (herdr-agent-state.ts loads inside
-// that pane too, reporting working/blocked/idle for it same as any other pi
-// session) instead of a parsed JSON event stream.
+// The pi integration herdr installs reports agent state under this fixed
+// source/agent pair (see the installed herdr-agent-state.ts extension).
+// Releasing it right after we detect completion — well before herdr's
+// default 1s notification delay expires — makes herdr re-check state at
+// delivery time, see it no longer matches, and skip the "finished" toast/
+// sound. A pane that goes "blocked" is left alone: that notification is the
+// one case where the user's attention is actually wanted.
+async function releaseAgentReport(paneId: string): Promise<void> {
+  await herdrRun([
+    "pane",
+    "release-agent",
+    paneId,
+    "--source",
+    "herdr:pi",
+    "--agent",
+    "pi",
+  ]);
+}
+
 async function runInHerdr(
   pi: ExtensionAPI,
   agent: AgentConfig,
@@ -530,37 +481,11 @@ async function runInHerdr(
   parts.push(`"$(cat '${taskFile}')"`);
   const shCmd = parts.join(" ");
 
-  // `agent start` runs the command as the pane's native process from
-  // creation — unlike `pane split` + `pane run`, there's no race against a
-  // fresh shell not being ready yet to receive a second, separately-typed
-  // command.
-  const startResp = await herdrJson<Record<string, any>>([
-    "agent",
-    "start",
-    target,
-    "--workspace",
-    process.env.HERDR_WORKSPACE_ID!,
-    "--tab",
-    process.env.HERDR_TAB_ID!,
-    "--cwd",
-    cwd,
-    "--split",
-    "right",
-    "--env",
-    "PI_IS_SUBAGENT=1",
-    "--no-focus",
-    "--",
-    "zsh",
-    "-lc",
-    shCmd,
-  ]);
-
-  const paneId: string | undefined = startResp?.result?.agent?.pane_id;
-
+  const paneId = await acquirePanelSlot(cwd, { PI_IS_SUBAGENT: "1" });
   if (!paneId) {
     cleanupFiles();
     progress.status = "failed";
-    progress.error = "herdr agent start failed";
+    progress.error = "herdr pane split failed";
     return {
       content: [
         {
@@ -569,22 +494,11 @@ async function runInHerdr(
         },
       ],
       details: { ...progress },
-      error: `Subagent ${agent.name}: herdr agent start failed`,
+      error: `Subagent ${agent.name}: herdr pane split failed`,
     };
   }
 
-  // Split defaults to 50/50; shrink the new pane to ~30% (--direction right
-  // grows the original/first pane, shrinking the second/new one).
-  await herdrRun([
-    "pane",
-    "resize",
-    "--direction",
-    "right",
-    "--amount",
-    "0.2",
-    "--pane",
-    paneId,
-  ]);
+  await herdrRun(["pane", "run", paneId, shCmd]);
 
   let seenWorking = false;
   let aborted = false;
@@ -632,9 +546,10 @@ async function runInHerdr(
   progress.durationMs = Date.now() - progress.startedAt;
 
   if (finalStatus === "aborted" || finalStatus === "timeout") {
+    await releaseAgentReport(paneId);
     await herdrRun(["pane", "send-keys", paneId, "ctrl+c"]);
     await sleep(300);
-    await herdrRun(["pane", "close", paneId]);
+    await releasePanelSlot(paneId);
     cleanupFiles();
     progress.status = "failed";
     progress.error =
@@ -653,7 +568,7 @@ async function runInHerdr(
   // "visible" only returns what currently fits on screen — wrong here since
   // the answer can scroll off during a long run. By now real scrollback has
   // accumulated, so "recent-unwrapped" (unlike right after pane creation) works.
-  const readResp = await herdrJson<Record<string, any>>([
+  const rawOutput = await herdrText([
     "pane",
     "read",
     paneId,
@@ -662,12 +577,10 @@ async function runInHerdr(
     "--lines",
     "400",
   ]);
-  const rawOutput: string =
-    readResp?.result?.text ?? readResp?.result?.content ?? "";
   const finalText = headTruncate(rawOutput.trim(), MAX_OUTPUT_BYTES);
-  cleanupFiles();
 
   if (finalStatus === "blocked") {
+    cleanupFiles();
     progress.status = "failed";
     progress.error =
       "subagent pane is blocked — needs manual attention (left open for review)";
@@ -684,7 +597,9 @@ async function runInHerdr(
     };
   }
 
-  await herdrRun(["pane", "close", paneId]);
+  await releaseAgentReport(paneId);
+  await releasePanelSlot(paneId);
+  cleanupFiles();
   progress.status = "done";
   progress.output = finalText;
   return {
@@ -695,6 +610,7 @@ async function runInHerdr(
 
 export default function (pi: ExtensionAPI) {
   if (process.env.PI_IS_SUBAGENT === "1") return;
+  if (!herdrActive()) return;
 
   const agents = loadAgents();
   if (agents.length === 0) return;
@@ -751,387 +667,20 @@ export default function (pi: ExtensionAPI) {
         progress.durationMs = Date.now() - progress.startedAt;
         onUpdate?.({
           content: [{ type: "text", text: "" }],
-          details: { ...progress, tools: [...progress.tools] },
+          details: { ...progress },
         });
       };
       const push = throttle(pushNow, UPDATE_INTERVAL_MS);
 
-      if (herdrActive()) {
-        return await runInHerdr(
-          pi,
-          agent,
-          args.task,
-          ctx.cwd,
-          progress,
-          push,
-          signal,
-        );
-      }
-
-      // Periodic tick: refresh the duration display and run the watchdogs.
-      const onTick = () => {
-        push();
-        if (childExited || watchdogReason) return;
-        const now = Date.now();
-        if (now - progress.startedAt > maxMs) {
-          fireWatchdog("timeout");
-        } else if (
-          !progress.tools.some((t) => t.status === "running") &&
-          now - lastEventAt > idleMs
-        ) {
-          fireWatchdog("idle");
-        }
-      };
-      const tick = setInterval(onTick, TICK_INTERVAL_MS);
-
-      // Heartbeat trace: when the child goes quiet, record how long it's been
-      // idle and what tool (if any) is still running — this is the fingerprint
-      // of a live-hang. Off unless PI_SUBAGENT_DEBUG=1.
-      const heartbeat = DEBUG
-        ? setInterval(() => {
-            if (childExited) return;
-            const running = progress.tools
-              .filter((t) => t.status === "running")
-              .map((t) => `${t.name} ${t.argsPreview}`);
-            log("heartbeat", {
-              idleMs: Date.now() - lastEventAt,
-              running,
-              cleanStopSeen,
-            });
-          }, HEARTBEAT_MS)
-        : undefined;
-      heartbeat?.unref?.();
-
-      const piArgs = [
-        "-p",
+      return await runInHerdr(
+        pi,
+        agent,
         args.task,
-        "--mode",
-        "json",
-        "--no-session",
-        "--no-context-files",
-        "--system-prompt",
-        agent.systemPrompt,
-      ];
-      if (agent.tools.length > 0) {
-        const expanded = expandToolPatterns(
-          agent.tools,
-          pi.getAllTools().map((t) => t.name),
-        );
-        if (expanded.length > 0) piArgs.push("--tools", expanded.join(","));
-      }
-      if (agent.model) piArgs.push("--model", agent.model);
-      if (agent.thinking) piArgs.push("--thinking", agent.thinking);
-
-      const child = spawn("pi", piArgs, {
-        cwd: ctx.cwd,
-        stdio: ["ignore", "pipe", "pipe"],
-        windowsHide: true,
-        // New process group so we can SIGTERM/SIGKILL the whole subtree (child
-        // + its grandchildren) via trySignal's `-pid`. Abort is handled
-        // manually below so we can escalate SIGTERM → SIGKILL; spawn's own
-        // `signal` only sends one SIGTERM to the child PID alone.
-        // POSIX-only: bare `spawn("pi")` and `process.kill(-pid)` don't work on
-        // Windows (pi is a .cmd shim; negative PIDs are unsupported). For a
-        // Windows-portable spawn see nicobailon/pi-subagents `getPiSpawnCommand`
-        // (resolves the node CLI script instead of the shim).
-        detached: true,
-        env: { ...process.env, PI_IS_SUBAGENT: "1" },
-      });
-
-      const log = (phase: string, extra?: Record<string, unknown>) =>
-        dbg({
-          agent: agent.name,
-          pid: child.pid,
-          phase,
-          sinceStartMs: Date.now() - progress.startedAt,
-          ...extra,
-        });
-      log("spawn", { piArgs });
-
-      let outBuf = "";
-      let stderrBuf = "";
-      let childExited = false;
-      let lastEventAt = Date.now(); // any JSON event from the child
-      let cleanStopSeen = false; // terminal assistant stop, no error/tool call
-      let assistantError = ""; // provider/agent error surfaced in a message
-      let forcedTermination = false; // we SIGTERM/SIGKILL'd a lingering child
-      let aborted = false; // parent AbortSignal fired
-      let watchdogReason = ""; // "idle" | "timeout" once a watchdog kills it
-
-      const idleMs = agent.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
-      const maxMs = agent.maxDurationMs ?? DEFAULT_MAX_DURATION_MS;
-
-      // Kill a child that is alive but stalled. Not a clean stop, so this is a
-      // genuine failure — we still surface whatever partial output was captured.
-      const fireWatchdog = (reason: "idle" | "timeout") => {
-        if (childExited || watchdogReason) return;
-        watchdogReason = reason;
-        log("watchdog", { reason, idleMs, maxMs });
-        forcedTermination = trySignal(child, "SIGTERM") || forcedTermination;
-        const t = setTimeout(() => {
-          if (!childExited)
-            forcedTermination =
-              trySignal(child, "SIGKILL") || forcedTermination;
-        }, FINAL_HARD_KILL_MS);
-        t.unref?.();
-      };
-
-      // Post-stop drain: the child can print its final message yet linger.
-      let finalDrainTimer: ReturnType<typeof setTimeout> | undefined;
-      let finalHardKillTimer: ReturnType<typeof setTimeout> | undefined;
-      const clearFinalDrain = () => {
-        if (finalDrainTimer) clearTimeout(finalDrainTimer);
-        if (finalHardKillTimer) clearTimeout(finalHardKillTimer);
-        finalDrainTimer = finalHardKillTimer = undefined;
-      };
-      const startFinalDrain = () => {
-        if (childExited || finalDrainTimer) return;
-        finalDrainTimer = setTimeout(() => {
-          if (childExited) return;
-          forcedTermination = trySignal(child, "SIGTERM") || forcedTermination;
-          finalHardKillTimer = setTimeout(() => {
-            if (childExited) return;
-            forcedTermination =
-              trySignal(child, "SIGKILL") || forcedTermination;
-          }, FINAL_HARD_KILL_MS);
-          finalHardKillTimer.unref?.();
-        }, FINAL_STOP_GRACE_MS);
-        finalDrainTimer.unref?.();
-      };
-
-      // Post-exit stdio guard: once the child exits, force its (maybe
-      // grandchild-held) pipes closed so `close` fires. Tracks `end` so a
-      // clean exit isn't delayed.
-      let stdoutEnded = false;
-      let stderrEnded = false;
-      let idleTimer: ReturnType<typeof setTimeout> | undefined;
-      let hardTimer: ReturnType<typeof setTimeout> | undefined;
-      const clearStdioGuard = () => {
-        if (idleTimer) clearTimeout(idleTimer);
-        if (hardTimer) clearTimeout(hardTimer);
-        idleTimer = hardTimer = undefined;
-      };
-      const destroyUnended = () => {
-        if (!stdoutEnded) child.stdout?.destroy();
-        if (!stderrEnded) child.stderr?.destroy();
-      };
-      const armIdle = () => {
-        if (!childExited) return;
-        if (idleTimer) clearTimeout(idleTimer);
-        idleTimer = setTimeout(destroyUnended, STDIO_IDLE_MS);
-        idleTimer.unref?.();
-      };
-      child.stdout.on("end", () => {
-        stdoutEnded = true;
-        log("stdout_end", { childExited });
-        if (stderrEnded) clearStdioGuard();
-      });
-      child.stderr.on("end", () => {
-        stderrEnded = true;
-        log("stderr_end", { childExited });
-        if (stdoutEnded) clearStdioGuard();
-      });
-
-      // Parent abort: SIGTERM, then SIGKILL if the child ignores it.
-      const onAbort = () => {
-        if (childExited) return;
-        aborted = true;
-        log("abort");
-        trySignal(child, "SIGTERM");
-        const t = setTimeout(() => {
-          if (!childExited) trySignal(child, "SIGKILL");
-        }, FINAL_HARD_KILL_MS);
-        t.unref?.();
-      };
-      if (signal?.aborted) onAbort();
-      else signal?.addEventListener("abort", onAbort, { once: true });
-
-      const handleEvent = (ev: { type?: string; [k: string]: unknown }) => {
-        if (!ev || !ev.type) return;
-        lastEventAt = Date.now();
-        switch (ev.type) {
-          case "tool_execution_start": {
-            const id = String(ev.toolCallId ?? "");
-            progress.tools.push({
-              toolCallId: id,
-              name: String(ev.toolName ?? "?"),
-              argsPreview: extractArgsPreview(
-                (ev.args as Record<string, unknown>) ?? {},
-              ),
-              status: "running",
-            });
-            push();
-            break;
-          }
-          case "tool_execution_end": {
-            const id = String(ev.toolCallId ?? "");
-            const hit = progress.tools.find((t) => t.toolCallId === id);
-            if (hit) hit.status = "done";
-            push();
-            break;
-          }
-          case "message_end": {
-            const msg = ev.message as
-              | {
-                  role?: string;
-                  content?: unknown;
-                  stopReason?: string;
-                  errorMessage?: string;
-                }
-              | undefined;
-            if (!msg || msg.role !== "assistant") break;
-            const text = extractText(msg.content);
-            if (text) {
-              progress.output = text;
-              const line = proseLastLine(text);
-              if (line) progress.lastMessage = line;
-            }
-            if (msg.errorMessage) assistantError = String(msg.errorMessage);
-            push();
-            // Drain only on a genuine terminal stop — a stop carrying a tool
-            // call still has work pending.
-            const hasToolCall =
-              Array.isArray(msg.content) &&
-              msg.content.some(
-                (p) => (p as { type?: string } | null)?.type === "toolCall",
-              );
-            if (msg.errorMessage)
-              log("assistant_error", { error: assistantError });
-            if (msg.stopReason === "stop") {
-              log("stop", { hasToolCall, hasError: !!msg.errorMessage });
-            }
-            if (msg.stopReason === "stop" && !hasToolCall) {
-              if (!msg.errorMessage) cleanStopSeen = true;
-              startFinalDrain();
-            }
-            break;
-          }
-        }
-      };
-
-      child.stdout.on("data", (c: Buffer) => {
-        outBuf += c.toString("utf-8");
-        let i: number;
-        while ((i = outBuf.indexOf("\n")) >= 0) {
-          const line = outBuf.slice(0, i);
-          outBuf = outBuf.slice(i + 1);
-          if (!line.trim()) continue;
-          try {
-            handleEvent(JSON.parse(line));
-          } catch {
-            /* non-JSON line, ignore */
-          }
-        }
-      });
-      child.stderr.on("data", (c: Buffer) => {
-        stderrBuf += c.toString("utf-8");
-      });
-
-      const { code, sig, spawnError } = await new Promise<{
-        code: number | null;
-        sig: NodeJS.Signals | null;
-        spawnError: Error | null;
-      }>((resolve) => {
-        let settled = false;
-        const settle = (r: {
-          code: number | null;
-          sig: NodeJS.Signals | null;
-          spawnError: Error | null;
-        }) => {
-          if (settled) return;
-          settled = true;
-          clearFinalDrain();
-          clearStdioGuard();
-          resolve(r);
-        };
-        // Re-arm the idle countdown on each post-exit chunk so buffered final
-        // output still flushes before the pipes are destroyed.
-        child.stdout.on("data", armIdle);
-        child.stderr.on("data", armIdle);
-        child.on("exit", () => {
-          childExited = true;
-          log("exit", { stdoutEnded, stderrEnded });
-          clearFinalDrain();
-          armIdle();
-          if (!hardTimer) {
-            hardTimer = setTimeout(destroyUnended, STDIO_HARD_MS);
-            hardTimer.unref?.();
-          }
-        });
-        // `close` = process ended AND stdio closed: the only safe resolve.
-        child.on("close", (c, s) => {
-          log("close", { code: c, sig: s });
-          settle({ code: c, sig: s, spawnError: null });
-        });
-        child.on("error", (err) =>
-          settle({ code: null, sig: null, spawnError: err }),
-        );
-      });
-
-      clearInterval(tick);
-      if (heartbeat) clearInterval(heartbeat);
-      progress.durationMs = Date.now() - progress.startedAt;
-
-      // A SIGTERM/SIGKILL we issued to drain a lingering—but successful—child
-      // is not a failure; only a parent abort or a real bad exit is.
-      const drainedAfterStop =
-        forcedTermination && cleanStopSeen && !assistantError;
-      const failed =
-        spawnError != null ||
-        aborted ||
-        watchdogReason !== "" ||
-        (!drainedAfterStop && (sig != null || (code != null && code !== 0)));
-
-      log("settle", {
-        code,
-        sig,
-        spawnError: spawnError?.message,
-        aborted,
-        cleanStopSeen,
-        forcedTermination,
-        drainedAfterStop,
-        failed,
-      });
-
-      if (failed) {
-        progress.status = "failed";
-        const lastTool = progress.tools.at(-1)?.name;
-        progress.error = spawnError
-          ? `spawn error: ${spawnError.message}`
-          : aborted
-            ? "aborted by parent"
-            : assistantError
-              ? assistantError
-              : watchdogReason === "timeout"
-                ? `timed out after ${formatDuration(maxMs)} (wall clock)`
-                : watchdogReason === "idle"
-                  ? `stalled — no activity for ${formatDuration(idleMs)}${lastTool ? ` (last tool: ${lastTool})` : ""}`
-                  : sig
-                    ? `killed by ${sig}`
-                    : `exit ${code}`;
-        const detail = headTruncate(
-          stderrBuf.trim() || progress.output.trim() || "(no child output)",
-          MAX_OUTPUT_BYTES / 4,
-        );
-        return {
-          content: [
-            {
-              type: "text",
-              text: `subagent '${agent.name}' failed — ${progress.error}\n${detail}`,
-            },
-          ],
-          details: { ...progress, tools: [...progress.tools] },
-          error: `Subagent ${agent.name}: ${progress.error}`,
-        };
-      }
-
-      progress.status = "done";
-      const finalText = headTruncate(progress.output.trim(), MAX_OUTPUT_BYTES);
-      progress.output = finalText;
-      return {
-        content: [{ type: "text", text: finalText }],
-        details: { ...progress, tools: [...progress.tools] },
-      };
+        ctx.cwd,
+        progress,
+        push,
+        signal,
+      );
     },
   });
 }

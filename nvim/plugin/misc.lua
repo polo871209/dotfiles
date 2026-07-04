@@ -2,18 +2,11 @@
 if vim.g.pi_agent then return end
 
 vim.pack.add {
-    'https://github.com/christoomey/vim-tmux-navigator',
     'https://github.com/folke/flash.nvim',
     'https://github.com/windwp/nvim-autopairs',
     'https://github.com/NMAC427/guess-indent.nvim',
     'https://github.com/lewis6991/gitsigns.nvim',
 }
-
--- Tmux navigation
-vim.keymap.set('n', '<c-h>', '<cmd>TmuxNavigateLeft<cr>')
-vim.keymap.set('n', '<c-j>', '<cmd>TmuxNavigateDown<cr>')
-vim.keymap.set('n', '<c-k>', '<cmd>TmuxNavigateUp<cr>')
-vim.keymap.set('n', '<c-l>', '<cmd>TmuxNavigateRight<cr>')
 
 -- Flash jump
 vim.keymap.set('n', 's', function() require('flash').jump() end, { desc = 'Flash' })

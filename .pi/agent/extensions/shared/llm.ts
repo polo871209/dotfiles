@@ -6,7 +6,7 @@
 // a cheap model (`provider/id`, e.g. `anthropic/claude-haiku-4-5`) and every
 // side-channel call routes there instead — saving cost + latency. Unset, or
 // unresolvable / no auth, falls back to the session model (no behavior change).
-import { complete, type Message } from "@earendil-works/pi-ai";
+import { complete, type Message } from "@earendil-works/pi-ai/compat";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 function resolveSideModel(ctx: ExtensionContext) {

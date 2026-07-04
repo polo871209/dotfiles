@@ -13,6 +13,10 @@ vim.keymap.set('n', '<leader>|', '<cmd>vsplit<CR>', { desc = 'Vertical Split' })
 -- Paste without replacing clipboard
 vim.keymap.set('v', '<leader>p', '"_dP', { desc = 'Paste without replacing clipboard' })
 
+-- Delete/change without yanking (dd, diw, ciw, etc.)
+vim.keymap.set({ 'n', 'v' }, 'd', '"_d', { desc = 'Delete without yanking' })
+vim.keymap.set({ 'n', 'v' }, 'c', '"_c', { desc = 'Change without yanking' })
+
 -- Diffview toggle
 local diffview_loaded = false
 local function load_diffview()

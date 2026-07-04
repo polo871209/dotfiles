@@ -18,7 +18,11 @@ import {
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
-import { Type, type Static, type TextContent } from "@earendil-works/pi-ai";
+import {
+  Type,
+  type Static,
+  type TextContent,
+} from "@earendil-works/pi-ai/compat";
 import {
   registerBridgeSession,
   setBridgeSignal,

@@ -28,11 +28,12 @@ Read referenced `.md` files completely and follow their cross-references before 
 
 ### Bigger toolbox for the model
 
+- **`web-search.ts`** — `web_search` / `fetch_content`: search the web and pull a page's readable content as markdown, for basic research without leaving the terminal. GitHub repo/file/dir links are cloned locally instead of scraped, so `read`/`bash` can explore real files.
 - **`eval/`** — persistent Python + JS kernels the model runs code in; cells can call pi's own tools and keep bulk data out of history. For "read N files, aggregate, summarize" work.
 - **`lsp/`** — the LSP subsystem. Symbol-precise nav tools: `lsp_hover` (type/docs), `lsp_definition` / `lsp_type_definition` / `lsp_implementation`, `lsp_references`, `lsp_document_symbols` (file outline), `lsp_rename` (workspace-wide), `lsp_diagnostics` (on-demand, read-only per-file error/warning check instead of a full `tsc`). Also the post-edit feedback pass (`lsp/feedback/`): formats your edits and auto-fixes their diagnostics in the background (root-cause, no suppress directives, never touching files unrelated to a diagnostic), surfacing the changes so you needn't re-read; anything left unfixed is flagged. `/lsp-fix` toggles that background auto-fix per session (`/lsp-fix on|off` to set explicitly); launch with `--lsp-fix=false` to default it off.
 - **`codegraph.ts`** — symbol-aware repo navigation + call-graph over the [codegraph CLI](https://github.com/colbymchenry/codegraph): `codegraph_status` / `_context` / `_search` / `_files` / `_callers` / `_callees` / `_impact` (blast-radius) / `_affected` (test selection).
 - **`github-pr.ts`** — `github_pr` fetches a PR as signal-only markdown (metadata, description, changed files, failing checks, unresolved review threads — including bot inline findings like CodeRabbit). Drops commit/timeline noise, resolved threads, and bot release-note/walkthrough issue comments; diff is opt-in via `diff:true`. Use instead of `gh pr view`.
-- **`subagent.ts`** — `/subagent` delegates a task to an isolated `pi` agent (single-layer, no recursion). Agents defined in `~/.pi/agent/agents/*.md`. For offloading research/recon/implementation off the main thread. Inside herdr, the subagent runs visibly in its own pane instead of a hidden background process — watch, scroll, or step in directly.
+- **`subagent.ts`** — `/subagent` delegates a task to an isolated `pi` agent (single-layer, no recursion), running visibly in its own herdr pane instead of a hidden background process — watch, scroll, or step in directly. Agents defined in `~/.pi/agent/agents/*.md`. For offloading research/recon/implementation off the main thread. Herdr-only: the tool isn't available outside a herdr session.
 - **`worktree.ts`** — `worktree_create` / `worktree_list` / `worktree_publish` / `worktree_remove`: agent-driven git worktrees keyed by branch. Feature branches fork off the default branch and finish by pushing to origin for a PR — never merged into trunk locally.
 - **`ask/`** — `ask_user_question`: presents a tabbed multiple-choice questionnaire (single/multi-select, free-text + "chat" fallbacks, review tab) instead of guessing when a request is ambiguous. Length limits on labels are soft so the first call always lands.
 
@@ -64,5 +65,5 @@ extensions/
 ├── ask/          ask_user_question questionnaire dialog
 ├── eval/         persistent kernels + bridge
 ├── lsp/          nvim singleton, nav tools + post-edit feedback
-└── shared/       side-channel LLM helper, message extraction, widget factory, cross-extension config
+└── shared/       side-channel LLM helper, message extraction, widget factory
 ```

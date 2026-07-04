@@ -1,5 +1,0 @@
-{
-  "workflow": "auto-summary",
-  "allowBrowserCookies": true,
-  "summaryModel": "anthropic/claude-sonnet-4-6"
-}

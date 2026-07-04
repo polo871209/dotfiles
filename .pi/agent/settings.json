@@ -5,9 +5,7 @@
   "defaultThinkingLevel": "high",
   "theme": "catppuccin-mocha",
   "quietStartup": true,
-  "packages": [
-    "npm:pi-web-access"
-  ],
+  "packages": [],
   "warnings": {
     "anthropicExtraUsage": false
   },

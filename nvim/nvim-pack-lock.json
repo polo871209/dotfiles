@@ -113,10 +113,6 @@
       "rev": "79aedb401bbdc7e4202f7881eab5f6feb2105b0a",
       "src": "https://github.com/Wansmer/treesj"
     },
-    "vim-tmux-navigator": {
-      "rev": "e41c431a0c7b7388ae7ba341f01a0d217eb3a432",
-      "src": "https://github.com/christoomey/vim-tmux-navigator"
-    },
     "visimatch.nvim": {
       "rev": "4334be61a9d3a6b268179144c6354349e445eb89",
       "src": "https://github.com/wurli/visimatch.nvim"
