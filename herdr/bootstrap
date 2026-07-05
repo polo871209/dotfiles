@@ -22,6 +22,6 @@ nvim_tab=$(printf '%s' "$nvim_resp" | jq -r '.result.tab.tab_id' 2>/dev/null)
 herdr tab create --workspace "$HERDR_WORKSPACE_ID" \
   --no-focus --env HERDR_NO_BOOTSTRAP=1 >/dev/null 2>&1
 
-[[ -n "$nvim_tab" && "$nvim_tab" != null ]] && herdr tab focus "$nvim_tab" >/dev/null 2>&1
+herdr tab focus "$HERDR_TAB_ID" >/dev/null 2>&1
 
 exec pi --continue

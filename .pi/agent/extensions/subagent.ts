@@ -205,19 +205,8 @@ function expandToolPatterns(patterns: string[], allNames: string[]): string[] {
   return [...out];
 }
 
-function loadDefaultSystemPrompt(): string {
-  try {
-    return fs
-      .readFileSync(path.join(getAgentDir(), "SYSTEM.md"), "utf-8")
-      .trim();
-  } catch {
-    return "";
-  }
-}
-
 function loadAgents(): AgentConfig[] {
   if (!fs.existsSync(AGENTS_DIR)) return [];
-  const defaultSystemPrompt = loadDefaultSystemPrompt();
   const out: AgentConfig[] = [];
   for (const entry of fs.readdirSync(AGENTS_DIR)) {
     if (!entry.endsWith(".md")) continue;
@@ -245,12 +234,11 @@ function loadAgents(): AgentConfig[] {
       model: frontmatter.model || undefined,
       thinking: frontmatter.thinking || undefined,
       maxDurationMs: secsToMs(frontmatter.maxDuration),
-      // Default rules first so the agent's own body can override where it
-      // must (e.g. worker can't use ask_user_question, so it overrides the
-      // ambiguity rule).
-      systemPrompt: [defaultSystemPrompt, body.trim()]
-        .filter(Boolean)
-        .join("\n\n---\n\n"),
+      // Only the agent's own .md content — no shared preamble (SYSTEM.md is
+      // the main session's own prompt, not a subagent default) and no other
+      // injected context, so every subagent starts from a clean, unambiguous
+      // slate defined entirely by its own file.
+      systemPrompt: body.trim(),
     });
   }
   return out;

@@ -5,8 +5,13 @@ import {
   defineTool,
   truncateHead,
 } from "@earendil-works/pi-coding-agent";
-import { callDriver } from "../nvim";
-import { displayPath, normalizeAtPath, toAbs, type DriverErr } from "../utils";
+import {
+  displayPath,
+  normalizeAtPath,
+  toAbs,
+  withDriver,
+  type DriverErr,
+} from "../utils";
 
 interface DocSymbol {
   name: string;
@@ -45,41 +50,27 @@ export const documentSymbolsTool = defineTool({
   async execute(_id, params, signal, onUpdate, ctx) {
     const p = params as { file: string };
     const file = toAbs(normalizeAtPath(p.file), ctx.cwd);
-    const progress = (text: string) =>
-      onUpdate?.({ content: [{ type: "text", text }], details: {} });
-    const res = await callDriver<DocResult>(
-      ctx.cwd,
+    return withDriver<DocResult>(
+      ctx,
       "document_symbols",
       [file],
       signal,
-      progress,
+      onUpdate,
+      (res, cwd) => {
+        const syms = res.symbols ?? [];
+        if (syms.length === 0) {
+          return { text: "No symbols found", details: { count: 0 } };
+        }
+        const lines = [
+          `${syms.length} symbol(s) in ${displayPath(file, cwd)}:`,
+        ];
+        for (const s of syms) {
+          const indent = "  ".repeat(s.depth + 1);
+          const detail = s.detail ? `  ${s.detail}` : "";
+          lines.push(`${indent}${s.kind} ${s.name}${detail}  :${s.line}`);
+        }
+        return { text: cap(lines.join("\n")), details: { count: syms.length } };
+      },
     );
-    if (!res.ok) {
-      return {
-        content: [
-          { type: "text", text: `LSP error: ${res.error ?? "unknown"}` },
-        ],
-        details: { success: false },
-      };
-    }
-    const syms = res.symbols ?? [];
-    if (syms.length === 0) {
-      return {
-        content: [{ type: "text", text: "No symbols found" }],
-        details: { success: true, count: 0 },
-      };
-    }
-    const lines = [
-      `${syms.length} symbol(s) in ${displayPath(file, ctx.cwd)}:`,
-    ];
-    for (const s of syms) {
-      const indent = "  ".repeat(s.depth + 1);
-      const detail = s.detail ? `  ${s.detail}` : "";
-      lines.push(`${indent}${s.kind} ${s.name}${detail}  :${s.line}`);
-    }
-    return {
-      content: [{ type: "text", text: cap(lines.join("\n")) }],
-      details: { success: true, count: syms.length },
-    };
   },
 });

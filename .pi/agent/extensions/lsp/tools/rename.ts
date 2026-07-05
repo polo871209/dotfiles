@@ -1,11 +1,11 @@
 import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
-import { callDriver } from "../nvim";
 import {
   anchorGuidelines,
   displayPath,
   normalizeAtPath,
   toAbs,
+  withDriver,
   type DriverErr,
 } from "../utils";
 
@@ -39,32 +39,22 @@ export const renameTool = defineTool({
   }),
   async execute(_id, params, signal, onUpdate, ctx) {
     const file = toAbs(normalizeAtPath(params.file), ctx.cwd);
-    const progress = (text: string) =>
-      onUpdate?.({ content: [{ type: "text", text }], details: {} });
-    const res = await callDriver<RenameResult>(
-      ctx.cwd,
+    return withDriver<RenameResult>(
+      ctx,
       "rename",
       [file, params.line, params.symbol ?? "", params.new_name],
       signal,
-      progress,
+      onUpdate,
+      (res, cwd) => {
+        const files = res.files ?? [];
+        const list = files.map((f) => `  ${displayPath(f, cwd)}`).join("\n");
+        const text =
+          files.length === 0
+            ? "Rename returned no changes"
+            : `Renamed to '${params.new_name}' across ${files.length} file(s):\n${list}`;
+        return { text, details: { count: files.length } };
+      },
+      "LSP rename error",
     );
-    if (!res.ok) {
-      return {
-        content: [
-          { type: "text", text: `LSP rename error: ${res.error ?? "unknown"}` },
-        ],
-        details: { success: false },
-      };
-    }
-    const files = res.files ?? [];
-    const list = files.map((f) => `  ${displayPath(f, ctx.cwd)}`).join("\n");
-    const text =
-      files.length === 0
-        ? "Rename returned no changes"
-        : `Renamed to '${params.new_name}' across ${files.length} file(s):\n${list}`;
-    return {
-      content: [{ type: "text", text }],
-      details: { success: true, count: files.length },
-    };
   },
 });

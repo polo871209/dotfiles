@@ -1,14 +1,6 @@
-export type Severity = "error" | "warn" | "info" | "hint";
+import type { Diag } from "../utils";
 
-export interface Diag {
-  file: string;
-  line: number;
-  col: number;
-  severity: Severity;
-  source?: string;
-  code?: string;
-  message: string;
-}
+export type { Severity, Diag } from "../utils";
 
 export interface DriverResult {
   formatted: string[];

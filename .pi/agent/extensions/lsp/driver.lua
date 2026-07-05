@@ -51,6 +51,12 @@ local function file_mtime(file)
     return st and st.mtime and (st.mtime.sec * 1e9 + st.mtime.nsec) or 0
 end
 
+-- open_buf silently creates an empty scratch buffer for a missing path
+-- (`:edit` doesn't error), which then surfaces as a confusing "no LSP
+-- attached" instead of "file not found". Callers taking a single `file`
+-- check this first.
+local function file_exists(file) return vim.uv.fs_stat(file) ~= nil end
+
 local function open_buf(file)
     local existing = bufs[file]
     local current_mtime = file_mtime(file)
@@ -118,6 +124,7 @@ local function read_line(file, line_1idx)
 end
 
 function M.hover(file, line, symbol)
+    if not file_exists(file) then return { ok = false, error = 'file not found: ' .. file } end
     local b = open_buf(file)
     local params, err = make_position_params(b, line, symbol)
     if not params then return { ok = false, error = err } end
@@ -166,6 +173,7 @@ local function normalize_locations(res)
 end
 
 function M.definition(file, line, symbol)
+    if not file_exists(file) then return { ok = false, error = 'file not found: ' .. file } end
     local b = open_buf(file)
     local params, err = make_position_params(b, line, symbol)
     if not params then return { ok = false, error = err } end
@@ -175,6 +183,7 @@ function M.definition(file, line, symbol)
 end
 
 function M.references(file, line, symbol)
+    if not file_exists(file) then return { ok = false, error = 'file not found: ' .. file } end
     local b = open_buf(file)
     local params, err = make_position_params(b, line, symbol)
     if not params then return { ok = false, error = err } end
@@ -196,6 +205,7 @@ end
 
 -- Shared body for position → location-list methods (definition-shaped).
 local function loc_request(file, line, symbol, method)
+    if not file_exists(file) then return { ok = false, error = 'file not found: ' .. file } end
     local b = open_buf(file)
     local params, err = make_position_params(b, line, symbol)
     if not params then return { ok = false, error = err } end
@@ -262,6 +272,7 @@ local function flatten_doc_symbols(items, out, depth)
 end
 
 function M.document_symbols(file)
+    if not file_exists(file) then return { ok = false, error = 'file not found: ' .. file } end
     local b = open_buf(file)
     if #vim.lsp.get_clients { bufnr = b } == 0 then return { ok = false, error = 'no LSP attached' } end
     local params = { textDocument = vim.lsp.util.make_text_document_params(b) }
@@ -291,6 +302,7 @@ end
 
 function M.rename(file, line, symbol, new_name)
     if not new_name or new_name == '' then return { ok = false, error = 'new_name required' } end
+    if not file_exists(file) then return { ok = false, error = 'file not found: ' .. file } end
     local b = open_buf(file)
     local params, err = make_position_params(b, line, symbol)
     if not params then return { ok = false, error = err } end
@@ -370,8 +382,12 @@ function M.diagnostics(files)
     local sev = { 'error', 'warn', 'info', 'hint' }
     local out = { ok = true, diagnostics = {} }
     local opened = {}
+    local seen = {}
     for _, file in ipairs(files) do
-        if type(file) == 'string' and vim.uv.fs_stat(file) then
+        -- Dedupe: a repeated path would otherwise open the same buffer twice
+        -- and double-count its diagnostics below.
+        if type(file) == 'string' and not seen[file] and vim.uv.fs_stat(file) then
+            seen[file] = true
             local b = open_buf(file)
             table.insert(opened, b)
             _G.PiLspShared.pull_diagnostics(b, 1500)

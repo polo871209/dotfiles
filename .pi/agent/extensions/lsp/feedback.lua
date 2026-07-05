@@ -91,13 +91,27 @@ end
 
 local function pull_diagnostics(bufnr, remaining) _G.PiLspShared.pull_diagnostics(bufnr, math.min(1500, remaining())) end
 
+-- A repeated path would otherwise open/format/pull-diagnostics twice and
+-- double-count that file's diagnostics in the result.
+local function dedupe_files(files)
+    local seen = {}
+    local out = {}
+    for _, f in ipairs(files) do
+        if type(f) == 'string' and not seen[f] then
+            seen[f] = true
+            table.insert(out, f)
+        end
+    end
+    return out
+end
+
 -- Fast, format-only pass for the inline (per-edit) hook. Just conform/LSP
 -- formatting + write; NO diagnostic settle, NO code-actions (those stay in the
 -- batched M.run at turn end). Keeps per-edit latency to a formatter call so the
 -- agent's edit result can be amended with the formatted bytes synchronously.
 function M.format(files)
     local formatted = {}
-    for _, file in ipairs(files) do
+    for _, file in ipairs(dedupe_files(files)) do
         if type(file) == 'string' and vim.uv.fs_stat(file) then
             vim.cmd('silent! edit ' .. vim.fn.fnameescape(file))
             local bufnr = vim.api.nvim_get_current_buf()
@@ -117,7 +131,7 @@ function M.run(files)
     local formatted = {}
     local bufs = {}
 
-    for _, file in ipairs(files) do
+    for _, file in ipairs(dedupe_files(files)) do
         if type(file) == 'string' and vim.uv.fs_stat(file) then
             local file_started = vim.uv.now()
             local function remaining() return math.max(0, PER_FILE_BUDGET_MS - (vim.uv.now() - file_started)) end

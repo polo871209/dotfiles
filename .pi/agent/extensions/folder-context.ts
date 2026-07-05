@@ -17,6 +17,10 @@ const CANDIDATES = ["AGENTS.md", "CLAUDE.md"] as const;
 const TARGET_TOOLS = new Set(["read", "edit", "write", "grep", "find", "ls"]);
 
 export default function (pi: ExtensionAPI) {
+  // Subagents get a clean context: only their own agent .md + tools, no
+  // ambient repo docs injected mid-run.
+  if (process.env.PI_IS_SUBAGENT === "1") return;
+
   // candidate abs path → mtimeMs at last injection
   const injected = new Map<string, number>();
 

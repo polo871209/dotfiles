@@ -6,7 +6,12 @@
 // a cheap model (`provider/id`, e.g. `anthropic/claude-haiku-4-5`) and every
 // side-channel call routes there instead — saving cost + latency. Unset, or
 // unresolvable / no auth, falls back to the session model (no behavior change).
-import { complete, type Message } from "@earendil-works/pi-ai/compat";
+import {
+  complete,
+  type Api,
+  type Message,
+  type Model,
+} from "@earendil-works/pi-ai/compat";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 function resolveSideModel(ctx: ExtensionContext) {
@@ -24,6 +29,10 @@ export interface SideChannelOpts {
   signal?: AbortSignal;
   // Joiner for multi-part text content. Defaults to "\n".
   join?: string;
+  // Force a specific model instead of PI_SIDE_MODEL / the session model.
+  model?: Model<Api>;
+  // Explicitly disable extended thinking regardless of the model's default.
+  thinkingEnabled?: boolean;
 }
 
 export type SideChannelResult =
@@ -38,7 +47,7 @@ export async function sideChannelComplete(
   ctx: ExtensionContext,
   opts: SideChannelOpts,
 ): Promise<SideChannelResult> {
-  const model = resolveSideModel(ctx) ?? ctx.model;
+  const model = opts.model ?? resolveSideModel(ctx) ?? ctx.model;
   if (!model) return { ok: false, reason: "no-model" };
   const join = opts.join ?? "\n";
   let auth;
@@ -62,7 +71,14 @@ export async function sideChannelComplete(
     const response = await complete(
       model,
       { systemPrompt: opts.systemPrompt, messages: opts.messages },
-      { apiKey: auth.apiKey, headers: auth.headers, signal: opts.signal },
+      {
+        apiKey: auth.apiKey,
+        headers: auth.headers,
+        signal: opts.signal,
+        ...(opts.thinkingEnabled !== undefined
+          ? { thinkingEnabled: opts.thinkingEnabled }
+          : {}),
+      },
     );
     if (response.stopReason === "aborted") {
       return { ok: false, reason: "aborted" };

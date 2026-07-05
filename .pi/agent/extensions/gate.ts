@@ -189,7 +189,14 @@ export default function (pi: ExtensionAPI) {
       await git("fetch", "origin", def);
 
       const ahead = await git("rev-list", "--count", `${defaultRef}..HEAD`);
-      if (ahead.ok && ahead.out === "0") {
+      if (!ahead.ok) {
+        ctx.ui.notify(
+          `/gate: could not determine commits ahead of ${defaultRef}: ${ahead.err}`,
+          "error",
+        );
+        return;
+      }
+      if (ahead.out === "0") {
         ctx.ui.notify(
           `/gate: nothing to gate (no commits ahead of ${defaultRef})`,
           "warning",

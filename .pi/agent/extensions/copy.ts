@@ -6,7 +6,7 @@ import type {
   ExtensionAPI,
   ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
-import { extractText } from "./shared/message";
+import { collectTextMessages, extractText } from "./shared/message";
 
 type Block = { lang?: string; code: string };
 
@@ -29,16 +29,13 @@ const extractCodeBlocks = (text: string): Block[] => {
     const lang = sanitizeLang(open[2].trim().split(/\s+/)[0] ?? "");
     const codeLines: string[] = [];
     let j = i + 1;
-    let closed = false;
-    while (j < lines.length) {
-      if (lines[j].startsWith(fence)) {
-        closed = true;
-        break;
-      }
+    while (j < lines.length && !lines[j].startsWith(fence)) {
       codeLines.push(lines[j]);
       j++;
     }
-    if (closed) blocks.push({ lang, code: codeLines.join("\n") });
+    // Unclosed fence (response truncated mid-block) is still treated as a
+    // block closed at EOF, matching how Markdown itself handles it.
+    blocks.push({ lang, code: codeLines.join("\n") });
     i = j + 1;
   }
   return blocks;
@@ -64,13 +61,10 @@ const lineCount = (text: string): number =>
 const lastAssistantText = (
   ctx: ExtensionCommandContext,
 ): string | undefined => {
-  const branch = ctx.sessionManager.getBranch();
-  for (let i = branch.length - 1; i >= 0; i--) {
-    const entry = branch[i];
-    if (entry.type !== "message") continue;
-    const m = entry.message as { role?: string; content?: unknown };
-    if (m.role !== "assistant") continue;
-    const text = extractText(m.content).trim();
+  const { messages } = collectTextMessages(ctx.sessionManager.getBranch());
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].role !== "assistant") continue;
+    const text = extractText(messages[i].content).trim();
     if (text) return text;
   }
 };
@@ -79,15 +73,26 @@ const formatSession = (ctx: ExtensionCommandContext): string => {
   const lines: string[] = [];
   const name = ctx.sessionManager.getSessionName?.();
   if (name) lines.push(`# ${name}`, "");
-  for (const entry of ctx.sessionManager.getBranch()) {
-    if (entry.type !== "message") continue;
-    const m = entry.message as { role?: string; content?: unknown };
-    if (m.role !== "user" && m.role !== "assistant") continue;
+  const { messages } = collectTextMessages(ctx.sessionManager.getBranch());
+  for (const m of messages) {
     const text = extractText(m.content).trim();
     if (!text) continue;
     lines.push(`## ${m.role}`, "", text, "");
   }
   return lines.join("\n").trimEnd() + "\n";
+};
+
+const copyWithNotify = async (
+  ctx: ExtensionCommandContext,
+  value: string,
+  label: string,
+): Promise<void> => {
+  try {
+    await copyToClipboard(value);
+    ctx.ui.notify(`Copied ${label} to clipboard`, "info");
+  } catch (e) {
+    ctx.ui.notify(e instanceof Error ? e.message : String(e), "error");
+  }
 };
 
 export default function (pi: ExtensionAPI) {
@@ -102,21 +107,12 @@ export default function (pi: ExtensionAPI) {
       }
       const blocks = extractCodeBlocks(text);
 
-      const copy = async (value: string, label: string) => {
-        try {
-          await copyToClipboard(value);
-          ctx.ui.notify(`Copied ${label} to clipboard`, "info");
-        } catch (e) {
-          ctx.ui.notify(e instanceof Error ? e.message : String(e), "error");
-        }
-      };
-
       if (blocks.length === 0) {
-        await copy(text, "response");
+        await copyWithNotify(ctx, text, "response");
         return;
       }
       if (blocks.length === 1) {
-        await copy(blocks[0].code, "code block");
+        await copyWithNotify(ctx, blocks[0].code, "code block");
         return;
       }
 
@@ -138,7 +134,7 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify("Copy target not found", "error");
         return;
       }
-      await copy(blocks[idx].code, `code block ${idx + 1}`);
+      await copyWithNotify(ctx, blocks[idx].code, `code block ${idx + 1}`);
     },
   });
 
@@ -150,19 +146,12 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify("Session is empty", "warning");
         return;
       }
-      try {
-        await copyToClipboard(text);
-        const turns = (text.match(/^## /gm) ?? []).length;
-        ctx.ui.notify(
-          `Copied session (${turns} turns, ${text.length} chars)`,
-          "info",
-        );
-      } catch (e) {
-        ctx.ui.notify(
-          `copy-all failed: ${e instanceof Error ? e.message : String(e)}`,
-          "error",
-        );
-      }
+      const turns = (text.match(/^## /gm) ?? []).length;
+      await copyWithNotify(
+        ctx,
+        text,
+        `session (${turns} turns, ${text.length} chars)`,
+      );
     },
   });
 }

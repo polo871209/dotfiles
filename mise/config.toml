@@ -80,7 +80,6 @@ prek = "latest"
 semgrep = "latest"
 
 # Other
-"github:max-sixty/worktrunk" = { version = "latest", exe = "wt" }
 "npm:@colbymchenry/codegraph" = "latest"
 "npm:@earendil-works/pi-coding-agent" = "latest"
 yt-dlp = { version = "latest", rename_exe = "yt-dlp" }

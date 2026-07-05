@@ -88,7 +88,11 @@ const installBottomPinPatch = () => {
 };
 
 const RESET = "\x1b[0m";
-const BORDER = /^(?:\x1b\[[0-9;]*m)*[─ ↑↓0-9more]+(?:\x1b\[[0-9;]*m)*$/;
+// Matches only actual decoration lines (a solid horizontal rule, or a
+// "↑ 3 more"-style scroll hint) so we don't skip coloring a real input line
+// that happens to be all digits or a word overlapping those characters.
+const BORDER =
+  /^(?:\x1b\[[0-9;]*m)*(?:─+|[↑↓]\s*\d+\s*more)(?:\x1b\[[0-9;]*m)*$/;
 
 const colorInputLine = (line: string, theme: PiTheme) => {
   if (BORDER.test(line)) return line;

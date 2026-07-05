@@ -285,6 +285,17 @@ export class JsKernel {
 
     const wrapped = wrapCell(code);
     const startedAt = Date.now();
+    // vm's `timeout` option only bounds the script's synchronous portion —
+    // the wrapped code is an async IIFE that returns a Promise almost
+    // immediately, so a cell awaiting a hung fetch/promise would otherwise
+    // never time out. Race the returned promise against our own timer.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const asyncTimeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(`Script execution timed out after ${timeoutSec}s`));
+      }, timeoutSec * 1000);
+      timer.unref?.();
+    });
     try {
       const promise = vm.runInContext(wrapped, this.#ctxState.ctx, {
         filename: "<cell>",
@@ -294,14 +305,19 @@ export class JsKernel {
           ? { importModuleDynamically: dynamicImport as never }
           : {}),
       }) as Promise<unknown>;
-      result.value = await promise;
+      result.value = await Promise.race([promise, asyncTimeout]);
     } catch (err) {
       const e = err as Error;
       if (e && /Script execution timed out/i.test(e.message)) {
         result.timedOut = true;
+        // The async IIFE may still be running against this context (e.g. a
+        // hung fetch) with no way to cancel it — discard the context so it
+        // can't keep mutating state or calling tools after this cell ends.
+        this.#ctxState = null;
       }
       result.error = e?.stack ?? String(err);
     } finally {
+      clearTimeout(timer);
       result.stdout = capture.stdout;
       result.stderr = capture.stderr;
       result.durationMs = Date.now() - startedAt;

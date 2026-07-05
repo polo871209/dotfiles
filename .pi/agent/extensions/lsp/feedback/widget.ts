@@ -1,22 +1,8 @@
 // Builds the above-editor widget lines summarizing a feedback run.
-import { displayPath } from "../utils";
-import type { DriverResult, Severity } from "./types";
+import { displayPath, formatDiagLine, sortDiagnostics } from "../utils";
+import type { DriverResult } from "./types";
 
 const MAX_LINES_OUT = 50;
-
-const sevTag: Record<Severity, string> = {
-  error: "error",
-  warn: "warn ",
-  info: "info ",
-  hint: "hint ",
-};
-
-const sevRank: Record<Severity, number> = {
-  error: 0,
-  warn: 1,
-  info: 2,
-  hint: 3,
-};
 
 export const buildWidgetLines = (
   r: DriverResult,
@@ -24,13 +10,7 @@ export const buildWidgetLines = (
   fixedFiles: string[] = [],
   fixSkipped = false,
 ): string[] | null => {
-  const diags = [...r.diagnostics].sort((a, b) => {
-    const s = sevRank[a.severity] - sevRank[b.severity];
-    if (s !== 0) return s;
-    const f = a.file.localeCompare(b.file);
-    if (f !== 0) return f;
-    return a.line - b.line;
-  });
+  const diags = sortDiagnostics(r.diagnostics);
   const formatted = r.formatted.map((f) => displayPath(f, cwd));
   const fixed = fixedFiles.map((f) => displayPath(f, cwd));
 
@@ -48,15 +28,7 @@ export const buildWidgetLines = (
     if (formatted.length > 0 || fixed.length > 0 || fixSkipped) lines.push("");
     lines.push(`${diags.length} diagnostic(s):`);
     const shown = diags.slice(0, MAX_LINES_OUT);
-    for (const d of shown) {
-      const loc = displayPath(d.file, cwd);
-      const src = d.source
-        ? `${d.source}${d.code ? `(${d.code})` : ""}`
-        : (d.code ?? "");
-      lines.push(
-        `  ${loc}:${d.line}:${d.col}  ${sevTag[d.severity]}  ${src ? `${src}: ` : ""}${d.message.replace(/\s+/g, " ").trim()}`,
-      );
-    }
+    for (const d of shown) lines.push(formatDiagLine(d, cwd));
     if (diags.length > shown.length) {
       lines.push(`  … (+${diags.length - shown.length} more)`);
     }
