@@ -7,6 +7,7 @@ theme = Gruvbox Dark
 macos-option-as-alt = true
 macos-titlebar-style = hidden
 maximize = true
+window-padding-x = 16
 window-padding-y = 10
 
 # Behavior

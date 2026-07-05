@@ -1,8 +1,8 @@
 // /subagent — delegate work to an isolated `pi` running as a real interactive
-// agent inside its own herdr pane. Single-layer only: agents cannot spawn
-// other subagents (PI_IS_SUBAGENT=1 in the child env makes this extension
-// early-exit before registering its tool). Herdr-only: outside herdr there is
-// no pane to run the child in, so the tool is not registered at all.
+// agent inside its own tmux pane, split off the calling pane. Single-layer
+// only: agents cannot spawn other subagents (PI_IS_SUBAGENT=1 in the child
+// env makes this extension early-exit before registering its tool). tmux-only:
+// outside tmux there is no pane to split, so the tool is not registered at all.
 //
 // Agents live in pi's standard agents dir (`~/.pi/agent/agents/*.md`) as
 // markdown with YAML frontmatter:
@@ -16,9 +16,8 @@
 //   ---
 //   <system prompt body>
 //
-// Status comes from herdr's own pi integration (herdr-agent-state.ts loads
-// inside the child pane too, reporting working/blocked/idle for it same as
-// any other pi session) instead of a parsed JSON event stream.
+// Status comes from notifier.ts, which sets the child pane's tmux pane title
+// to reflect busy/ask/done — polled here instead of a parsed JSON event stream.
 
 import { execFile } from "node:child_process";
 import * as fs from "node:fs";
@@ -70,61 +69,43 @@ const UPDATE_INTERVAL_MS = 150;
 const TASK_PREVIEW_MAX = 140;
 const FORBIDDEN_TOOLS = new Set(["subagent"]);
 const DEFAULT_MAX_DURATION_MS = 600_000;
-// Tight enough to reliably beat herdr's default 1s notification delay when we
-// release the pane's agent report right after detecting completion (see
-// releaseNotification below).
-const HERDR_POLL_MS = 300;
+const TMUX_POLL_MS = 500;
 
 const execFileAsync = promisify(execFile);
 
-function herdrActive(): boolean {
-  return process.env.HERDR_ENV === "1" && !!process.env.HERDR_PANE_ID;
+function tmuxActive(): boolean {
+  return !!process.env.TMUX && !!process.env.TMUX_PANE;
 }
 
-async function herdrJson<T>(args: string[]): Promise<T | undefined> {
+// tmux prints plain text on stdout, not JSON — every helper here just trims it.
+async function tmuxOut(args: string[]): Promise<string> {
   try {
-    const { stdout } = await execFileAsync("herdr", args, {
+    const { stdout } = await execFileAsync("tmux", args, {
       timeout: 10_000,
+      maxBuffer: 16 * 1024 * 1024,
     });
-    return JSON.parse(stdout) as T;
+    return stdout.trim();
   } catch {
-    return undefined;
+    return "";
   }
 }
 
-async function herdrRun(args: string[]): Promise<boolean> {
+async function tmuxRun(args: string[]): Promise<boolean> {
   try {
-    await execFileAsync("herdr", args, { timeout: 10_000 });
+    await execFileAsync("tmux", args, { timeout: 10_000 });
     return true;
   } catch {
     return false;
   }
 }
 
-// `pane read` prints plain text, not JSON (unlike every other herdr
-// subcommand) — must not go through herdrJson's JSON.parse.
-async function herdrText(args: string[]): Promise<string> {
-  try {
-    const { stdout } = await execFileAsync("herdr", args, {
-      timeout: 10_000,
-      maxBuffer: 16 * 1024 * 1024,
-    });
-    return stdout;
-  } catch {
-    return "";
-  }
-}
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-// Shared herdr panel: concurrent subagents stack inside one fixed-width
-// column (30% of the main pane) instead of each carving its own slice out of
-// the main pane. The first subagent splits the main pane; later concurrent
-// ones split the previous subagent's pane downward, so the panel's total
-// width never grows with agent count. A simple promise chain serializes the
-// split/close calls that mutate the shared panel list so concurrent
-// executions can't race each other's layout changes.
-const PANEL_WIDTH_RATIO = 0.7; // main pane keeps 70%, panel column gets 30%
+// Shared panel: concurrent subagents stack in one vertical column instead of
+// each carving a fresh horizontal slice out of the calling pane. The first
+// subagent splits off the calling pane (side column); later concurrent ones
+// split the previous subagent's pane downward, so the column's width never
+// grows with agent count. A promise chain serializes the split/close calls
+// that mutate the shared panel list so concurrent executions can't race each
+// other's layout changes.
 let panel: string[] = [];
 let panelChain: Promise<unknown> = Promise.resolve();
 
@@ -137,55 +118,85 @@ function withPanelLock<T>(fn: () => Promise<T>): Promise<T> {
   return result;
 }
 
+// Give every pane in the panel column equal height instead of the halving
+// cascade split-window's default 50/50 would produce (1st pane 50%, 2nd 25%,
+// 3rd 12.5%, ...). Resizing all but the last is enough — tmux gives the last
+// pane whatever's left, which lands on the same equal share by construction.
+async function rebalancePanel(): Promise<void> {
+  if (panel.length < 2) return;
+  const totalHeight = Number(
+    await tmuxOut([
+      "display-message",
+      "-t",
+      panel[0]!,
+      "-p",
+      "#{window_height}",
+    ]),
+  );
+  if (!Number.isFinite(totalHeight) || totalHeight <= 0) return;
+  const share = Math.floor(totalHeight / panel.length);
+  for (const id of panel.slice(0, -1)) {
+    await tmuxRun(["resize-pane", "-t", id, "-y", String(share)]);
+  }
+}
+
 async function acquirePanelSlot(
   cwd: string,
-  env: Record<string, string>,
+  shCmd: string,
 ): Promise<string | undefined> {
   return withPanelLock(async () => {
-    const envArgs = Object.entries(env).flatMap(([k, v]) => [
-      "--env",
-      `${k}=${v}`,
-    ]);
     const anchor = panel.at(-1);
-    const resp = anchor
-      ? await herdrJson<Record<string, any>>([
-          "pane",
-          "split",
+    const args = anchor
+      ? [
+          "split-window",
+          "-d",
+          "-v",
+          "-c",
+          cwd,
+          "-t",
           anchor,
-          "--direction",
-          "down",
-          "--ratio",
-          "0.5",
-          "--cwd",
+          "-P",
+          "-F",
+          "#{pane_id}",
+          "--",
+          "zsh",
+          "-lc",
+          shCmd,
+        ]
+      : [
+          "split-window",
+          "-d",
+          "-h",
+          "-p",
+          "25",
+          "-c",
           cwd,
-          "--no-focus",
-          ...envArgs,
-        ])
-      : await herdrJson<Record<string, any>>([
-          "pane",
-          "split",
-          process.env.HERDR_PANE_ID!,
-          "--direction",
-          "right",
-          "--ratio",
-          String(PANEL_WIDTH_RATIO),
-          "--cwd",
-          cwd,
-          "--no-focus",
-          ...envArgs,
-        ]);
-    const paneId: string | undefined = resp?.result?.pane?.pane_id;
+          "-t",
+          process.env.TMUX_PANE!,
+          "-P",
+          "-F",
+          "#{pane_id}",
+          "--",
+          "zsh",
+          "-lc",
+          shCmd,
+        ];
+    const paneId = await tmuxOut(args);
     if (paneId) panel.push(paneId);
-    return paneId;
+    await rebalancePanel();
+    return paneId || undefined;
   });
 }
 
 async function releasePanelSlot(paneId: string): Promise<void> {
   await withPanelLock(async () => {
-    await herdrRun(["pane", "close", paneId]);
+    await tmuxRun(["kill-pane", "-t", paneId]);
     panel = panel.filter((id) => id !== paneId);
+    await rebalancePanel();
   });
 }
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function expandToolPatterns(patterns: string[], allNames: string[]): string[] {
   const out = new Set<string>();
@@ -405,26 +416,16 @@ function toolsFlagValue(
   return expanded.length > 0 ? expanded.join(",") : undefined;
 }
 
-// The pi integration herdr installs reports agent state under this fixed
-// source/agent pair (see the installed herdr-agent-state.ts extension).
-// Releasing it right after we detect completion — well before herdr's
-// default 1s notification delay expires — makes herdr re-check state at
-// delivery time, see it no longer matches, and skip the "finished" toast/
-// sound. A pane that goes "blocked" is left alone: that notification is the
-// one case where the user's attention is actually wanted.
-async function releaseAgentReport(paneId: string): Promise<void> {
-  await herdrRun([
-    "pane",
-    "release-agent",
-    paneId,
-    "--source",
-    "herdr:pi",
-    "--agent",
-    "pi",
-  ]);
+// Pane-title status suffix notifier.ts sets for a subagent pane (see
+// notifier.ts's setWindowStatus): "<title>-busy" / "-ask" / "-done" / "-idle".
+// A dedicated pane title (not the shared window name) because the subagent
+// pane lives inside the parent's own window.
+function paneStatusSuffix(paneTitle: string): string | undefined {
+  const idx = paneTitle.lastIndexOf("-");
+  return idx === -1 ? undefined : paneTitle.slice(idx + 1);
 }
 
-async function runInHerdr(
+async function runInTmux(
   pi: ExtensionAPI,
   agent: AgentConfig,
   task: string,
@@ -458,6 +459,7 @@ async function runInHerdr(
 
   const toolsFlag = toolsFlagValue(agent, pi);
   const parts = [
+    "PI_IS_SUBAGENT=1",
     "pi",
     "--no-session",
     "--no-context-files",
@@ -467,28 +469,31 @@ async function runInHerdr(
   if (agent.model) parts.push(`--model ${agent.model}`);
   if (agent.thinking) parts.push(`--thinking ${agent.thinking}`);
   parts.push(`"$(cat '${taskFile}')"`);
+  // Real interactive pi, not --print: the task is the initial prompt, then
+  // pi stays running and idle in the pane afterward — watchable, and you can
+  // type into it directly to steer or follow up.
   const shCmd = parts.join(" ");
 
-  const paneId = await acquirePanelSlot(cwd, { PI_IS_SUBAGENT: "1" });
+  const paneId = await acquirePanelSlot(cwd, shCmd);
   if (!paneId) {
     cleanupFiles();
     progress.status = "failed";
-    progress.error = "herdr pane split failed";
+    progress.error = "tmux split-window failed";
     return {
       content: [
         {
           type: "text",
-          text: `subagent '${agent.name}' failed — could not open herdr pane`,
+          text: `subagent '${agent.name}' failed — could not open tmux pane`,
         },
       ],
       details: { ...progress },
-      error: `Subagent ${agent.name}: herdr pane split failed`,
+      error: `Subagent ${agent.name}: tmux split-window failed`,
     };
   }
+  // Best effort: name the pane after the subagent for readability before
+  // notifier.ts (running inside it) takes over with status suffixes.
+  void tmuxRun(["select-pane", "-t", paneId, "-T", target]);
 
-  await herdrRun(["pane", "run", paneId, shCmd]);
-
-  let seenWorking = false;
   let aborted = false;
   const onAbort = () => {
     aborted = true;
@@ -509,13 +514,21 @@ async function runInHerdr(
       break;
     }
 
-    const info = await herdrJson<Record<string, any>>(["pane", "get", paneId]);
-    const status: string | undefined = info?.result?.pane?.agent_status;
-    if (status === "working") seenWorking = true;
-    progress.lastMessage = status ? `herdr: ${status}` : "herdr: starting…";
+    const paneTitle = await tmuxOut([
+      "display-message",
+      "-t",
+      paneId,
+      "-p",
+      "#{pane_title}",
+    ]);
+    const status = paneStatusSuffix(paneTitle);
+    progress.lastMessage = status ? `tmux: ${status}` : "tmux: starting…";
     push();
 
-    if (seenWorking && status === "idle") {
+    // notifier.ts only ever sets "done" from a real agent_end, and a subagent
+    // pane is never OS-focused, so "done" (not the ambiguous initial "idle")
+    // is the terminal signal here — no need to first observe "busy".
+    if (status === "done") {
       finalStatus = "idle";
       break;
     }
@@ -523,19 +536,18 @@ async function runInHerdr(
       finalStatus = "blocked";
       break;
     }
-    if (!status && seenWorking) {
-      finalStatus = "idle"; // pane/agent vanished after having started
+    if (!paneTitle) {
+      finalStatus = "idle"; // pane vanished
       break;
     }
 
-    await sleep(HERDR_POLL_MS);
+    await sleep(TMUX_POLL_MS);
   }
 
   progress.durationMs = Date.now() - progress.startedAt;
 
   if (finalStatus === "aborted" || finalStatus === "timeout") {
-    await releaseAgentReport(paneId);
-    await herdrRun(["pane", "send-keys", paneId, "ctrl+c"]);
+    await tmuxRun(["send-keys", "-t", paneId, "C-c"]);
     await sleep(300);
     await releasePanelSlot(paneId);
     cleanupFiles();
@@ -553,17 +565,14 @@ async function runInHerdr(
     };
   }
 
-  // "visible" only returns what currently fits on screen — wrong here since
-  // the answer can scroll off during a long run. By now real scrollback has
-  // accumulated, so "recent-unwrapped" (unlike right after pane creation) works.
-  const rawOutput = await herdrText([
-    "pane",
-    "read",
+  const rawOutput = await tmuxOut([
+    "capture-pane",
+    "-p",
+    "-J",
+    "-t",
     paneId,
-    "--source",
-    "recent-unwrapped",
-    "--lines",
-    "400",
+    "-S",
+    "-400",
   ]);
   const finalText = headTruncate(rawOutput.trim(), MAX_OUTPUT_BYTES);
 
@@ -577,7 +586,7 @@ async function runInHerdr(
       content: [
         {
           type: "text",
-          text: `subagent '${agent.name}' is blocked in herdr pane ${paneId} — check it directly.\n${finalText}`,
+          text: `subagent '${agent.name}' is blocked in tmux pane ${paneId} — check it directly.\n${finalText}`,
         },
       ],
       details: { ...progress },
@@ -585,7 +594,6 @@ async function runInHerdr(
     };
   }
 
-  await releaseAgentReport(paneId);
   await releasePanelSlot(paneId);
   cleanupFiles();
   progress.status = "done";
@@ -598,7 +606,7 @@ async function runInHerdr(
 
 export default function (pi: ExtensionAPI) {
   if (process.env.PI_IS_SUBAGENT === "1") return;
-  if (!herdrActive()) return;
+  if (!tmuxActive()) return;
 
   const agents = loadAgents();
   if (agents.length === 0) return;
@@ -660,7 +668,7 @@ export default function (pi: ExtensionAPI) {
       };
       const push = throttle(pushNow, UPDATE_INTERVAL_MS);
 
-      return await runInHerdr(
+      return await runInTmux(
         pi,
         agent,
         args.task,

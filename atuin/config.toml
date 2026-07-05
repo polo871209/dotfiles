@@ -231,6 +231,7 @@ enter_accept = true
 #   "podman",
 #   "port",
 #   "systemctl",
+#   "tmux",
 #   "yarn",
 # ]
 
@@ -316,6 +317,22 @@ autostart = true
 ## The "workspace" mode is skipped when not in a workspace or workspaces = false.
 ## Default filter mode can be overridden with the filter_mode setting.
 filters = ["global", "workspace"]
+
+[tmux]
+## Enable using atuin with tmux popup (requires tmux >= 3.2)
+## When enabled and running inside tmux, Atuin will use a popup window for interactive search.
+## Set to false to disable the popup.
+## This can also be controlled with the ATUIN_TMUX_POPUP environment variable.
+## Note: tmux popup is currently supported in zsh, bash, and fish shells.
+enabled = false
+
+## Width of the tmux popup window
+## Can be a percentage, or integer (e.g. "100" means 100 characters wide)
+# width = "95%"
+
+## Height of the tmux popup window
+## Can be a percentage, or integer (e.g. "100" means 100 lines tall)
+# height = "95%"
 
 [ui]
 ## Columns to display in the interactive search, from left to right.

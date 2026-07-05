@@ -1,10 +1,8 @@
--- Send selections / diagnostics from neovim to a running pi instance.
---
--- Finds the pi agent(s) in the current herdr workspace via `herdr pane
--- list`/`tab list` and injects text with `herdr pane run` (herdr auto-wraps
--- it in bracketed paste for panes that have that mode on, so embedded
--- newlines land as one message instead of one Enter per line). Multiple pi
--- agents in the workspace -> vim.ui.select to pick one.
+-- Send selections / diagnostics from neovim to a pi instance running in the
+-- same tmux session. Requires .pi/extensions/tmux-bridge.ts to be loaded in
+-- pi, which exposes a Unix socket per pi pane at
+-- $TMPDIR/pi-tmux-pane-<sanitized-pane-id>.sock. Multiple pi panes in the
+-- session -> vim.ui.select to pick one.
 local M = {}
 
 local TIMEOUT = 1000
@@ -13,6 +11,122 @@ local TIMEOUT = 1000
 ---@param level? integer
 local function notify(msg, level)
     vim.schedule(function() vim.notify(msg, level or vim.log.levels.INFO) end)
+end
+
+--- Build candidate socket paths for a given tmux pane.
+--- pi-side (tmux-bridge.ts) uses Node's `os.tmpdir()` which on macOS resolves
+--- to /var/folders/.../T regardless of $TMPDIR. nvim's $TMPDIR may differ,
+--- so we probe several candidates.
+---@param pane_id string
+---@return string[]
+local function candidate_paths(pane_id)
+    local safe = pane_id:gsub('[^%w_%-]', '_')
+    local name = 'pi-tmux-pane-' .. safe .. '.sock'
+    local seen, out = {}, {}
+    local function add(dir)
+        if not dir or dir == '' then return end
+        dir = dir:gsub('/+$', '')
+        local p = dir .. '/' .. name
+        if not seen[p] then
+            seen[p] = true
+            table.insert(out, p)
+        end
+    end
+    add(vim.env.TMPDIR)
+    -- macOS canonical temp dir (matches Node's os.tmpdir() on Darwin).
+    local r = vim.system({ 'getconf', 'DARWIN_USER_TEMP_DIR' }, { text = true, timeout = TIMEOUT }):wait()
+    if r.code == 0 and r.stdout then add(vim.trim(r.stdout)) end
+    add '/tmp'
+    return out
+end
+
+--- Check whether a unix socket has a live listener by attempting a connect.
+--- Fully synchronous, blocks up to ~150ms.
+---@param sock string
+---@return boolean
+local function listener_alive(sock)
+    if vim.uv.fs_stat(sock) == nil then return false end
+    local pipe = vim.uv.new_pipe(false)
+    if not pipe then return false end
+    local ok = false
+    local done = false
+    pipe:connect(sock, function(err)
+        ok = err == nil
+        done = true
+    end)
+    vim.wait(150, function() return done end, 10)
+    pcall(function() pipe:close() end)
+    return ok
+end
+
+--- Resolve the live tmux-bridge socket for one pane, if any.
+---@param pane_id string
+---@return string?
+local function socket_for_pane(pane_id)
+    for _, p in ipairs(candidate_paths(pane_id)) do
+        if listener_alive(p) then return p end
+    end
+    return nil
+end
+
+--- pi panes in the current tmux session. pi's own process shows up as "node"
+--- in tmux (it's a node program), so we can't filter on
+--- pane_current_command; pi sets its own pane title starting with "π" instead
+--- (see notifier.ts / interactive-mode.updateTerminalTitle), which is what we
+--- match on.
+---@return table[]  { pane_id, window_name }
+local function tmux_pi_panes()
+    local r = vim.system({ 'tmux', 'list-panes', '-s', '-F', '#{pane_id}\t#{pane_title}\t#{window_name}' }, { text = true, timeout = TIMEOUT }):wait()
+    if r.code ~= 0 or not r.stdout then return {} end
+    local out = {}
+    for line in r.stdout:gmatch '[^\n]+' do
+        local pane_id, pane_title, window_name = line:match '^([^\t]*)\t([^\t]*)\t(.*)$'
+        if pane_title and pane_title:match '^π' then table.insert(out, { pane_id = pane_id, window_name = window_name }) end
+    end
+    return out
+end
+
+--- Resolve which pi socket to send to: the session's only live pi bridge, or
+--- a vim.ui.select prompt when there are several.
+---@param cb fun(sock: string?)
+local function resolve_socket(cb)
+    if vim.env.TMUX == nil then
+        notify('pi integration requires tmux', vim.log.levels.ERROR)
+        cb(nil)
+        return
+    end
+    local live = {}
+    for _, p in ipairs(tmux_pi_panes()) do
+        local sock = socket_for_pane(p.pane_id)
+        if sock then table.insert(live, { pane_id = p.pane_id, window_name = p.window_name, sock = sock }) end
+    end
+    if #live == 0 then
+        notify('No pi listener found in this tmux session. Is .pi/extensions/tmux-bridge.ts loaded?', vim.log.levels.ERROR)
+        cb(nil)
+        return
+    end
+    if #live == 1 then
+        cb(live[1].sock)
+        return
+    end
+    vim.ui.select(live, {
+        prompt = 'Send to which pi agent?',
+        format_item = function(p) return p.window_name end,
+    }, function(choice) cb(choice and choice.sock or nil) end)
+end
+
+--- Send a JSON object as one line to a pi socket. Fully async.
+---@param sock string
+---@param obj table
+local function send(sock, obj)
+    local payload = vim.json.encode(obj) .. '\n'
+    vim.system({ 'nc', '-U', '-w', '1', sock }, { stdin = payload, text = true, timeout = TIMEOUT }, function(result)
+        if result.code ~= 0 then
+            notify('Failed to send to pi: ' .. (result.stderr or 'unknown error'), vim.log.levels.ERROR)
+        else
+            notify 'Sent to pi'
+        end
+    end)
 end
 
 --- Read selected text from the current buffer between marks `<` and `>`.
@@ -25,98 +139,6 @@ local function get_visual_selection(buf)
     local lines = vim.api.nvim_buf_get_lines(buf, s[1] - 1, e[1], false)
     return table.concat(lines, '\n'), s[1], e[1]
 end
-
---- Build "<question>\n\n<filepath lines X-Y>\n<numbered snippet>" for a
---- selection. Sends only the selected lines, not the whole file, so the
---- message stays small and readable in pi's transcript; pi reads the file
---- itself if it needs more than the selection.
----@param input string
----@param selection string
----@param filepath string
----@param ft string
----@param sline integer?
----@param eline integer?
----@return string
-local function build_selection_text(input, selection, filepath, ft, sline, eline)
-    local snip_lines = vim.split(selection, '\n')
-    local width = #tostring((eline or #snip_lines))
-    local numbered = {}
-    for i, l in ipairs(snip_lines) do
-        numbered[i] = string.format('%' .. width .. 'd | %s', (sline or 1) + i - 1, l)
-    end
-    return string.format('%s\n\n%s lines %d-%d:\n```%s\n%s\n```', input, filepath, sline, eline, ft, table.concat(numbered, '\n'))
-end
-
---- pi agent panes in the current herdr workspace.
----@return table[]  { pane_id, tab_id }
-local function herdr_pi_panes()
-    local r = vim.system({ 'herdr', 'pane', 'list' }, { text = true, timeout = TIMEOUT }):wait()
-    if r.code ~= 0 or not r.stdout then return {} end
-    local ok, decoded = pcall(vim.json.decode, r.stdout)
-    if not ok then return {} end
-    local ws = vim.env.HERDR_WORKSPACE_ID
-    local out = {}
-    for _, p in ipairs((decoded.result or {}).panes or {}) do
-        if p.workspace_id == ws and p.agent == 'pi' then table.insert(out, { pane_id = p.pane_id, tab_id = p.tab_id }) end
-    end
-    return out
-end
-
---- tab_id -> display label, for labeling the picker.
----@return table<string, string>
-local function herdr_tab_labels()
-    local r = vim.system({ 'herdr', 'tab', 'list', '--workspace', vim.env.HERDR_WORKSPACE_ID }, { text = true, timeout = TIMEOUT }):wait()
-    if r.code ~= 0 or not r.stdout then return {} end
-    local ok, decoded = pcall(vim.json.decode, r.stdout)
-    if not ok then return {} end
-    local out = {}
-    for _, t in ipairs((decoded.result or {}).tabs or {}) do
-        out[t.tab_id] = t.label
-    end
-    return out
-end
-
---- Resolve which herdr pane to send to: the workspace's only pi agent, or a
---- vim.ui.select prompt when there are several.
----@param cb fun(pane_id: string?)
-local function resolve_herdr_pane(cb)
-    if vim.env.HERDR_ENV ~= '1' then
-        notify('pi integration requires herdr', vim.log.levels.ERROR)
-        cb(nil)
-        return
-    end
-    local panes = herdr_pi_panes()
-    if #panes == 0 then
-        notify('No pi agent found in this herdr workspace', vim.log.levels.ERROR)
-        cb(nil)
-        return
-    end
-    if #panes == 1 then
-        cb(panes[1].pane_id)
-        return
-    end
-    local labels = herdr_tab_labels()
-    vim.ui.select(panes, {
-        prompt = 'Send to which pi agent?',
-        format_item = function(p) return labels[p.tab_id] or p.pane_id end,
-    }, function(choice) cb(choice and choice.pane_id or nil) end)
-end
-
---- Submit text + Enter into a herdr pane. herdr wraps it in bracketed paste
---- when the target pane has that mode on, so no manual wrapping here.
----@param pane_id string
----@param text string
-local function send_herdr(pane_id, text)
-    vim.system({ 'herdr', 'pane', 'run', pane_id, text }, { timeout = TIMEOUT }, function(result)
-        if result.code ~= 0 then
-            notify('Failed to send to pi: ' .. (result.stderr or 'unknown error'), vim.log.levels.ERROR)
-        else
-            notify 'Sent to pi'
-        end
-    end)
-end
-
--- Public API --------------------------------------------------------------
 
 function M.send_selection()
     vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<esc>', true, false, true), 'x', true)
@@ -137,11 +159,22 @@ function M.send_selection()
     local filepath = vim.fn.fnamemodify(bufname, ':.')
     local ft = vim.bo[buf].filetype or ''
 
-    resolve_herdr_pane(function(pane_id)
-        if not pane_id then return end
+    resolve_socket(function(sock)
+        if not sock then return end
         vim.ui.input({ prompt = 'pi: ' }, function(input)
             if not input or input == '' then return end
-            send_herdr(pane_id, build_selection_text(input, selection, filepath, ft, sline, eline))
+            -- Send the whole file so pi answers with zero extra read round-trip (pi's
+            -- edit/write read from disk at exec time, so editing never needs a prior
+            -- read either). The bridge injects it as a collapsed custom message so the
+            -- conversation stays compact; the selection just marks the focus range.
+            local all = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), '\n')
+            -- tmux-bridge drops socket lines >256KB; for big files send a reference and
+            -- let pi read them itself instead of the message being silently dropped.
+            if #all <= 200000 then
+                send(sock, { prompt = input, file = { path = filepath, sline = sline, eline = eline, ft = ft, content = all } })
+            else
+                send(sock, { text = string.format('%s\n\nRe: %s lines %d-%d. Read the file for full context.', input, filepath, sline, eline) })
+            end
         end)
     end)
 end
@@ -166,16 +199,18 @@ function M.send_diagnostics()
         [vim.diagnostic.severity.INFO] = 'INFO',
         [vim.diagnostic.severity.HINT] = 'HINT',
     }
+
     local lines = {}
     for _, d in ipairs(diagnostics) do
         local severity = severity_names[d.severity] or 'UNKNOWN'
         table.insert(lines, string.format('[%s] Line %d: %s', severity, d.lnum + 1, (d.message or ''):gsub('\n', ' ')))
     end
+
     local filepath = vim.fn.fnamemodify(bufname, ':.')
     local text = 'Please review these diagnostics and help me fix them.\n\n' .. filepath .. ':\n' .. table.concat(lines, '\n')
 
-    resolve_herdr_pane(function(pane_id)
-        if pane_id then send_herdr(pane_id, text) end
+    resolve_socket(function(sock)
+        if sock then send(sock, { text = text }) end
     end)
 end
 

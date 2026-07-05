@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# pi-send — inject tmux pane output / a message into the pi pane in this
+# tmux session, by pasting text directly into its pane (bracketed paste,
+# same as a real paste) then pressing Enter. No socket, no cooperating
+# extension required inside pi.
+#
+# Usage:
+#   pi-send "message"                    # message only
+#   pi-send -p <pane_id> "message"       # capture last 100 lines of pane + message
+#   echo "..." | pi-send "message"       # use stdin (e.g. copy-mode selection) + message
+
+set -euo pipefail
+
+if [[ -z "${TMUX:-}" ]]; then
+  echo "pi-send: not running inside a tmux session" >&2
+  exit 1
+fi
+
+MESSAGE=""
+LINES=100
+PANE_ID=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -p) PANE_ID="$2"; shift 2 ;;
+    *)  MESSAGE="$1"; shift ;;
+  esac
+done
+
+# --- Find the pi pane in this session ---
+# pi's own process shows up as "node" in tmux (it's a node program), so we
+# match on pi's own pane title (starts with π) instead of pane_current_command.
+
+TARGET=$(tmux list-panes -s -F '#{pane_id}\t#{pane_title}' | awk -F'\t' '$2 ~ /^π/ {print $1; exit}')
+if [[ -z "$TARGET" ]]; then
+  echo "pi-send: no pi pane found in this tmux session" >&2
+  exit 1
+fi
+
+# --- Gather content ---
+
+if [[ -n "$PANE_ID" ]]; then
+  PANE_OUTPUT=$(tmux capture-pane -p -J -S "-$LINES" -t "$PANE_ID" 2>/dev/null | sed '/^[[:space:]]*$/d' || true)
+elif [[ ! -t 0 ]]; then
+  PANE_OUTPUT=$(cat)
+else
+  PANE_OUTPUT=""
+fi
+
+if [[ -n "$PANE_OUTPUT" ]]; then
+  if [[ -n "$MESSAGE" ]]; then
+    TEXT="terminal output:
+
+$MESSAGE
+
+\`\`\`
+$PANE_OUTPUT
+\`\`\`"
+  else
+    TEXT="terminal output:
+
+\`\`\`
+$PANE_OUTPUT
+\`\`\`"
+  fi
+else
+  if [[ -z "$MESSAGE" ]]; then
+    echo "pi-send: nothing to send (no message, no pane, no stdin)" >&2
+    exit 1
+  fi
+  TEXT="$MESSAGE"
+fi
+
+# --- Send: paste-buffer wraps in bracketed paste so multi-line text lands as
+# one message instead of one Enter per line ---
+
+printf '%s' "$TEXT" | tmux load-buffer -b pi-send -
+tmux paste-buffer -p -b pi-send -d -t "$TARGET"
+tmux send-keys -t "$TARGET" Enter
+
+tmux display-message "pi-send: sent to pi"

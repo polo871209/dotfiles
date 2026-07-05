@@ -42,6 +42,16 @@ const containsComponent = (node: Component, target: Component): boolean => {
   return false;
 };
 
+// pi's own message containers render with a 1-column left margin (a real
+// space character in the terminal grid, not screen padding), so selecting
+// text out of the pane always drags that space along. Footer/divider lines
+// span full width with no margin and are untouched since they don't start
+// with one. Strip right after any leading ANSI color codes so colored lines
+// still get the same trim.
+const LEADING_MARGIN = /^((?:\x1b\[[0-9;]*m)*) /;
+const stripLeadingMargin = (lines: string[]): string[] =>
+  lines.map((l) => l.replace(LEADING_MARGIN, "$1"));
+
 // Patch TUI.render to split children at the editor and fill the gap above it
 // with blank lines so the editor (and its bottom-anchored autocomplete overlay)
 // sits at the bottom of the viewport even on a fresh session. As the
@@ -69,7 +79,7 @@ const installBottomPinPatch = () => {
       }
     }
 
-    if (editorIdx <= 0) return origRender.call(this, width);
+    if (editorIdx <= 0) return stripLeadingMargin(origRender.call(this, width));
 
     const before: string[] = [];
     for (let i = 0; i < editorIdx; i++)
@@ -81,9 +91,11 @@ const installBottomPinPatch = () => {
       0,
       this.terminal.rows - before.length - rest.length,
     );
-    return filler > 0
-      ? [...before, ...new Array<string>(filler).fill(""), ...rest]
-      : [...before, ...rest];
+    return stripLeadingMargin(
+      filler > 0
+        ? [...before, ...new Array<string>(filler).fill(""), ...rest]
+        : [...before, ...rest],
+    );
   };
 };
 

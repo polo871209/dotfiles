@@ -2,11 +2,14 @@
 // metadata table that drives sentinel rows, runtime validation, and the
 // LLM-facing answer envelope.
 //
-// IMPORTANT: the schema deliberately carries NO `maxLength` on header/label.
-// Hard length caps in the schema make pi reject the whole tool call before
-// execute() runs, forcing the model to retry (the "needs twice to trigger"
-// bug). Limits are advisory in the descriptions and enforced by graceful
-// truncation in index.ts instead, so the first call always lands.
+// IMPORTANT: the schema deliberately carries NO `maxLength` on header/label,
+// and no `minItems`/`maxItems` on questions/options either. Any hard bound in
+// the schema makes pi reject the whole tool call before execute() runs,
+// forcing the model to retry (the "needs twice to trigger" bug) — that once
+// bit the options array specifically (a question with 1 authored option got
+// rejected outright instead of just working). All limits here are advisory in
+// the descriptions and enforced by graceful clamping in index.ts instead, so
+// the first call always lands.
 
 import { type Static, Type } from "typebox";
 
@@ -141,10 +144,7 @@ export const QuestionSchema = Type.Object({
     description: `Very short chip/tag shown next to the question (aim for ≤${MAX_HEADER_LENGTH} chars). Examples: "Auth method", "Library", "Approach". Over-long headers are auto-truncated, never rejected.`,
   }),
   options: Type.Array(OptionSchema, {
-    minItems: MIN_OPTIONS,
-    maxItems: MAX_OPTIONS,
-    description:
-      "The available choices for this question. Must have 2-4 options. Each option should be a distinct, mutually exclusive choice (unless multiSelect is enabled). The 'Type something.' row is appended automatically — do NOT author it.",
+    description: `The available choices for this question. Aim for ${MIN_OPTIONS}-${MAX_OPTIONS} options (soft limit — extra ones are dropped, and a single-select question always gets a free-text fallback row for free, so 1 is still usable). Each option should be a distinct, mutually exclusive choice (unless multiSelect is enabled). The 'Type something.' row is appended automatically — do NOT author it.`,
   }),
   multiSelect: Type.Optional(
     Type.Boolean({
@@ -157,9 +157,7 @@ export const QuestionSchema = Type.Object({
 
 export const QuestionParamsSchema = Type.Object({
   questions: Type.Array(QuestionSchema, {
-    minItems: 1,
-    maxItems: MAX_QUESTIONS,
-    description: "Questions to ask the user (1-4 questions)",
+    description: `Questions to ask the user (soft limit ${MAX_QUESTIONS} — extra ones are dropped)`,
   }),
 });
 
@@ -227,11 +225,11 @@ export function validateQuestionnaire(typed: QuestionParams): ValidationResult {
   }
 
   for (const q of typed.questions) {
-    if (q.options.length < MIN_OPTIONS) {
+    if (q.options.length === 0) {
       return {
         ok: false,
         error: "empty_options",
-        message: `Error: Each question requires at least ${MIN_OPTIONS} options`,
+        message: "Error: Each question requires at least one option",
       };
     }
     const seenLabels = new Set<string>();

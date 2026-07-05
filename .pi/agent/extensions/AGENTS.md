@@ -33,8 +33,7 @@ Read referenced `.md` files completely and follow their cross-references before 
 - **`lsp/`** — the LSP subsystem. Symbol-precise nav tools: `lsp_hover` (type/docs), `lsp_definition` / `lsp_type_definition` / `lsp_implementation`, `lsp_references`, `lsp_document_symbols` (file outline), `lsp_rename` (workspace-wide), `lsp_diagnostics` (on-demand, read-only per-file error/warning check instead of a full `tsc`). Also the post-edit feedback pass (`lsp/feedback/`): formats your edits and auto-fixes their diagnostics in the background (root-cause, no suppress directives, never touching files unrelated to a diagnostic), surfacing the changes so you needn't re-read; anything left unfixed is flagged. `/lsp-fix` toggles that background auto-fix per session (`/lsp-fix on|off` to set explicitly); launch with `--lsp-fix=false` to default it off.
 - **`codegraph.ts`** — symbol-aware repo navigation + call-graph over the [codegraph CLI](https://github.com/colbymchenry/codegraph): `codegraph_status` / `_context` / `_search` / `_files` / `_callers` / `_callees` / `_impact` (blast-radius) / `_affected` (test selection).
 - **`github-pr.ts`** — `github_pr` fetches a PR as signal-only markdown (metadata, description, changed files, failing checks, unresolved review threads — including bot inline findings like CodeRabbit). Drops commit/timeline noise, resolved threads, and bot release-note/walkthrough issue comments; diff is opt-in via `diff:true`. Use instead of `gh pr view`.
-- **`subagent.ts`** — `/subagent` delegates a task to an isolated `pi` agent (single-layer, no recursion), running visibly in its own herdr pane instead of a hidden background process — watch, scroll, or step in directly. Agents defined in `~/.pi/agent/agents/*.md` — each file's body is the subagent's entire system prompt, no shared preamble or other context added, for an unambiguous clean start. For offloading research/recon/implementation off the main thread. Herdr-only: the tool isn't available outside a herdr session.
-- **`worktree.ts`** — `worktree_create` / `worktree_list` / `worktree_publish` / `worktree_remove`: agent-driven git worktrees keyed by branch, each opened as its own herdr workspace with a live agent pane you can hand work off to and drive directly. Feature branches fork off the default branch and finish by pushing to origin for a PR — never merged into trunk locally. Herdr-only.
+- **`subagent.ts`** — `/subagent` delegates a task to an isolated `pi` agent (single-layer, no recursion), running visibly in its own tmux pane instead of a hidden background process — watch, scroll, or step in directly. Agents defined in `~/.pi/agent/agents/*.md` — each file's body is the subagent's entire system prompt, no shared preamble or other context added, for an unambiguous clean start. For offloading research/recon/implementation off the main thread. tmux-only: the tool isn't available outside a tmux session.
 - **`ask/`** — `ask_user_question`: presents a tabbed multiple-choice questionnaire (single/multi-select, free-text + "chat" fallbacks, review tab) instead of guessing when a request is ambiguous. Length limits on labels are soft so the first call always lands.
 
 ### Cleaner context
@@ -50,9 +49,14 @@ Read referenced `.md` files completely and follow their cross-references before 
 - **`copy.ts`** — `/copy-blocks` picks a fenced code block from the last assistant response; `/copy-all` copies the full session as markdown. Built-in `/copy` unchanged.
 - **`auto-rename.ts`** — names the session after 3+ turns. Kills the default `2025-05-24T09-21-…` slugs.
 
+### Outside-pi surface
+
+- **`notifier.ts`** — desktop notification when a turn finishes, or blocks on a question, while you're not looking at the pi pane; also sets this pane's tmux window name to the agent's status (busy / blocked / done / idle) so the tab shows it at a glance — a finished-but-unfocused turn shows done, flipping to idle once you look at the pane. Subagent panes (which share their window with the parent) get a pane title instead, which `subagent.ts` polls to know when a subagent pane has finished (no desktop notification there — the parent's own poll is what's meant to react).
+- **`tmux-bridge.ts`** — lets nvim (`nvim/lua/pi.lua`) push a visual selection or the current buffer's diagnostics straight into a running pi session as a message, from any pane in the same tmux session. Picks which pi agent when more than one is running.
+
 ### TUI taste
 
-- **`tui.ts`** — visual tweaks: coloured input line, compact footer, input pinned to the bottom of the viewport, and autocomplete floating as an overlay above the editor.
+- **`tui.ts`** — visual tweaks: coloured input line, compact footer, input pinned to the bottom of the viewport, autocomplete floating as an overlay above the editor, and no stray left-margin column so mouse-selecting/copying conversation text doesn't drag a leading space onto every line.
 - **`code-blocks.ts`** — syntax-highlights fenced code blocks in assistant responses.
 
 ## Layout

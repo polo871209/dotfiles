@@ -22,6 +22,11 @@ import {
   type QuestionnaireResult,
   validateQuestionnaire,
 } from "./schema";
+
+/** Drop excess items instead of rejecting — same "first call always lands" reasoning as clamp(). */
+function capItems<T>(items: T[], max: number): T[] {
+  return items.length > max ? items.slice(0, max) : items;
+}
 import { buildItemsForQuestion, QuestionnaireSession } from "./session";
 import type { WrappingSelectItem } from "./widgets";
 
@@ -34,13 +39,13 @@ function clamp(value: string, max: number): string {
   return `${chars.slice(0, Math.max(0, max - 1)).join("")}…`;
 }
 
-/** Graceful normalization: clamp over-long header/label so the call always lands. */
+/** Graceful normalization: clamp over-long header/label and cap array sizes so the call always lands. */
 function clampParams(params: QuestionParams): QuestionParams {
   return {
-    questions: params.questions.map((q) => ({
+    questions: capItems(params.questions, MAX_QUESTIONS).map((q) => ({
       ...q,
       header: clamp(q.header, MAX_HEADER_LENGTH),
-      options: q.options.map((o) => ({
+      options: capItems(q.options, MAX_OPTIONS).map((o) => ({
         ...o,
         label: clamp(o.label, MAX_LABEL_LENGTH),
       })),
@@ -103,25 +108,16 @@ export function registerAskUserQuestionTool(pi: ExtensionAPI): void {
       // Inline (non-overlay): replaces the editor instead of floating over the
       // scrollback, so the conversation stays visible and is pushed up above the
       // dialog rather than hidden behind it.
-      pi.events.emit("herdr:blocked", {
-        active: true,
-        label: "awaiting your answer",
-      });
-      let result: QuestionnaireResult;
-      try {
-        result = await ctx.ui.custom<QuestionnaireResult>(
-          (tui, theme, _kb, done) =>
-            new QuestionnaireSession({
-              tui,
-              theme,
-              params: typed,
-              itemsByTab,
-              done,
-            }).component,
-        );
-      } finally {
-        pi.events.emit("herdr:blocked", { active: false });
-      }
+      const result = await ctx.ui.custom<QuestionnaireResult>(
+        (tui, theme, _kb, done) =>
+          new QuestionnaireSession({
+            tui,
+            theme,
+            params: typed,
+            itemsByTab,
+            done,
+          }).component,
+      );
 
       return buildQuestionnaireResponse(result, typed);
     },

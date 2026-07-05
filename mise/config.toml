@@ -18,6 +18,7 @@ zig = "latest"
 neovim = "latest"
 
 # Shell / CLI tools
+"aqua:joshmedeski/sesh" = "latest"
 "github:veirt/weathr" = "latest"
 atuin = "latest"
 bat = "latest"
@@ -31,6 +32,7 @@ jq = "latest"
 just = "latest"
 oh-my-posh = "latest"
 ripgrep = "latest"
+tmux = "latest"
 yq = "latest"
 zoxide = "latest"
 
@@ -84,4 +86,3 @@ semgrep = "latest"
 "npm:@earendil-works/pi-coding-agent" = "latest"
 yt-dlp = { version = "latest", rename_exe = "yt-dlp" }
 ffmpeg = "latest"
-herdr = "latest"

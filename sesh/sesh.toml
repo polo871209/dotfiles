@@ -1,0 +1,4 @@
+#:schema https://github.com/joshmedeski/sesh/raw/main/sesh.schema.json
+[default_session]
+startup_command = "tmux rename-window π; tmux new-window -d -n nvim; tmux send-keys -t nvim 'nvim' Enter; tmux new-window -d; tmux select-window -t π; p"
+preview_command = "eza --all --git --icons --color=always {}"
