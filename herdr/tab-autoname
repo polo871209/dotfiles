@@ -13,6 +13,7 @@ if [[ "$HERDR_ENV" == 1 && -n "$HERDR_TAB_ID" ]] && command -v herdr >/dev/null 
 
   _herdr_preexec() {
     local cmd="${${1%% *}:t}"
+    [[ "$cmd" == "pi" || "$cmd" == "p" ]] && cmd="π"
     [[ -n "$cmd" ]] && _herdr_rename "$cmd"
   }
 

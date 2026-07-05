@@ -199,7 +199,7 @@ export default function (pi: ExtensionAPI) {
     name: "codegraph_context",
     label: "CodeGraph context",
     description:
-      'Conceptual cross-file flow ("how does data flow X→Y", multi-file feature trace, what-calls-what chains). NO anchor needed. Returns relevant symbols\' source + call paths in one shot. WRONG tool for literal API/identifier surface ("where is `pi.foo` registered", "every file that calls X", "find duplicate pattern Z") — semantic search drifts on those; use grep or codegraph_search. If first call drifts off-topic, pivot to grep — do NOT retry rephrased. lsp_* CANNOT replace this — LSP requires an anchor.',
+      'Conceptual cross-file flow ("how does data flow X→Y", multi-file feature trace, what-calls-what chains). NO anchor needed. Returns relevant symbols\' source + call paths in one shot. WRONG tool for literal API/identifier surface ("where is `pi.foo` registered", "every file that calls X", "find duplicate pattern Z") — semantic search drifts on those; use grep or codegraph_search. lsp_* CANNOT replace this — LSP requires an anchor.',
     parameters: Type.Object({
       task: Type.String({
         description:

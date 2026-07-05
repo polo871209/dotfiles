@@ -89,6 +89,7 @@ bindkey -M vicmd 'v' edit-command-line
 # Aliases
 alias cafe="caffeinate -id weathr --hide-location"
 alias gc="gcloud config configurations activate"
+alias h="herdr"
 alias k="kubectl"
 alias kctx="kubectx"
 alias kns="kubens"

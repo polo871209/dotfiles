@@ -16,6 +16,7 @@ import {
   createReadTool,
   createWriteTool,
   type ExtensionAPI,
+  type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
 import {
@@ -32,6 +33,7 @@ import {
 import { PyKernel } from "./py-kernel";
 import { JsKernel } from "./js-kernel";
 import type { CellResult } from "./types";
+import { sideChannelComplete } from "../shared/llm";
 
 const Cell = Type.Object({
   language: Type.Union([Type.Literal("py"), Type.Literal("js")]),
@@ -54,14 +56,59 @@ interface SessionState {
   cwd: string;
   // AgentTool's generic is constrained to TSchema; `any` here is unavoidable.
   builtins: Record<string, AgentTool<any>> | null;
+  // Refreshed at the start of every execute() call, so completion() always
+  // sees the live model/auth for this session even though the SessionState
+  // itself outlives any single call.
+  ctx: ExtensionContext | null;
+}
+
+// Strip ```json fences models sometimes wrap structured output in.
+function extractJsonText(text: string): string {
+  const trimmed = text.trim();
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  return fenced ? fenced[1]!.trim() : trimmed;
+}
+
+function buildCompletionSystem(system: unknown, schema: unknown): string {
+  const base =
+    typeof system === "string" && system.trim()
+      ? system.trim()
+      : "Answer directly. No preamble, no meta-commentary.";
+  if (!schema) return base;
+  return `${base}\n\nRespond with ONLY a single JSON value matching this JSON Schema, no prose, no code fence:\n${JSON.stringify(schema)}`;
+}
+
+// Resolve the `model` bridge arg: omitted/"default" defers to
+// sideChannelComplete's own PI_SIDE_MODEL / session-model fallback;
+// "provider/id" resolves an explicit model.
+function resolveCompletionModel(ctx: ExtensionContext, spec: unknown) {
+  if (typeof spec !== "string" || !spec.trim() || spec === "default") {
+    return undefined;
+  }
+  const slash = spec.indexOf("/");
+  if (slash < 1) {
+    throw new Error(
+      `completion: model must be "provider/id" or "default", got ${JSON.stringify(spec)}`,
+    );
+  }
+  const model = ctx.modelRegistry.find(
+    spec.slice(0, slash),
+    spec.slice(slash + 1),
+  );
+  if (!model || !ctx.modelRegistry.hasConfiguredAuth(model)) {
+    throw new Error(
+      `completion: model "${spec}" is unavailable or unauthenticated`,
+    );
+  }
+  return model;
 }
 
 const sessions = new Map<string, SessionState>();
 
 function bridgeHandler(state: SessionState): BridgeHandler {
   return async (name, args, signal) => {
-    // Forward to pi's built-in tools when a matching one exists.
     const builtins = ensureBuiltins(state);
+    // Forward to pi's built-in tools when a matching one exists.
     if (builtins[name]) {
       const t = builtins[name]!;
       const id = `eval-bridge-${randomUUID()}`;
@@ -73,6 +120,41 @@ function bridgeHandler(state: SessionState): BridgeHandler {
       return flattenToolResult(result);
     }
     switch (name) {
+      case "completion": {
+        if (!state.ctx) {
+          throw new Error("completion unavailable: no active tool context");
+        }
+        const promptText = String(args.prompt ?? "").trim();
+        if (!promptText)
+          throw new Error("completion requires a non-empty prompt");
+        const model = resolveCompletionModel(state.ctx, args.model);
+        const schema = args.schema;
+        const result = await sideChannelComplete(state.ctx, {
+          systemPrompt: buildCompletionSystem(args.system, schema),
+          messages: [
+            {
+              role: "user",
+              content: [{ type: "text", text: promptText }],
+              timestamp: Date.now(),
+            },
+          ],
+          model,
+          signal,
+        });
+        if (!result.ok) {
+          throw new Error(
+            `completion failed: ${result.error ?? result.reason}`,
+          );
+        }
+        if (schema) {
+          try {
+            return JSON.parse(extractJsonText(result.text));
+          } catch {
+            return result.text;
+          }
+        }
+        return result.text;
+      }
       case "tree": {
         const base = String(args.path ?? ".");
         const maxDepth = Number(args.max_depth ?? 3);
@@ -125,7 +207,14 @@ function getSession(sessionFile: string, cwd: string): SessionState {
     }
     return state;
   }
-  state = { py: null, js: null, registration: null, cwd, builtins: null };
+  state = {
+    py: null,
+    js: null,
+    registration: null,
+    cwd,
+    builtins: null,
+    ctx: null,
+  };
   sessions.set(sessionFile, state);
   return state;
 }
@@ -255,7 +344,10 @@ export default function (pi: ExtensionAPI) {
     name: "eval",
     label: "Eval",
     description:
-      'Run code in persistent Python and JavaScript kernels. Each language has one kernel per session; state persists across cells and across separate tool calls. Set `language: "py"` or `language: "js"` per cell. Call `install("pkg1", "pkg2")` to add Python packages; they persist across pi restarts. Inside any cell, call `tool.<name>({...})` to invoke pi built-in tools: `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls` use their normal pi argument schemas; `tree({path,max_depth})` is an extra helper. Shortcuts: `read(path)`, `write(path,content)`, `tree(path)`. JS cells support top-level await and package imports; use `globalThis` / `state` to persist values across cells.',
+      "Run code in persistent Python and JavaScript kernels for iterative, stateful work — state persists across cells and across separate tool calls, in one kernel per language per session. Not for a single one-off command; use `bash`/`read` directly for those.\n\n" +
+      'Cell shape: `{language: "py"|"js", code, title?, timeout?, reset?}`.\n\n' +
+      'Inside cell code, `tool.<name>({...})` invokes pi built-in tools (`read`, `write`, `edit`, `bash`, `grep`, `find`, `ls` take their normal pi argument schemas; `tree({path,max_depth})` is extra). Shortcuts: `read(path)`, `write(path,content)`, `tree(path)`, `env(key?, value?)` (no args: full env dict; one: get; two: set), `completion(prompt, model?, system?, schema?)` for a oneshot stateless model call (model: "default" or "provider/id"; schema: JSON-Schema for structured output).\n\n' +
+      'Call `install("pkg1", "pkg2")` to add Python packages, persists across pi restarts. JS cells support top-level await and package imports; use `globalThis` / `state` to persist values across cells.',
     promptSnippet:
       "eval: persistent py + js kernels; share state across tool calls; `tool.*` proxy invokes pi tools (read/write/edit/bash/grep/find/ls/tree).",
     parameters: EvalParams,
@@ -264,6 +356,7 @@ export default function (pi: ExtensionAPI) {
         const sessionFile = ctx.sessionManager.getSessionFile?.() ?? "default";
         const state = getSession(sessionFile, ctx.cwd);
         state.cwd = ctx.cwd;
+        state.ctx = ctx;
         // Make the current call's signal available to bridge tool calls.
         const reg = await ensureBridge(state);
         setBridgeSignal(reg.session, signal);

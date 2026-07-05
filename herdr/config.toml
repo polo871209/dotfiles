@@ -7,8 +7,8 @@ name = "gruvbox"
 accent = "#b4befe" # lavender
 
 [terminal]
-new_cwd = "~/dotfiles" # also the empty-state spawn dir
-shell_mode = "auto"    # login shells on macOS
+new_cwd = "follow"  # inherit source pane/workspace; ~/dotfiles only when no source
+shell_mode = "auto" # login shells on macOS
 
 [keys]
 close_pane = "prefix+x"
@@ -43,6 +43,7 @@ command = "urls=$(herdr pane read \"$HERDR_ACTIVE_PANE_ID\" --source recent-unwr
 description = "pick a URL from pane output"
 
 [ui]
+confirm_close = false
 sidebar_width = 20
 sidebar_min_width = 14
 mouse_capture = true

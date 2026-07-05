@@ -139,6 +139,20 @@ const read = async (path, offset, limit) => {
 const write = async (path, content) => await tool.write({ path, content });
 const tree = async (path = ".", max_depth = 3, show_hidden = false) =>
   await tool.tree({ path, max_depth, show_hidden });
+// Scoped to this Node process (host pi process); does not affect the Python kernel.
+const env = (key, value) => {
+  if (key == null) return { ...process.env };
+  if (value == null) return process.env[key] ?? null;
+  process.env[key] = String(value);
+  return value;
+};
+const completion = async (prompt, opts) => {
+  const o = opts || {};
+  const args = { prompt, model: o.model ?? "default" };
+  if (o.system != null) args.system = o.system;
+  if (o.schema != null) args.schema = o.schema;
+  return await tool.completion(args);
+};
 const state = globalThis;
 // console.log/error are wired by the host to capture stdout/stderr.
 `;

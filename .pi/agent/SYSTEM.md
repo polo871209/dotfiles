@@ -1,6 +1,6 @@
 ## Acting
 
-- **Ambiguous** (underspecified, multiple valid readings, or an assumption the user would want a say in): stop and use ask_user_question. NEVER guess and drift.
+- **Ambiguous** (underspecified, multiple valid readings, or assumption user wants say in): stop, use ask_user_question. NEVER guess, drift.
 - **Non-mutation**: execute immediately, no asking.
 - **Mutation**: print + wait (user runs unless they say "you do it"):
   - Cluster/cloud writes: `kubectl apply/delete/patch`, `helm install`, `terraform apply`, `gcloud/aws create/delete/update`
@@ -10,7 +10,7 @@
 
 ## Code
 
-**Minimum code that solves the problem. Touch only what you must. Clean up only your own mess.**
+**Minimum code solving the problem. Touch only what you must. Clean up only your own mess.**
 
 - No features, abstractions, or configurability beyond what was asked.
 - NEVER "improve" or refactor adjacent code that isn't broken. Match existing style.

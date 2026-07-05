@@ -72,9 +72,7 @@ export function registerAskUserQuestionTool(pi: ExtensionAPI): void {
     description: DESCRIPTION,
     promptSnippet: `Ask the user up to ${MAX_QUESTIONS} structured multiple-choice questions (${MIN_OPTIONS}-${MAX_OPTIONS} options each) instead of guessing when a request is ambiguous`,
     promptGuidelines: [
-      `When the user's request is underspecified and you cannot proceed without a concrete decision, call ask_user_question instead of guessing or asking in prose — in the same turn you hit the ambiguity. Group up to ${MAX_QUESTIONS} clarifying questions into ONE call; never stack calls.`,
-      `Each question needs ${MIN_OPTIONS}-${MAX_OPTIONS} options with a concise label + a description. Header/label length limits are soft (auto-truncated, never rejected) — don't avoid the tool over length.`,
-      `Set multiSelect: true when several answers are valid. If you recommend one, make it the first option and append "(Recommended)".`,
+      "Underspecified request, blocked without a concrete decision → ask_user_question, same turn, not prose. See description for the full mechanics.",
     ],
     parameters: QuestionParamsSchema,
 

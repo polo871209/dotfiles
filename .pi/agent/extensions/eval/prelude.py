@@ -134,6 +134,36 @@ def tree(path=".", max_depth=3, show_hidden=False):
     return tool.tree({"path": path, "max_depth": max_depth, "show_hidden": show_hidden})
 
 
+def env(key=None, value=None):
+    """Get/set env vars in this kernel's process.
+
+    No args -> full env dict. One arg -> value of `key` or None. Two args ->
+    set `key=value` (coerced to str), return `value`. Scoped to this Python
+    subprocess; does not affect the host pi process or JS kernel.
+    """
+    if key is None:
+        return dict(_os.environ)
+    if value is None:
+        return _os.environ.get(key)
+    _os.environ[key] = str(value)
+    return value
+
+
+def completion(prompt, model="default", system=None, schema=None):
+    """Oneshot, stateless model call: no conversation history, no tools.
+
+    model: "default" (session model / PI_SIDE_MODEL) or "provider/id".
+    schema: JSON-Schema dict -> instructs structured output, parsed to a
+    dict/list when the response parses as JSON, else returned as text.
+    """
+    args = {"prompt": prompt, "model": model}
+    if system is not None:
+        args["system"] = system
+    if schema is not None:
+        args["schema"] = schema
+    return tool.completion(args)
+
+
 def install(*pkgs, upgrade=False):
     """Install one or more Python packages into the eval venv via uv.
 

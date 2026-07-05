@@ -1,5 +1,7 @@
 ---
-description: Strip dead code and useless comments per house rules
+name: cleanup
+description: Strip dead code and useless comments from files touched this session, per house rules.
+disable-model-invocation: true
 ---
 
 Clean up dead code and comments. **Scope: files you edited in THIS session OR files dirty in `git status --porcelain`** (union of the two). Do NOT touch any file outside that set, even if you spot issues there. If the set is empty, stop and say so.
@@ -33,4 +35,4 @@ Rules:
 - Use LSP references (`lsp_references`) before deleting any exported symbol. If used outside scope, leave and report.
 - Public API (exported from package entry) — do NOT delete without confirming. List candidates instead.
 - Match existing style.
-- After edits, report: files touched, lines removed, anything you flagged-but-skipped.
+- After edits, report: files touched, lines removed, anything flagged-but-skipped.

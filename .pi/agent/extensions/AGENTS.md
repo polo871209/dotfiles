@@ -7,7 +7,7 @@ Personal agent harness built on top of [pi](https://github.com/earendil-works/pi
 ## Design rules
 
 1. **Deterministic first — more code, less agent.** If a step can be a script, regex, or hard-coded branch, it's not a prompt. The LLM is the last resort.
-2. **Protect the main agent's context.** History is the scarce resource. Anything that doesn't need to be remembered by the next turn shouldn't enter it — use side-channel completions, delegate recon to a subagent, keep bulk data in a kernel. When authoring an extension, custom tool, or skill, read the `writing-skills` skill first (`~/.pi/skills/writing-skills/SKILL.md`) for token-lean output design.
+2. **Protect the main agent's context.** History is the scarce resource. Anything that doesn't need to be remembered by the next turn shouldn't enter it — use side-channel completions, delegate recon to a subagent, keep bulk data in a kernel. When authoring an extension, custom tool, or skill, read the `writing-agent-instructions` skill first (`~/.pi/skills/writing-agent-instructions/SKILL.md`) for token-lean output design.
 3. **Hooks idempotent.** Lifecycle events re-fire (`/new`, extension reload), so any hook with a repeatable side effect — spawns, widgets, queued work — must dedupe per session. Re-triggering is then free and silent.
 4. **Agent borrows from my dev env, not the other way around.** My nvim config is the source of truth for LSP, formatters, diagnostics. The harness spawns a headless instance of _that_ nvim so the agent sees exactly what I see when editing — same servers, same rules. No agent-specific reimplementation of tooling I already maintain.
 5. **Say _what_, not _how_ — everywhere.** Tool `description` / `promptSnippet` / `promptGuidelines` (the prompt the model reads) AND the bullets in this README describe capability and when to use it, never the implementation (no "headless nvim", "warm singleton", spawn/cache mechanics, perf numbers). Mechanism is noise; it lives in the code, not in prose.
@@ -44,7 +44,7 @@ Read referenced `.md` files completely and follow their cross-references before 
 
 ### Workflow shortcuts
 
-- **`resend.ts`** — `/resend` re-runs the agent on the current transcript with nothing appended. For when you abort a prompt mid-stream or it stalls and auto-retry gives up: restarts inference on your message as-is, no duplicate.
+- **`resend.ts`** — `/resend` re-runs the agent on the current transcript with nothing appended, for when you abort a prompt mid-stream or it stalls and auto-retry gives up. Also carries an opt-in stream-rule watchdog (`RULES` in the file, empty by default): a regex hit on the model's live output aborts the turn, injects a hidden correction, and resumes automatically — no manual `/resend` needed for known recurring mistakes.
 - **`gate.ts`** — `/gate [intent]` spins out a background agent that validates the current branch (intent → rebase → review → lsp diagnostics → test → comment-cleanup → lint, auto-fixing safe issues) and, on a clean verdict, lands the gated result back onto the branch once it's no longer checked out — your checkout stays free to keep working or switch branches meanwhile.
 - **`yeet.ts`** — `/yeet` stages, commits with an auto-written Conventional Commits message (informed by recent user input for intent, not agent responses), and pushes.
 - **`copy.ts`** — `/copy-blocks` picks a fenced code block from the last assistant response; `/copy-all` copies the full session as markdown. Built-in `/copy` unchanged.

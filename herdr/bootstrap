@@ -13,13 +13,17 @@ counts=$(herdr workspace get "$HERDR_WORKSPACE_ID" 2>/dev/null \
 herdr tab rename "$HERDR_TAB_ID" "π" >/dev/null 2>&1
 
 # tab-autoname labels these tabs (nvim / zsh) once their shells run.
-nvim_resp=$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" \
+# Root pane's cwd becomes the workspace root; new tabs must inherit it
+# instead of falling back to [terminal] new_cwd.
+root="$PWD"
+
+nvim_resp=$(herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$root" \
   --no-focus --env HERDR_NO_BOOTSTRAP=1 2>/dev/null)
 nvim_pane=$(printf '%s' "$nvim_resp" | jq -r '.result.root_pane.pane_id' 2>/dev/null)
 nvim_tab=$(printf '%s' "$nvim_resp" | jq -r '.result.tab.tab_id' 2>/dev/null)
 [[ -n "$nvim_pane" && "$nvim_pane" != null ]] && herdr pane run "$nvim_pane" "nvim" >/dev/null 2>&1
 
-herdr tab create --workspace "$HERDR_WORKSPACE_ID" \
+herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$root" \
   --no-focus --env HERDR_NO_BOOTSTRAP=1 >/dev/null 2>&1
 
 herdr tab focus "$HERDR_TAB_ID" >/dev/null 2>&1

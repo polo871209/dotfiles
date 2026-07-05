@@ -26,9 +26,7 @@ export const diagnosticsTool = defineTool({
     "LSP + linter diagnostics for one or more files — type errors, lint warnings, etc., scoped to the files you pass. Read-only: never formats, fixes, or writes. Do NOT call this to verify or check files you just edited — post-edit checks are handled for you, so editing is never a trigger. Use ONLY when the user explicitly asks for diagnostics, or to inspect a reported error you have not yet seen.",
   promptSnippet: "Check a file's errors/warnings on demand (not after edits)",
   promptGuidelines: [
-    "Editing a file is NOT a reason to call lsp_diagnostics — post-edit checks happen automatically.",
-    "Call only when the user explicitly asks for diagnostics, or when debugging an error you have not yet observed.",
-    "Prefer lsp_diagnostics over shelling out to `tsc`/`eslint` for those on-demand per-file checks.",
+    "Prefer lsp_diagnostics over shelling out to `tsc`/`eslint` for on-demand per-file checks.",
   ],
   parameters: Type.Object({
     files: Type.Array(Type.String(), {
