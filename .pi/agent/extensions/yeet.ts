@@ -8,10 +8,9 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Box, Text } from "@earendil-works/pi-tui";
 import { sideChannelComplete } from "./shared/llm";
-import { collectTextMessages, extractText } from "./shared/message";
 
 const MSG_PROMPT =
-  "Write a Conventional Commits message for the diff. User input (if present) tells you WHY the change was made — use it for intent/scope, but describe only what the diff actually changes. Format: `<type>(<scope>)!: <subject>` where type ∈ {feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert}; scope optional; `!` only for breaking changes. Subject: imperative mood, lowercase, ≤72 chars, no trailing period. Optional body after one blank line only if change is non-obvious; body MAY be multiple newline-separated paragraphs. Optional footers one blank line after body, each `Token: value` or `Token #value`; tokens use `-` instead of spaces (e.g. `Reviewed-by`, `Refs: #123`), except `BREAKING CHANGE` which stays uppercase with a space. Recent commit subjects (if present) show this repo's established type/scope vocabulary and phrasing — match them; reuse an existing scope when the change touches the same area rather than inventing a new one. No fences, no preamble. Output ONLY the message.";
+  "Write a Conventional Commits message for the diff. The diff is the only source of truth for WHAT changed — base the subject and body entirely on it. A user hint (if present) may ONLY be consulted to disambiguate WHY (e.g. picking a scope, or explaining a non-obvious rationale in the body); never let it introduce, emphasize, or replace a description of a change that isn't actually in the diff. Format: `<type>(<scope>)!: <subject>` where type ∈ {feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert}; scope optional; `!` only for breaking changes. Subject: imperative mood, lowercase, ≤72 chars, no trailing period. Optional body after one blank line only if change is non-obvious; body MAY be multiple newline-separated paragraphs. Optional footers one blank line after body, each `Token: value` or `Token #value`; tokens use `-` instead of spaces (e.g. `Reviewed-by`, `Refs: #123`), except `BREAKING CHANGE` which stays uppercase with a space. Recent commit subjects (if present) show this repo's established type/scope vocabulary and phrasing — match them; reuse an existing scope when the change touches the same area rather than inventing a new one. No fences, no preamble. Output ONLY the message.";
 
 const YEET_MSG_TYPE = "yeet-marker";
 
@@ -98,24 +97,6 @@ export default function (pi: ExtensionAPI) {
         diff.length > 6000 ? diff.slice(0, 6000) + "\n…(truncated)" : diff;
       const hint = args?.trim() ? `\nUser hint: ${args.trim()}\n` : "";
 
-      // Recent user input (last ~3 messages) so the message captures intent,
-      // not just the mechanical diff. Agent responses are excluded — only
-      // what the user actually asked for counts as intent.
-      const { messages: recent } = collectTextMessages(
-        ctx.sessionManager.getBranch(),
-        6,
-      );
-      const convo = recent
-        .filter((m) => m.role === "user")
-        .map((m) => {
-          const text = extractText(m.content);
-          return text.length > 1200
-            ? text.slice(0, 1200) + "…(truncated)"
-            : text;
-        })
-        .join("\n---\n");
-      const convoBlock = convo ? `User input:\n${convo}\n\n` : "";
-
       // Recent commit subjects so the message matches the repo's established
       // type/scope vocabulary and phrasing.
       const log = await git("log", "-10", "--no-merges", "--format=%s");
@@ -154,7 +135,7 @@ export default function (pi: ExtensionAPI) {
                   content: [
                     {
                       type: "text",
-                      text: `${hint}${branchBlock}${historyBlock}${convoBlock}Diffstat:\n${diffstat}\n\nDiff:\n${diffSnippet}`,
+                      text: `${hint}${branchBlock}${historyBlock}Diffstat:\n${diffstat}\n\nDiff:\n${diffSnippet}`,
                     },
                   ],
                   timestamp: Date.now(),

@@ -45,7 +45,7 @@ Read referenced `.md` files completely and follow their cross-references before 
 
 - **`resend.ts`** — `/resend` re-runs the agent on the current transcript with nothing appended, for when you abort a prompt mid-stream or it stalls and auto-retry gives up. Also carries an opt-in stream-rule watchdog (`RULES` in the file, empty by default): a regex hit on the model's live output aborts the turn, injects a hidden correction, and resumes automatically — no manual `/resend` needed for known recurring mistakes.
 - **`gate.ts`** — `/gate [intent]` spins out a background agent that validates the current branch (intent → rebase → review → lsp diagnostics → test → comment-cleanup → lint, auto-fixing safe issues) and, on a clean verdict, lands the gated result back onto the branch once it's no longer checked out — your checkout stays free to keep working or switch branches meanwhile.
-- **`yeet.ts`** — `/yeet` stages, commits with an auto-written Conventional Commits message (informed by recent user input for intent, not agent responses), and pushes.
+- **`yeet.ts`** — `/yeet [hint]` stages, commits with an auto-written Conventional Commits message derived from the diff itself (an optional hint arg may only disambiguate intent, never introduce content absent from the diff), and pushes.
 - **`copy.ts`** — `/copy-blocks` picks a fenced code block from the last assistant response; `/copy-all` copies the full session as markdown. Built-in `/copy` unchanged.
 - **`auto-rename.ts`** — names the session after 3+ turns. Kills the default `2025-05-24T09-21-…` slugs.
 
@@ -68,6 +68,6 @@ extensions/
 ├── *.ts          single-file extensions
 ├── ask/          ask_user_question questionnaire dialog
 ├── eval/         persistent kernels + bridge
-├── lsp/          nvim singleton, nav tools + post-edit feedback
+├── lsp/          headless nvim, nav tools + post-edit feedback
 └── shared/       side-channel LLM helper, message extraction, widget factory
 ```

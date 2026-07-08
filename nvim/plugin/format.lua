@@ -1,3 +1,5 @@
+---@diagnostic disable: unused-local
+---@diagnostic disable-next-line: unused-local
 vim.pack.add { 'https://github.com/stevearc/conform.nvim' }
 
 -- Lazy-load treesj behind its only keymap (~9ms off cold startup).
@@ -17,12 +19,14 @@ local function biome_or_prettier(bufnr)
     return { 'prettier' }
 end
 
+local format_on_save_enabled = true
+
 require('conform').setup {
     notify_on_error = false,
-    format_on_save = {
-        timeout_ms = 1500,
-        lsp_format = 'fallback',
-    },
+    format_on_save = function(bufnr)
+        if not format_on_save_enabled then return end
+        return { timeout_ms = 1500, lsp_format = 'fallback' }
+    end,
     formatters_by_ft = {
         bzl = { 'buildifier' },
         c = { 'clang-format' },
@@ -56,3 +60,18 @@ require('conform').setup {
 }
 
 vim.keymap.set('', '<leader>f', function() require('conform').format { async = true, lsp_format = 'fallback' } end, { desc = '[F]ormat buffer' })
+
+-- Agent nvim skips snacks (see plugin/snacks.lua); an unguarded require here
+-- errors inside the scheduled callback during --embed startup and wedges the
+-- RPC channel — every agent lua call then hangs forever.
+if not vim.g.pi_agent then
+    vim.schedule(function()
+        require('snacks').toggle
+            .new({
+                name = 'Format on Save',
+                get = function() return format_on_save_enabled end,
+                set = function(state) format_on_save_enabled = state end,
+            })
+            :map '<leader>tf'
+    end)
+end

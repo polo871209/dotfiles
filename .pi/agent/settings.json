@@ -1,8 +1,8 @@
 {
   "lastChangelogVersion": "0.80.3",
   "defaultProvider": "anthropic",
-  "defaultModel": "claude-sonnet-5",
-  "defaultThinkingLevel": "medium",
+  "defaultModel": "claude-fable-5",
+  "defaultThinkingLevel": "low",
   "theme": "catppuccin-mocha",
   "quietStartup": true,
   "packages": [],

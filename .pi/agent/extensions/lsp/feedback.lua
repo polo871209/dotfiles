@@ -81,11 +81,11 @@ local function apply_code_actions(bufnr, remaining)
     return changed
 end
 
-local function try_format(bufnr)
+local function try_format(bufnr, timeout_ms)
     local ok_conform, conform = pcall(require, 'conform')
     if not ok_conform then return false end
     local before = vim.api.nvim_buf_get_changedtick(bufnr)
-    pcall(function() conform.format { bufnr = bufnr, async = false, lsp_format = 'fallback', timeout_ms = FORMAT_TIMEOUT_MS } end)
+    pcall(function() conform.format { bufnr = bufnr, async = false, lsp_format = 'fallback', timeout_ms = timeout_ms or FORMAT_TIMEOUT_MS } end)
     return vim.api.nvim_buf_get_changedtick(bufnr) ~= before
 end
 
@@ -109,14 +109,16 @@ end
 -- formatting + write; NO diagnostic settle, NO code-actions (those stay in the
 -- batched M.run at turn end). Keeps per-edit latency to a formatter call so the
 -- agent's edit result can be amended with the formatted bytes synchronously.
-function M.format(files)
+-- timeout_ms: caller-side budget (inline hook passes a short one so a slow
+-- formatter aborts instead of writing after the caller already gave up).
+function M.format(files, timeout_ms)
     local formatted = {}
     for _, file in ipairs(dedupe_files(files)) do
         if type(file) == 'string' and vim.uv.fs_stat(file) then
             vim.cmd('silent! edit ' .. vim.fn.fnameescape(file))
             local bufnr = vim.api.nvim_get_current_buf()
             pcall(function() vim.cmd 'filetype detect' end)
-            if try_format(bufnr) then
+            if try_format(bufnr, timeout_ms) then
                 pcall(function()
                     vim.api.nvim_buf_call(bufnr, function() vim.cmd 'silent! write' end)
                 end)

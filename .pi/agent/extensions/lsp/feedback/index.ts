@@ -211,6 +211,9 @@ export function registerFeedback(pi: ExtensionAPI): void {
     // read + spawn syscall) off pi's startup path.
     setTimeout(() => {
       void ensureFeedbackLoaded(cwd).catch(() => {});
+      // Warm the inline lane too: format-on-edit runs on its own nvim so it
+      // never queues behind the heavy turn-end pass on the main lane.
+      void ensureFeedbackLoaded(cwd, "inline").catch(() => {});
     }, 0);
   });
 

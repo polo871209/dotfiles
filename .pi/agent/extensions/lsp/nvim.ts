@@ -1,6 +1,6 @@
-// Persistent nvim singleton. Lazy spawn on first use, --embed over stdio
-// (msgpack-rpc via `neovim` npm pkg). Crash-resilient: on child exit, clear
-// singleton so next call respawns.
+// Persistent nvim instances, one per lane. Lazy spawn on first use, --embed
+// over stdio (msgpack-rpc via `neovim` npm pkg). Crash-resilient: on child
+// exit, clear the lane so its next call respawns.
 
 import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
@@ -30,10 +30,22 @@ interface NvimSession {
   client: NeovimClient;
 }
 
-let session: NvimSession | null = null;
-let starting: Promise<NvimSession> | null = null;
+// Two independent nvim instances. A single nvim can't run two lua chunks
+// concurrently (vim.wait pumps the loop -> shared-state corruption), so the
+// queue below serializes each lane. "main" carries nav tools + the heavy
+// turn-end diagnostics pass; "inline" is dedicated to fast format-on-edit so
+// it never queues behind a long background run (the old "stuck after edit").
+export type Lane = "main" | "inline";
+const LANES: Lane[] = ["main", "inline"];
+
+const sessions: Record<Lane, NvimSession | null> = { main: null, inline: null };
+const startings: Record<Lane, Promise<NvimSession> | null> = {
+  main: null,
+  inline: null,
+};
 
 const spawnNvim = async (
+  lane: Lane,
   cwd: string,
   onProgress: ProgressFn | undefined,
 ): Promise<NvimSession> => {
@@ -52,12 +64,12 @@ const spawnNvim = async (
   );
 
   proc.on("exit", (code, signal) => {
-    log(`nvim exited code=${code} signal=${signal}`);
-    session = null;
+    log(`nvim[${lane}] exited code=${code} signal=${signal}`);
+    sessions[lane] = null;
   });
   proc.on("error", (err) => {
-    log(`nvim spawn error: ${err.message}`);
-    session = null;
+    log(`nvim[${lane}] spawn error: ${err.message}`);
+    sessions[lane] = null;
   });
   proc.stderr?.on("data", (b: Buffer) => {
     const s = b.toString().trim();
@@ -83,27 +95,32 @@ const spawnNvim = async (
 };
 
 const getNvim = async (
+  lane: Lane,
   cwd: string,
   onProgress?: ProgressFn,
 ): Promise<NeovimClient> => {
-  if (session) return session.client;
-  if (starting) return (await starting).client;
-  starting = spawnNvim(cwd, onProgress).catch((e) => {
-    starting = null;
+  const cur = sessions[lane];
+  if (cur) return cur.client;
+  const inflight = startings[lane];
+  if (inflight) return (await inflight).client;
+  const p = spawnNvim(lane, cwd, onProgress).catch((e) => {
+    startings[lane] = null;
     throw e;
   });
+  startings[lane] = p;
   try {
-    session = await starting;
-    return session.client;
+    sessions[lane] = await p;
+    return sessions[lane]!.client;
   } finally {
-    starting = null;
+    startings[lane] = null;
   }
 };
 
-export const shutdownNvim = (): void => {
+const shutdownLane = (lane: Lane): void => {
+  const session = sessions[lane];
   if (!session) return;
   const { proc } = session;
-  session = null;
+  sessions[lane] = null;
   // proc.killed only means a signal was sent, not that the process died.
   // Track real exit so the SIGKILL fallback actually fires on a nvim that
   // ignores SIGTERM (headless --embed can linger) -> no orphans.
@@ -127,15 +144,24 @@ export const shutdownNvim = (): void => {
   }
 };
 
-export const isRunning = (): boolean => session !== null;
+export const shutdownNvim = (): void => {
+  for (const lane of LANES) shutdownLane(lane);
+};
 
-// Serialize lua chunks: `vim.wait` pumps the event loop and can run a second
-// chunk mid-call, mutating shared buffer state. Chain each after the last.
-let queueTail: Promise<unknown> = Promise.resolve();
+export const isRunning = (lane: Lane = "main"): boolean =>
+  sessions[lane] !== null;
+
+// Serialize lua chunks per lane: `vim.wait` pumps the event loop and can run a
+// second chunk mid-call, mutating shared buffer state. Chain each after the
+// last, independently per nvim instance.
+const queueTails: Record<Lane, Promise<unknown>> = {
+  main: Promise.resolve(),
+  inline: Promise.resolve(),
+};
 const noop = () => {};
-const enqueue = <T>(task: () => Promise<T>): Promise<T> => {
-  const run = queueTail.then(task, task);
-  queueTail = run.then(noop, noop);
+const enqueue = <T>(lane: Lane, task: () => Promise<T>): Promise<T> => {
+  const run = queueTails[lane].then(task, task);
+  queueTails[lane] = run.then(noop, noop);
   return run;
 };
 
@@ -147,10 +173,11 @@ export const callLua = async <T = unknown>(
   args: unknown[],
   signal: AbortSignal | undefined,
   onProgress?: ProgressFn,
+  lane: Lane = "main",
 ): Promise<T> => {
-  const client = await getNvim(cwd, onProgress);
+  const client = await getNvim(lane, cwd, onProgress);
   if (signal?.aborted) throw new Error("aborted");
-  const exec = enqueue(() => client.lua(code, args as never) as Promise<T>);
+  const exec = enqueue(lane, () => client.lua(code, args as never) as Promise<T>);
   if (!signal) return exec;
   // Abort just stops awaiting: the queued lua can't be cancelled and runs to
   // completion in nvim (bounded by lua-side budgets).
@@ -173,6 +200,15 @@ export const callLua = async <T = unknown>(
   });
 };
 
+// Hard cap on a single nav/diagnostics driver call. Lua-side budgets bound
+// each op (attach 2.5s + progress 8s + per-file pulls), but a wedged nvim or
+// a server that never returns would otherwise hang the tool forever, since
+// callLua's abort only stops awaiting. Scale by file count so a cold
+// multi-file diagnostics pass isn't cut short; the signal fires only on a
+// real wedge.
+const DRIVER_CAP_BASE_MS = 15_000;
+const DRIVER_CAP_PER_FILE_MS = 8_000;
+
 // Sugar: call _G.PiLsp.<fn>(args...) for navigation tools.
 export const callDriver = <T = unknown>(
   cwd: string,
@@ -180,12 +216,24 @@ export const callDriver = <T = unknown>(
   args: unknown[],
   signal: AbortSignal | undefined,
   onProgress?: ProgressFn,
-): Promise<T> =>
-  callLua<T>(cwd, `return PiLsp.${fn}(...)`, args, signal, onProgress);
+): Promise<T> => {
+  const fileCount = Array.isArray(args[0]) ? Math.max(1, args[0].length) : 1;
+  const timeoutSignal = AbortSignal.timeout(
+    DRIVER_CAP_BASE_MS + fileCount * DRIVER_CAP_PER_FILE_MS,
+  );
+  const combined = signal
+    ? AbortSignal.any([signal, timeoutSignal])
+    : timeoutSignal;
+  return callLua<T>(cwd, `return PiLsp.${fn}(...)`, args, combined, onProgress);
+};
 
 // Load a Lua module source into the persistent nvim once per session.
 // Caller tracks its own loaded flag.
-export const loadLua = async (cwd: string, src: string): Promise<void> => {
-  const client = await getNvim(cwd);
+export const loadLua = async (
+  cwd: string,
+  src: string,
+  lane: Lane = "main",
+): Promise<void> => {
+  const client = await getNvim(lane, cwd);
   await client.lua(src, []);
 };

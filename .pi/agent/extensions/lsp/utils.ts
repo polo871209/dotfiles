@@ -43,7 +43,18 @@ export async function withDriver<R extends DriverErr>(
 ): Promise<AgentToolResult<unknown>> {
   const progress = (text: string) =>
     onUpdate?.({ content: [{ type: "text", text }], details: {} });
-  const res = await callDriver<R>(ctx.cwd, driverFn, args, signal, progress);
+  // callDriver enforces the hard timeout (wedged-nvim guard). Here we just
+  // turn a thrown abort/timeout into a clean tool error instead of a crash.
+  let res: R;
+  try {
+    res = await callDriver<R>(ctx.cwd, driverFn, args, signal, progress);
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : String(e);
+    return {
+      content: [{ type: "text", text: `${errorPrefix}: ${reason}` }],
+      details: { success: false },
+    };
+  }
   if (!res.ok) {
     return {
       content: [
