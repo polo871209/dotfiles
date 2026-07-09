@@ -139,10 +139,6 @@ sesh-sessions() {
 }
 alias s=sesh-sessions
 
-divelocal() {
-    dive <(docker save "$1") --source=docker-archive "${@:2}"
-}
-
 # Tool Integrations
 _eval_cache uv       uv       ""  uv generate-shell-completion zsh
 _eval_cache direnv   direnv   ""  direnv hook zsh

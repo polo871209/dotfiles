@@ -46,6 +46,11 @@ export default function (pi: ExtensionAPI) {
       }
       const cwd = ctx.cwd;
 
+      // Repo-root paths /yeet never stages, diffs, or commits (e.g. dotfiles'
+      // stowed gitconfig gets dirtied by tools mid-session). Extend as needed.
+      const IGNORED_PATHS = ["git/"];
+      const EXCLUDE = IGNORED_PATHS.map((p) => `:(exclude,top)${p}`);
+
       // Force no ANSI color in diffs regardless of user gitconfig.
       const git = async (...gargs: string[]) => {
         const r = await pi.exec("git", ["-c", "color.ui=never", ...gargs], {
@@ -68,7 +73,9 @@ export default function (pi: ExtensionAPI) {
       // Don't stage yet — diff working tree vs HEAD so an LLM cancel doesn't
       // leave the index dirty. Stage right before commit.
       const hasHead = (await git("rev-parse", "--verify", "HEAD")).ok;
-      const wtStatus = (await git("status", "--porcelain")).out;
+      const wtStatus = (
+        await git("status", "--porcelain", "--", ".", ...EXCLUDE)
+      ).out;
       if (!wtStatus) {
         ctx.ui.notify("/yeet: nothing to commit", "warning");
         return;
@@ -78,7 +85,14 @@ export default function (pi: ExtensionAPI) {
       // undo so we don't leave index state behind. Without this, brand-new
       // files are invisible in the diff and the commit message drifts.
       const untracked = (
-        await git("ls-files", "--others", "--exclude-standard")
+        await git(
+          "ls-files",
+          "--others",
+          "--exclude-standard",
+          "--",
+          ".",
+          ...EXCLUDE,
+        )
       ).out
         .split("\n")
         .filter(Boolean);
@@ -87,9 +101,11 @@ export default function (pi: ExtensionAPI) {
       let diff: string;
       try {
         diffstat = hasHead
-          ? (await git("diff", "HEAD", "--stat")).out
+          ? (await git("diff", "HEAD", "--stat", "--", ".", ...EXCLUDE)).out
           : wtStatus;
-        diff = hasHead ? (await git("diff", "HEAD")).out : wtStatus;
+        diff = hasHead
+          ? (await git("diff", "HEAD", "--", ".", ...EXCLUDE)).out
+          : wtStatus;
       } finally {
         if (untracked.length) await git("reset", "--", ...untracked);
       }
@@ -175,7 +191,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       // 2) Stage + commit deterministically.
-      const add = await git("add", "-A");
+      const add = await git("add", "-A", "--", ".", ...EXCLUDE);
       if (!add.ok) {
         ctx.ui.notify(`/yeet: git add failed: ${add.err}`, "error");
         return;

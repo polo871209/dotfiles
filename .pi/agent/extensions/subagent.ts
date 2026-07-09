@@ -44,6 +44,7 @@ import { Type } from "typebox";
 interface AgentConfig {
   name: string;
   description: string;
+  hidden: boolean;
   tools: string[];
   model?: string;
   thinking?: string;
@@ -227,23 +228,34 @@ function loadAgents(): AgentConfig[] {
     } catch {
       continue;
     }
-    const { frontmatter, body } =
-      parseFrontmatter<Record<string, string>>(content);
-    if (!frontmatter.name || !frontmatter.description) continue;
-    const tools = (frontmatter.tools || "")
+    // YAML scalars: strings for the flag-like fields, real boolean for `hidden`.
+    const { frontmatter, body } = parseFrontmatter<
+      Record<string, string | boolean | undefined> & { hidden?: boolean }
+    >(content);
+    if (
+      typeof frontmatter.name !== "string" ||
+      typeof frontmatter.description !== "string"
+    )
+      continue;
+    const tools = (
+      typeof frontmatter.tools === "string" ? frontmatter.tools : ""
+    )
       .split(",")
       .map((t) => t.trim())
       .filter((t) => t.length > 0);
-    const secsToMs = (v: string | undefined): number | undefined => {
-      const n = Number(v);
+    const str = (v: string | boolean | undefined): string | undefined =>
+      typeof v === "string" && v ? v : undefined;
+    const secsToMs = (v: string | boolean | undefined): number | undefined => {
+      const n = Number(str(v));
       return Number.isFinite(n) && n > 0 ? n * 1000 : undefined;
     };
     out.push({
       name: frontmatter.name,
       description: frontmatter.description,
+      hidden: frontmatter.hidden === true,
       tools,
-      model: frontmatter.model || undefined,
-      thinking: frontmatter.thinking || undefined,
+      model: str(frontmatter.model),
+      thinking: str(frontmatter.thinking),
       maxDurationMs: secsToMs(frontmatter.maxDuration),
       // Only the agent's own .md content — no shared preamble (SYSTEM.md is
       // the main session's own prompt, not a subagent default) and no other
@@ -611,7 +623,10 @@ export default function (pi: ExtensionAPI) {
   const agents = loadAgents();
   if (agents.length === 0) return;
   const byName = new Map(agents.map((a) => [a.name, a]));
+  // Hidden agents stay invocable (they're in the param enum) but pay no
+  // per-turn description cost — a skill that knows the name invokes them.
   const agentList = agents
+    .filter((a) => !a.hidden)
     .map((a) => `  ${a.name}: ${a.description}`)
     .join("\n");
 
