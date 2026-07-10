@@ -81,22 +81,6 @@ function selectActiveTabIndex(
   return Math.min(currentTab, totalQuestions - 1);
 }
 
-function selectActiveTabItems(
-  itemsByTab: ReadonlyArray<readonly WrappingSelectItem[]>,
-  currentTab: number,
-  totalQuestions: number,
-): readonly WrappingSelectItem[] {
-  return itemsByTab[selectActiveTabIndex(currentTab, totalQuestions)] ?? [];
-}
-
-function chatNumberingFor(items: readonly WrappingSelectItem[]): {
-  offset: number;
-  total: number;
-} {
-  const count = items.filter((i) => ROW_INTENT_META[i.kind].numbered).length;
-  return { offset: count, total: count + 1 };
-}
-
 function selectConfirmedIndicator(
   questions: readonly QuestionData[],
   currentTab: number,
@@ -543,15 +527,7 @@ export class QuestionnairePropsAdapter {
 
     this.dialog.setProps({ state, activeOptionList });
 
-    const activeItems = selectActiveTabItems(
-      this.itemsByTab,
-      state.currentTab,
-      totalQuestions,
-    );
-    this.chatRow.setProps({
-      focused: activeView === "chat",
-      numbering: chatNumberingFor(activeItems),
-    });
+    this.chatRow.setProps({ focused: activeView === "chat" });
 
     if (this.submitPicker) {
       const focused = activeView === "submit";
@@ -678,7 +654,7 @@ export function buildQuestionnaire(
   const getTerminalRows = () => tui.terminal.rows;
 
   const selectTheme: WrappingSelectTheme = {
-    selectedText: (s) => theme.fg("accent", theme.bold(s)),
+    selectedText: (s) => theme.fg("accent", s),
     description: (s) => theme.fg("muted", s),
     scrollInfo: (s) => theme.fg("dim", s),
   };

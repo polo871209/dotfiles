@@ -426,7 +426,9 @@ export default function (pi: ExtensionAPI) {
     if (event.toolName === "ask_user_question") setWindowStatus("busy");
   });
 
-  pi.on("agent_end", async () => {
+  // agent_settled, not agent_end: agent_end also fires mid auto-retry /
+  // auto-compact / queued follow-ups, causing premature "done" + pings.
+  pi.on("agent_settled", async () => {
     if (IS_SUBAGENT) {
       // subagent.ts polls this window name to know when the pane is done;
       // no notification/sound for a background turn nobody is watching.

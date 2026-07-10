@@ -32,23 +32,15 @@ export interface WrappingSelectTheme {
   scrollInfo: (text: string) => string;
 }
 
-export interface WrappingSelectOptions {
-  numberStartOffset?: number;
-  totalItemsForNumbering?: number;
-}
-
 export class WrappingSelect implements Component {
-  private static readonly ACTIVE_POINTER = "❯ ";
+  private static readonly ACTIVE_POINTER = "→ ";
   private static readonly INACTIVE_POINTER = "  ";
-  private static readonly NUMBER_SEPARATOR = ". ";
   private static readonly CONFIRMED_MARK = " ✔";
   private static readonly MIN_CONTENT_WIDTH = 1;
 
   private readonly items: readonly WrappingSelectItem[];
   private readonly maxVisible: number;
   private readonly theme: WrappingSelectTheme;
-  private numberStartOffset: number;
-  private totalItemsForNumbering: number;
 
   private selectedIndex = 0;
   private focused = true;
@@ -61,22 +53,10 @@ export class WrappingSelect implements Component {
     items: readonly WrappingSelectItem[],
     maxVisible: number,
     theme: WrappingSelectTheme,
-    options: WrappingSelectOptions = {},
   ) {
     this.items = items;
     this.maxVisible = Math.max(1, maxVisible);
     this.theme = theme;
-    this.numberStartOffset = options.numberStartOffset ?? 0;
-    this.totalItemsForNumbering =
-      options.totalItemsForNumbering ?? items.length;
-  }
-
-  setNumbering(
-    numberStartOffset: number,
-    totalItemsForNumbering: number,
-  ): void {
-    this.numberStartOffset = numberStartOffset;
-    this.totalItemsForNumbering = Math.max(1, totalItemsForNumbering);
   }
 
   setSelectedIndex(index: number): void {
@@ -113,14 +93,13 @@ export class WrappingSelect implements Component {
     if (this.items.length === 0) return [];
 
     const { startIndex, endIndex } = this.computeVisibleWindow();
-    const numberWidth = String(Math.max(1, this.totalItemsForNumbering)).length;
     const lines: string[] = [];
 
     for (let i = startIndex; i < endIndex; i++) {
       const item = this.items[i];
       if (!item) continue;
       const isActive = i === this.selectedIndex && this.focused;
-      lines.push(...this.renderItem(item, i, isActive, width, numberWidth));
+      lines.push(...this.renderItem(item, i, isActive, width));
     }
 
     if (this.hasItemsOutsideWindow(startIndex, endIndex)) {
@@ -137,19 +116,12 @@ export class WrappingSelect implements Component {
   focusedItemRowRange(width: number): [number, number] {
     if (this.items.length === 0) return [0, 0];
     const { startIndex, endIndex } = this.computeVisibleWindow();
-    const numberWidth = String(Math.max(1, this.totalItemsForNumbering)).length;
     let row = 0;
     for (let i = startIndex; i < endIndex; i++) {
       const item = this.items[i];
       if (!item) continue;
       const isActive = i === this.selectedIndex && this.focused;
-      const itemRowCount = this.renderItem(
-        item,
-        i,
-        isActive,
-        width,
-        numberWidth,
-      ).length;
+      const itemRowCount = this.renderItem(item, i, isActive, width).length;
       if (i === this.selectedIndex) return [row, row + itemRowCount];
       row += itemRowCount;
     }
@@ -175,9 +147,10 @@ export class WrappingSelect implements Component {
     index: number,
     isActive: boolean,
     width: number,
-    numberWidth: number,
   ): string[] {
-    const rowPrefix = this.buildRowPrefix(index, isActive, numberWidth);
+    const rowPrefix = isActive
+      ? WrappingSelect.ACTIVE_POINTER
+      : WrappingSelect.INACTIVE_POINTER;
     const continuationPrefix = " ".repeat(visibleWidth(rowPrefix));
     const contentWidth = Math.max(
       WrappingSelect.MIN_CONTENT_WIDTH,
@@ -212,19 +185,6 @@ export class WrappingSelect implements Component {
         contentWidth,
       ),
     ];
-  }
-
-  private buildRowPrefix(
-    index: number,
-    isActive: boolean,
-    numberWidth: number,
-  ): string {
-    const pointer = isActive
-      ? WrappingSelect.ACTIVE_POINTER
-      : WrappingSelect.INACTIVE_POINTER;
-    const displayNumber = this.numberStartOffset + index + 1;
-    const paddedNumber = String(displayNumber).padStart(numberWidth, " ");
-    return `${pointer}${paddedNumber}${WrappingSelect.NUMBER_SEPARATOR}`;
   }
 
   // Cursor as ECMA-48 SGR 7 reverse-video on the cell at the cursor (not an
@@ -302,16 +262,10 @@ export class OptionListView {
     items: readonly WrappingSelectItem[],
     theme: WrappingSelectTheme,
   ) {
-    // Reserve a numbering slot for the chat row (items.length + 1) so the
-    // number column width is stable whether or not chat is focused.
     this.select = new WrappingSelect(
       items,
       Math.min(items.length, MAX_VISIBLE_OPTIONS),
       theme,
-      {
-        numberStartOffset: 0,
-        totalItemsForNumbering: items.length + 1,
-      },
     );
   }
 
@@ -347,11 +301,10 @@ export class OptionListView {
 
 export const MULTI_SUBMIT_LABEL = "Submit";
 
-const MS_ACTIVE_POINTER = "❯ ";
+const MS_ACTIVE_POINTER = "→ ";
 const MS_INACTIVE_POINTER = "  ";
 const MS_CHECKED = "[✔]";
 const MS_UNCHECKED = "[ ]";
-const MS_NUMBER_SEPARATOR = ". ";
 const MS_BOX_LABEL_GAP = " ";
 const MS_CONTINUATION_INDENT = "  ";
 
@@ -385,9 +338,6 @@ export class MultiSelectView {
     const lines: string[] = [];
     const prefixWidth = this.prefixVisibleWidth();
     const contentWidth = Math.max(1, width - prefixWidth);
-    const numberWidth = String(
-      Math.max(1, this.question.options.length),
-    ).length;
     for (let i = 0; i < this.question.options.length; i++) {
       const opt = this.question.options[i];
       const row = this.props.rows[i];
@@ -399,11 +349,8 @@ export class MultiSelectView {
         ? this.theme.fg("accent", MS_CHECKED)
         : this.theme.fg("muted", MS_UNCHECKED);
       const label = truncateToWidth(opt.label, contentWidth, "…");
-      const styledLabel = row.active
-        ? this.theme.fg("accent", this.theme.bold(label))
-        : label;
-      const num = String(i + 1).padStart(numberWidth, " ");
-      const line = `${pointer}${num}${MS_NUMBER_SEPARATOR}${box}${MS_BOX_LABEL_GAP}${styledLabel}`;
+      const styledLabel = row.active ? this.theme.fg("accent", label) : label;
+      const line = `${pointer}${box}${MS_BOX_LABEL_GAP}${styledLabel}`;
       lines.push(truncateToWidth(line, width, ""));
       if (opt.description) {
         for (const segment of wrapTextWithAnsi(opt.description, contentWidth)) {
@@ -415,7 +362,7 @@ export class MultiSelectView {
       ? this.theme.fg("accent", MS_ACTIVE_POINTER)
       : MS_INACTIVE_POINTER;
     const nextLabel = this.props.nextActive
-      ? this.theme.fg("accent", this.theme.bold(this.props.nextLabel))
+      ? this.theme.fg("accent", this.props.nextLabel)
       : this.props.nextLabel;
     lines.push(truncateToWidth(`${nextPointer}${nextLabel}`, width, ""));
     return lines;
@@ -453,13 +400,8 @@ export class MultiSelectView {
   }
 
   private prefixVisibleWidth(): number {
-    const numberWidth = String(
-      Math.max(1, this.question.options.length),
-    ).length;
-    return (
-      visibleWidth(MS_INACTIVE_POINTER) +
-      numberWidth +
-      visibleWidth(`${MS_NUMBER_SEPARATOR}${MS_UNCHECKED}${MS_BOX_LABEL_GAP}`)
+    return visibleWidth(
+      `${MS_INACTIVE_POINTER}${MS_UNCHECKED}${MS_BOX_LABEL_GAP}`,
     );
   }
 }
@@ -468,22 +410,17 @@ export class MultiSelectView {
 
 export interface ChatRowViewProps {
   focused: boolean;
-  numbering: { offset: number; total: number };
 }
 
 export class ChatRowView implements Component {
   private readonly select: WrappingSelect;
 
   constructor(item: WrappingSelectItem, theme: WrappingSelectTheme) {
-    this.select = new WrappingSelect([item], 1, theme, {
-      numberStartOffset: 0,
-      totalItemsForNumbering: 1,
-    });
+    this.select = new WrappingSelect([item], 1, theme);
   }
 
   setProps(props: ChatRowViewProps): void {
     this.select.setFocused(props.focused);
-    this.select.setNumbering(props.numbering.offset, props.numbering.total);
   }
 
   handleInput(_data: string): void {}
@@ -549,9 +486,8 @@ export class TabBar implements Component {
 export const SUBMIT_LABEL = "Submit answers";
 export const CANCEL_LABEL = "Cancel";
 
-const SP_ACTIVE_POINTER = "❯ ";
+const SP_ACTIVE_POINTER = "→ ";
 const SP_INACTIVE_POINTER = "  ";
-const SP_NUMBER_SEPARATOR = ". ";
 
 export interface SubmitPickerProps {
   rows: ReadonlyArray<{ active: boolean }>;
@@ -582,11 +518,10 @@ export class SubmitPicker implements Component {
       const text = i === 0 ? SUBMIT_LABEL : CANCEL_LABEL;
       const active = this.props.rows[i]?.active ?? false;
       const pointer = active ? SP_ACTIVE_POINTER : SP_INACTIVE_POINTER;
-      const number = `${i + 1}${SP_NUMBER_SEPARATOR}`;
       const label = active
-        ? this.theme.fg("accent", this.theme.bold(text))
+        ? this.theme.fg("accent", text)
         : this.theme.fg("text", text);
-      lines.push(truncateToWidth(`${pointer}${number}${label}`, width, ""));
+      lines.push(truncateToWidth(`${pointer}${label}`, width, ""));
     }
     return lines;
   }

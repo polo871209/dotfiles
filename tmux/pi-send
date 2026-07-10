@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# pi-send — inject tmux pane output / a message into the pi pane in this
-# tmux session, by pasting text directly into its pane (bracketed paste,
-# same as a real paste) then pressing Enter. No socket, no cooperating
-# extension required inside pi.
+# pi-send — inject tmux pane output / a message into a pi instance in this
+# tmux session. Prefers the tmux-bridge unix socket (same protocol as
+# nvim/lua/pi.lua): one JSON line {"text": ...} per message. Falls back to
+# pasting into the pi pane (bracketed paste + Enter) when no bridge listener
+# is live. Multiple live pi panes -> fzf picker.
 #
 # Usage:
 #   pi-send "message"                    # message only
@@ -27,15 +28,48 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# --- Find the pi pane in this session ---
+# --- Find pi panes in this session ---
 # pi's own process shows up as "node" in tmux (it's a node program), so we
 # match on pi's own pane title (starts with π) instead of pane_current_command.
 
-TARGET=$(tmux list-panes -s -F '#{pane_id}\t#{pane_title}' | awk -F'\t' '$2 ~ /^π/ {print $1; exit}')
-if [[ -z "$TARGET" ]]; then
+# NB: tmux passes \t through literally, so use a real tab in the format
+PI_PANES=$(tmux list-panes -s -F $'#{pane_id}\t#{pane_title}\t#{window_name}' | awk -F'\t' '$2 ~ /^π/ {print $1 "\t" $3}')
+if [[ -z "$PI_PANES" ]]; then
   echo "pi-send: no pi pane found in this tmux session" >&2
   exit 1
 fi
+
+# --- Socket discovery (mirrors nvim/lua/pi.lua) ---
+# tmux-bridge.ts listens on <tmpdir>/pi-tmux-pane-<sanitized-pane-id>.sock,
+# where tmpdir is Node's os.tmpdir() — on macOS the DARWIN_USER_TEMP_DIR,
+# which may differ from our $TMPDIR, so probe several candidates.
+
+socket_for_pane() {
+  local pane_id="$1" safe name dir
+  safe=$(printf '%s' "$pane_id" | tr -c 'a-zA-Z0-9_-' '_')
+  name="pi-tmux-pane-${safe}.sock"
+  local dirs=("${TMPDIR:-}" "$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null || true)" /tmp)
+  for dir in "${dirs[@]}"; do
+    [[ -z "$dir" ]] && continue
+    local sock="${dir%/}/$name"
+    # -S: socket exists; empty-payload connect: a listener actually accepts
+    # (macOS nc -z doesn't work with -U). Bridge ignores blank lines.
+    if [[ -S "$sock" ]] && printf '' | nc -U -w 1 "$sock" 2>/dev/null; then
+      printf '%s' "$sock"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Live bridges: "pane_id \t window_name \t sock" per line
+LIVE=""
+while IFS=$'\t' read -r pid wname; do
+  if sock=$(socket_for_pane "$pid"); then
+    LIVE+="${pid}\t${wname}\t${sock}\n"
+  fi
+done <<< "$PI_PANES"
+LIVE=$(printf '%b' "$LIVE")
 
 # --- Gather content ---
 
@@ -71,11 +105,29 @@ else
   TEXT="$MESSAGE"
 fi
 
-# --- Send: paste-buffer wraps in bracketed paste so multi-line text lands as
-# one message instead of one Enter per line ---
+# --- Send via bridge socket when live ---
 
+if [[ -n "$LIVE" ]]; then
+  if [[ $(wc -l <<< "$LIVE") -gt 1 ]]; then
+    CHOICE=$(fzf --height 40% --reverse --border --border-label ' send to which pi agent? ' \
+      --with-nth 2 --delimiter '\t' <<< "$LIVE") || exit 1
+  else
+    CHOICE="$LIVE"
+  fi
+  SOCK=$(cut -f3 <<< "$CHOICE")
+  # tmux-bridge drops lines >256KB
+  if [[ ${#TEXT} -le 200000 ]]; then
+    jq -nc --arg text "$TEXT" '{text: $text}' | nc -U -w 1 "$SOCK"
+    tmux display-message "pi-send: sent to pi (bridge)"
+    exit 0
+  fi
+fi
+
+# --- Fallback: paste-buffer wraps in bracketed paste so multi-line text lands
+# as one message instead of one Enter per line ---
+
+TARGET=$(head -n1 <<< "$PI_PANES" | cut -f1)
 printf '%s' "$TEXT" | tmux load-buffer -b pi-send -
 tmux paste-buffer -p -b pi-send -d -t "$TARGET"
 tmux send-keys -t "$TARGET" Enter
-
-tmux display-message "pi-send: sent to pi"
+tmux display-message "pi-send: sent to pi (paste)"

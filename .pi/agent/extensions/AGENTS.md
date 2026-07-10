@@ -43,9 +43,10 @@ Read referenced `.md` files completely and follow their cross-references before 
 
 ### Workflow shortcuts
 
-- **`resend.ts`** — `/resend` re-runs the agent on the current transcript with nothing appended, for when you abort a prompt mid-stream or it stalls and auto-retry gives up. Also carries an opt-in stream-rule watchdog (`RULES` in the file, empty by default): a regex hit on the model's live output aborts the turn, injects a hidden correction, and resumes automatically — no manual `/resend` needed for known recurring mistakes.
+- **`go.ts`** — `/go` re-runs the agent on the current transcript with nothing appended, for when you abort a prompt mid-stream or it stalls and auto-retry gives up. Also carries an opt-in stream-rule watchdog (`RULES` in the file, empty by default): a regex hit on the model's live output aborts the turn, injects a hidden correction, and resumes automatically — no manual `/go` needed for known recurring mistakes.
 - **`yeet.ts`** — `/yeet [hint]` stages, commits with an auto-written Conventional Commits message derived from the diff itself (an optional hint arg may only disambiguate intent, never introduce content absent from the diff), and pushes; paths on its ignore list (`IGNORED_PATHS` in the file) are always left out.
 - **`copy.ts`** — `/copy-blocks` picks a fenced code block from the last assistant response; `/copy-all` copies the full session as markdown. Built-in `/copy` unchanged.
+- **`skip-xhigh.ts`** — thinking-level cycle (shift+tab) skips `xhigh` and `max`; high wraps to off.
 - **`auto-rename.ts`** — names the session after 3+ turns. Kills the default `2025-05-24T09-21-…` slugs.
 
 ### Outside-pi surface
@@ -55,8 +56,8 @@ Read referenced `.md` files completely and follow their cross-references before 
 
 ### TUI taste
 
-- **`tui.ts`** — visual tweaks: coloured input line, compact footer, input pinned to the bottom of the viewport, autocomplete floating as an overlay above the editor, and no stray left-margin column so mouse-selecting/copying conversation text doesn't drag a leading space onto every line.
-- **`code-blocks.ts`** — syntax-highlights fenced code blocks in assistant responses.
+- **`tui.ts`** — visual tweaks and mouse support: coloured input line, compact footer, input pinned to the bottom of the viewport, autocomplete floating as an overlay above the editor, no stray left-margin column so selecting/copying conversation text doesn't drag a leading space onto every line, click a code block to copy it, and wheel-up drops into tmux copy-mode so scrollback stays native (hold Shift for terminal-native text selection).
+- **`code-blocks.ts`** — syntax-highlights fenced code blocks in assistant responses and frames each one as a panel (language header, copy hint, gutter) wired for click-to-copy.
 
 ## Layout
 

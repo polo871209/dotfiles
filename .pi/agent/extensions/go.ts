@@ -1,4 +1,4 @@
-// /resend — re-run the agent loop on the existing transcript, and (if RULES
+// /go — re-run the agent loop on the existing transcript, and (if RULES
 // below is non-empty) an automatic mid-stream watchdog that does the same
 // resume for you.
 //
@@ -79,7 +79,7 @@ function trimTrailingAssistant(
   return end === msgs.length ? msgs : msgs.slice(0, end);
 }
 
-async function resend(ctx: ExtensionContext): Promise<void> {
+async function go(ctx: ExtensionContext): Promise<void> {
   const session = slot.active;
   if (!session) {
     ctx.ui.notify("No active session to retrigger", "warning");
@@ -108,7 +108,7 @@ async function resend(ctx: ExtensionContext): Promise<void> {
 //
 // A regex hits the model's streaming text/thinking output → the turn aborts
 // → a hidden reminder is appended as a user turn → generation resumes via
-// the same trim+continue() primitive `resend` uses. Empty by default: zero
+// the same trim+continue() primitive `go` uses. Empty by default: zero
 // cost (no message_update listener even registered) until you add a rule.
 //
 // Add project- or habit-specific corrections here, e.g.:
@@ -192,16 +192,16 @@ async function injectAndContinue(
   try {
     await agent.continue();
   } catch {
-    // Best effort — matches resend()'s own swallow-on-failure for this path;
-    // the manual /resend command still surfaces failures via ctx.ui.notify.
+    // Best effort — matches go()'s own swallow-on-failure for this path;
+    // the manual /go command still surfaces failures via ctx.ui.notify.
   }
 }
 
-export default function resendExtension(pi: ExtensionAPI): void {
-  pi.registerCommand("resend", {
+export default function goExtension(pi: ExtensionAPI): void {
+  pi.registerCommand("go", {
     description:
       "Re-run the agent on the current transcript (no message appended)",
-    handler: async (_args, ctx) => resend(ctx),
+    handler: async (_args, ctx) => go(ctx),
   });
 
   if (RULES.length === 0) return;

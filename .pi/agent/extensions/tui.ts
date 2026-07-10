@@ -1,13 +1,17 @@
 // Customizes pi TUI: input text color, slim footer, pins the editor to the
-// bottom of the viewport even when the conversation is short, and renders the
+// bottom of the viewport even when the conversation is short, renders the
 // autocomplete dropdown as a floating overlay above the editor — the dropdown
 // covers the conversation lines underneath instead of pushing the editor up or
-// reserving a permanent gap.
+// reserving a permanent gap — and enables mouse support: click a code block
+// to copy it (block ids come from code-blocks.ts markers), wheel-up enters
+// tmux copy-mode so scrollback keeps working.
 import {
   CustomEditor,
   type ExtensionAPI,
+  type ExtensionContext,
   type KeybindingsManager,
 } from "@earendil-works/pi-coding-agent";
+import { spawn } from "node:child_process";
 import type { Theme as PiTheme } from "@earendil-works/pi-coding-agent";
 import {
   Editor,
@@ -52,22 +56,50 @@ const LEADING_MARGIN = /^((?:\x1b\[[0-9;]*m)*) /;
 const stripLeadingMargin = (lines: string[]): string[] =>
   lines.map((l) => l.replace(LEADING_MARGIN, "$1"));
 
+// code-blocks.ts tags each code-block line with a zero-width APC marker
+// carrying the block id. Harvest markers into a row -> block-id map (for
+// click hit-testing) and strip them so they never reach the terminal — tmux
+// would pass unknown APC sequences through and some terminals render junk.
+const CB_MARKER = /\x1b_pi-cb:(\d+)\x07/;
+const CB_MARKER_ALL = /\x1b_pi-cb:\d+\x07/g;
+const CB_ROW_MAP_KEY = "__cbRowMap";
+
+const harvestBlockMarkers = (tui: TUI, lines: string[]): string[] => {
+  const map = new Map<number, number>();
+  const out = lines.map((l, i) => {
+    const m = CB_MARKER.exec(l);
+    if (!m) return l;
+    map.set(i, Number(m[1]));
+    return l.replaceAll(CB_MARKER_ALL, "");
+  });
+  (tui as unknown as Record<string, unknown>)[CB_ROW_MAP_KEY] = map;
+  return out;
+};
+
 // Patch TUI.render to split children at the editor and fill the gap above it
 // with blank lines so the editor (and its bottom-anchored autocomplete overlay)
 // sits at the bottom of the viewport even on a fresh session. As the
 // conversation grows the filler shrinks to 0 and normal scrolling takes over.
+const PIN_TAG = "__bottomPinned";
 const installBottomPinPatch = () => {
   const proto = TUI.prototype as unknown as {
     render(width: number): string[];
     children: Component[];
     terminal: { rows: number; columns: number };
-    __bottomPinned?: boolean;
   };
 
-  if (proto.__bottomPinned) return;
-  proto.__bottomPinned = true;
-  const origRender = proto.render;
-  proto.render = function (width: number): string[] {
+  // Re-installable across /reload: walk past wrappers from previous module
+  // loads to the true original, then install a fresh wrapper bound to this
+  // module's live helpers (a stale wrapper would keep old closures alive and
+  // miss features added since, e.g. code-block marker harvesting).
+  let origRender = proto.render as unknown as {
+    (width: number): string[];
+    [PIN_TAG]?: { orig: (width: number) => string[] };
+  };
+  while (origRender[PIN_TAG]) {
+    origRender = origRender[PIN_TAG].orig as typeof origRender;
+  }
+  const wrapper = function (this: typeof proto, width: number): string[] {
     const editor = getPinnedEditor(this as unknown as TUI);
     let editorIdx = -1;
     if (editor) {
@@ -79,7 +111,10 @@ const installBottomPinPatch = () => {
       }
     }
 
-    if (editorIdx <= 0) return stripLeadingMargin(origRender.call(this, width));
+    const finalize = (lines: string[]): string[] =>
+      harvestBlockMarkers(this as unknown as TUI, stripLeadingMargin(lines));
+
+    if (editorIdx <= 0) return finalize(origRender.call(this, width));
 
     const before: string[] = [];
     for (let i = 0; i < editorIdx; i++)
@@ -87,19 +122,116 @@ const installBottomPinPatch = () => {
     const rest: string[] = [];
     for (let i = editorIdx; i < this.children.length; i++)
       rest.push(...this.children[i].render(width));
+    // Pad up to the bottom of the *current viewport*, not just terminal.rows:
+    // when a tall transient UI (dialog, questionnaire) collapses, the frame
+    // shrinks but the terminal viewport top stays put, so anchoring to rows
+    // alone leaves the editor stranded mid-screen with blank rows below it.
+    const viewportTop =
+      (this as unknown as { previousViewportTop?: number })
+        .previousViewportTop ?? 0;
     const filler = Math.max(
       0,
-      this.terminal.rows - before.length - rest.length,
+      viewportTop + this.terminal.rows - before.length - rest.length,
     );
-    return stripLeadingMargin(
+    return finalize(
       filler > 0
         ? [...before, ...new Array<string>(filler).fill(""), ...rest]
         : [...before, ...rest],
     );
-  };
+  } as unknown as typeof origRender;
+  wrapper[PIN_TAG] = { orig: origRender };
+  proto.render = wrapper;
 };
 
-const RESET = "\x1b[0m";
+// --- Mouse: click a code block to copy it -----------------------------------
+// pi-tui never enables mouse reporting, so we request SGR mouse (1000 = click
+// press/release, 1006 = SGR encoding) ourselves. tmux forwards events with
+// pane-relative coordinates. Wheel-up hands control back to tmux copy-mode so
+// scrollback still feels native; every mouse sequence is consumed so it never
+// reaches the editor as junk input.
+const MOUSE_ON = "\x1b[?1000h\x1b[?1006h";
+const MOUSE_OFF = "\x1b[?1006l\x1b[?1000l";
+const SGR_MOUSE = /^\x1b\[<(\d+);(\d+);(\d+)([Mm])$/;
+const MOUSE_LISTENER_KEY = "__cbMouseListener";
+
+interface CodeBlockRegistry {
+  byId: Map<number, string>;
+}
+const blockRegistry = (): CodeBlockRegistry | undefined =>
+  (globalThis as Record<string, unknown>).__piCodeBlocks as
+    CodeBlockRegistry | undefined;
+
+const pbcopy = (text: string) => {
+  const p = spawn("pbcopy", { stdio: ["pipe", "ignore", "ignore"] });
+  // Swallow spawn/pipe failures (missing binary, EPIPE) — an unhandled
+  // "error" event would crash pi over a failed copy.
+  p.on("error", () => {});
+  p.stdin.on("error", () => {});
+  p.stdin.write(text);
+  p.stdin.end();
+};
+
+let mouseCtx: ExtensionContext | undefined;
+
+const installMouseListener = (tui: TUI) => {
+  const t = tui as unknown as Record<string, unknown> & {
+    addInputListener(
+      l: (data: string) => { consume?: boolean } | undefined,
+    ): () => void;
+    previousViewportTop?: number;
+  };
+  // Re-register on /reload: drop the previous module's listener (its closure
+  // holds a stale ctx) and install this module's fresh one.
+  const prevUnsub = t[MOUSE_LISTENER_KEY];
+  if (typeof prevUnsub === "function") (prevUnsub as () => void)();
+
+  t[MOUSE_LISTENER_KEY] = t.addInputListener((data: string) => {
+    const m = SGR_MOUSE.exec(data);
+    if (!m) return undefined;
+    const btn = Number(m[1]);
+    const row = Number(m[3]);
+    const press = m[4] === "M";
+
+    if (btn === 64) {
+      // Wheel up: let tmux take over scrolling for this pane.
+      if (press && process.env.TMUX && process.env.TMUX_PANE) {
+        spawn("tmux", ["copy-mode", "-e", "-t", process.env.TMUX_PANE], {
+          stdio: "ignore",
+        }).on("error", () => {});
+      }
+      return { consume: true };
+    }
+
+    if (btn === 0 && press) {
+      const rowMap = t[CB_ROW_MAP_KEY] as Map<number, number> | undefined;
+      const lineIdx = (t.previousViewportTop ?? 0) + row - 1;
+      const id = rowMap?.get(lineIdx);
+      const code = id !== undefined ? blockRegistry()?.byId.get(id) : undefined;
+      if (code !== undefined) {
+        pbcopy(code);
+        mouseCtx?.ui.notify("code block copied", "info");
+      }
+    }
+    return { consume: true };
+  });
+};
+
+let exitHookInstalled = false;
+const installMouse = (pi: ExtensionAPI) => {
+  pi.on("session_start", async (_event, ctx) => {
+    mouseCtx = ctx;
+    process.stdout.write(MOUSE_ON);
+  });
+  pi.on("session_shutdown", async () => {
+    process.stdout.write(MOUSE_OFF);
+  });
+  if (!exitHookInstalled) {
+    exitHookInstalled = true;
+    process.on("exit", () => process.stdout.write(MOUSE_OFF));
+  }
+};
+
+const SGR_RESET = "\x1b[0m";
 // Matches only actual decoration lines (a solid horizontal rule, or a
 // "↑ 3 more"-style scroll hint) so we don't skip coloring a real input line
 // that happens to be all digits or a word overlapping those characters.
@@ -109,7 +241,7 @@ const BORDER =
 const colorInputLine = (line: string, theme: PiTheme) => {
   if (BORDER.test(line)) return line;
   const input = theme.getFgAnsi("text");
-  return `${input}${line.replaceAll(RESET, `${RESET}${input}`)}${RESET}`;
+  return `${input}${line.replaceAll(SGR_RESET, `${SGR_RESET}${input}`)}${SGR_RESET}`;
 };
 
 // Render the autocomplete dropdown as a floating overlay above the
@@ -119,7 +251,6 @@ const colorInputLine = (line: string, theme: PiTheme) => {
 // Slightly lighter than gruvbox dark bg (#282828) so the overlay block
 // reads as a panel without harsh contrast.
 const OVERLAY_BG = "\x1b[48;2;60;56;54m"; // #3c3836
-const SGR_RESET = "\x1b[0m";
 
 const wrapWithBg = (line: string, width: number): string => {
   // Reapply bg after each inner reset so nested ANSI codes don't strip it.
@@ -198,19 +329,25 @@ const syncOverlay = (editor: EditorWithOverlay, editorHeight: number) => {
   }
 };
 
+const AC_TAG = "__acOverlay";
 const installAutocompleteAbovePatch = () => {
   const proto = Editor.prototype as unknown as {
     render(width: number): string[];
-    __acOverlay?: boolean;
     autocompleteState?: unknown;
     autocompleteList?: { render(width: number): string[] };
   };
 
-  if (proto.__acOverlay) return;
-  proto.__acOverlay = true;
-  const origRender = proto.render;
+  // Re-installable across /reload (same pattern as the bottom-pin patch):
+  // unwrap to the true original, then wrap with this module's live closures.
+  let origRender = proto.render as unknown as {
+    (width: number): string[];
+    [AC_TAG]?: { orig: (width: number) => string[] };
+  };
+  while (origRender[AC_TAG]) {
+    origRender = origRender[AC_TAG].orig as typeof origRender;
+  }
 
-  proto.render = function (width: number): string[] {
+  const wrapper = function (this: typeof proto, width: number): string[] {
     // Always strip the inline dropdown from the editor's own render so
     // the editor occupies the same rows whether autocomplete is active
     // or not.
@@ -233,7 +370,9 @@ const installAutocompleteAbovePatch = () => {
     queueMicrotask(() => syncOverlay(self, editorHeight));
 
     return lines;
-  };
+  } as unknown as typeof origRender;
+  wrapper[AC_TAG] = { orig: origRender };
+  proto.render = wrapper;
 };
 
 class ThemedEditor extends CustomEditor {
@@ -245,6 +384,7 @@ class ThemedEditor extends CustomEditor {
   ) {
     super(tui, editorTheme, keybindings);
     setPinnedEditor(tui, this);
+    installMouseListener(tui);
   }
 
   render(width: number): string[] {
@@ -336,4 +476,5 @@ installAutocompleteAbovePatch();
 export default function (pi: ExtensionAPI) {
   installInputColor(pi);
   installFooter(pi);
+  installMouse(pi);
 }

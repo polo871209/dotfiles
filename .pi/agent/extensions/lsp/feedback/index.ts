@@ -2,7 +2,7 @@
 //   - Inline (per edit, tool_result): format-only, fast. The formatted bytes
 //     are folded back into the agent's own edit result so its view stays in
 //     sync with disk — no surprise re-read, no extra context entry.
-//   - Batched (turn end, agent_end): run the staged fix pipeline (pipeline.ts)
+//   - Batched (turn end, agent_settled): run the staged fix pipeline (pipeline.ts)
 //     off-thread — format, diagnose, deterministic LSP code-fix, then LLM fix
 //     only for surviving errors/warnings; when a fix rewrites a file, inject a
 //     compact diff once so the next edit targets current bytes. Widget renders
@@ -244,7 +244,7 @@ export function registerFeedback(pi: ExtensionAPI): void {
   // Inline format-on-save: format each touched file and fold the deltas into
   // the agent's own tool result, keeping its view synced to disk (no re-read)
   // without a separate context entry. The slow diagnostics + LLM auto-fix run
-  // batched at agent_end over the same `touched` set.
+  // batched at agent_settled over the same `touched` set.
   pi.on("tool_result", async (event) => {
     if (event.isError) return;
 
@@ -256,7 +256,10 @@ export function registerFeedback(pi: ExtensionAPI): void {
       return { content: [...event.content, { type: "text", text: note }] };
   });
 
-  pi.on("agent_end", async (_event, ctx) => {
+  // agent_settled, not agent_end: agent_end also fires mid auto-retry /
+  // auto-compact / queued follow-ups — auto-fix there races the agent's next
+  // edits. Settled = pi will not continue on its own.
+  pi.on("agent_settled", async (_event, ctx) => {
     if (reported || touched.size === 0) return;
     if (isRebasing(ctx.cwd ?? cwd)) return;
     const files = Array.from(touched);

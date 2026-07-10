@@ -33,8 +33,6 @@ export interface RowIntentMeta {
   label: string;
   reserved: boolean;
   livesInMainList: boolean;
-  /** Contributes to the main-list numbering offset the chat row reads. */
-  numbered: boolean;
   /** Focusing the row toggles state.inputMode (the inline free-text row). */
   activatesInputMode: boolean;
   /** In multiSelect, Space / Enter-as-toggle is suppressed (the Next row). */
@@ -52,7 +50,6 @@ export const ROW_INTENT_META: Record<RowKind, RowIntentMeta> = {
     label: "",
     reserved: false,
     livesInMainList: true,
-    numbered: true,
     activatesInputMode: false,
     blocksMultiToggle: false,
     autoSubmitsInMulti: false,
@@ -63,7 +60,6 @@ export const ROW_INTENT_META: Record<RowKind, RowIntentMeta> = {
     label: "Type something.",
     reserved: true,
     livesInMainList: true,
-    numbered: true,
     activatesInputMode: true,
     blocksMultiToggle: false,
     autoSubmitsInMulti: false,
@@ -74,7 +70,6 @@ export const ROW_INTENT_META: Record<RowKind, RowIntentMeta> = {
     label: "Chat about this",
     reserved: true,
     livesInMainList: false,
-    numbered: true,
     activatesInputMode: false,
     blocksMultiToggle: false,
     autoSubmitsInMulti: false,
@@ -85,7 +80,6 @@ export const ROW_INTENT_META: Record<RowKind, RowIntentMeta> = {
     label: "Next",
     reserved: true,
     livesInMainList: true,
-    numbered: false,
     activatesInputMode: false,
     blocksMultiToggle: true,
     autoSubmitsInMulti: true,
