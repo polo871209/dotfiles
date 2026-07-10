@@ -1,5 +1,5 @@
 -- pi-lsp driver — loaded once into the persistent --embed nvim that lsp/
--- owns. Exposes _G.PiLsp = { hover, definition, references, rename,
+-- owns. Exposes _G.PiLsp = { hover, definition, references,
 -- implementation, type_definition, document_symbols, diagnostics, status }
 -- for the nav tools.
 -- Caches one buffer per file (mtime-invalidated) so repeat queries are warm.
@@ -285,65 +285,6 @@ function M.document_symbols(file)
     return { ok = true, symbols = out }
 end
 
-local function changed_uris(workspace_edit)
-    local uris = {}
-    if workspace_edit.documentChanges then
-        for _, change in ipairs(workspace_edit.documentChanges) do
-            -- skip create/rename/delete file ops (no textDocument.edits)
-            if change.textDocument and change.textDocument.uri then uris[change.textDocument.uri] = true end
-        end
-    elseif workspace_edit.changes then
-        for uri, _ in pairs(workspace_edit.changes) do
-            uris[uri] = true
-        end
-    end
-    return uris
-end
-
-function M.rename(file, line, symbol, new_name)
-    if not new_name or new_name == '' then return { ok = false, error = 'new_name required' } end
-    if not file_exists(file) then return { ok = false, error = 'file not found: ' .. file } end
-    local b = open_buf(file)
-    local params, err = make_position_params(b, line, symbol)
-    if not params then return { ok = false, error = err } end
-    local supported = false
-    for _, c in ipairs(vim.lsp.get_clients { bufnr = b }) do
-        if c.server_capabilities and c.server_capabilities.renameProvider then
-            supported = true
-            break
-        end
-    end
-    if not supported then return { ok = false, error = 'no attached LSP supports rename' } end
-    params.newName = new_name
-    local ok, res = pcall(vim.lsp.buf_request_sync, b, 'textDocument/rename', params, REQ_TIMEOUT_MS)
-    if not ok or not res then return { ok = false, error = 'request failed' } end
-    local workspace_edit, enc
-    for cid, r in pairs(res) do
-        if r.result then
-            workspace_edit = r.result
-            local c = vim.lsp.get_client_by_id(cid)
-            enc = c and c.offset_encoding or 'utf-16'
-            break
-        end
-    end
-    if not workspace_edit then return { ok = false, error = 'no rename edits returned (symbol not renameable here?)' } end
-    local uris = changed_uris(workspace_edit)
-    local apply_ok, apply_err = pcall(vim.lsp.util.apply_workspace_edit, workspace_edit, enc)
-    if not apply_ok then return { ok = false, error = 'apply failed: ' .. tostring(apply_err) } end
-    local written = {}
-    for uri, _ in pairs(uris) do
-        local bn = vim.uri_to_bufnr(uri)
-        if vim.api.nvim_buf_is_valid(bn) then vim.api.nvim_buf_call(bn, function() vim.cmd 'silent! write!' end) end
-        -- invalidate nav cache so subsequent queries reload from disk
-        local f = uri_to_path(uri)
-        bufs[f] = nil
-        mtimes[f] = nil
-        table.insert(written, f)
-    end
-    table.sort(written)
-    return { ok = true, files = written, count = #written }
-end
-
 -- Shared lint/diagnostic helpers on _G.PiLspShared; feedback.lua (loaded after,
 -- into the same nvim) reuses them instead of duplicating.
 _G.PiLspShared = _G.PiLspShared or {}
@@ -396,7 +337,9 @@ function M.diagnostics(files)
     end
     -- Servers push diagnostics async and lag; across files some report later.
     -- Wait until the total count stops growing, not just the first buffer, so
-    -- multi-file calls don't drop stragglers. Capped; a clean set pays the cap.
+    -- multi-file calls don't drop stragglers. Settled once the count holds
+    -- steady across two polls after the baseline read (works at zero too),
+    -- so clean files don't burn the full cap.
     local function total_diags()
         local n = 0
         for _, b in ipairs(opened) do
@@ -405,9 +348,15 @@ function M.diagnostics(files)
         return n
     end
     local last = -1
+    local stable = 0
     vim.wait(3000, function()
         local n = total_diags()
-        if n > 0 and n == last then return true end
+        if n == last then
+            stable = stable + 1
+            if stable >= 2 then return true end
+        else
+            stable = 0
+        end
         last = n
         return false
     end, 150)

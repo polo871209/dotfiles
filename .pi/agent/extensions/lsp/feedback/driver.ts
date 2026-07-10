@@ -82,11 +82,15 @@ export const runDriver = async (
 // silently desync the agent's view of the file.
 const INLINE_TIMEOUT_MS = 1_500;
 const INLINE_LUA_FORMAT_MS = 1_200;
+// Headroom between the lua budget and the JS deadline so a format finishing
+// right at the wire still gets awaited instead of writing after we gave up.
+const INLINE_MARGIN_MS = 100;
 export const formatFile = async (
   file: string,
   cwd: string,
 ): Promise<boolean> => {
   try {
+    const start = Date.now();
     const deadline = AbortSignal.timeout(INLINE_TIMEOUT_MS);
     await Promise.race([
       ensureFeedbackLoaded(cwd, "inline"),
@@ -98,10 +102,14 @@ export const formatFile = async (
         ),
       ),
     ]);
+    // ensureFeedbackLoaded ate into the shared deadline: give lua only what's
+    // left, and skip entirely when a write couldn't land before we stop waiting.
+    const remaining = INLINE_TIMEOUT_MS - (Date.now() - start);
+    if (remaining <= INLINE_MARGIN_MS) return false;
     const res = await callLua<{ formatted: string[] }>(
       cwd,
       "return PiFeedback.format(...)",
-      [[file], INLINE_LUA_FORMAT_MS],
+      [[file], Math.min(INLINE_LUA_FORMAT_MS, remaining - INLINE_MARGIN_MS)],
       deadline,
       undefined,
       "inline",

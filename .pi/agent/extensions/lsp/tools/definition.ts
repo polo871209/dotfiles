@@ -22,7 +22,7 @@ export const definitionTool = defineTool({
     "Use lsp_definition to locate where a symbol is declared before modifying it or reading wider source.",
   ),
   parameters: Type.Object({
-    file: Type.String({ description: "Absolute or cwd-relative file path." }),
+    file: Type.String({ description: "Abs or cwd-relative." }),
     line: Type.Number({
       minimum: 1,
       description: "1-indexed line number.",

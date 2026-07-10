@@ -23,12 +23,30 @@ export default function (pi: ExtensionAPI) {
 
   // candidate abs path → mtimeMs at last injection
   const injected = new Map<string, number>();
+  // Contents collected during tool_result hooks, flushed at turn_end. Sending
+  // steer messages from tool_result directly is unsafe with parallel tool
+  // calls: the message lands between the assistant tool_use block and its
+  // sibling tool_results, which Anthropic rejects (400: unexpected
+  // tool_use_id in tool_result blocks).
+  const pending: string[] = [];
 
   pi.on("session_start", () => {
     injected.clear();
+    pending.length = 0;
   });
 
-  pi.on("tool_call", async (event, ctx) => {
+  pi.on("turn_end", async () => {
+    // All of this turn's tool_results are recorded by now, so a steer message
+    // here lands after them — valid position for the next provider request.
+    for (const content of pending.splice(0)) {
+      pi.sendMessage(
+        { customType: "folder-context", content, display: false },
+        { deliverAs: "steer" },
+      );
+    }
+  });
+
+  pi.on("tool_result", async (event, ctx) => {
     if (!TARGET_TOOLS.has(event.toolName)) return;
     const rawPath = (event.input as { path?: unknown }).path;
     if (typeof rawPath !== "string" || rawPath === "") return;
@@ -75,13 +93,8 @@ export default function (pi: ExtensionAPI) {
         injected.set(candidate, mtime);
         try {
           const content = readFileSync(candidate, "utf-8");
-          pi.sendMessage(
-            {
-              customType: "folder-context",
-              content: `Folder context loaded from \`${candidate}\`:\n\n${content}`,
-              display: false,
-            },
-            { deliverAs: "steer" },
+          pending.push(
+            `Folder context loaded from \`${candidate}\`:\n\n${content}`,
           );
         } catch {
           injected.delete(candidate); // allow retry on next call

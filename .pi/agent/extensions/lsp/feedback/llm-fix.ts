@@ -99,17 +99,18 @@ const runFixerLLM = async (
 };
 
 // Run the LLM fixer over each file that still has an error/warning. Returns the
-// files written plus their pre-fix content (so the caller can diff old→new).
+// files written plus their pre/post-fix content (so the caller can diff
+// old→new without re-reading disk, which later unrelated edits would poison).
 export const applyFixes = async (
   diags: Diag[],
   ctx: ExtensionContext,
   signal: AbortSignal | undefined,
-): Promise<{ file: string; before: string }[]> => {
+): Promise<{ file: string; before: string; after: string }[]> => {
   const targets = Array.from(groupTargetsByFile(diags).entries()).slice(
     0,
     MAX_FIX_FILES,
   );
-  const patched: { file: string; before: string }[] = [];
+  const patched: { file: string; before: string; after: string }[] = [];
 
   for (const [file, errs] of targets) {
     let original: string;
@@ -128,7 +129,9 @@ export const applyFixes = async (
       // No backup — user has git. isSafeFix above (length floor, brace
       // balance, identity check) catches obvious bad outputs.
       fs.writeFileSync(file, fixed, "utf8");
-      patched.push({ file, before: original });
+      // Capture the written bytes now: reading disk later would mislabel any
+      // intervening unrelated edit as part of this auto-fix.
+      patched.push({ file, before: original, after: fixed });
     } catch {
       /* ignore */
     }

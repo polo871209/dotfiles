@@ -92,7 +92,9 @@ const UNSUPPORTED_CONTENT_TYPES = new Set([
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
-const GITHUB_CLONE_DIR = join(tmpdir(), "pi-github-repos");
+// Per-process dir: a shared machine-global path would let this session's
+// shutdown rmSync clones another concurrent pi session is still reading.
+const GITHUB_CLONE_DIR = join(tmpdir(), `pi-github-repos-${process.pid}`);
 const CLONE_TIMEOUT_MS = 30_000;
 const MAX_TREE_ENTRIES = 200;
 const MAX_FILE_CHARS = 30_000;
@@ -650,7 +652,7 @@ export default function (pi: ExtensionAPI) {
     name: "web_search",
     label: "Web Search",
     description:
-      "Search the web, no API key required. Returns title, URL, and a content snippet per result. Pass multiple `queries` with varied phrasing for broader research coverage.",
+      "Search the web, no API key required. Returns title, URL, and a content snippet per result.",
     promptSnippet:
       "Search the web for research questions. Prefer multiple varied `queries` over one.",
     renderResult(result, _options, theme: Theme) {
@@ -666,13 +668,11 @@ export default function (pi: ExtensionAPI) {
       );
     },
     parameters: Type.Object({
-      query: Type.Optional(
-        Type.String({ description: "Single search query." }),
-      ),
+      query: Type.Optional(Type.String()),
       queries: Type.Optional(
         Type.Array(Type.String(), {
           description:
-            "Multiple queries searched in sequence, for broader coverage.",
+            "Searched in sequence; vary phrasing for broader coverage.",
         }),
       ),
       numResults: Type.Optional(
@@ -761,10 +761,8 @@ export default function (pi: ExtensionAPI) {
       );
     },
     parameters: Type.Object({
-      url: Type.Optional(Type.String({ description: "Single URL to fetch." })),
-      urls: Type.Optional(
-        Type.Array(Type.String(), { description: "Multiple URLs to fetch." }),
-      ),
+      url: Type.Optional(Type.String()),
+      urls: Type.Optional(Type.Array(Type.String())),
     }),
     async execute(_callId, params, signal) {
       const urlList = (

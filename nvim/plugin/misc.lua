@@ -3,7 +3,6 @@ if vim.g.pi_agent then return end
 
 vim.pack.add {
     'https://github.com/folke/flash.nvim',
-    'https://github.com/windwp/nvim-autopairs',
     'https://github.com/NMAC427/guess-indent.nvim',
     'https://github.com/lewis6991/gitsigns.nvim',
 }
@@ -12,7 +11,16 @@ vim.pack.add {
 vim.keymap.set('n', 's', function() require('flash').jump() end, { desc = 'Flash' })
 vim.keymap.set('n', 'S', function() require('flash').treesitter() end, { desc = 'Flash Treesitter' })
 
-require('nvim-autopairs').setup {}
+-- Lazy-load autopairs on first InsertEnter.
+vim.api.nvim_create_autocmd('InsertEnter', {
+    group = vim.api.nvim_create_augroup('autopairs-lazy', { clear = true }),
+    once = true,
+    callback = function()
+        vim.pack.add { 'https://github.com/windwp/nvim-autopairs' }
+        require('nvim-autopairs').setup {}
+    end,
+})
+
 require('guess-indent').setup {}
 
 require('gitsigns').setup {

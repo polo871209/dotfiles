@@ -12,11 +12,12 @@
 // which would otherwise fire once per subagent turn.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { exec, execFile } from "node:child_process";
+import { APP_TITLE, statusTitle, type AgentStatus } from "./shared/status";
 import { writeFileSync } from "node:fs";
 import * as path from "node:path";
 
 const IS_SUBAGENT = process.env.PI_IS_SUBAGENT === "1";
-const SOUND_PATH = "/System/Library/Sounds/Blow.aiff";
+const SOUND_PATH = "/System/Library/Sounds/Glass.aiff";
 const ESC = "\x1b";
 const BEL = "\x07";
 
@@ -203,19 +204,19 @@ const wrapPassthrough = (raw: string): string =>
     ? `${ESC}Ptmux;${raw.replace(/\x1b/g, ESC + ESC)}${ESC}\\`
     : raw;
 
-const titleSeq = (title: string): string =>
-  wrapPassthrough(`${ESC}]0;${sanitizeOsc(title)}${BEL}`);
 const notifySeq = (title: string, body: string): string =>
   wrapPassthrough(
     `${ESC}]777;notify;${sanitizeOsc(title)};${sanitizeOsc(body)}${BEL}`,
   );
+const titleSeq = (title: string): string =>
+  wrapPassthrough(`${ESC}]0;${sanitizeOsc(title)}${BEL}`);
 
+// ghostty applies title changes async; wait so the banner subtitle isn't
+// stale. Only needed when the title actually changes.
+const GHOSTTY_TITLE_SETTLE_MS = 300;
+let lastGhosttyTitle: string | null = null;
 const delay = (ms: number): Promise<void> =>
   new Promise((r) => setTimeout(r, ms));
-
-// ghostty applies title changes async; wait so the notification subtitle isn't
-// stale.
-const GHOSTTY_TITLE_SETTLE_MS = 300;
 
 // tmux only forwards passthrough from visible panes (pane_active irrelevant).
 const isPaneVisible = async (): Promise<boolean> => {
@@ -260,39 +261,37 @@ const getVisiblePaneTty = async (): Promise<string | null> => {
 
 // false = no ghostty target, caller should use osascript.
 //
-// ghostty renders the window title as the notification subtitle, so on our own
-// (visible) pane we briefly set it to the project name, fire the notification,
-// then restore pi's title — otherwise the project name stays stuck in the
-// titlebar (pi only re-asserts its title on session changes, not per turn).
-//
-// When pi's pane is hidden we route through a visible pane's tty (tmux drops
-// passthrough from hidden panes) and skip the title dance entirely: changing a
-// different window's title would just pollute it with no benefit, so that
-// notification simply inherits whatever subtitle the carrier window already has.
-const sendGhostty = async (
-  project: string,
-  body: string,
-  restoreTitle: string,
-): Promise<boolean> => {
+// ghostty forces the window title in as the banner's subtitle line — not
+// removable (empty title falls back to pwd, space renders a blank line).
+// Nothing else manages the OS window title under tmux (set-titles off), so
+// whatever stale bytes last landed there would show as the subtitle — set it
+// to the project first, no restore needed. When pi's pane is hidden we route
+// through a visible pane's tty (tmux drops passthrough from hidden panes).
+const sendGhostty = async (project: string, body: string): Promise<boolean> => {
   if (!isGhostty()) return false;
 
   try {
+    // Banner layout: line 1 = notify title (app), line 2 = window title
+    // (project), line 3 = body.
+    const send = async (write: (seq: string) => void): Promise<void> => {
+      if (lastGhosttyTitle !== project) {
+        write(titleSeq(project));
+        lastGhosttyTitle = project;
+        await delay(GHOSTTY_TITLE_SETTLE_MS);
+      }
+      write(notifySeq(APP_TITLE, body));
+    };
+
     if (process.env.TMUX_PANE && !(await isPaneVisible())) {
       const carrierTty = await getVisiblePaneTty();
       if (!carrierTty) return false;
-      writeFileSync(carrierTty, notifySeq("pi", body));
+      await send((seq) => writeFileSync(carrierTty, seq));
       return true;
     }
 
     // Own pane, visible. stdout works under pi's takeOverStdout (reroutes to
     // fd2, same pty tmux reads, same as OSC 52).
-    process.stdout.write(titleSeq(project));
-    await delay(GHOSTTY_TITLE_SETTLE_MS);
-    process.stdout.write(notifySeq("pi", body));
-    // Wait before restoring so ghostty captures the project title for the
-    // banner before the title reverts (title application is async/debounced).
-    await delay(GHOSTTY_TITLE_SETTLE_MS);
-    process.stdout.write(titleSeq(restoreTitle));
+    await send((seq) => process.stdout.write(seq));
     return true;
   } catch {
     return false;
@@ -327,12 +326,10 @@ const playSound = (): void => {
 // would fight over one name with two writers. Subagent panes set their own
 // pane title instead (per-pane, `select-pane -T`) — invisible to the user,
 // but subagent.ts polls it to know when that pane's turn finished.
-const setWindowStatus = (
-  status: "busy" | "blocked" | "idle" | "done",
-): void => {
+const setWindowStatus = (status: AgentStatus): void => {
   const pane = process.env.TMUX_PANE;
   if (!pane) return;
-  const title = `${APP_TITLE}-${status}`;
+  const title = statusTitle(status);
   execFile(
     "tmux",
     IS_SUBAGENT
@@ -364,31 +361,13 @@ const startDonePoll = (): void => {
   donePoll.unref?.();
 };
 
-// Reconstruct the title pi assigns (interactive-mode.updateTerminalTitle) so we
-// can restore it after temporarily setting the project name for the banner.
-const APP_TITLE = "\u03c0";
-const piTitle = (projectName: string, sessionName?: string): string =>
-  sessionName
-    ? `${APP_TITLE} - ${sessionName} - ${projectName}`
-    : `${APP_TITLE} - ${projectName}`;
-
-const notify = async (
-  projectName: string,
-  message: string,
-  sessionName: string | undefined,
-): Promise<void> => {
+const notify = async (projectName: string, message: string): Promise<void> => {
   if (await isTerminalFocused()) return;
   if (shouldThrottle(`${projectName}\x00${message}`)) return;
   // When ghostty is the focused app (e.g. another tmux window) it suppresses
   // its own OSC banner — sound only. That's ghostty's design, not overridable.
-  if (
-    !(await sendGhostty(
-      projectName,
-      message,
-      piTitle(projectName, sessionName),
-    ))
-  ) {
-    await sendOsascript(`pi - ${projectName}`, message);
+  if (!(await sendGhostty(projectName, message))) {
+    await sendOsascript(`${APP_TITLE}-${projectName}`, message);
   }
   playSound();
 };
@@ -414,11 +393,7 @@ export default function (pi: ExtensionAPI) {
     // subagent.ts's pane-title poll, not a desktop ping nobody but the
     // parent's own turn logic is meant to react to.
     if (!IS_SUBAGENT) {
-      await notify(
-        projectName,
-        "Blocked: waiting for your answer",
-        pi.getSessionName(),
-      );
+      await notify(projectName, "waiting");
     }
   });
 
@@ -441,7 +416,7 @@ export default function (pi: ExtensionAPI) {
       setWindowStatus("done");
       startDonePoll();
     }
-    await notify(projectName, "Turn complete", pi.getSessionName());
+    await notify(projectName, "done");
   });
 
   pi.on("session_shutdown", async () => {

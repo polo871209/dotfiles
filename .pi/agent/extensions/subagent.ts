@@ -20,6 +20,7 @@
 // to reflect busy/ask/done — polled here instead of a parsed JSON event stream.
 
 import { execFile } from "node:child_process";
+import { parseStatusTitle } from "./shared/status";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -107,8 +108,28 @@ async function tmuxRun(args: string[]): Promise<boolean> {
 // grows with agent count. A promise chain serializes the split/close calls
 // that mutate the shared panel list so concurrent executions can't race each
 // other's layout changes.
-let panel: string[] = [];
+//
+// The pane-id list lives on globalThis (pattern from go.ts): tmux panes
+// survive an extension reload, so a module-scoped array would reset and
+// orphan them, breaking the column layout.
+const panelSlot = (() => {
+  const g = globalThis as unknown as { __piSubagentPanel?: { ids: string[] } };
+  if (!g.__piSubagentPanel) g.__piSubagentPanel = { ids: [] };
+  return g.__piSubagentPanel;
+})();
 let panelChain: Promise<unknown> = Promise.resolve();
+
+// Drop pane ids whose tmux pane is gone (killed manually, or leaked across a
+// reload) so dead entries don't poison anchor choice and rebalancing.
+async function prunePanel(): Promise<void> {
+  const alive: string[] = [];
+  for (const id of panelSlot.ids) {
+    if (await tmuxOut(["display-message", "-p", "-t", id, "#{pane_id}"])) {
+      alive.push(id);
+    }
+  }
+  panelSlot.ids = alive;
+}
 
 function withPanelLock<T>(fn: () => Promise<T>): Promise<T> {
   const result = panelChain.then(fn, fn);
@@ -124,6 +145,7 @@ function withPanelLock<T>(fn: () => Promise<T>): Promise<T> {
 // 3rd 12.5%, ...). Resizing all but the last is enough — tmux gives the last
 // pane whatever's left, which lands on the same equal share by construction.
 async function rebalancePanel(): Promise<void> {
+  const panel = panelSlot.ids;
   if (panel.length < 2) return;
   const totalHeight = Number(
     await tmuxOut([
@@ -146,7 +168,8 @@ async function acquirePanelSlot(
   shCmd: string,
 ): Promise<string | undefined> {
   return withPanelLock(async () => {
-    const anchor = panel.at(-1);
+    await prunePanel();
+    const anchor = panelSlot.ids.at(-1);
     const args = anchor
       ? [
           "split-window",
@@ -183,7 +206,7 @@ async function acquirePanelSlot(
           shCmd,
         ];
     const paneId = await tmuxOut(args);
-    if (paneId) panel.push(paneId);
+    if (paneId) panelSlot.ids.push(paneId);
     await rebalancePanel();
     return paneId || undefined;
   });
@@ -192,7 +215,7 @@ async function acquirePanelSlot(
 async function releasePanelSlot(paneId: string): Promise<void> {
   await withPanelLock(async () => {
     await tmuxRun(["kill-pane", "-t", paneId]);
-    panel = panel.filter((id) => id !== paneId);
+    panelSlot.ids = panelSlot.ids.filter((id) => id !== paneId);
     await rebalancePanel();
   });
 }
@@ -432,11 +455,6 @@ function toolsFlagValue(
 // notifier.ts's setWindowStatus): "<title>-busy" / "-ask" / "-done" / "-idle".
 // A dedicated pane title (not the shared window name) because the subagent
 // pane lives inside the parent's own window.
-function paneStatusSuffix(paneTitle: string): string | undefined {
-  const idx = paneTitle.lastIndexOf("-");
-  return idx === -1 ? undefined : paneTitle.slice(idx + 1);
-}
-
 async function runInTmux(
   pi: ExtensionAPI,
   agent: AgentConfig,
@@ -533,7 +551,7 @@ async function runInTmux(
       "-p",
       "#{pane_title}",
     ]);
-    const status = paneStatusSuffix(paneTitle);
+    const status = parseStatusTitle(paneTitle);
     progress.lastMessage = status ? `tmux: ${status}` : "tmux: starting…";
     push();
 

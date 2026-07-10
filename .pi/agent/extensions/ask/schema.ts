@@ -155,7 +155,6 @@ export const QuestionParamsSchema = Type.Object({
   }),
 });
 
-export type OptionData = Static<typeof OptionSchema>;
 export type QuestionData = Static<typeof QuestionSchema>;
 export type QuestionParams = Static<typeof QuestionParamsSchema>;
 

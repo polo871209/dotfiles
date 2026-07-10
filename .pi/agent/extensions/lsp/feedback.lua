@@ -1,7 +1,9 @@
 -- Feedback driver for the lsp subsystem — loaded into the shared --embed nvim.
 -- Exposes _G.PiFeedback.format(files) (fast format-only, for the inline
--- per-edit hook) and _G.PiFeedback.run(files) (format + safe LSP code-actions
--- (fixAll, organizeImports) + diagnostics, for the batched turn-end pass).
+-- per-edit hook) and _G.PiFeedback.run(files) (safe LSP code-actions
+-- (fixAll, organizeImports) + diagnostics, for the batched turn-end pass;
+-- formatting happens inline per edit, so here only code-action output gets
+-- re-formatted).
 -- Reuses the shared nvim so we skip spawn + init.lua load each agent turn.
 
 local M = {}
@@ -146,31 +148,23 @@ function M.run(files)
             pcall(function() vim.cmd 'doautocmd BufEnter' end)
             pcall(function() vim.cmd 'doautocmd FileType' end)
 
-            -- 1) Format first. conform.nvim uses external formatters so this
-            --    runs even if the LSP pipeline later fails/times out.
-            local fmt = try_format(bufnr)
-            if fmt then
-                pcall(function()
-                    vim.api.nvim_buf_call(bufnr, function() vim.cmd 'silent! write' end)
-                end)
-                table.insert(formatted, vim.api.nvim_buf_get_name(bufnr))
-            end
-
-            -- 2) Wait LSP attach (best-effort).
+            -- 1) Wait LSP attach (best-effort). No format here: the inline
+            --    per-edit hook already formatted these files.
             vim.wait(math.min(2000, remaining()), function() return #vim.lsp.get_clients { bufnr = bufnr } > 0 end, 50)
 
             pull_diagnostics(bufnr, remaining)
             run_fast_lint(bufnr)
             vim.wait(math.min(800, remaining()), function() return false end, 50)
 
-            -- 3) Safe auto-fixes (organizeImports + source.fixAll).
+            -- 2) Safe auto-fixes (organizeImports + source.fixAll); their
+            --    edits arrive unformatted, so re-format just those.
             local fixed = apply_code_actions(bufnr, remaining)
             if fixed then
                 local refmt = try_format(bufnr)
                 pcall(function()
                     vim.api.nvim_buf_call(bufnr, function() vim.cmd 'silent! write' end)
                 end)
-                if refmt and not fmt then table.insert(formatted, vim.api.nvim_buf_get_name(bufnr)) end
+                if refmt then table.insert(formatted, vim.api.nvim_buf_get_name(bufnr)) end
             end
 
             pull_diagnostics(bufnr, remaining)

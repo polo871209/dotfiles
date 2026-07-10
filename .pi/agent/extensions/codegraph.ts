@@ -56,22 +56,6 @@ type Node = {
 const loc = (n: Node) => `${n.filePath}:${n.startLine}`;
 const nodeRow = (n: Node) => `${n.name}  ${n.kind}  ${loc(n)}`;
 
-function fmtStatus(s: Record<string, unknown>): string {
-  const kinds = Object.entries((s.nodesByKind as Record<string, number>) ?? {})
-    .map(([k, v]) => `${k}=${v}`)
-    .join(" ");
-  const p = (s.pendingChanges as Record<string, number>) ?? {};
-  return [
-    `files=${s.fileCount} nodes=${s.nodeCount} edges=${s.edgeCount}`,
-    `languages=${((s.languages as string[]) ?? []).join(",")}`,
-    kinds && `kinds: ${kinds}`,
-    `pending: +${p.added ?? 0} ~${p.modified ?? 0} -${p.removed ?? 0}`,
-    s.lastIndexed && `lastIndexed=${s.lastIndexed}`,
-  ]
-    .filter(Boolean)
-    .join("\n");
-}
-
 function fmtQuery(
   arr: Array<{ node: Node & { isExported?: boolean } }>,
 ): string {
@@ -180,19 +164,6 @@ export default function (pi: ExtensionAPI) {
     });
     child.on("error", () => {});
     child.unref();
-  });
-
-  pi.registerTool({
-    name: "codegraph_status",
-    label: "CodeGraph status",
-    description:
-      "Inspect codegraph index: file count, node count, languages, pending changes.",
-    parameters: Type.Object({}),
-    async execute(_id, _raw, signal, _onUpdate, ctx) {
-      return callCodegraph(["status", "-j"], ctx.cwd, signal, (j) =>
-        fmtStatus(j as Record<string, unknown>),
-      );
-    },
   });
 
   pi.registerTool({

@@ -1,9 +1,5 @@
 // code-blocks — replace pi's code-block syntax highlighter with `bat`, and
-// frame each block as a click-to-copy panel (header with language + copy
-// hint, left gutter). Every rendered code line carries a zero-width APC
-// marker with a block id; tui.ts strips the markers before terminal output
-// and uses them to map mouse clicks back to the raw code (global registry
-// below), so clicking a block copies it.
+// frame each block as a panel (header with language, left gutter).
 //
 // Pi renders fenced code blocks via `pi-tui`'s `Markdown` component, which
 // calls `theme.highlightCode(text, lang)` on each render to colorize lines.
@@ -26,42 +22,8 @@ import { spawnSync } from "node:child_process";
 
 type HighlightFn = (code: string, lang?: string) => string[];
 
-// Registry shared with tui.ts via globalThis so it survives extension
-// reloads (pi reloads modules with a fresh module scope on /new).
-interface CodeBlockRegistry {
-  byId: Map<number, string>;
-  idByCode: Map<string, number>;
-  nextId: number;
-}
-const registry: CodeBlockRegistry = ((
-  globalThis as Record<string, unknown>
-).__piCodeBlocks ??= {
-  byId: new Map(),
-  idByCode: new Map(),
-  nextId: 1,
-}) as CodeBlockRegistry;
-
-const MAX_REGISTRY = 500;
-const registerBlock = (code: string): number => {
-  const hit = registry.idByCode.get(code);
-  if (hit !== undefined) return hit;
-  if (registry.byId.size >= MAX_REGISTRY) {
-    const oldest = registry.byId.keys().next().value;
-    if (oldest !== undefined) {
-      const oldCode = registry.byId.get(oldest);
-      registry.byId.delete(oldest);
-      if (oldCode !== undefined) registry.idByCode.delete(oldCode);
-    }
-  }
-  const id = registry.nextId++;
-  registry.byId.set(id, code);
-  registry.idByCode.set(code, id);
-  return id;
-};
-
 const GUTTER_FG = "\x1b[38;5;245m";
 const RESET_SGR = "\x1b[0m";
-const blockMarker = (id: number) => `\x1b_pi-cb:${id}\x07`;
 
 const cache = new Map<string, string[]>();
 const MAX_CACHE = 500;
@@ -118,11 +80,8 @@ const batHighlight: HighlightFn = (code: string, lang?: string) => {
   const hit = cache.get(cacheKey);
   if (hit) return hit;
 
-  const id = registerBlock(code);
-  // Marker (zero-width, stripped by tui.ts) + gutter on every line so a
-  // click anywhere inside the block resolves to its raw code.
   const decorate = (lines: string[]): string[] =>
-    lines.map((l) => `${blockMarker(id)}${GUTTER_FG}│${RESET_SGR} ${l}`);
+    lines.map((l) => `${GUTTER_FG}│${RESET_SGR} ${l}`);
 
   const mapped = LANG_MAP[langKey];
   // No-language and shell fences: let theme use mdCodeBlock color.
@@ -193,7 +152,7 @@ const patchBorder = (t: {
     open = !open;
     if (open) {
       const lang = text.slice(3).trim();
-      return `  ${GUTTER_FG}╭─ ${lang || "code"} ── ⧉ click to copy${RESET_SGR}`;
+      return `  ${GUTTER_FG}╭─ ${lang || "code"}${RESET_SGR}`;
     }
     return `  ${GUTTER_FG}╰──${RESET_SGR}`;
   };

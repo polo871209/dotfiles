@@ -104,7 +104,7 @@ async function go(ctx: ExtensionContext): Promise<void> {
   }
 }
 
-// --- Stream rules (TTSR-lite) -----------------------------------------
+// Stream rules (TTSR-lite):
 //
 // A regex hits the model's streaming text/thinking output → the turn aborts
 // → a hidden reminder is appended as a user turn → generation resumes via

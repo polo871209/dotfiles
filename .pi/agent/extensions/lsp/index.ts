@@ -2,7 +2,7 @@
 // (warm-spawned at session_start by the feedback pass, else lazy on first tool
 // call; torn down on session shutdown). Two halves:
 //   - Navigation tools (pull): hover, definition, type-definition,
-//     implementation, references, rename, document symbols, and the on-demand
+//     implementation, references, document symbols, and the on-demand
 //     read-only lsp_diagnostics.
 //   - Feedback pass (push, ./feedback): formats edits inline and runs batched
 //     diagnostics + LLM auto-fix after a turn. See ./feedback/index.ts.
@@ -13,7 +13,6 @@ import { registerFeedback } from "./feedback";
 import { hoverTool } from "./tools/hover";
 import { definitionTool } from "./tools/definition";
 import { referencesTool } from "./tools/references";
-import { renameTool } from "./tools/rename";
 import { diagnosticsTool } from "./tools/diagnostics";
 import { implementationTool, typeDefinitionTool } from "./tools/navigation";
 import { documentSymbolsTool } from "./tools/symbols";
@@ -28,7 +27,6 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(hoverTool);
   pi.registerTool(definitionTool);
   pi.registerTool(referencesTool);
-  pi.registerTool(renameTool);
   pi.registerTool(diagnosticsTool);
   pi.registerTool(implementationTool);
   pi.registerTool(typeDefinitionTool);

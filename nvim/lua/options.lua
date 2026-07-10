@@ -80,32 +80,16 @@ vim.api.nvim_create_autocmd('FileType', {
     callback = function() vim.opt_local.spell = true end,
 })
 
+-- 4-space indent filetypes; expandtab nil = leave default
+local indent4_expandtab = { cue = false, c = true, cpp = true } -- absent = keep default
 vim.api.nvim_create_autocmd('FileType', {
-    pattern = 'go',
+    pattern = { 'go', 'cue', 'c', 'cpp' },
     group = filetype_group,
-    callback = function()
+    callback = function(ev)
         vim.opt_local.tabstop = 4
         vim.opt_local.shiftwidth = 4
-    end,
-})
-
-vim.api.nvim_create_autocmd('FileType', {
-    pattern = 'cue',
-    group = filetype_group,
-    callback = function()
-        vim.opt_local.tabstop = 4
-        vim.opt_local.shiftwidth = 4
-        vim.opt_local.expandtab = false
-    end,
-})
-
-vim.api.nvim_create_autocmd('FileType', {
-    pattern = { 'c', 'cpp' },
-    group = filetype_group,
-    callback = function()
-        vim.opt_local.tabstop = 4
-        vim.opt_local.shiftwidth = 4
-        vim.opt_local.expandtab = true
+        local et = indent4_expandtab[ev.match]
+        if et ~= nil then vim.opt_local.expandtab = et end
     end,
 })
 

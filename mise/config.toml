@@ -52,7 +52,6 @@ kubectl = "latest"
 kubens = "latest"
 
 # LSPs
-"github:bergercookie/asm-lsp" = "latest"
 "aqua:grafana/jsonnet-language-server" = "latest"
 "aqua:hashicorp/terraform-ls" = "latest"
 "aqua:LuaLS/lua-language-server" = "latest"
@@ -83,5 +82,5 @@ semgrep = "latest"
 # Other
 "npm:@colbymchenry/codegraph" = "latest"
 "npm:@earendil-works/pi-coding-agent" = "latest"
-yt-dlp = { version = "latest", rename_exe = "yt-dlp" }
 ffmpeg = "latest"
+redis = "8.8.0"

@@ -2,16 +2,12 @@
 // bottom of the viewport even when the conversation is short, renders the
 // autocomplete dropdown as a floating overlay above the editor — the dropdown
 // covers the conversation lines underneath instead of pushing the editor up or
-// reserving a permanent gap — and enables mouse support: click a code block
-// to copy it (block ids come from code-blocks.ts markers), wheel-up enters
-// tmux copy-mode so scrollback keeps working.
+// reserving a permanent gap.
 import {
   CustomEditor,
   type ExtensionAPI,
-  type ExtensionContext,
   type KeybindingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { spawn } from "node:child_process";
 import type { Theme as PiTheme } from "@earendil-works/pi-coding-agent";
 import {
   Editor,
@@ -56,26 +52,6 @@ const LEADING_MARGIN = /^((?:\x1b\[[0-9;]*m)*) /;
 const stripLeadingMargin = (lines: string[]): string[] =>
   lines.map((l) => l.replace(LEADING_MARGIN, "$1"));
 
-// code-blocks.ts tags each code-block line with a zero-width APC marker
-// carrying the block id. Harvest markers into a row -> block-id map (for
-// click hit-testing) and strip them so they never reach the terminal — tmux
-// would pass unknown APC sequences through and some terminals render junk.
-const CB_MARKER = /\x1b_pi-cb:(\d+)\x07/;
-const CB_MARKER_ALL = /\x1b_pi-cb:\d+\x07/g;
-const CB_ROW_MAP_KEY = "__cbRowMap";
-
-const harvestBlockMarkers = (tui: TUI, lines: string[]): string[] => {
-  const map = new Map<number, number>();
-  const out = lines.map((l, i) => {
-    const m = CB_MARKER.exec(l);
-    if (!m) return l;
-    map.set(i, Number(m[1]));
-    return l.replaceAll(CB_MARKER_ALL, "");
-  });
-  (tui as unknown as Record<string, unknown>)[CB_ROW_MAP_KEY] = map;
-  return out;
-};
-
 // Patch TUI.render to split children at the editor and fill the gap above it
 // with blank lines so the editor (and its bottom-anchored autocomplete overlay)
 // sits at the bottom of the viewport even on a fresh session. As the
@@ -111,10 +87,14 @@ const installBottomPinPatch = () => {
       }
     }
 
-    const finalize = (lines: string[]): string[] =>
-      harvestBlockMarkers(this as unknown as TUI, stripLeadingMargin(lines));
+    const finalize = (lines: string[]): string[] => stripLeadingMargin(lines);
 
-    if (editorIdx <= 0) return finalize(origRender.call(this, width));
+    if (editorIdx <= 0) {
+      const out = finalize(origRender.call(this, width));
+      (this as unknown as { __pinLastHeight?: number }).__pinLastHeight =
+        out.length;
+      return out;
+    }
 
     const before: string[] = [];
     for (let i = 0; i < editorIdx; i++)
@@ -126,109 +106,40 @@ const installBottomPinPatch = () => {
     // when a tall transient UI (dialog, questionnaire) collapses, the frame
     // shrinks but the terminal viewport top stays put, so anchoring to rows
     // alone leaves the editor stranded mid-screen with blank rows below it.
-    const viewportTop =
-      (this as unknown as { previousViewportTop?: number })
-        .previousViewportTop ?? 0;
-    const filler = Math.max(
-      0,
-      viewportTop + this.terminal.rows - before.length - rest.length,
-    );
-    return finalize(
+    // Cap at the previous frame height: filler must never GROW the frame,
+    // otherwise padding raises previousViewportTop which demands more filler
+    // next render (runaway repaint loop on a fresh session's first turn).
+    const self = this as unknown as {
+      previousViewportTop?: number;
+      __pinLastHeight?: number;
+    };
+    const viewportTop = self.previousViewportTop ?? 0;
+    const content = before.length + rest.length;
+    // Only pad past terminal.rows while the content above the editor still
+    // reaches the viewport top (the dialog-collapse case: filler lands inside
+    // the visible region and diffs cleanly). When it doesn't — the chat was
+    // truncated by /new, /compact, or session switch — padding would write
+    // blanks into rows the differ tracks as scrollback, forcing a full
+    // clear+redraw on EVERY render until the new conversation outgrows the
+    // old one (sustained flicker). Pad only to rows instead: the TUI does one
+    // clean full redraw and previousViewportTop resets to the short frame.
+    const contentReachesViewport = before.length >= viewportTop;
+    const maxHeight = contentReachesViewport
+      ? Math.max(
+          this.terminal.rows,
+          Math.min(viewportTop + this.terminal.rows, self.__pinLastHeight ?? 0),
+        )
+      : this.terminal.rows;
+    const filler = Math.max(0, maxHeight - content);
+    const lines =
       filler > 0
         ? [...before, ...new Array<string>(filler).fill(""), ...rest]
-        : [...before, ...rest],
-    );
+        : [...before, ...rest];
+    self.__pinLastHeight = lines.length;
+    return finalize(lines);
   } as unknown as typeof origRender;
   wrapper[PIN_TAG] = { orig: origRender };
   proto.render = wrapper;
-};
-
-// --- Mouse: click a code block to copy it -----------------------------------
-// pi-tui never enables mouse reporting, so we request SGR mouse (1000 = click
-// press/release, 1006 = SGR encoding) ourselves. tmux forwards events with
-// pane-relative coordinates. Wheel-up hands control back to tmux copy-mode so
-// scrollback still feels native; every mouse sequence is consumed so it never
-// reaches the editor as junk input.
-const MOUSE_ON = "\x1b[?1000h\x1b[?1006h";
-const MOUSE_OFF = "\x1b[?1006l\x1b[?1000l";
-const SGR_MOUSE = /^\x1b\[<(\d+);(\d+);(\d+)([Mm])$/;
-const MOUSE_LISTENER_KEY = "__cbMouseListener";
-
-interface CodeBlockRegistry {
-  byId: Map<number, string>;
-}
-const blockRegistry = (): CodeBlockRegistry | undefined =>
-  (globalThis as Record<string, unknown>).__piCodeBlocks as
-    CodeBlockRegistry | undefined;
-
-const pbcopy = (text: string) => {
-  const p = spawn("pbcopy", { stdio: ["pipe", "ignore", "ignore"] });
-  // Swallow spawn/pipe failures (missing binary, EPIPE) — an unhandled
-  // "error" event would crash pi over a failed copy.
-  p.on("error", () => {});
-  p.stdin.on("error", () => {});
-  p.stdin.write(text);
-  p.stdin.end();
-};
-
-let mouseCtx: ExtensionContext | undefined;
-
-const installMouseListener = (tui: TUI) => {
-  const t = tui as unknown as Record<string, unknown> & {
-    addInputListener(
-      l: (data: string) => { consume?: boolean } | undefined,
-    ): () => void;
-    previousViewportTop?: number;
-  };
-  // Re-register on /reload: drop the previous module's listener (its closure
-  // holds a stale ctx) and install this module's fresh one.
-  const prevUnsub = t[MOUSE_LISTENER_KEY];
-  if (typeof prevUnsub === "function") (prevUnsub as () => void)();
-
-  t[MOUSE_LISTENER_KEY] = t.addInputListener((data: string) => {
-    const m = SGR_MOUSE.exec(data);
-    if (!m) return undefined;
-    const btn = Number(m[1]);
-    const row = Number(m[3]);
-    const press = m[4] === "M";
-
-    if (btn === 64) {
-      // Wheel up: let tmux take over scrolling for this pane.
-      if (press && process.env.TMUX && process.env.TMUX_PANE) {
-        spawn("tmux", ["copy-mode", "-e", "-t", process.env.TMUX_PANE], {
-          stdio: "ignore",
-        }).on("error", () => {});
-      }
-      return { consume: true };
-    }
-
-    if (btn === 0 && press) {
-      const rowMap = t[CB_ROW_MAP_KEY] as Map<number, number> | undefined;
-      const lineIdx = (t.previousViewportTop ?? 0) + row - 1;
-      const id = rowMap?.get(lineIdx);
-      const code = id !== undefined ? blockRegistry()?.byId.get(id) : undefined;
-      if (code !== undefined) {
-        pbcopy(code);
-        mouseCtx?.ui.notify("code block copied", "info");
-      }
-    }
-    return { consume: true };
-  });
-};
-
-let exitHookInstalled = false;
-const installMouse = (pi: ExtensionAPI) => {
-  pi.on("session_start", async (_event, ctx) => {
-    mouseCtx = ctx;
-    process.stdout.write(MOUSE_ON);
-  });
-  pi.on("session_shutdown", async () => {
-    process.stdout.write(MOUSE_OFF);
-  });
-  if (!exitHookInstalled) {
-    exitHookInstalled = true;
-    process.on("exit", () => process.stdout.write(MOUSE_OFF));
-  }
 };
 
 const SGR_RESET = "\x1b[0m";
@@ -384,7 +295,6 @@ class ThemedEditor extends CustomEditor {
   ) {
     super(tui, editorTheme, keybindings);
     setPinnedEditor(tui, this);
-    installMouseListener(tui);
   }
 
   render(width: number): string[] {
@@ -399,6 +309,75 @@ const installInputColor = (pi: ExtensionAPI) => {
       (tui, editorTheme, keybindings) =>
         new ThemedEditor(tui, editorTheme, keybindings, () => ctx.ui.theme),
     );
+  });
+};
+
+// No header at all — live info (session name, model, context %) lives in
+// the footer, and terminal/tmux titles are notifier.ts's territory.
+const installHeader = (pi: ExtensionAPI) => {
+  pi.on("session_start", async (_event, ctx) => {
+    ctx.ui.setHeader(() => ({
+      invalidate() {},
+      render(): string[] {
+        return [];
+      },
+    }));
+  });
+};
+
+// Working loader: subtle pulse + elapsed time so a long turn is visibly
+// alive and its age readable at a glance.
+const installWorking = (pi: ExtensionAPI) => {
+  let timer: ReturnType<typeof setInterval> | null = null;
+  const stop = () => {
+    if (timer) {
+      clearInterval(timer);
+      timer = null;
+    }
+  };
+
+  pi.on("session_start", async (_event, ctx) => {
+    stop();
+    const t = ctx.ui.theme;
+    ctx.ui.setWorkingIndicator({
+      frames: [
+        t.fg("dim", "·"),
+        t.fg("muted", "•"),
+        t.fg("accent", "●"),
+        t.fg("muted", "•"),
+      ],
+      intervalMs: 150,
+    });
+  });
+
+  pi.on("agent_start", async (_event, ctx) => {
+    stop();
+    const started = Date.now();
+    const tick = () => {
+      const s = Math.round((Date.now() - started) / 1000);
+      const elapsed =
+        s < 60
+          ? `${s}s`
+          : `${Math.floor(s / 60)}m${(s % 60).toString().padStart(2, "0")}s`;
+      ctx.ui.setWorkingMessage(`working · ${elapsed}`);
+    };
+    tick();
+    timer = setInterval(tick, 1000);
+    timer.unref?.();
+  });
+
+  pi.on("agent_end", async (_event, ctx) => {
+    stop();
+    ctx.ui.setWorkingMessage();
+  });
+
+  pi.on("session_shutdown", async () => stop());
+};
+
+// Tool outputs start collapsed; ctrl+o still expands on demand.
+const installCollapsedTools = (pi: ExtensionAPI) => {
+  pi.on("session_start", async (_event, ctx) => {
+    ctx.ui.setToolsExpanded(false);
   });
 };
 
@@ -475,6 +454,8 @@ installAutocompleteAbovePatch();
 
 export default function (pi: ExtensionAPI) {
   installInputColor(pi);
+  installHeader(pi);
   installFooter(pi);
-  installMouse(pi);
+  installWorking(pi);
+  installCollapsedTools(pi);
 }

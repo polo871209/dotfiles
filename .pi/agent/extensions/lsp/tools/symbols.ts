@@ -45,7 +45,7 @@ export const documentSymbolsTool = defineTool({
     "Prefer over reading a whole file when you only need to find a member or understand structure.",
   ],
   parameters: Type.Object({
-    file: Type.String({ description: "Absolute or cwd-relative file path." }),
+    file: Type.String({ description: "Abs or cwd-relative." }),
   }),
   async execute(_id, params, signal, onUpdate, ctx) {
     const p = params as { file: string };

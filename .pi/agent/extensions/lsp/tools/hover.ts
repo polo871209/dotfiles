@@ -10,13 +10,13 @@ export const hoverTool = defineTool({
   name: "lsp_hover",
   label: "LSP Hover",
   description:
-    "Type signature + docs for ONE symbol at file:line (requires anchor). Use when you already have a location and want type info without reading source. codegraph_* tools do NOT return type signatures — this is the only way.",
+    "Type signature + docs for ONE symbol at file:line (requires anchor). codegraph_* tools do NOT return type signatures — this is the only way.",
   promptSnippet: "Read a symbol's type and docs without opening the file",
   promptGuidelines: anchorGuidelines(
     "Use lsp_hover to inspect a symbol's type or signature without reading the whole source file.",
   ),
   parameters: Type.Object({
-    file: Type.String({ description: "Absolute or cwd-relative file path." }),
+    file: Type.String({ description: "Abs or cwd-relative." }),
     line: Type.Number({
       minimum: 1,
       description: "1-indexed line number.",

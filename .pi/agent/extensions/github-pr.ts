@@ -131,7 +131,7 @@ export default function (pi: ExtensionAPI) {
       return new Text(theme.fg("dim", `  ${s}`), 0, 0);
     },
     description:
-      "Fetch a GitHub PR (URL or number) as signal-only markdown: metadata, description, changed files, failing checks, and unresolved review threads. Use instead of `gh pr view`. diff:true to include the unified diff.",
+      "Fetch a GitHub PR (URL or number) as signal-only markdown: metadata, description, changed files, failing checks, and unresolved review threads. Use instead of `gh pr view`.",
     parameters: params,
     async execute(_id, raw, signal, _onUpdate, _ctx) {
       const a = raw as {

@@ -345,7 +345,6 @@ export default function (pi: ExtensionAPI) {
     label: "Eval",
     description:
       "Run code in persistent Python and JavaScript kernels for iterative, stateful work — state persists across cells and across separate tool calls, in one kernel per language per session. Not for a single one-off command; use `bash`/`read` directly for those.\n\n" +
-      'Cell shape: `{language: "py"|"js", code, title?, timeout?, reset?}`.\n\n' +
       'Inside cell code, `tool.<name>({...})` invokes pi built-in tools (`read`, `write`, `edit`, `bash`, `grep`, `find`, `ls` take their normal pi argument schemas; `tree({path,max_depth})` is extra). Shortcuts: `read(path)`, `write(path,content)`, `tree(path)`, `env(key?, value?)` (no args: full env dict; one: get; two: set), `completion(prompt, model?, system?, schema?)` for a oneshot stateless model call (model: "default" or "provider/id"; schema: JSON-Schema for structured output).\n\n' +
       'Call `install("pkg1", "pkg2")` to add Python packages, persists across pi restarts. JS cells support top-level await and package imports; use `globalThis` / `state` to persist values across cells.',
     promptSnippet:

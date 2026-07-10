@@ -31,7 +31,7 @@ export const diagnosticsTool = defineTool({
   parameters: Type.Object({
     files: Type.Array(Type.String(), {
       minItems: 1,
-      description: "Absolute or cwd-relative file paths to diagnose.",
+      description: "Abs or cwd-relative paths.",
     }),
   }),
   async execute(_id, params, signal, onUpdate, ctx) {

@@ -10,7 +10,7 @@ import { Box, Text } from "@earendil-works/pi-tui";
 import { sideChannelComplete } from "./shared/llm";
 
 const MSG_PROMPT =
-  "Write a Conventional Commits message for the diff. The diff is the only source of truth for WHAT changed — base the subject and body entirely on it. A user hint (if present) may ONLY be consulted to disambiguate WHY (e.g. picking a scope, or explaining a non-obvious rationale in the body); never let it introduce, emphasize, or replace a description of a change that isn't actually in the diff. Format: `<type>(<scope>)!: <subject>` where type ∈ {feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert}; scope optional; `!` only for breaking changes. Subject: imperative mood, lowercase, ≤72 chars, no trailing period. Optional body after one blank line only if change is non-obvious; body MAY be multiple newline-separated paragraphs. Optional footers one blank line after body, each `Token: value` or `Token #value`; tokens use `-` instead of spaces (e.g. `Reviewed-by`, `Refs: #123`), except `BREAKING CHANGE` which stays uppercase with a space. Recent commit subjects (if present) show this repo's established type/scope vocabulary and phrasing — match them; reuse an existing scope when the change touches the same area rather than inventing a new one. No fences, no preamble. Output ONLY the message.";
+  "Write a Conventional Commits message for the diff. Terse and exact: no fluff, why over what. The diff is the only source of truth for WHAT changed — base the subject and body entirely on it. A user hint (if present) may ONLY be consulted to disambiguate WHY (e.g. picking a scope, or explaining a non-obvious rationale in the body); never let it introduce, emphasize, or replace a description of a change that isn't actually in the diff. Format: `<type>(<scope>)!: <subject>` where type ∈ {feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert}; scope optional; `!` only for breaking changes. Subject: imperative mood ('add', 'fix' — not 'added', 'adds'), lowercase, ≤50 chars when possible (hard cap 72), no trailing period, don't restate a file name the scope already names. Body: skip entirely when subject is self-explanatory; add only for non-obvious WHY, breaking changes, security fixes, data migrations, or reverts (these ALWAYS get a body — never subject-only); one blank line after subject, wrap at 72 chars, bullets `-` not `*`, MAY be multiple paragraphs. NEVER write: 'this commit', 'I', 'we', 'now', 'currently', 'as requested by', emoji, or any AI attribution. Optional footers one blank line after body, each `Token: value` or `Token #value`; tokens use `-` instead of spaces (e.g. `Reviewed-by`, `Refs: #123`, `Closes #42`), except `BREAKING CHANGE` which stays uppercase with a space. Recent commit subjects (if present) show this repo's established type/scope vocabulary and phrasing — match them; reuse an existing scope when the change touches the same area rather than inventing a new one. No fences, no preamble. Output ONLY the message.";
 
 const YEET_MSG_TYPE = "yeet-marker";
 
@@ -100,12 +100,15 @@ export default function (pi: ExtensionAPI) {
       let diffstat: string;
       let diff: string;
       try {
-        diffstat = hasHead
-          ? (await git("diff", "HEAD", "--stat", "--", ".", ...EXCLUDE)).out
-          : wtStatus;
-        diff = hasHead
-          ? (await git("diff", "HEAD", "--", ".", ...EXCLUDE)).out
-          : wtStatus;
+        // No HEAD yet (first commit): diff against the well-known empty tree
+        // so the LLM sees a real diff instead of bare status lines.
+        const base = hasHead
+          ? "HEAD"
+          : "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+        const stat = await git("diff", "--stat", base, "--", ".", ...EXCLUDE);
+        const full = await git("diff", base, "--", ".", ...EXCLUDE);
+        diffstat = stat.ok ? stat.out : wtStatus;
+        diff = full.ok ? full.out : wtStatus;
       } finally {
         if (untracked.length) await git("reset", "--", ...untracked);
       }

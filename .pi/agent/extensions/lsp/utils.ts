@@ -27,7 +27,7 @@ export interface NavParams {
 
 // Wraps the toAbs → progress → callDriver → ok/err pattern shared by every
 // LSP tool. Takes the raw driver args directly so callers with different
-// shapes (rename's extra new_name, document_symbols' file-only, diagnostics'
+// shapes (document_symbols' file-only, diagnostics'
 // files array) don't have to re-roll this themselves.
 export async function withDriver<R extends DriverErr>(
   ctx: ExtensionContext,

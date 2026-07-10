@@ -2,14 +2,6 @@
 
 export type Language = "py" | "js";
 
-export interface Cell {
-  language: Language;
-  code: string;
-  title?: string;
-  timeout?: number;
-  reset?: boolean;
-}
-
 export interface DisplayItem {
   mime: string;
   data: string;
@@ -51,9 +43,7 @@ export interface KernelEventDone {
   error: string | null;
 }
 export type KernelEvent =
-  | KernelEventDisplay
-  | KernelEventStream
-  | KernelEventDone;
+  KernelEventDisplay | KernelEventStream | KernelEventDone;
 
 // Bridge protocol — Python prelude -> host over loopback HTTP.
 export interface BridgeRequest {

@@ -121,6 +121,10 @@ export function registerFeedback(pi: ExtensionAPI): void {
   let reported = false;
   let autoFix = true;
   let cwd = process.cwd();
+  // Bumped each turn start; a background runFeedback captured the value when
+  // scheduled and bails if it changed, so a stale run finishing after a NEW
+  // turn began can't set widgets/notify/inject notes mid-turn.
+  let generation = 0;
 
   const reset = () => {
     touched.clear();
@@ -131,6 +135,7 @@ export function registerFeedback(pi: ExtensionAPI): void {
     files: string[],
     ctx: ExtensionContext,
     fix: boolean,
+    gen: number,
   ): Promise<void> => {
     const projectCwd = ctx.cwd ?? cwd;
     const result = await runFixPipeline(
@@ -139,8 +144,12 @@ export function registerFeedback(pi: ExtensionAPI): void {
       ctx,
       ctx.signal,
       fix,
+      // Stale = a new turn started; pipeline stops before its write stages.
+      () => gen !== generation,
     );
     if (!result) return;
+    // Same guard for UI/message side effects.
+    if (gen !== generation) return;
     const { final, fixedFiles, fixResults, hadFixable } = result;
 
     const lines = buildWidgetLines(
@@ -178,16 +187,12 @@ export function registerFeedback(pi: ExtensionAPI): void {
     // compact diff once so the next edit targets current bytes instead of
     // forcing a full-file re-read.
     for (const fr of fixResults) {
-      let after: string;
-      try {
-        after = fs.readFileSync(fr.file, "utf8");
-      } catch {
-        continue;
-      }
-      if (after === fr.before) continue;
+      // Use the bytes applyFixes wrote, not a fresh disk read — intervening
+      // unrelated edits would otherwise get mislabeled as auto-fix.
+      if (fr.after === fr.before) continue;
       const text = changeNote(
         fr.before,
-        after,
+        fr.after,
         displayPath(fr.file, projectCwd),
         "auto-fixed",
       );
@@ -218,6 +223,7 @@ export function registerFeedback(pi: ExtensionAPI): void {
   });
 
   pi.on("before_agent_start", async (_event, ctx) => {
+    generation++;
     reported = false;
     ctx.ui.setWidget(WIDGET_KEY, undefined);
   });
@@ -267,7 +273,7 @@ export function registerFeedback(pi: ExtensionAPI): void {
     reported = true;
     // Fire-and-forget: return immediately so pi marks the turn idle.
     // The widget appears when the background work finishes.
-    void runFeedback(files, ctx, autoFix).catch((e) => {
+    void runFeedback(files, ctx, autoFix, generation).catch((e) => {
       console.error(
         "[lsp-feedback] background run failed:",
         e instanceof Error ? e.message : String(e),
