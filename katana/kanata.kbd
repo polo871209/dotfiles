@@ -1,0 +1,59 @@
+;; match qmk keymap https://github.com/polo871209/qmk_firmware/blob/solfe/keyboards/sofle/keymaps/polo871209/keymap.c 
+(defcfg
+  process-unmapped-keys yes
+)
+
+(defsrc
+  f1   f2   f3   f4   f5   f6   f7   f8   f9   f10   f11   f12
+  bspc
+  tab u i o [
+  caps a s d f j k l ;
+  m .
+  fn spc rmet
+)
+(defvar
+  tap-time 150
+  hold-time 200
+)
+
+(defalias
+  hyp (multi lctl lsft lalt lmet)
+  a (tap-hold $tap-time $hold-time a (multi lctl lsft lalt lmet))
+  s (tap-hold $tap-time $hold-time s lalt)
+  d (tap-hold $tap-time $hold-time d lsft)
+  f (tap-hold $tap-time $hold-time f lctl)
+  j (tap-hold $tap-time $hold-time j rctl)
+  k (tap-hold $tap-time $hold-time k rsft)
+  l (tap-hold $tap-time $hold-time l ralt)
+  ; (tap-hold $tap-time $hold-time ; (multi rctl rsft ralt rmet))
+  spc (tap-hold $tap-time $hold-time spc (layer-while-held arrows))
+  altleft (multi lalt left)
+  altright (multi lalt right)
+)
+
+(deflayer base
+  brdn  brup  _    _    _    _   prev  pp  next  mute  vold  volu
+  [
+  esc _ _ _ bspc
+  tab @a @s @d @f @j @k @l @;
+  _ _
+  _ @spc ret
+)
+
+(deflayer fn
+  f1   f2   f3   f4   f5   f6   f7   f8   f9   f10   f11   f12
+  _
+  _ _ _ _ _
+  _ _ _ _ _ _ _ _ _
+  _ _
+  fn _ _
+)
+
+(deflayer arrows
+  _ _ _ _ _ _ _ _ _ _ _ _
+  _
+  _ home up end _
+  _ _ _ _ _ left down right _
+  @altleft @altright
+  _ _ _
+)

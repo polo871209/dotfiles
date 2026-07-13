@@ -21,6 +21,3 @@
 	process = git-lfs filter-process
 [diff]
 	algorithm = histogram
-
-[merge]
-	conflictstyle = zdiff3

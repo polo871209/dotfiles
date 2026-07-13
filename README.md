@@ -29,6 +29,18 @@ ssh-keygen -t ed25519
 git remote set-url origin git@github.com:polo871209/dotfiles.git
 ```
 
+### Setup Kanata
+
+- Make sure permission for Karabiner-Element have all the permission to run it.
+
+```bash
+sudo cp ~/dotfiles/katana/com.example.kanata.plist /Library/LaunchDaemons/
+sudo launchctl load /Library/LaunchDaemons/com.example.kanata.plist
+sudo launchctl start com.example.kanata
+```
+
+- Restart Mac
+
 ### Configure Nushell(Optional)
 
 ```nu
