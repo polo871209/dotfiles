@@ -26,7 +26,6 @@ import {
   MAX_FILES,
 } from "./driver";
 import { runFixPipeline } from "./pipeline";
-import { LLM_TARGET_SEVERITIES } from "./llm-fix";
 import { changeNote } from "./diff";
 import { buildWidgetLines } from "./widget";
 
@@ -120,6 +119,10 @@ export function registerFeedback(pi: ExtensionAPI): void {
   const touched = new Set<string>();
   let reported = false;
   let autoFix = true;
+  // Mirror for tui.ts's footer indicator (globalThis so it survives /reload).
+  const publishAutoFix = () => {
+    (globalThis as Record<string, unknown>).__lspFixEnabled = autoFix;
+  };
   let cwd = process.cwd();
   // Bumped each turn start; a background runFeedback captured the value when
   // scheduled and bails if it changed, so a stale run finishing after a NEW
@@ -171,18 +174,6 @@ export function registerFeedback(pi: ExtensionAPI): void {
       placement: "aboveEditor",
     });
 
-    // Nudge so unfixed issues don't sit silently in the widget — the auto-fix
-    // couldn't (or wouldn't) resolve these; go check them.
-    const unfixed = final.diagnostics.filter((d) =>
-      LLM_TARGET_SEVERITIES.has(d.severity),
-    ).length;
-    if (unfixed > 0) {
-      ctx.ui.notify(
-        `lsp-feedback: ${unfixed} unfixed issue(s) — check the widget`,
-        "warning",
-      );
-    }
-
     // Auto-fix rewrote files behind the agent (async, between turns). Surface a
     // compact diff once so the next edit targets current bytes instead of
     // forcing a full-file re-read.
@@ -210,6 +201,7 @@ export function registerFeedback(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
     cwd = ctx.cwd ?? process.cwd();
     autoFix = pi.getFlag(AUTO_FIX_FLAG) !== false;
+    publishAutoFix();
     reset();
     // Warm nvim + feedback lua in the background so the first edit skips spawn
     // + init.lua + LSP-attach. Deferred a tick to keep the sync prefix (file
@@ -294,6 +286,7 @@ export function registerFeedback(pi: ExtensionAPI): void {
         ctx.ui.notify(`lsp-fix: unknown arg '${arg}' (use on/off)`, "warning");
         return;
       }
+      publishAutoFix();
       ctx.ui.notify(`lsp-feedback auto-fix ${autoFix ? "on" : "off"}`, "info");
     },
   });

@@ -2,9 +2,10 @@
 // tmux session) can push structured messages into this running pi instance.
 //
 // Socket is keyed by this pi's own tmux pane, not the session: several pi
-// panes can be running in one session (main + subagent panes), each gets its
-// own socket, and the consumer (nvim/lua/pi.lua) discovers all of them and
-// lets you pick which agent to send to.
+// panes can be running in one session, each gets its own socket, and the
+// consumer (nvim/lua/pi.lua) discovers all of them and lets you pick which
+// agent to send to. Subagent panes (PI_IS_SUBAGENT) are excluded — they
+// never open a bridge socket.
 //
 // Socket path: <tmpdir>/pi-tmux-pane-<sanitized-pane-id>.sock
 //
@@ -27,6 +28,7 @@ function socketPathForPane(paneId: string): string {
 }
 
 export default function (pi: ExtensionAPI) {
+  if (process.env.PI_IS_SUBAGENT) return; // subagents don't get their own bridge
   const paneId = process.env.TMUX_PANE;
   if (!process.env.TMUX || !paneId) return; // not in tmux — nothing to do
   const sockPath = socketPathForPane(paneId);

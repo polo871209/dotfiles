@@ -61,15 +61,8 @@ export default function (pi: ExtensionAPI) {
         messages,
         join: " ",
       });
-      if (!result.ok) {
-        if (result.reason === "error") {
-          ctx.ui.notify(
-            `auto-rename failed: ${result.error ?? "unknown"}`,
-            "warning",
-          );
-        }
-        return;
-      }
+      // Background task: fail silently, never notify.
+      if (!result.ok) return;
       // Normalize: strip surrounding quotes, trailing punctuation, collapse ws.
       const name = result.text
         .replace(/^["'`]+|["'`]+$/g, "")
@@ -87,7 +80,6 @@ export default function (pi: ExtensionAPI) {
 
       pi.setSessionName(name);
       done.add(sessionFile);
-      ctx.ui.notify(`Session renamed: ${name}`, "info");
     } finally {
       inFlight.delete(sessionFile);
     }

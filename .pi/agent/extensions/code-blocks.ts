@@ -17,7 +17,7 @@
 // `bat` is slow per-invocation (~50ms), so results are memoized by
 // (lang, content) forever. After first render of a given block, it's free.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Markdown } from "@earendil-works/pi-tui";
+import { Markdown, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { spawnSync } from "node:child_process";
 
 type HighlightFn = (code: string, lang?: string) => string[];
@@ -26,6 +26,11 @@ const GUTTER_FG = "\x1b[38;5;245m";
 const RESET_SGR = "\x1b[0m";
 
 const cache = new Map<string, string[]>();
+// Content width of the Markdown component currently rendering, captured by
+// the render wrapper. Markdown wraps lines AFTER highlightCode returns, so a
+// long code line's continuation would land outside the gutter — pre-wrap here
+// instead so every wrapped segment gets its own `│ `.
+let currentContentWidth = 0;
 const MAX_CACHE = 500;
 // Languages bat recognizes well; everything else falls through unhighlighted.
 // Map common pi/highlight.js language tags to bat's preferred names.
@@ -76,12 +81,18 @@ const LANG_MAP: Record<string, string> = {
 
 const batHighlight: HighlightFn = (code: string, lang?: string) => {
   const langKey = (lang ?? "").toLowerCase().trim();
-  const cacheKey = `${langKey}\0${code}`;
+  const cacheKey = `${langKey}\0${currentContentWidth}\0${code}`;
   const hit = cache.get(cacheKey);
   if (hit) return hit;
 
+  // Markdown prepends a 2-col indent to each returned line; gutter is 2 more.
+  const avail = Math.max(1, currentContentWidth - 4);
   const decorate = (lines: string[]): string[] =>
-    lines.map((l) => `${GUTTER_FG}│${RESET_SGR} ${l}`);
+    lines.flatMap((l) =>
+      wrapTextWithAnsi(l, avail).map(
+        (seg) => `${GUTTER_FG}│${RESET_SGR} ${seg}`,
+      ),
+    );
 
   const mapped = LANG_MAP[langKey];
   // No-language and shell fences: let theme use mdCodeBlock color.
@@ -182,6 +193,8 @@ const installPatch = () => {
       t.highlightCode = batHighlight;
       patchBorder(t);
     }
+    const paddingX = (this as { paddingX?: number }).paddingX ?? 0;
+    currentContentWidth = width - paddingX * 2;
     return origRender.call(this, width);
   } as unknown as typeof origRender;
   wrapper[PATCH_TAG] = { orig: origRender };

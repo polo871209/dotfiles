@@ -47,8 +47,11 @@ const containsComponent = (node: Component, target: Component): boolean => {
 // text out of the pane always drags that space along. Footer/divider lines
 // span full width with no margin and are untouched since they don't start
 // with one. Strip right after any leading ANSI color codes so colored lines
-// still get the same trim.
-const LEADING_MARGIN = /^((?:\x1b\[[0-9;]*m)*) /;
+// still get the same trim. Also skip OSC sequences (e.g. the OSC 133 zone
+// markers pi prepends to an assistant message's last line) — otherwise that
+// line keeps its margin and shifts 1 column right while streaming.
+const LEADING_MARGIN =
+  /^((?:\x1b\[[0-9;]*m|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\))*) /;
 const stripLeadingMargin = (lines: string[]): string[] =>
   lines.map((l) => l.replace(LEADING_MARGIN, "$1"));
 
@@ -406,10 +409,34 @@ const installFooter = (pi: ExtensionAPI) => {
         const usageText =
           usage?.percent != null ? `${usage.percent.toFixed(1)}%` : "";
 
+        // Flags owned by lsp/feedback and lark.ts (globalThis so they
+        // survive /reload).
+        const g = globalThis as Record<string, unknown>;
+        // Only shown when off/on the non-default way, so the default setup
+        // (fix on, lark off) keeps a clean footer.
+        const lspFixOn = g.__lspFixEnabled !== false;
+        const lspText = lspFixOn ? "" : "fix:off";
+        const lspColored = lspText ? theme.fg("dim", lspText) : "";
+        const larkOn = g.__larkSkillsEnabled === true;
+        const larkText = larkOn ? "lark:on" : "";
+        // Lark brand blue.
+        const larkColored = larkText
+          ? `\x1b[38;2;51;112;255m${larkText}\x1b[39m`
+          : "";
+        const gwsOn = g.__gwsSkillsEnabled === true;
+        const gwsText = gwsOn ? "gws:on" : "";
+        // Google brand blue.
+        const gwsColored = gwsText
+          ? `\x1b[38;2;66;133;244m${gwsText}\x1b[39m`
+          : "";
+
         const leftPlain = [
           pwd,
           usageText,
           thinkingText ? `${modelName} • ${thinkingText}` : modelName,
+          lspText,
+          larkText,
+          gwsText,
         ]
           .filter(Boolean)
           .join("   ");
@@ -419,7 +446,10 @@ const installFooter = (pi: ExtensionAPI) => {
         const dimLeft =
           theme.fg("dim", `${pwd}   `) +
           (usageText ? theme.fg("dim", `${usageText}   `) : "") +
-          modelColored;
+          modelColored +
+          (lspColored ? `   ${lspColored}` : "") +
+          (larkColored ? `   ${larkColored}` : "") +
+          (gwsColored ? `   ${gwsColored}` : "");
 
         const sessionName = ctx.sessionManager.getSessionName?.() ?? "";
         const rightPlain = sessionName;

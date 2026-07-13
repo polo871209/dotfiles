@@ -20,6 +20,7 @@ neovim = "latest"
 # Shell / CLI tools
 "aqua:joshmedeski/sesh" = "latest"
 "github:veirt/weathr" = "latest"
+"pipx:pgcli" = "latest"
 atuin = "latest"
 bat = "latest"
 carapace = "latest"

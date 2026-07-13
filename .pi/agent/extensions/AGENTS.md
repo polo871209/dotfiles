@@ -39,6 +39,8 @@ Read referenced `.md` files completely and follow their cross-references before 
 ### Cleaner context
 
 - **`btw.ts`** — `/btw <q>` asks a side question. For quick asides without polluting the main thread.
+- **`lark.ts`** — `/lark` flips the Lark/Feishu skill set ([larksuite/cli](https://github.com/larksuite/cli)) on/off per process, `/lark update` syncs it; off by default so its ~27 skill descriptions never cost context unless enabled, auto-syncs to upstream on enable (falling back to the cached copy offline).
+- **`gws.ts`** — `/gws` flips the Google Workspace skill set ([googleworkspace/cli](https://github.com/googleworkspace/cli)) on/off per process, `/gws update` syncs it; off by default so its 100+ skill descriptions never cost context unless enabled, auto-syncs to upstream on enable (falling back to the cached copy offline). Requires the `gws` binary for the skills to actually work.
 - **`folder-context.ts`** — injects a folder's `AGENTS.md` / `CLAUDE.md` when the agent touches a path in it; re-injects when the file is updated. Main session only — subagents get a clean context (just their agent `.md` + tools), no ambient repo docs.
 
 ### Workflow shortcuts
@@ -56,7 +58,7 @@ Read referenced `.md` files completely and follow their cross-references before 
 
 ### TUI taste
 
-- **`tui.ts`** — visual tweaks: no header, coloured input line, compact footer, working loader with elapsed time, tool outputs collapsed by default, input pinned to the bottom of the viewport, autocomplete floating as an overlay above the editor, no stray left-margin column so selecting/copying conversation text doesn't drag a leading space onto every line.
+- **`tui.ts`** — visual tweaks: no header, coloured input line, compact footer (flags non-default lsp-fix / lark / gws skills state), working loader with elapsed time, tool outputs collapsed by default, input pinned to the bottom of the viewport, autocomplete floating as an overlay above the editor, no stray left-margin column so selecting/copying conversation text doesn't drag a leading space onto every line.
 - **`code-blocks.ts`** — syntax-highlights fenced code blocks in assistant responses and frames each one as a panel (language header, gutter).
 
 ## Layout

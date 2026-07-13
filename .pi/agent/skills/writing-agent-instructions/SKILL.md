@@ -1,6 +1,7 @@
 ---
 name: writing-agent-instructions
 description: Read before writing or editing any agent-facing instructions — an agent skill (SKILL.md and whatever it links to), a tool/function description, or an extension's injected context. Covers discoverability, information hierarchy, and token-lean design.
+disable-model-invocation: true
 ---
 
 A skill, tool description, or extension prompt exists to wrangle **predictability** out of a stochastic system — the agent taking the same _process_ every run, not necessarily producing the same output (a brainstorming skill should predictably diverge; its tokens vary, its behavior doesn't). Every rule below is a lever on that, not an end in itself.
