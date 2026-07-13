@@ -71,6 +71,15 @@ const MAX_OUTPUT_BYTES = 32 * 1024;
 const UPDATE_INTERVAL_MS = 150;
 const TICK_INTERVAL_MS = 500;
 const COLLAPSED_TOOL_TAIL = 5;
+// Child can exit while a grandchild (nvim/kernel) holds the stdio pipe, so
+// `close` never fires. Resolve on `exit` then drain: STDIO_DRAIN_IDLE_MS of
+// quiet flushes buffered output; STDIO_DRAIN_HARD_MS caps a noisy grandchild.
+const STDIO_DRAIN_IDLE_MS = 1500;
+const STDIO_DRAIN_HARD_MS = 6000;
+// On the agent's terminal message, give the child a grace window to self-exit
+// before SIGTERM → SIGKILL, so a lingering pi process can't hang the tool.
+const FINAL_STOP_GRACE_MS = 1500;
+const FINAL_HARD_KILL_MS = 3000;
 const ARG_PREVIEW_MAX = 60;
 const FORBIDDEN_TOOLS = new Set(["subagent"]);
 
@@ -430,6 +439,30 @@ export default function (pi: ExtensionAPI) {
       let outBuf = "";
       let stderrBuf = "";
 
+      let finalDrainTimer: ReturnType<typeof setTimeout> | undefined;
+      let finalHardKillTimer: ReturnType<typeof setTimeout> | undefined;
+      let childExited = false;
+      const startFinalDrain = () => {
+        if (childExited || finalDrainTimer) return;
+        finalDrainTimer = setTimeout(() => {
+          if (childExited) return;
+          try {
+            child.kill("SIGTERM");
+          } catch {
+            /* ignore */
+          }
+          finalHardKillTimer = setTimeout(() => {
+            try {
+              child.kill("SIGKILL");
+            } catch {
+              /* ignore */
+            }
+          }, FINAL_HARD_KILL_MS);
+          finalHardKillTimer.unref?.();
+        }, FINAL_STOP_GRACE_MS);
+        finalDrainTimer.unref?.();
+      };
+
       const handleEvent = (ev: { type?: string; [k: string]: unknown }) => {
         if (!ev || !ev.type) return;
         switch (ev.type) {
@@ -455,7 +488,7 @@ export default function (pi: ExtensionAPI) {
           }
           case "message_end": {
             const msg = ev.message as
-              | { role?: string; content?: unknown }
+              | { role?: string; content?: unknown; stopReason?: string }
               | undefined;
             if (!msg || msg.role !== "assistant") break;
             const text = extractText(msg.content);
@@ -465,6 +498,7 @@ export default function (pi: ExtensionAPI) {
               if (line) progress.lastMessage = line;
             }
             push();
+            if (msg.stopReason === "stop") startFinalDrain();
             break;
           }
         }
@@ -497,11 +531,60 @@ export default function (pi: ExtensionAPI) {
         killSignal: NodeJS.Signals | null;
         spawnError: Error | null;
       }>((resolve) => {
+        let settled = false;
+        let exit: { code: number; sig: NodeJS.Signals | null } | null = null;
+        let idleTimer: ReturnType<typeof setTimeout> | undefined;
+        let hardTimer: ReturnType<typeof setTimeout> | undefined;
+        const settle = (r: {
+          code: number;
+          killSignal: NodeJS.Signals | null;
+          spawnError: Error | null;
+        }) => {
+          if (settled) return;
+          settled = true;
+          if (idleTimer) clearTimeout(idleTimer);
+          if (hardTimer) clearTimeout(hardTimer);
+          resolve(r);
+        };
+        const resolveExit = () => {
+          child.stdout?.destroy();
+          child.stderr?.destroy();
+          settle({
+            code: exit?.code ?? -1,
+            killSignal: exit?.sig ?? null,
+            spawnError: null,
+          });
+        };
+        // Reset the drain clock on each post-exit chunk so buffered final
+        // output still flushes before we destroy the pipes.
+        const armDrain = () => {
+          if (idleTimer) clearTimeout(idleTimer);
+          idleTimer = setTimeout(resolveExit, STDIO_DRAIN_IDLE_MS);
+          idleTimer.unref?.();
+        };
+        child.stdout.on("data", () => {
+          if (exit) armDrain();
+        });
+        child.on("exit", (code, sig) => {
+          childExited = true;
+          if (finalDrainTimer) clearTimeout(finalDrainTimer);
+          if (finalHardKillTimer) clearTimeout(finalHardKillTimer);
+          exit = { code: code ?? -1, sig };
+          armDrain();
+          // Hard cap in case stdout never quiets (grandchild keeps writing).
+          hardTimer = setTimeout(resolveExit, STDIO_DRAIN_HARD_MS);
+          hardTimer.unref?.();
+        });
+        // If the pipes do close cleanly, take it immediately.
         child.on("close", (code, sig) =>
-          resolve({ code: code ?? -1, killSignal: sig, spawnError: null }),
+          settle({
+            code: code ?? exit?.code ?? -1,
+            killSignal: sig ?? exit?.sig ?? null,
+            spawnError: null,
+          }),
         );
         child.on("error", (err) =>
-          resolve({ code: -1, killSignal: null, spawnError: err }),
+          settle({ code: -1, killSignal: null, spawnError: err }),
         );
       });
 

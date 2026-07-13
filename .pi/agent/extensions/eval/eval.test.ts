@@ -163,6 +163,22 @@ describe("PyKernel", () => {
     assert.equal(chunks.at(-1), "0\n1\n2\n");
   });
 
+  it("flips alive=false on kernel death and recovers on respawn", async () => {
+    // Regression: a crashed interpreter (OOM kill, native segfault, os._exit)
+    // used to stay cached, throwing "python kernel has exited" for the rest of
+    // the session. ensurePyKernel now respawns when `alive` is false.
+    const k = await make();
+    assert.equal(k.alive, true);
+    const dead = await k.run("import os; os._exit(0)", 5, undefined);
+    assert.match(dead.error ?? "", /exited with code 0 mid-run/);
+    assert.equal(k.alive, false);
+    // Caller (index.ts) detects !alive and builds a fresh kernel.
+    const fresh = await make();
+    const r = await fresh.run("6 * 7", 5, undefined);
+    assert.equal(r.value, 42);
+    assert.equal(r.error, null);
+  });
+
   it("reset wipes the kernel globals", async () => {
     const k = await make();
     await k.run("x = 99", 5, undefined);

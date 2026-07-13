@@ -9,6 +9,7 @@ import { callDriver, isRunning, shutdownNvim } from "./nvim";
 import { hoverTool } from "./tools/hover";
 import { definitionTool } from "./tools/definition";
 import { referencesTool } from "./tools/references";
+import { renameTool } from "./tools/rename";
 import { displayPath } from "./utils";
 
 interface StatusResult {
@@ -20,6 +21,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool(hoverTool);
   pi.registerTool(definitionTool);
   pi.registerTool(referencesTool);
+  pi.registerTool(renameTool);
 
   pi.registerCommand("lsp-status", {
     description:

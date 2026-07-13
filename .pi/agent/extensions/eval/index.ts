@@ -161,15 +161,26 @@ async function ensureBridge(state: SessionState): Promise<BridgeRegistration> {
 }
 
 async function ensurePyKernel(state: SessionState): Promise<PyKernel> {
-  if (state.py) return state.py;
+  // Recycle a dead kernel: once the interpreter exits (OOM kill, native
+  // segfault, os._exit, host crash) the cached handle is permanently closed,
+  // so reusing it would throw "python kernel has exited" for the rest of the
+  // session. Drop it and spawn a fresh one transparently.
+  if (state.py?.alive) return state.py;
+  state.py = null;
   const reg = await ensureBridge(state);
-  state.py = new PyKernel({
+  const kernel = new PyKernel({
     bridgeUrl: reg.url,
     bridgeToken: reg.token,
     bridgeSession: reg.session,
   });
-  await state.py.ready();
-  return state.py;
+  try {
+    await kernel.ready();
+  } catch (err) {
+    kernel.dispose();
+    throw err;
+  }
+  state.py = kernel;
+  return kernel;
 }
 
 async function ensureJsKernel(state: SessionState): Promise<JsKernel> {
@@ -204,25 +215,26 @@ function formatResult(r: CellResult, idx: number): string {
 }
 
 export default function (pi: ExtensionAPI) {
-  // Node's default on unhandledRejection terminates the host. Just having a
-  // listener suppresses that, so we must NOT silently eat non-eval rejections
-  // — re-throw them via setImmediate so Node's normal uncaughtException path
-  // still fires for bugs in other extensions.
+  // pi installs no unhandledRejection handler, so Node's default (terminate)
+  // applies process-wide. A stray async rejection anywhere — a kernel pipe
+  // dying, an aborted bridge fetch — would otherwise exit pi. Having a listener
+  // suppresses the default; we log every rejection (so genuine bugs stay
+  // visible in stderr) but NEVER re-throw, because re-throwing here was turning
+  // recoverable hiccups into hard pi crashes.
   const onUnhandled = (reason: unknown) => {
     const msg =
       reason instanceof Error
         ? (reason.stack ?? reason.message)
         : String(reason);
-    if (/eval-bridge|eval\/(bridge|py-kernel|js-kernel|index)/.test(msg)) {
-      process.stderr.write(
-        `[eval extension] swallowed unhandled rejection: ${msg}\n`,
-      );
-      return;
-    }
-    setImmediate(() => {
-      throw reason;
-    });
+    const evalOrigin =
+      /eval-bridge|eval\/(bridge|py-kernel|js-kernel|index)/.test(msg);
+    process.stderr.write(
+      `[eval extension] swallowed unhandled rejection${evalOrigin ? "" : " (non-eval origin)"}: ${msg}\n`,
+    );
   };
+  // Reloads re-run this default() without firing session_shutdown, so an old
+  // listener can linger; drop any prior instance before adding ours.
+  process.off("unhandledRejection", onUnhandled);
   process.on("unhandledRejection", onUnhandled);
 
   pi.on("session_shutdown", async () => {
@@ -244,86 +256,103 @@ export default function (pi: ExtensionAPI) {
       "eval: persistent py + js kernels; share state across tool calls; `tool.*` proxy invokes pi tools (read/write/edit/bash/grep/find/ls/tree).",
     parameters: EvalParams,
     async execute(_callId, params: EvalParamsT, signal, onUpdate, ctx) {
-      const sessionFile = ctx.sessionManager.getSessionFile?.() ?? "default";
-      const state = getSession(sessionFile, ctx.cwd);
-      state.cwd = ctx.cwd;
-      // Make the current call's signal available to bridge tool calls.
-      const reg = await ensureBridge(state);
-      setBridgeSignal(reg.session, signal);
-
-      const results: CellResult[] = [];
-      let firstError: number | null = null;
-      const emit = (extra?: Partial<{ status: string }>) => {
-        try {
-          onUpdate?.({ results, ...extra } as unknown as never);
-        } catch {}
-      };
-
       try {
-        for (let i = 0; i < params.cells.length; i++) {
-          if (signal?.aborted) break;
-          const cell = params.cells[i]!;
-          if (cell.reset) {
+        const sessionFile = ctx.sessionManager.getSessionFile?.() ?? "default";
+        const state = getSession(sessionFile, ctx.cwd);
+        state.cwd = ctx.cwd;
+        // Make the current call's signal available to bridge tool calls.
+        const reg = await ensureBridge(state);
+        setBridgeSignal(reg.session, signal);
+
+        const results: CellResult[] = [];
+        let firstError: number | null = null;
+        const emit = (extra?: Partial<{ status: string }>) => {
+          try {
+            onUpdate?.({ results, ...extra } as unknown as never);
+          } catch {}
+        };
+
+        try {
+          for (let i = 0; i < params.cells.length; i++) {
+            if (signal?.aborted) break;
+            const cell = params.cells[i]!;
+            if (cell.reset) {
+              if (cell.language === "py") {
+                state.py?.dispose();
+                state.py = null;
+              } else {
+                state.js?.reset();
+                state.js = null;
+              }
+            }
+            emit({
+              status: `[${i + 1}/${params.cells.length}] ${cell.language}${cell.title ? " " + cell.title : ""}`,
+            });
+            const onProgress = (partial: CellResult) => {
+              const snapshot = [...results, partial];
+              try {
+                onUpdate?.({ results: snapshot } as unknown as never);
+              } catch {}
+            };
+            let r: CellResult;
             if (cell.language === "py") {
-              state.py?.dispose();
-              state.py = null;
+              const kernel = await ensurePyKernel(state);
+              r = await kernel.run(
+                cell.code,
+                cell.timeout ?? 30,
+                cell.title,
+                onProgress,
+              );
+              if (r.timedOut) {
+                state.py = null;
+              }
             } else {
-              state.js?.reset();
-              state.js = null;
+              const kernel = await ensureJsKernel(state);
+              r = await kernel.run(
+                cell.code,
+                cell.timeout ?? 30,
+                cell.title,
+                onProgress,
+              );
+            }
+            results.push(r);
+            emit();
+            if (r.error) {
+              firstError = i;
+              break;
             }
           }
-          emit({
-            status: `[${i + 1}/${params.cells.length}] ${cell.language}${cell.title ? " " + cell.title : ""}`,
-          });
-          const onProgress = (partial: CellResult) => {
-            const snapshot = [...results, partial];
-            try {
-              onUpdate?.({ results: snapshot } as unknown as never);
-            } catch {}
-          };
-          let r: CellResult;
-          if (cell.language === "py") {
-            const kernel = await ensurePyKernel(state);
-            r = await kernel.run(
-              cell.code,
-              cell.timeout ?? 30,
-              cell.title,
-              onProgress,
-            );
-            if (r.timedOut) {
-              state.py = null;
-            }
-          } else {
-            const kernel = await ensureJsKernel(state);
-            r = await kernel.run(
-              cell.code,
-              cell.timeout ?? 30,
-              cell.title,
-              onProgress,
-            );
-          }
-          results.push(r);
-          emit();
-          if (r.error) {
-            firstError = i;
-            break;
-          }
+        } finally {
+          setBridgeSignal(reg.session, undefined);
         }
-      } finally {
-        setBridgeSignal(reg.session, undefined);
+
+        const body = results.map((r, i) => formatResult(r, i)).join("\n\n");
+        const summary =
+          firstError !== null
+            ? `Cell ${firstError + 1} failed. ${results.length}/${params.cells.length} cells ran.`
+            : `${results.length} cells ran.`;
+
+        return {
+          content: [{ type: "text", text: `${summary}\n\n${body}` }],
+          details: { results, isError: firstError !== null },
+          isError: firstError !== null,
+        };
+      } catch (err) {
+        // Last line of defence: execute() must never reject, or pi surfaces it as
+        // "No result provided" (and an unhandled rejection can take pi down).
+        // Return the failure as a normal tool error so the kernel/bridge can be
+        // debugged from the conversation.
+        const msg =
+          err instanceof Error ? (err.stack ?? err.message) : String(err);
+        process.stderr.write(`[eval extension] execute() failed: ${msg}\n`);
+        return {
+          content: [
+            { type: "text", text: `eval failed (host error):\n${msg}` },
+          ],
+          details: { isError: true },
+          isError: true,
+        };
       }
-
-      const body = results.map((r, i) => formatResult(r, i)).join("\n\n");
-      const summary =
-        firstError !== null
-          ? `Cell ${firstError + 1} failed. ${results.length}/${params.cells.length} cells ran.`
-          : `${results.length} cells ran.`;
-
-      return {
-        content: [{ type: "text", text: `${summary}\n\n${body}` }],
-        details: { results, isError: firstError !== null },
-        isError: firstError !== null,
-      };
     },
   });
 }

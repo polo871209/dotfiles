@@ -193,6 +193,64 @@ function M.references(file, line, symbol)
     return { ok = true, locations = locations }
 end
 
+local function changed_uris(workspace_edit)
+    local uris = {}
+    if workspace_edit.documentChanges then
+        for _, change in ipairs(workspace_edit.documentChanges) do
+            -- skip create/rename/delete file ops (no textDocument.edits)
+            if change.textDocument and change.textDocument.uri then uris[change.textDocument.uri] = true end
+        end
+    elseif workspace_edit.changes then
+        for uri, _ in pairs(workspace_edit.changes) do
+            uris[uri] = true
+        end
+    end
+    return uris
+end
+
+function M.rename(file, line, symbol, new_name)
+    if not new_name or new_name == '' then return { ok = false, error = 'new_name required' } end
+    local b = open_buf(file)
+    local params, err = make_position_params(b, line, symbol)
+    if not params then return { ok = false, error = err } end
+    local supported = false
+    for _, c in ipairs(vim.lsp.get_clients { bufnr = b }) do
+        if c.server_capabilities and c.server_capabilities.renameProvider then
+            supported = true
+            break
+        end
+    end
+    if not supported then return { ok = false, error = 'no attached LSP supports rename' } end
+    params.newName = new_name
+    local ok, res = pcall(vim.lsp.buf_request_sync, b, 'textDocument/rename', params, REQ_TIMEOUT_MS)
+    if not ok or not res then return { ok = false, error = 'request failed' } end
+    local workspace_edit, enc
+    for cid, r in pairs(res) do
+        if r.result then
+            workspace_edit = r.result
+            local c = vim.lsp.get_client_by_id(cid)
+            enc = c and c.offset_encoding or 'utf-16'
+            break
+        end
+    end
+    if not workspace_edit then return { ok = false, error = 'no rename edits returned (symbol not renameable here?)' } end
+    local uris = changed_uris(workspace_edit)
+    local apply_ok, apply_err = pcall(vim.lsp.util.apply_workspace_edit, workspace_edit, enc)
+    if not apply_ok then return { ok = false, error = 'apply failed: ' .. tostring(apply_err) } end
+    local written = {}
+    for uri, _ in pairs(uris) do
+        local bn = vim.uri_to_bufnr(uri)
+        if vim.api.nvim_buf_is_valid(bn) then vim.api.nvim_buf_call(bn, function() vim.cmd 'silent! write!' end) end
+        -- invalidate nav cache so subsequent queries reload from disk
+        local f = uri_to_path(uri)
+        bufs[f] = nil
+        mtimes[f] = nil
+        table.insert(written, f)
+    end
+    table.sort(written)
+    return { ok = true, files = written, count = #written }
+end
+
 function M.status()
     local files = {}
     for f, b in pairs(bufs) do
