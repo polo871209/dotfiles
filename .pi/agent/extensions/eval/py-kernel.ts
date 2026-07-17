@@ -20,9 +20,16 @@ interface PendingRun {
   resolve: (r: CellResult) => void;
   result: CellResult;
   startedAt: number;
+  timeoutSec: number;
   timeout: NodeJS.Timeout | null;
+  escalation: NodeJS.Timeout | null;
+  interrupted: boolean;
   onProgress?: (r: CellResult) => void;
 }
+
+// Grace period between SIGINT (soft interrupt, state preserved) and
+// SIGTERM + respawn (state lost) when a cell exceeds its timeout.
+const INTERRUPT_GRACE_MS = 2000;
 
 interface VenvInfo {
   dir: string;
@@ -31,15 +38,38 @@ interface VenvInfo {
 
 let cachedVenv: VenvInfo | null = null;
 
+// Latest stable CPython minor. Bump when a new stable lands; the venv is
+// recreated on mismatch (installed packages are wiped, reinstall via
+// install()). Patch upgrades need no bump: the venv symlinks mise's python,
+// so 3.x.y -> 3.x.z is picked up automatically.
+const PYTHON_VERSION = "3.14";
+
+function venvPythonMinor(dir: string): string | null {
+  try {
+    const cfg = fs.readFileSync(path.join(dir, "pyvenv.cfg"), "utf-8");
+    const m = cfg.match(/^version(?:_info)?\s*=\s*(\d+\.\d+)/m);
+    return m ? m[1]! : null;
+  } catch {
+    return null;
+  }
+}
+
 function ensureVenv(): VenvInfo {
   if (cachedVenv) return cachedVenv;
   const dir = path.join(os.homedir(), ".cache", "pi-eval", "venv");
   const python = path.join(dir, "bin", "python");
-  if (!fs.existsSync(python)) {
+  const stale =
+    fs.existsSync(python) && venvPythonMinor(dir) !== PYTHON_VERSION;
+  if (stale) fs.rmSync(dir, { recursive: true, force: true });
+  if (stale || !fs.existsSync(python)) {
     fs.mkdirSync(path.dirname(dir), { recursive: true });
-    const r = spawnSync("uv", ["venv", "--quiet", "--python", "3.14", dir], {
-      stdio: "pipe",
-    });
+    const r = spawnSync(
+      "uv",
+      ["venv", "--quiet", "--python", PYTHON_VERSION, dir],
+      {
+        stdio: "pipe",
+      },
+    );
     if (r.status !== 0) {
       const err = r.stderr?.toString() ?? "";
       throw new Error(
@@ -160,22 +190,35 @@ export class PyKernel {
         resolve,
         result,
         startedAt: Date.now(),
+        timeoutSec,
         timeout: null,
+        escalation: null,
+        interrupted: false,
         onProgress,
       };
       pending.timeout = setTimeout(() => {
-        result.timedOut = true;
-        result.error = result.error ?? `cell timed out after ${timeoutSec}s`;
-        // Remove before dispose: dispose's exit handler re-walks #pending and
-        // would double-finalize this entry otherwise.
-        this.#pending.delete(id);
-        // Kill the kernel; state is lost, but we cannot interrupt cleanly
-        // without an IPython-style control channel. Caller spawns a fresh one.
-        this.dispose();
-        this.#finalize(pending);
+        // Soft interrupt first: SIGINT raises KeyboardInterrupt inside the
+        // cell, which the runner reports as a normal done event — kernel
+        // state survives. Escalate to kill + respawn only when the
+        // interpreter is stuck in native code that never checks signals.
+        pending.interrupted = true;
+        try {
+          this.#proc.kill("SIGINT");
+        } catch {}
+        pending.escalation = setTimeout(() => {
+          result.timedOut = true;
+          result.error =
+            result.error ??
+            `cell timed out after ${timeoutSec}s (interrupt ignored; kernel killed, state lost)`;
+          // Remove before dispose: dispose's exit handler re-walks #pending
+          // and would double-finalize this entry otherwise.
+          this.#pending.delete(id);
+          this.dispose();
+          this.#finalize(pending);
+        }, INTERRUPT_GRACE_MS);
       }, timeoutSec * 1000);
       this.#pending.set(id, pending);
-      this.#send({ id, op: "run", code, timeout: timeoutSec });
+      this.#send({ id, op: "run", code });
     });
   }
 
@@ -199,7 +242,10 @@ export class PyKernel {
   #send(req: KernelRequest): void {
     const line = JSON.stringify(req) + "\n";
     try {
-      this.#proc.stdin?.write(line);
+      // A botched spawn leaves stdin null; optional chaining would silently
+      // no-op and the pending would only resolve via its timeout.
+      if (!this.#proc.stdin) throw new Error("kernel stdin unavailable");
+      this.#proc.stdin.write(line);
     } catch (err) {
       // Kernel died between the alive check and this write. Finalize the
       // matching pending so the caller gets an error result instead of a hung
@@ -261,6 +307,14 @@ export class PyKernel {
       case "done":
         pending.result.value = event.value;
         if (event.error) pending.result.error = event.error;
+        if (pending.interrupted) {
+          // Done arrived after the soft interrupt: the cell was cut short but
+          // the kernel (and its state) survived.
+          pending.result.timedOut = true;
+          pending.result.error =
+            `cell timed out after ${pending.timeoutSec}s (interrupted; kernel state preserved)` +
+            (event.error ? `\n${event.error}` : "");
+        }
         this.#finalize(pending);
         this.#pending.delete(event.id);
         break;
@@ -269,6 +323,7 @@ export class PyKernel {
 
   #finalize(pending: PendingRun): void {
     if (pending.timeout) clearTimeout(pending.timeout);
+    if (pending.escalation) clearTimeout(pending.escalation);
     pending.result.durationMs = Date.now() - pending.startedAt;
     pending.resolve(pending.result);
   }

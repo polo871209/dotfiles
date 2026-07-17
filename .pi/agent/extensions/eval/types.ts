@@ -21,8 +21,7 @@ export interface CellResult {
 
 // Wire protocol — kernel <-> host over the runner's stdin/stdout (JSON lines).
 export type KernelRequest =
-  | { id: string; op: "run"; code: string; timeout: number }
-  | { id: string; op: "reset" };
+  { id: string; op: "run"; code: string } | { id: string; op: "reset" };
 
 export interface KernelEventDisplay {
   id: string;

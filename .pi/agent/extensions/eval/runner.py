@@ -96,14 +96,8 @@ def main() -> None:
     def emit(event: dict) -> None:
         os.write(3, (json.dumps(event, default=str) + "\n").encode("utf-8"))
 
-    for line in sys.stdin:
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            req = json.loads(line)
-        except json.JSONDecodeError:
-            continue
+    def handle(req: dict) -> None:
+        nonlocal globals_dict
         rid = req.get("id", "")
         op = req.get("op")
         globals_dict["_current_id"] = rid
@@ -114,11 +108,11 @@ def main() -> None:
             stdout_fwd._globals = globals_dict
             stderr_fwd._globals = globals_dict
             emit({"id": rid, "op": "done", "value": None, "error": None})
-            continue
+            return
 
         if op != "run":
             emit({"id": rid, "op": "done", "value": None, "error": f"unknown op: {op}"})
-            continue
+            return
 
         code = req.get("code", "")
         value: object = None
@@ -137,6 +131,32 @@ def main() -> None:
             value_out = repr(value)
 
         emit({"id": rid, "op": "done", "value": value_out, "error": error})
+
+    # The host sends SIGINT on cell timeout (soft interrupt). When it lands
+    # inside a cell, _exec_cell's BaseException net turns it into a normal
+    # error result. When it lands here — blocked on readline between cells, or
+    # in the post-exec bookkeeping — it must not kill the kernel.
+    while True:
+        try:
+            line = sys.stdin.readline()
+        except KeyboardInterrupt:
+            continue
+        if not line:
+            break
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            req = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        try:
+            handle(req)
+        except KeyboardInterrupt:
+            # Interrupt landed outside the cell's own exception net (e.g.
+            # during result serialization); no done event is sent — the host
+            # escalates to a respawn if it never arrives.
+            continue
 
 
 if __name__ == "__main__":

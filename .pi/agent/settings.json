@@ -2,7 +2,7 @@
   "lastChangelogVersion": "0.80.10",
   "defaultProvider": "anthropic",
   "defaultModel": "claude-fable-5",
-  "defaultThinkingLevel": "low",
+  "defaultThinkingLevel": "medium",
   "theme": "catppuccin-mocha",
   "quietStartup": true,
   "packages": [],

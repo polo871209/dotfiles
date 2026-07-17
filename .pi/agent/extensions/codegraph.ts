@@ -7,6 +7,7 @@ import { spawn, spawnSync } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { run } from "./shared/exec";
+import { exposeRegisteredToolsToEval } from "./shared/bridge-tools";
 
 const CODEGRAPH_BIN = "codegraph";
 const MAX_ROWS = 40;
@@ -145,6 +146,7 @@ const EDIT_TOOLS = new Set(["edit", "write", "str_replace", "create"]);
 export default function (pi: ExtensionAPI) {
   const loadCwd = process.cwd();
   if (!isCodegraphInitialized(loadCwd)) return;
+  exposeRegisteredToolsToEval(pi);
 
   // Keep the on-disk index fresh. CLI reads hit the graph directly; the
   // file-watcher that auto-syncs runs only under `codegraph serve`, so in

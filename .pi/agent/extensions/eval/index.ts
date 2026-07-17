@@ -34,6 +34,7 @@ import { PyKernel } from "./py-kernel";
 import { JsKernel } from "./js-kernel";
 import type { CellResult } from "./types";
 import { sideChannelComplete } from "../shared/llm";
+import { evalBridgeTools } from "../shared/bridge-tools";
 
 const Cell = Type.Object({
   language: Type.Union([Type.Literal("py"), Type.Literal("js")]),
@@ -119,7 +120,34 @@ function bridgeHandler(state: SessionState): BridgeHandler {
       );
       return flattenToolResult(result);
     }
+    // Extension tools that opted in via exposeRegisteredToolsToEval
+    // (web_search, fetch_content, github_pr, lsp_*, codegraph_*, …).
+    // Args skip pi's schema validation here; a tool's own error is returned
+    // to the cell as an exception.
+    const ext = evalBridgeTools().get(name);
+    if (ext) {
+      if (!state.ctx) {
+        throw new Error(`tool.${name} unavailable: no active tool context`);
+      }
+      const result = await ext.execute(
+        `eval-bridge-${randomUUID()}`,
+        args,
+        signal,
+        undefined,
+        state.ctx,
+      );
+      return flattenToolResult(result);
+    }
     switch (name) {
+      case "list": {
+        return [
+          ...Object.keys(ensureBuiltins(state)),
+          ...evalBridgeTools().keys(),
+          "tree",
+          "completion",
+          "list",
+        ].sort();
+      }
       case "completion": {
         if (!state.ctx) {
           throw new Error("completion unavailable: no active tool context");
@@ -345,10 +373,10 @@ export default function (pi: ExtensionAPI) {
     label: "Eval",
     description:
       "Run code in persistent Python and JavaScript kernels for iterative, stateful work — state persists across cells and across separate tool calls, in one kernel per language per session. Not for a single one-off command; use `bash`/`read` directly for those.\n\n" +
-      'Inside cell code, `tool.<name>({...})` invokes pi built-in tools (`read`, `write`, `edit`, `bash`, `grep`, `find`, `ls` take their normal pi argument schemas; `tree({path,max_depth})` is extra). Shortcuts: `read(path)`, `write(path,content)`, `tree(path)`, `env(key?, value?)` (no args: full env dict; one: get; two: set), `completion(prompt, model?, system?, schema?)` for a oneshot stateless model call (model: "default" or "provider/id"; schema: JSON-Schema for structured output).\n\n' +
+      'Inside cell code, `tool.<name>({...})` invokes pi tools with their normal argument schemas: built-ins (`read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`) plus extension tools (`web_search`, `fetch_content`, `github_pr`, `lsp_*`, `codegraph_*`); `tool.list()` enumerates what is callable, `tree({path,max_depth})` is extra. Great for fan-out: query a tool N times in a loop, keep raw output in the kernel, return only the aggregate. Shortcuts: `read(path)`, `write(path,content)`, `tree(path)`, `env(key?, value?)` (no args: full env dict; one: get; two: set), `completion(prompt, model?, system?, schema?)` for a oneshot stateless model call (model: "default" or "provider/id"; schema: JSON-Schema for structured output).\n\n' +
       'Call `install("pkg1", "pkg2")` to add Python packages, persists across pi restarts. JS cells support top-level await and package imports; use `globalThis` / `state` to persist values across cells.',
     promptSnippet:
-      "eval: persistent py + js kernels; share state across tool calls; `tool.*` proxy invokes pi tools (read/write/edit/bash/grep/find/ls/tree).",
+      "eval: persistent py + js kernels; share state across tool calls; `tool.*` proxy invokes pi tools (read/write/edit/bash/grep/find/ls/tree, web_search/fetch_content/github_pr/lsp_*/codegraph_*) — fan out in a loop, return only the aggregate.",
     parameters: EvalParams,
     async execute(_callId, params: EvalParamsT, signal, onUpdate, ctx) {
       try {
@@ -412,9 +440,8 @@ export default function (pi: ExtensionAPI) {
                 cell.title,
                 onProgress,
               );
-              if (r.timedOut) {
-                state.py = null;
-              }
+              // Timeout is soft-interrupted first (kernel survives); if it
+              // escalated to a kill, ensurePyKernel sees !alive and respawns.
             } else {
               const kernel = await ensureJsKernel(state);
               r = await kernel.run(
@@ -441,8 +468,23 @@ export default function (pi: ExtensionAPI) {
             ? `Cell ${firstError + 1} failed. ${results.length}/${params.cells.length} cells ran.`
             : `${results.length} cells ran.`;
 
+        // Image displays (e.g. matplotlib figures) go back as real image
+        // content so the model can actually see them, not just a byte-count
+        // placeholder in the text body.
+        const content: (
+          | { type: "text"; text: string }
+          | { type: "image"; data: string; mimeType: string }
+        )[] = [{ type: "text", text: `${summary}\n\n${body}` }];
+        for (const r of results) {
+          for (const d of r.displays) {
+            if (d.mime.startsWith("image/")) {
+              content.push({ type: "image", data: d.data, mimeType: d.mime });
+            }
+          }
+        }
+
         return {
-          content: [{ type: "text", text: `${summary}\n\n${body}` }],
+          content,
           details: { results, isError: firstError !== null },
           isError: firstError !== null,
         };

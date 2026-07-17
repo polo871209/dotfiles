@@ -35,13 +35,13 @@ The extension auto-loads from `~/.pi/agent/extensions/eval/`. The model can invo
 
 Each cell:
 
-| Field      | Type             | Description                                                                             |
-| ---------- | ---------------- | --------------------------------------------------------------------------------------- |
-| `language` | `"py"` \| `"js"` | Which kernel runs it                                                                    |
-| `code`     | string           | Source code. Verbatim. Last expression auto-returns as the cell's value (Jupyter-style) |
-| `title`    | string?          | Optional label shown in the result                                                      |
-| `timeout`  | number?          | Seconds, 1–600, default 30                                                              |
-| `reset`    | boolean?         | Wipe this language's kernel before running                                              |
+| Field      | Type             | Description                                                                                                                  |
+| ---------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `language` | `"py"` \| `"js"` | Which kernel runs it                                                                                                         |
+| `code`     | string           | Source code. Verbatim. Last expression auto-returns as the cell's value (Jupyter-style)                                      |
+| `title`    | string?          | Optional label shown in the result                                                                                           |
+| `timeout`  | number?          | Seconds, 1–600, default 30. Python cells get SIGINT first (state preserved); kill + respawn only if the interrupt is ignored |
+| `reset`    | boolean?         | Wipe this language's kernel before running                                                                                   |
 
 ## In-cell API
 
@@ -53,7 +53,7 @@ Same names, same arg order both languages. Python uses keyword args; JavaScript 
 | `read(path, offset?, limit?)`                                      | Shorthand for `tool.read`                                                                                                                                                                                                                                |
 | `write(path, content)`                                             | Shorthand for `tool.write`                                                                                                                                                                                                                               |
 | `tree(path=".", max_depth=3, show_hidden=False)`                   | ASCII tree (custom, not a pi built-in)                                                                                                                                                                                                                   |
-| `display(value)`                                                   | Emit a cell display event. Py: matplotlib `Figure` → PNG, else JSON / `repr`. JS: JSON / `String()` fallback                                                                                                                                             |
+| `display(value)`                                                   | Emit a cell display event. Py: matplotlib `Figure` → PNG (returned as real image content the model can see), else JSON / `repr`. JS: JSON / `String()` fallback                                                                                          |
 | `install(*pkgs, upgrade=False)`                                    | **Python only.** `uv pip install` into the managed venv. Persists across pi restarts                                                                                                                                                                     |
 | `state`                                                            | **JS only.** Alias for `globalThis`; preferred way to persist state across JS cells                                                                                                                                                                      |
 | `env(key?, value?)`                                                | No args → full env dict. One → get. Two → set, returns value. Scoped to that kernel's process (Python subprocess / host Node process for JS) — not shared across languages                                                                               |
@@ -62,13 +62,16 @@ Same names, same arg order both languages. Python uses keyword args; JavaScript 
 `tool.<name>(args)` resolves in this order:
 
 1. Pi built-in tools registered at session start: `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`. Arguments match pi's standard schemas. Results are flattened: single text → string, with images → `{text, images}`.
-2. Custom fallback: `tree({ path, max_depth, show_hidden })`.
+2. Extension tools that opted in via `exposeRegisteredToolsToEval(pi)` (`../shared/bridge-tools.ts`): `web_search`, `fetch_content`, `github_pr`, `lsp_*`, `codegraph_*`. Same flattening. Args skip pi's schema validation on this path — bad args surface as the tool's own error. `tool.list()` enumerates everything callable.
+3. Custom fallback: `tree({ path, max_depth, show_hidden })`.
+
+The registry lives on `globalThis` because pi loads each extension in an isolated jiti module graph — a module-level singleton in `shared/` would not be shared across extensions. Producers opt in with one line at the top of their `default()`; interactive/recursive tools (`ask_user_question`, `subagent`) deliberately don't.
 
 Abort signal from the parent `eval` call is forwarded to built-in tool invocations, so cancelling the agent mid-cell cancels any in-flight `tool.bash` / `tool.grep`.
 
 ## Python runtime + packages
 
-The Python kernel runs in a managed venv at **`~/.cache/pi-eval/venv`**, pinned to **Python 3.14** (created via `uv venv --python 3.14`). Created lazily on first kernel boot; reused across all pi sessions on this machine.
+The Python kernel runs in a managed venv at **`~/.cache/pi-eval/venv`**, pinned to the latest stable CPython minor (`PYTHON_VERSION` in `py-kernel.ts`, currently **3.14**). Created lazily on first kernel boot; reused across all pi sessions on this machine. Patch upgrades flow in automatically (the venv symlinks mise's python); on a minor-pin bump the venv is detected as stale via `pyvenv.cfg` and recreated — installed packages are wiped then, reinstall via `install()`.
 
 Install packages from any cell:
 
@@ -187,16 +190,16 @@ The JS kernel runs in-process (`node:vm` context) but uses the same loopback HTT
 
 ## Files
 
-| File           | LOC  | Role                                                                                                                                                                                                                                                                             |
-| -------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `index.ts`     | ~310 | Extension entry. Registers tool, manages per-session kernels + bridge lifecycle, routes cells by language, forwards pi built-ins via `createXxxTool` factories.                                                                                                                  |
-| `bridge.ts`    | ~130 | Single shared `node:http` server on a random loopback port. Multiplexes sessions by id; bearer-token gated. `server.unref()` so it never holds the event loop alone.                                                                                                             |
-| `py-kernel.ts` | ~230 | Spawns `python3 -u runner.py` from the managed venv, JSON-line stdin protocol + fd 3 events. Streams stdout / stderr / display to the host via `onProgress` callback. Handles timeout (kill + respawn), reset, and exposes `alive` so a dead kernel is recycled on the next run. |
-| `runner.py`    | ~120 | Long-lived Python loop. Reads stdin JSON, execs cells with stdout/stderr redirected to fd 3, emits stream / display / done. Captures last expression value via AST.                                                                                                              |
-| `prelude.py`   | ~140 | Defines `tool` proxy (over urllib), `display`, `read`, `write`, `tree`, `install`. Exec'd into globals at kernel boot.                                                                                                                                                           |
-| `js-kernel.ts` | ~280 | `node:vm` context per session; each cell wrapped as `(async () => {…})()` for top-level await; last-expression auto-return via heuristic; `tool.*` proxy via global `fetch` (with `Connection: close` to avoid keep-alive).                                                      |
-| `types.ts`     | ~55  | Wire protocol types: `Cell`, `CellResult`, `KernelRequest`, `KernelEvent`, `BridgeRequest`, `BridgeResponse`.                                                                                                                                                                    |
-| `eval.test.ts` | ~250 | `node:test` suite — bridge auth, py kernel (state/stdout/errors/tool callback/onProgress/reset), js kernel (top-level await/state/console/tool callback/errors).                                                                                                                 |
+| File           | LOC  | Role                                                                                                                                                                                                                                                                                                                  |
+| -------------- | ---- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `index.ts`     | ~310 | Extension entry. Registers tool, manages per-session kernels + bridge lifecycle, routes cells by language, forwards pi built-ins via `createXxxTool` factories.                                                                                                                                                       |
+| `bridge.ts`    | ~130 | Single shared `node:http` server on a random loopback port. Multiplexes sessions by id; bearer-token gated. `server.unref()` so it never holds the event loop alone.                                                                                                                                                  |
+| `py-kernel.ts` | ~280 | Spawns `python3 -u runner.py` from the managed venv, JSON-line stdin protocol + fd 3 events. Streams stdout / stderr / display to the host via `onProgress` callback. Handles timeout (SIGINT soft interrupt, escalating to kill + respawn), reset, and exposes `alive` so a dead kernel is recycled on the next run. |
+| `runner.py`    | ~120 | Long-lived Python loop. Reads stdin JSON, execs cells with stdout/stderr redirected to fd 3, emits stream / display / done. Captures last expression value via AST.                                                                                                                                                   |
+| `prelude.py`   | ~140 | Defines `tool` proxy (over urllib), `display`, `read`, `write`, `tree`, `install`. Exec'd into globals at kernel boot.                                                                                                                                                                                                |
+| `js-kernel.ts` | ~280 | `node:vm` context per session; each cell wrapped as `(async () => {…})()` for top-level await; last-expression auto-return via heuristic; `tool.*` proxy via global `fetch` (with `Connection: close` to avoid keep-alive).                                                                                           |
+| `types.ts`     | ~55  | Wire protocol types: `Cell`, `CellResult`, `KernelRequest`, `KernelEvent`, `BridgeRequest`, `BridgeResponse`.                                                                                                                                                                                                         |
+| `eval.test.ts` | ~250 | `node:test` suite — bridge auth, py kernel (state/stdout/errors/tool callback/onProgress/reset), js kernel (top-level await/state/console/tool callback/errors).                                                                                                                                                      |
 
 ## Tests
 
@@ -242,24 +245,35 @@ The 3,000-line raw data **lives in the Python subprocess's RAM**, never crosses 
 
 ### Crash recovery vs oh-my-pi
 
-Ported from oh-my-pi's kernel lifecycle: instant exit detection + `isAlive()` guard + respawn-on-next-call (their findings #1/#2/#6), stdin EPIPE guard (#3), and the subprocess parent-watchdog (#7). Not ported (deliberate, see gaps below): SIGINT soft-interrupt escalation ladder, heartbeat/idle-timeout split, pre-spawn runtime probe, and the `startingSessions` concurrent-spawn dedup — pi serializes tool calls per session and timeout already falls back to kill+respawn, so the cost outweighs the value for a personal setup.
+Ported from oh-my-pi's kernel lifecycle: instant exit detection + `isAlive()` guard + respawn-on-next-call (their findings #1/#2/#6), stdin EPIPE guard (#3), the subprocess parent-watchdog (#7), and the SIGINT soft-interrupt escalation ladder (timeout → SIGINT, KeyboardInterrupt surfaces as a normal error result with kernel state preserved; SIGTERM + respawn only if the interrupt is ignored for 2s — the runner catches interrupts that land between cells so a race with a just-finished cell can't kill the kernel). Not ported (deliberate, see gaps below): heartbeat/idle-timeout split, pre-spawn runtime probe, and the `startingSessions` concurrent-spawn dedup — pi serializes tool calls per session, so the cost outweighs the value for a personal setup.
 
 ## What omp does that we don't
 
 These are real gaps. Skipped because the engineering cost was disproportionate to the value for a personal dotfiles setup.
 
-- **IPython kernel.** omp uses real IPython (ZMQ, rich display, soft cell-interrupt). We use raw `python3 -u` with `exec()`. We lose rich display (pandas DataFrame → text repr, not pretty HTML) and timeout means kill + respawn, not soft interrupt.
+- **IPython kernel.** omp uses real IPython (ZMQ, rich display). We use raw `python3 -u` with `exec()`. We lose rich display (pandas DataFrame → text repr, not pretty HTML). Timeout is handled: SIGINT soft interrupt first (state preserved), kill + respawn only on escalation.
 - **JS static `import` statements.** omp does AST rewriting to support top-level `import x from "pkg"` syntax in JS cells via Bun.Worker. We use `node:vm`, where a cell isn't a module, so the `import ... from` _statement_ form can't work. Runtime module loading does work, though: `require("pkg")` / `require("node:fs")` / `require("/abs/path")` are injected, and `await import("pkg")` resolves through Node's real loader.
 - **Subagent integration.** omp's `task` tool returns schema-validated objects; cells read them via `output(taskId)`. We don't have a `task` tool to forward.
-- **Forwarding extension/MCP tools.** We forward only the 7 built-ins. Other pi extensions' tools and MCP tools aren't reachable through `tool.*`. To expose one, add an arm to `bridgeHandler` in `index.ts`.
+- **Forwarding MCP tools.** Extension tools are forwarded (see resolution order above), but MCP tools aren't reachable through `tool.*`.
 - **TUI rendering polish.** omp renders each cell as a Jupyter-card with title/timing/inline images. We render plain text.
 - **Per-bridge-call status events.** omp shows each `tool.read` invocation in the TUI as it fires inside a cell. We only emit between cells.
 
 If you hit one of these walls, see the relevant omp source as a reference port. The bridge mechanism we share is identical; everything above is layered on top of it.
 
-## Extending: adding a custom bridge tool
+## Extending: exposing more tools to cells
 
-To make `tool.git_log({n: 30})` callable from cells, add an arm in `bridgeHandler` in `index.ts`:
+**Extension tools** (the normal case): add one line at the top of the producer extension's `default()` — everything it registers becomes callable from cells:
+
+```ts
+import { exposeRegisteredToolsToEval } from "./shared/bridge-tools";
+
+export default function (pi: ExtensionAPI) {
+  exposeRegisteredToolsToEval(pi);
+  pi.registerTool({ ... });
+}
+```
+
+**Host-side capabilities that aren't tools** (shell pipelines, external APIs): add an arm in `bridgeHandler` in `index.ts`. To make `tool.git_log({n: 30})` callable from cells:
 
 ```ts
 case "git_log": {

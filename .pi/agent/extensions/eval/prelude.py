@@ -85,7 +85,10 @@ class _ToolCallable:
             },
         )
         try:
-            with _urlreq.urlopen(req, timeout=120) as resp:
+            # No client-side timeout: the cell's own timeout is the bound — a
+            # long tool.bash may legitimately outlast any fixed cap, and the
+            # host's SIGINT interrupts a blocked urlopen anyway.
+            with _urlreq.urlopen(req) as resp:
                 body = resp.read()
         except _urlerr.HTTPError as exc:
             body = exc.read()

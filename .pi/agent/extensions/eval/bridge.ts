@@ -18,7 +18,6 @@ export type BridgeHandler = (
 interface BridgeServer {
   url: string;
   token: string;
-  port: number;
   stop: () => void;
 }
 
@@ -99,11 +98,9 @@ async function ensureServer(): Promise<BridgeServer> {
   s.unref();
   const addr = s.address() as AddressInfo | null;
   if (!addr) throw new Error("bridge server failed to bind");
-  const port = addr.port;
   server = {
-    url: `http://127.0.0.1:${port}`,
+    url: `http://127.0.0.1:${addr.port}`,
     token,
-    port,
     stop: () => s.close(),
   };
   return server;

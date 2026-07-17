@@ -10,6 +10,7 @@ import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { run } from "./shared/exec";
+import { exposeRegisteredToolsToEval } from "./shared/bridge-tools";
 
 const MAX_DIFF_BYTES = 48 * 1024;
 const MAX_BODY_BYTES = 6 * 1024;
@@ -121,6 +122,7 @@ const params = Type.Object({
 });
 
 export default function (pi: ExtensionAPI) {
+  exposeRegisteredToolsToEval(pi);
   pi.registerTool<typeof params, { summary: string }>({
     name: "github_pr",
     label: "GitHub PR",

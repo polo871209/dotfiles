@@ -9,6 +9,7 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { callDriver, isRunning, shutdownNvim } from "./nvim";
+import { exposeRegisteredToolsToEval } from "../shared/bridge-tools";
 import { registerFeedback } from "./feedback";
 import { hoverTool } from "./tools/hover";
 import { definitionTool } from "./tools/definition";
@@ -24,6 +25,7 @@ interface StatusResult {
 }
 
 export default function (pi: ExtensionAPI) {
+  exposeRegisteredToolsToEval(pi);
   pi.registerTool(hoverTool);
   pi.registerTool(definitionTool);
   pi.registerTool(referencesTool);

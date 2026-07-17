@@ -5,6 +5,10 @@
 import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
 import { registerBridgeSession, setBridgeSignal } from "./bridge.ts";
+import {
+  exposeRegisteredToolsToEval,
+  evalBridgeTools,
+} from "../shared/bridge-tools.ts";
 import { PyKernel } from "./py-kernel.ts";
 import { JsKernel } from "./js-kernel.ts";
 
@@ -104,6 +108,23 @@ describe("bridge", () => {
   });
 });
 
+describe("bridge-tools registry", () => {
+  it("captures tools registered through a wrapped ExtensionAPI", () => {
+    const registered: unknown[] = [];
+    const fakePi = {
+      registerTool: (def: unknown) => registered.push(def),
+    };
+    exposeRegisteredToolsToEval(fakePi as never);
+    (fakePi.registerTool as (def: unknown) => void)({
+      name: "fake_bridged_tool",
+      execute: async () => ({ content: [] }),
+    });
+    // Still reaches the real registerTool AND lands in the global registry.
+    assert.equal(registered.length, 1);
+    assert.ok(evalBridgeTools().has("fake_bridged_tool"));
+  });
+});
+
 describe("PyKernel", () => {
   const kernels: PyKernel[] = [];
   const make = async () => {
@@ -177,6 +198,29 @@ describe("PyKernel", () => {
     const r = await fresh.run("6 * 7", 5, undefined);
     assert.equal(r.value, 42);
     assert.equal(r.error, null);
+  });
+
+  it("soft-interrupts a timed-out cell and preserves kernel state", async () => {
+    const k = await make();
+    await k.run("marker = 123", 5, undefined);
+    const r = await k.run("import time\ntime.sleep(60)", 1, undefined);
+    assert.equal(r.timedOut, true);
+    assert.match(r.error ?? "", /kernel state preserved/);
+    assert.equal(k.alive, true);
+    const after = await k.run("marker", 5, undefined);
+    assert.equal(after.value, 123);
+  });
+
+  it("escalates to kill when the interrupt is ignored", async () => {
+    const k = await make();
+    const r = await k.run(
+      "import signal, time\nsignal.signal(signal.SIGINT, signal.SIG_IGN)\ntime.sleep(60)",
+      1,
+      undefined,
+    );
+    assert.equal(r.timedOut, true);
+    assert.match(r.error ?? "", /interrupt ignored/);
+    assert.equal(k.alive, false);
   });
 
   it("reset wipes the kernel globals", async () => {
@@ -288,6 +332,15 @@ describe("JsKernel", () => {
       r.value,
       JSON.stringify({ hasToJSON: "undefined", hasThen: "undefined" }),
     );
+  });
+
+  it("blocks process.exit inside cells", async () => {
+    const k = await make();
+    const r = await k.run("process.exit(1)", 5, undefined);
+    assert.match(r.error ?? "", /disabled in eval cells/);
+    // env access via the prototype chain still works.
+    const env = await k.run("typeof process.env.PATH", 5, undefined);
+    assert.equal(env.value, "string");
   });
 
   it("globalThis / state does not enumerate tool scaffolding", async () => {

@@ -15,6 +15,27 @@ import type { CellResult, DisplayItem } from "./types";
 // installed npm packages (extensions' node_modules), or any absolute path.
 const cellRequire = createRequire(import.meta.url);
 
+// The JS kernel runs in-process, so cells share pi's own `process`. Cells
+// need it (env, cwd), but an accidental process.exit()/abort() would take
+// down the pi host itself — shadow those with throwing stubs. Not a security
+// boundary (require("process") bypasses it); it only catches the accident.
+const safeProcess = Object.create(process, {
+  exit: {
+    value: (code?: number) => {
+      throw new Error(
+        `process.exit(${code ?? ""}) is disabled in eval cells (it would kill the pi host); end the cell with a value instead`,
+      );
+    },
+  },
+  abort: {
+    value: () => {
+      throw new Error(
+        "process.abort() is disabled in eval cells (it would kill the pi host)",
+      );
+    },
+  },
+}) as NodeJS.Process;
+
 // Lets `await import("pkg")` inside a cell resolve through Node's real module
 // loader instead of throwing "dynamic import callback invoked without ...".
 // Guarded: only present on Node ≥ 20.10.
@@ -224,7 +245,7 @@ export class JsKernel {
       btoa,
       structuredClone,
       crypto,
-      process,
+      process: safeProcess,
       require: cellRequire,
       global: undefined as unknown,
     };

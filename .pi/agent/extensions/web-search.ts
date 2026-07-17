@@ -52,6 +52,7 @@ import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
 import TurndownService from "turndown";
 import { lookup as dnsLookup } from "node:dns/promises";
+import { exposeRegisteredToolsToEval } from "./shared/bridge-tools";
 import net from "node:net";
 import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -639,6 +640,7 @@ async function fetchOne(
 }
 
 export default function (pi: ExtensionAPI) {
+  exposeRegisteredToolsToEval(pi);
   pi.on("session_shutdown", () => {
     for (const promise of cloneCache.values()) {
       promise
