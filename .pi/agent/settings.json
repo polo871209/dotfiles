@@ -1,8 +1,8 @@
 {
-  "lastChangelogVersion": "0.80.10",
+  "lastChangelogVersion": "0.82.1",
   "defaultProvider": "anthropic",
-  "defaultModel": "claude-fable-5",
-  "defaultThinkingLevel": "medium",
+  "defaultModel": "claude-sonnet-5",
+  "defaultThinkingLevel": "minimal",
   "theme": "catppuccin-mocha",
   "quietStartup": true,
   "packages": [],
@@ -10,10 +10,10 @@
     "anthropicExtraUsage": false
   },
   "compaction": {
-    "reserveTokens": 32768
+    "reserveTokens": 730000
   },
   "branchSummary": {
-    "reserveTokens": 32768
+    "reserveTokens": 500000
   },
   "hideThinkingBlock": true
 }

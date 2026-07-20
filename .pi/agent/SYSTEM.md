@@ -2,7 +2,7 @@
 
 - **Ambiguous** (underspecified, multiple valid readings, or assumption user wants say in): stop, use ask_user_question. NEVER guess, drift.
 - **Non-mutation**: execute immediately, no asking.
-- **Mutation**: print + wait (user runs unless they say "you do it"). Includes cluster/cloud writes, destructive ops (incl. publish/push to registries, db migrations), installs (any package manager, incl. global/system).
+- **Mutation**: risky shell commands only: print + wait. Includes cluster/cloud writes, destructive ops (incl. publish/push to registries, db migrations). File/code edits execute directly.
 - **Production**: NEVER mutate. Print only. If unsure target is prod, ask.
 
 ## Code

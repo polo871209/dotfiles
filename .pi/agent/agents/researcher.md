@@ -2,7 +2,6 @@
 name: researcher
 description: 'FIRST CHOICE for unfamiliar EXTERNAL tech — libs/frameworks/concepts/third-party repos. Spawn turn 1; never inline web_search/fetch_content or shell-cat README to "orient" first. Pasted URL to unknown thing = research. Inline only for: known fact from known URL, iterative drilling, or verbatim quoting. If in doubt, delegate.'
 tools: web_search, fetch_content, code_search, read, grep, find, ls, bash
-model: anthropic/claude-sonnet-5
 thinking: low
 ---
 

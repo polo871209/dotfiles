@@ -10,6 +10,20 @@ vim.keymap.set({ 'n', 'i' }, '<C-.>', '<cmd>bnext<CR>', { desc = 'Next Buffer' }
 vim.keymap.set('n', '<leader>-', '<cmd>split<CR>', { desc = 'Horizontal Split' })
 vim.keymap.set('n', '<leader>|', '<cmd>vsplit<CR>', { desc = 'Vertical Split' })
 
+local pane_directions = {
+    { key = 'h', vim = 'h', tmux = '-L', name = 'Left' },
+    { key = 'j', vim = 'j', tmux = '-D', name = 'Down' },
+    { key = 'k', vim = 'k', tmux = '-U', name = 'Up' },
+    { key = 'l', vim = 'l', tmux = '-R', name = 'Right' },
+}
+for _, direction in ipairs(pane_directions) do
+    vim.keymap.set('n', '<C-' .. direction.key .. '>', function()
+        local window = vim.api.nvim_get_current_win()
+        vim.cmd('wincmd ' .. direction.vim)
+        if window == vim.api.nvim_get_current_win() and vim.env.TMUX then vim.fn.system { 'tmux', 'select-pane', direction.tmux } end
+    end, { desc = direction.name .. ' Pane' })
+end
+
 -- Paste without replacing clipboard
 vim.keymap.set('v', '<leader>p', '"_dP', { desc = 'Paste without replacing clipboard' })
 

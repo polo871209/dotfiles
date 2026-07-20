@@ -1,5 +1,3 @@
-# Config files
+# Repository boundary
 
-**ONLY modify files inside `/Users/ching-polo/dotfiles/`.**
-
-`~/.config/` (via GNU Stow) and `~/.pi` (via `just link`: `ln -sfn {{dotfiles}}/.pi ~/.pi`) are symlinks pointing back into this repo. `~/.pi` resolves to `/Users/ching-polo/dotfiles/.pi`. Always edit source files here, never the symlink targets.
+Make changes only through paths inside this checkout. `~/.config` and `~/.pi` may resolve here; use repository paths so scope is explicit.

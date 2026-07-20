@@ -76,12 +76,11 @@ kubens = "latest"
 "aqua:terraform-linters/tflint" = "latest"
 "github:DonIsaac/zlint" = "latest"
 "npm:eslint_d" = "latest"
-"npm:prettier" = "latest"
+"npm:@biomejs/biome" = "latest"
 prek = "latest"
 semgrep = "latest"
 
 # Other
-"npm:@colbymchenry/codegraph" = "latest"
 "npm:@earendil-works/pi-coding-agent" = "latest"
 ffmpeg = "latest"
 redis = "8.8.0"

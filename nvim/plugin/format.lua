@@ -13,10 +13,15 @@ vim.keymap.set('n', '<leader>m', function()
     vim.cmd 'TSJToggle'
 end, { desc = 'Toggle split/join' })
 
--- Use biome instead of prettier when biome config present in project
+-- Biome by default for code; Prettier owns Markdown and YAML because Biome
+-- does not format them yet. Other overlapping filetypes prefer Biome.
+local biome_configs = { 'biome.json', 'biome.jsonc' }
+local prettier_configs = { '.prettierrc', '.prettierrc.json', '.prettierrc.yaml', '.prettierrc.yml' }
 local function biome_or_prettier(bufnr)
-    if vim.fs.find({ 'biome.json', 'biome.jsonc' }, { upward = true, path = vim.api.nvim_buf_get_name(bufnr) })[1] then return { 'biome' } end
-    return { 'prettier' }
+    local path = vim.api.nvim_buf_get_name(bufnr)
+    if vim.fs.find(biome_configs, { upward = true, path = path })[1] then return { 'biome' } end
+    if vim.fs.find(prettier_configs, { upward = true, path = path })[1] then return { 'prettier' } end
+    return { 'biome' }
 end
 
 local format_on_save_enabled = true
@@ -40,13 +45,18 @@ require('conform').setup {
         json = biome_or_prettier,
         jsonnet = { 'jsonnetfmt' },
         lua = { 'stylua' },
-        markdown = biome_or_prettier,
+        markdown = { 'prettier' },
+        ['markdown.mdx'] = { 'prettier' },
+        mdx = { 'prettier' },
         protobuf = { 'buf' },
         python = { 'ruff_fix', 'ruff_format', 'ruff_organize_imports' },
         terraform = { 'terraform_fmt' },
         typescript = biome_or_prettier,
         typescriptreact = biome_or_prettier,
-        yaml = biome_or_prettier,
+        yaml = { 'prettier' },
+        ['yaml.docker-compose'] = { 'prettier' },
+        ['yaml.github'] = { 'prettier' },
+        ['yaml.gitlab'] = { 'prettier' },
         zig = { 'zigfmt' },
     },
     formatters = {
@@ -75,4 +85,3 @@ if not vim.g.pi_agent then
             :map '<leader>tf'
     end)
 end
-

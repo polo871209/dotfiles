@@ -3,7 +3,6 @@ name: reviewer
 description: "Read-only diff reviewer for the code-review skill. Hidden: invoked by name, not model-discovered."
 hidden: true
 tools: read, grep, find, ls, lsp_*, codegraph_*, bash
-model: anthropic/claude-sonnet-5
 thinking: low
 ---
 
