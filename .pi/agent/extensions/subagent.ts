@@ -10,7 +10,6 @@
 //   name: scout
 //   description: ...
 //   tools: read, grep, find, ls       # optional --tools allowlist
-//   model: anthropic/claude-haiku-4-5  # optional
 //   thinking: low                      # optional
 //   maxDuration: 600                   # optional, seconds (wall-clock cap)
 //   ---
@@ -47,10 +46,14 @@ interface AgentConfig {
   description: string;
   hidden: boolean;
   tools: string[];
-  model?: string;
   thinking?: string;
   maxDurationMs?: number;
   systemPrompt: string;
+}
+
+interface ModelRoutingConfig {
+  inherit: string[];
+  providers: Record<string, string>;
 }
 
 interface Progress {
@@ -66,11 +69,12 @@ interface Progress {
 }
 
 const AGENTS_DIR = path.join(getAgentDir(), "agents");
+const MODEL_MAP_PATH = path.join(AGENTS_DIR, "model-map.json");
 const MAX_OUTPUT_BYTES = 32 * 1024;
 const UPDATE_INTERVAL_MS = 150;
 const TASK_PREVIEW_MAX = 140;
 const FORBIDDEN_TOOLS = new Set(["subagent"]);
-const DEFAULT_MAX_DURATION_MS = 600_000;
+const DEFAULT_MAX_DURATION_MS = 3_600_000;
 const TMUX_POLL_MS = 500;
 
 const execFileAsync = promisify(execFile);
@@ -277,7 +281,6 @@ function loadAgents(): AgentConfig[] {
       description: frontmatter.description,
       hidden: frontmatter.hidden === true,
       tools,
-      model: str(frontmatter.model),
       thinking: str(frontmatter.thinking),
       maxDurationMs: secsToMs(frontmatter.maxDuration),
       // Only the agent's own .md content — no shared preamble (SYSTEM.md is
@@ -288,6 +291,13 @@ function loadAgents(): AgentConfig[] {
     });
   }
   return out;
+}
+
+function loadModelRouting(): ModelRoutingConfig {
+  const parsed = JSON.parse(
+    fs.readFileSync(MODEL_MAP_PATH, "utf-8"),
+  ) as ModelRoutingConfig;
+  return parsed;
 }
 
 const formatDuration = (ms: number): string => {
@@ -351,19 +361,17 @@ function throttle<F extends (...args: never[]) => void>(fn: F, ms: number): F {
   }) as F;
 }
 
-const buildParams = (agents: AgentConfig[]) =>
+const buildParams = () =>
   Type.Object({
-    agent: Type.Union(
-      agents.map((a) => Type.Literal(a.name)),
-      { description: "Which subagent to dispatch" },
-    ),
+    agent: Type.String({ description: "Which subagent to dispatch" }),
     task: Type.String({
       description:
         "Self-contained task description. Include all context the agent needs — file paths, constraints, expected output format.",
     }),
+    model: Type.Optional(Type.String()),
   });
 
-type SubagentArgs = { agent: string; task: string };
+type SubagentArgs = { agent: string; task: string; model?: string };
 
 const statusIcon = (theme: Theme, p: Progress): string => {
   if (p.status === "running") return theme.fg("warning", "⟳");
@@ -459,6 +467,7 @@ async function runInTmux(
   pi: ExtensionAPI,
   agent: AgentConfig,
   task: string,
+  model: string | undefined,
   cwd: string,
   progress: Progress,
   push: () => void,
@@ -496,7 +505,7 @@ async function runInTmux(
     `--system-prompt "$(cat '${sysFile}')"`,
   ];
   if (toolsFlag) parts.push(`--tools ${toolsFlag}`);
-  if (agent.model) parts.push(`--model ${agent.model}`);
+  if (model) parts.push(`--model '${model.replaceAll("'", "'\\''")}'`);
   if (agent.thinking) parts.push(`--thinking ${agent.thinking}`);
   parts.push(`"$(cat '${taskFile}')"`);
   // Real interactive pi, not --print: the task is the initial prompt, then
@@ -640,6 +649,7 @@ export default function (pi: ExtensionAPI) {
 
   const agents = loadAgents();
   if (agents.length === 0) return;
+  const modelRouting = loadModelRouting();
   const byName = new Map(agents.map((a) => [a.name, a]));
   // Hidden agents stay invocable (they're in the param enum) but pay no
   // per-turn description cost — a skill that knows the name invokes them.
@@ -648,7 +658,7 @@ export default function (pi: ExtensionAPI) {
     .map((a) => `  ${a.name}: ${a.description}`)
     .join("\n");
 
-  const params = buildParams(agents);
+  const params = buildParams();
 
   pi.registerTool<typeof params, Progress | undefined>({
     name: "subagent",
@@ -685,11 +695,17 @@ export default function (pi: ExtensionAPI) {
         };
       }
 
-      const progress = initialProgress(
-        agent,
-        args.task,
-        agent.model ?? "default",
-      );
+      const parentModel = ctx.model
+        ? `${ctx.model.provider}/${ctx.model.id}`
+        : undefined;
+      const model =
+        args.model ??
+        (modelRouting.inherit.includes(agent.name)
+          ? parentModel
+          : ((ctx.model && modelRouting.providers[ctx.model.provider]) ??
+            parentModel));
+
+      const progress = initialProgress(agent, args.task, model ?? "default");
 
       // Throttled push so render redraws don't pile up under fast event bursts.
       const pushNow = () => {
@@ -705,6 +721,7 @@ export default function (pi: ExtensionAPI) {
         pi,
         agent,
         args.task,
+        model,
         ctx.cwd,
         progress,
         push,

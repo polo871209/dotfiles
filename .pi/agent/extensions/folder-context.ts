@@ -6,12 +6,23 @@
 //
 // Priority per dir: AGENTS.md > CLAUDE.md. README.md is intentionally NOT a
 // candidate — it's unbounded prose, and as steer context it rides every
-// subsequent turn. A candidate re-injects only if its on-disk mtime changed
-// since last load (picks up edits).
+// subsequent turn. A candidate is loaded at most once per session (mtime
+// changes mid-session are not picked up — restart to refresh).
+//
+// Injection rides the `context` hook (fires before every LLM call, including
+// mid-turn calls after a tool result), not before_agent_start (fires once
+// per outer user turn, before the tool loop starts) or a one-off steer
+// message (ages into buried history). Appending on `context` means a folder
+// discovered by tool N is visible to the LLM call that follows tool N —
+// same turn, no need to wait for the next user prompt. (before_agent_start
+// would land in the literal system-prompt string, but pi serializes these
+// custom messages as role "user" either way, so that purity buys nothing
+// — not worth trading away same-turn immediacy for.)
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { CustomMessage } from "@earendil-works/pi-agent-core";
 
 const CANDIDATES = ["AGENTS.md", "CLAUDE.md"] as const;
 const TARGET_TOOLS = new Set(["read", "edit", "write", "grep", "find", "ls"]);
@@ -21,29 +32,28 @@ export default function (pi: ExtensionAPI) {
   // ambient repo docs injected mid-run.
   if (process.env.PI_IS_SUBAGENT === "1") return;
 
-  // candidate abs path → mtimeMs at last injection
-  const injected = new Map<string, number>();
-  // Contents collected during tool_result hooks, flushed at turn_end. Sending
-  // steer messages from tool_result directly is unsafe with parallel tool
-  // calls: the message lands between the assistant tool_use block and its
-  // sibling tool_results, which Anthropic rejects (400: unexpected
-  // tool_use_id in tool_result blocks).
-  const pending: string[] = [];
+  // candidate abs path → true once loaded (never reloaded, even on edit)
+  const injected = new Set<string>();
+  // Accumulated blocks, resent in full on every `context` call (not stored in
+  // session history) so the rule stays present for as long as the session
+  // cares about that folder, without waiting for the next user turn.
+  const blocks: string[] = [];
 
   pi.on("session_start", () => {
     injected.clear();
-    pending.length = 0;
+    blocks.length = 0;
   });
 
-  pi.on("turn_end", async () => {
-    // All of this turn's tool_results are recorded by now, so a steer message
-    // here lands after them — valid position for the next provider request.
-    for (const content of pending.splice(0)) {
-      pi.sendMessage(
-        { customType: "folder-context", content, display: false },
-        { deliverAs: "steer" },
-      );
-    }
+  pi.on("context", (event) => {
+    if (!blocks.length) return;
+    const msg: CustomMessage = {
+      role: "custom",
+      customType: "folder-context",
+      content: blocks.join("\n\n"),
+      display: false,
+      timestamp: Date.now(),
+    };
+    return { messages: [...event.messages, msg] };
   });
 
   pi.on("tool_result", async (event, ctx) => {
@@ -82,22 +92,16 @@ export default function (pi: ExtensionAPI) {
       for (const name of CANDIDATES) {
         const candidate = resolve(d, name);
         if (!existsSync(candidate)) continue;
-        let mtime: number;
-        try {
-          mtime = statSync(candidate).mtimeMs;
-        } catch {
-          break;
-        }
-        if (injected.get(candidate) === mtime) break; // already loaded, unchanged
+        if (injected.has(candidate)) break; // already loaded this session
 
-        injected.set(candidate, mtime);
         try {
           const content = readFileSync(candidate, "utf-8");
-          pending.push(
+          injected.add(candidate);
+          blocks.push(
             `Folder context loaded from \`${candidate}\`:\n\n${content}`,
           );
         } catch {
-          injected.delete(candidate); // allow retry on next call
+          // allow retry on next call
         }
         break; // first match in this dir wins
       }

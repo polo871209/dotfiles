@@ -1,3 +1,4 @@
+brew "cocoapods"
 brew "git"
 brew "imagemagick"
 brew "libpq"
@@ -12,6 +13,7 @@ brew "watch"
 brew "zsh-autosuggestions"
 brew "zsh-syntax-highlighting"
 cask "alt-tab"
+cask "android-studio"
 cask "betterdisplay"
 cask "dbeaver-community"
 cask "font-fira-code-nerd-font"
@@ -31,3 +33,4 @@ cask "telegram"
 cask "whatsapp"
 cask "zen"
 mas "PDFgear 2", id: 6469021132
+mas "Xcode", id: 497799835

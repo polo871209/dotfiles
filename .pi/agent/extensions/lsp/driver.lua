@@ -349,16 +349,16 @@ function M.diagnostics(files)
     end
     local last = -1
     local stable = 0
+    local start = vim.uv.hrtime()
+    -- fast linters (eslint_d, ...) spawn a subprocess async and take a beat
+    -- to post; two back-to-back polls can both read 0 before that lands,
+    -- so require a time floor too, not just a stable-count, before exiting.
     vim.wait(3000, function()
         local n = total_diags()
-        if n == last then
-            stable = stable + 1
-            if stable >= 2 then return true end
-        else
-            stable = 0
-        end
+        stable = (n == last) and (stable + 1) or 0
         last = n
-        return false
+        local elapsed_ms = (vim.uv.hrtime() - start) / 1e6
+        return stable >= 2 and elapsed_ms >= 300
     end, 150)
     for _, bufnr in ipairs(opened) do
         if vim.api.nvim_buf_is_valid(bufnr) then

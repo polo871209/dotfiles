@@ -2,6 +2,9 @@ vim.pack.add { 'https://github.com/mfussenegger/nvim-lint' }
 
 local lint = require 'lint'
 
+local golangcilint = lint.linters.golangcilint
+golangcilint.args[#golangcilint.args] = function() return vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ':h') end
+
 -- semgrep: free SAST. `--config auto` pulls registry rules (cached after first
 -- fetch). Not built into nvim-lint, so define it.
 local semgrep_sev = {
@@ -84,12 +87,43 @@ lint.linters.zlint = {
     end,
 }
 
+-- eslint_d: nvim-lint runs it in nvim's cwd, not the buffer's directory.
+-- In a monorepo (config lives in a subpackage, e.g. apps/web/eslint.config.mjs,
+-- not repo root) that cwd has no config in its upward search path, so eslint_d
+-- silently reports nothing — nvim-lint's own parser even swallows the "Could
+-- not find config file" error. Resolve the nearest eslint.config.* / .eslintrc*
+-- and cd there before running.
+local function eslint_root()
+    local file = vim.api.nvim_buf_get_name(0)
+    local found = vim.fs.find(
+        { 'eslint.config.js', 'eslint.config.mjs', 'eslint.config.cjs', 'eslint.config.ts', '.eslintrc.json', '.eslintrc.js', '.eslintrc.cjs', '.eslintrc' },
+        { path = vim.fs.dirname(file), upward = true }
+    )[1]
+    return found and vim.fs.dirname(found) or vim.fn.getcwd()
+end
+
+lint.linters.eslint_d.cmd = 'sh'
+lint.linters.eslint_d.args = {
+    '-c',
+    'cd "$1" && shift && exec eslint_d "$@"',
+    'sh',
+    eslint_root,
+    '--format',
+    'json',
+    '--stdin',
+    '--stdin-filename',
+    function() return vim.api.nvim_buf_get_name(0) end,
+}
+
 lint.linters_by_ft = {
     dockerfile = { 'hadolint' },
     go = { 'golangcilint', 'semgrep' },
     python = { 'ruff', 'semgrep' },
     terraform = { 'tflint' },
     typescript = { 'eslint_d', 'semgrep' },
+    typescriptreact = { 'eslint_d', 'semgrep' },
+    javascript = { 'eslint_d' },
+    javascriptreact = { 'eslint_d' },
     zig = { 'zlint' },
 }
 

@@ -8,6 +8,10 @@ export LESS=-iRFX
 # Go
 export GOPATH="$HOME/go"
 
+# Android
+export ANDROID_HOME="$HOME/Library/Android/sdk"
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+
 # Google Cloud
 export CLOUDSDK_CONFIG="$HOME/.gcloud"
 export CLOUDSDK_PYTHON="$HOME/.local/share/mise/shims/python3"

@@ -81,7 +81,6 @@ prek = "latest"
 semgrep = "latest"
 
 # Other
-"npm:@colbymchenry/codegraph" = "latest"
 "npm:@earendil-works/pi-coding-agent" = "latest"
 ffmpeg = "latest"
 redis = "8.8.0"
