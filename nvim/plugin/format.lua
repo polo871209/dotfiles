@@ -1,6 +1,10 @@
----@diagnostic disable: unused-local
----@diagnostic disable-next-line: unused-local
-vim.pack.add { 'https://github.com/stevearc/conform.nvim' }
+-- guess-indent runs in both lanes so agent edits match each file's existing
+-- indent style (agent nvim has no other plugin that detects this).
+vim.pack.add {
+    'https://github.com/stevearc/conform.nvim',
+    'https://github.com/NMAC427/guess-indent.nvim',
+}
+require('guess-indent').setup {}
 
 -- Lazy-load treesj behind its only keymap (~9ms off cold startup).
 local treesj_loaded = false
@@ -13,8 +17,12 @@ vim.keymap.set('n', '<leader>m', function()
     vim.cmd 'TSJToggle'
 end, { desc = 'Toggle split/join' })
 
--- Biome by default for code; Prettier owns Markdown and YAML because Biome
--- does not format them yet. Other overlapping filetypes prefer Biome.
+-- Biome by default (its defaults already match Prettier's: double quotes,
+-- semicolons, trailing commas, arrow parens; indent style/width conform
+-- passes explicitly to match the buffer). Prettier only when a project opts
+-- into it via config, or for Markdown/YAML which Biome doesn't format yet.
+-- Prettier itself is not installed globally, so it only works inside
+-- projects with a local node_modules/prettier.
 local biome_configs = { 'biome.json', 'biome.jsonc' }
 local prettier_configs = { '.prettierrc', '.prettierrc.json', '.prettierrc.yaml', '.prettierrc.yml' }
 local function biome_or_prettier(bufnr)
@@ -26,10 +34,20 @@ end
 
 local format_on_save_enabled = true
 
+-- Never format vendored/lock/skill content, regardless of filetype.
+local ignore_patterns = { '/node_modules/', '/%.agents/skills/', '%.lock$' }
+local function is_ignored(bufnr)
+    local path = vim.api.nvim_buf_get_name(bufnr)
+    for _, pattern in ipairs(ignore_patterns) do
+        if path:match(pattern) then return true end
+    end
+    return false
+end
+
 require('conform').setup {
     notify_on_error = false,
     format_on_save = function(bufnr)
-        if not format_on_save_enabled then return end
+        if not format_on_save_enabled or is_ignored(bufnr) then return end
         return { timeout_ms = 1500, lsp_format = 'fallback' }
     end,
     formatters_by_ft = {
@@ -50,6 +68,7 @@ require('conform').setup {
         mdx = { 'prettier' },
         protobuf = { 'buf' },
         python = { 'ruff_fix', 'ruff_format', 'ruff_organize_imports' },
+        sql = { 'sqlfluff' },
         terraform = { 'terraform_fmt' },
         typescript = biome_or_prettier,
         typescriptreact = biome_or_prettier,
@@ -66,10 +85,16 @@ require('conform').setup {
         jsonnetfmt = {
             args = { '--indent', '0', '--max-blank-lines', '2', '--sort-imports', '--string-style', 's', '--comment-style', 's', '--no-pad-objects', '-' },
         },
+        sqlfluff = {
+            require_cwd = false,
+        },
     },
 }
 
-vim.keymap.set('', '<leader>f', function() require('conform').format { async = true, lsp_format = 'fallback' } end, { desc = '[F]ormat buffer' })
+vim.keymap.set('', '<leader>f', function()
+    if is_ignored(0) then return end
+    require('conform').format { async = true, lsp_format = 'fallback' }
+end, { desc = '[F]ormat buffer' })
 
 -- Agent nvim skips snacks (see plugin/snacks.lua); an unguarded require here
 -- errors inside the scheduled callback during --embed startup and wedges the

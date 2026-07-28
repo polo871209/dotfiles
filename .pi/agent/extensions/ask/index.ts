@@ -76,7 +76,7 @@ export function registerAskUserQuestionTool(pi: ExtensionAPI): void {
     ],
     parameters: QuestionParamsSchema,
 
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const raw = params as unknown as QuestionParams;
       if (!ctx.hasUI)
         return buildToolResult(ERROR_NO_UI, {
@@ -103,16 +103,24 @@ export function registerAskUserQuestionTool(pi: ExtensionAPI): void {
       // Inline (non-overlay): replaces the editor instead of floating over the
       // scrollback, so the conversation stays visible and is pushed up above the
       // dialog rather than hidden behind it.
+      // Turn abort must tear the dialog down instead of leaving it waiting
+      // for an answer that no longer has a consumer.
+      let onAbort: (() => void) | undefined;
       const result = await ctx.ui.custom<QuestionnaireResult>(
-        (tui, theme, _kb, done) =>
-          new QuestionnaireSession({
+        (tui, theme, _kb, done) => {
+          onAbort = () => done({ answers: [], cancelled: true });
+          if (signal?.aborted) onAbort();
+          else signal?.addEventListener("abort", onAbort, { once: true });
+          return new QuestionnaireSession({
             tui,
             theme,
             params: typed,
             itemsByTab,
             done,
-          }).component,
+          }).component;
+        },
       );
+      if (signal && onAbort) signal.removeEventListener("abort", onAbort);
 
       return buildQuestionnaireResponse(result, typed);
     },

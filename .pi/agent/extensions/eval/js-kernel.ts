@@ -182,6 +182,11 @@ export class JsKernel {
   #opts: JsKernelOptions;
   #ctxState: ContextState | null = null;
   #disposed = false;
+  // Bumped whenever a context is discarded (timeout/reset/dispose). A hung
+  // async cell keeps executing in the old context — this fences its tool
+  // proxy so it can't keep firing real bridge calls (bash/write/edit) after
+  // the cell already returned a timeout to the model.
+  #generation = 0;
 
   constructor(opts: JsKernelOptions) {
     this.#opts = opts;
@@ -193,6 +198,7 @@ export class JsKernel {
 
   #buildContext(capture: Capture, tick: () => void): ContextState {
     const { bridgeUrl, bridgeToken, bridgeSession } = this.#opts;
+    const gen = this.#generation;
     const toolProxy = new Proxy(
       {},
       {
@@ -202,6 +208,11 @@ export class JsKernel {
           // util.inspect, and any V8 dev tooling that probes objects.
           if (TOOL_RESERVED.has(name)) return undefined;
           return async (args: unknown) => {
+            if (this.#generation !== gen) {
+              throw new Error(
+                `tool.${name} blocked: this cell's context was discarded (timed out or reset)`,
+              );
+            }
             const res = await fetch(`${bridgeUrl}/v1/tool`, {
               method: "POST",
               headers: {
@@ -346,9 +357,10 @@ export class JsKernel {
       if (e && /Script execution timed out/i.test(e.message)) {
         result.timedOut = true;
         // The async IIFE may still be running against this context (e.g. a
-        // hung fetch) with no way to cancel it — discard the context so it
-        // can't keep mutating state or calling tools after this cell ends.
+        // hung fetch) with no way to cancel it — discard the context and
+        // bump the generation so its tool proxy goes dead too.
         this.#ctxState = null;
+        this.#generation++;
       }
       result.error = e?.stack ?? String(err);
     } finally {
@@ -368,10 +380,12 @@ export class JsKernel {
 
   reset(): void {
     this.#ctxState = null;
+    this.#generation++;
   }
 
   dispose(): void {
     this.#disposed = true;
     this.#ctxState = null;
+    this.#generation++;
   }
 }

@@ -39,11 +39,14 @@ export default function (pi: ExtensionAPI) {
   // Files pushed from nvim arrive as a custom message so the LLM gets full
   // content (convertToLlm maps custom -> user) while the TUI shows one compact
   // line. The file body lives in the user's editor, so we never expand it here.
-  pi.registerMessageRenderer("nvim-file", (message, _opts, theme) => {
+  pi.registerMessageRenderer("nvim-file", (message, opts, theme) => {
     const d = message.details as
-      { path: string; sline: number; eline: number } | undefined;
+      | { path: string; sline: number; eline: number }
+      | undefined;
     const label = d ? `${d.path} (L${d.sline}-${d.eline})` : "file context";
-    const box = new Box(0, 1, (t) => theme.bg("customMessageBg", t));
+    const box = new Box(0, opts.outputPad, (t) =>
+      theme.bg("customMessageBg", t),
+    );
     box.addChild(new Text(theme.fg("accent", label), 0, 0));
     return box;
   });

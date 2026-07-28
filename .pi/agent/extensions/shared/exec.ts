@@ -9,14 +9,21 @@ export interface ExecResult {
   code: number;
 }
 
+// Always bounded: without a default cap, a hung child (e.g. `gh` waiting on
+// auth) hangs the awaiting tool call forever when the caller passes no signal.
+const DEFAULT_TIMEOUT_MS = 120_000;
+
 export function run(
   cmd: string,
   args: string[],
   signal?: AbortSignal,
   cwd?: string,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<ExecResult> {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { cwd, signal });
+    const child = spawn(cmd, args, { cwd, signal: combined });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (d: Buffer) => (stdout += d.toString()));

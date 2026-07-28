@@ -1,8 +1,6 @@
--- Line numbers
 vim.o.number = true
 vim.o.relativenumber = true
 
--- Enable mouse
 vim.o.mouse = 'a'
 
 -- Hide mode display (shown in status line)
@@ -14,23 +12,18 @@ vim.schedule(function() vim.o.clipboard = 'unnamedplus' end)
 -- Indentation
 vim.o.breakindent = true
 
--- Persistent undo
 vim.o.undofile = true
 
--- Disable swap files
 vim.o.swapfile = false
 
 -- Smart case-insensitive search
 vim.o.ignorecase = true
 vim.o.smartcase = true
 
--- Always show sign column
 vim.o.signcolumn = 'yes'
 
--- Faster update time
 vim.o.updatetime = 250
 
--- Faster key sequence timeout
 vim.o.timeoutlen = 300
 
 -- Split directions
@@ -44,13 +37,11 @@ vim.opt.listchars = { trail = '·', nbsp = '␣', tab = '» ' }
 -- Live substitution preview
 vim.o.inccommand = 'split'
 
--- Highlight cursor line
 vim.o.cursorline = true
 
 -- Scroll padding
 vim.o.scrolloff = 30
 
--- Disable line wrap
 vim.o.wrap = false
 
 -- Hide status line
@@ -106,7 +97,6 @@ vim.filetype.add {
     extension = { bzl = 'bzl' },
 }
 
--- Highlight on yank
 vim.api.nvim_create_autocmd('TextYankPost', {
     desc = 'Highlight when yanking text',
     group = vim.api.nvim_create_augroup('kickstart-highlight-yank', { clear = true }),

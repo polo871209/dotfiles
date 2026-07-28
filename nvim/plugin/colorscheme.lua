@@ -17,4 +17,4 @@ require('catppuccin').setup {
 }
 
 vim.cmd.colorscheme 'catppuccin-mocha'
-vim.cmd.hi 'Comment gui=none' -- Remove italic from comments
+vim.cmd.hi 'Comment gui=none'

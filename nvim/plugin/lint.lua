@@ -119,6 +119,7 @@ lint.linters_by_ft = {
     dockerfile = { 'hadolint' },
     go = { 'golangcilint', 'semgrep' },
     python = { 'ruff', 'semgrep' },
+    sql = { 'sqlfluff' },
     terraform = { 'tflint' },
     typescript = { 'eslint_d', 'semgrep' },
     typescriptreact = { 'eslint_d', 'semgrep' },

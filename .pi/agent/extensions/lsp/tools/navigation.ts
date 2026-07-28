@@ -1,7 +1,8 @@
-import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import {
   anchorGuidelines,
+  anchorParams,
+  capText,
   formatLocations,
   runNavTool,
   type DriverErr,
@@ -11,17 +12,6 @@ import {
 interface DriverLocResult extends DriverErr {
   locations?: LspLocation[];
 }
-
-const anchorParams = Type.Object({
-  file: Type.String({ description: "Abs or cwd-relative." }),
-  line: Type.Number({ minimum: 1, description: "1-indexed line number." }),
-  symbol: Type.Optional(
-    Type.String({
-      description:
-        "Substring on the line to anchor the column. Omit to use the first non-whitespace token.",
-    }),
-  ),
-});
 
 export const implementationTool = defineTool({
   name: "lsp_implementation",
@@ -42,9 +32,10 @@ export const implementationTool = defineTool({
       onUpdate,
       (res, cwd) => {
         const locs = res.locations ?? [];
+        const t = capText(formatLocations(locs, cwd, "implementation(s)"));
         return {
-          text: formatLocations(locs, cwd, "implementation(s)"),
-          details: { count: locs.length },
+          text: t.text,
+          details: { count: locs.length, truncated: t.truncated },
         };
       },
     );
@@ -70,9 +61,10 @@ export const typeDefinitionTool = defineTool({
       onUpdate,
       (res, cwd) => {
         const locs = res.locations ?? [];
+        const t = capText(formatLocations(locs, cwd, "type definition(s)"));
         return {
-          text: formatLocations(locs, cwd, "type definition(s)"),
-          details: { count: locs.length },
+          text: t.text,
+          details: { count: locs.length, truncated: t.truncated },
         };
       },
     );

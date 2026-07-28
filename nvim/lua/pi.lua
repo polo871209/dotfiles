@@ -1,5 +1,5 @@
 -- Send selections / diagnostics from neovim to a pi instance running in the
--- same tmux session. Requires .pi/extensions/tmux-bridge.ts to be loaded in
+-- same tmux session. Requires .pi/agent/extensions/tmux-bridge.ts to be loaded in
 -- pi, which exposes a Unix socket per pi pane at
 -- $TMPDIR/pi-tmux-pane-<sanitized-pane-id>.sock. Multiple pi panes in the
 -- session -> vim.ui.select to pick one.
@@ -101,7 +101,7 @@ local function resolve_socket(cb)
         if sock then table.insert(live, { pane_id = p.pane_id, window_name = p.window_name, sock = sock }) end
     end
     if #live == 0 then
-        notify('No pi listener found in this tmux session. Is .pi/extensions/tmux-bridge.ts loaded?', vim.log.levels.ERROR)
+        notify('No pi listener found in this tmux session. Is .pi/agent/extensions/tmux-bridge.ts loaded?', vim.log.levels.ERROR)
         cb(nil)
         return
     end

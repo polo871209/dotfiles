@@ -1,11 +1,42 @@
 // Shared formatting + path helpers for navigation tools.
 
 import * as path from "node:path";
-import type {
-  AgentToolResult,
-  ExtensionContext,
+import {
+  DEFAULT_MAX_BYTES,
+  DEFAULT_MAX_LINES,
+  truncateHead,
+  type AgentToolResult,
+  type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import { callDriver } from "./nvim";
+
+// The {file, line, symbol} anchor schema shared by every anchor-based nav
+// tool (hover/definition/references/implementation/type_definition).
+export const anchorParams = Type.Object({
+  file: Type.String({ description: "Abs or cwd-relative." }),
+  line: Type.Number({ minimum: 1, description: "1-indexed line number." }),
+  symbol: Type.Optional(
+    Type.String({
+      description:
+        "Substring on the line to anchor the column. Omit to use the first non-whitespace token.",
+    }),
+  ),
+});
+
+// Cap tool output at pi's default budgets so an unbounded LSP response
+// (overload-heavy definitions, giant hover docs) can't flood agent context.
+export const capText = (full: string): { text: string; truncated: boolean } => {
+  const t = truncateHead(full, {
+    maxLines: DEFAULT_MAX_LINES,
+    maxBytes: DEFAULT_MAX_BYTES,
+  });
+  let text = t.content;
+  if (t.truncated) {
+    text += `\n\n[truncated: shown ${t.outputLines}/${t.totalLines} lines]`;
+  }
+  return { text, truncated: t.truncated };
+};
 
 export interface LspLocation {
   file: string;

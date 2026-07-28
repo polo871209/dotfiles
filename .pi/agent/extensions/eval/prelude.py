@@ -49,7 +49,7 @@ def display(value):
 
 
 class _ToolCallable:
-    __slots__ = ("_proxy", "_name")
+    __slots__ = ("_name", "_proxy")
 
     def __init__(self, proxy, name):
         self._proxy = proxy
@@ -103,7 +103,7 @@ class _ToolCallable:
 
 
 class _ToolProxy:
-    __slots__ = ("_base", "_token", "_session")
+    __slots__ = ("_base", "_session", "_token")
 
     def __init__(self, base, token, session):
         self._base = base.rstrip("/")

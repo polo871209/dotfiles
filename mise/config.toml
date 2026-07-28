@@ -79,6 +79,7 @@ kubens = "latest"
 "npm:@biomejs/biome" = "latest"
 prek = "latest"
 semgrep = "latest"
+"pipx:sqlfluff" = "latest"
 
 # Other
 "npm:@earendil-works/pi-coding-agent" = "latest"

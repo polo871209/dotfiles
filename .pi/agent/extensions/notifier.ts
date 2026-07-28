@@ -326,17 +326,28 @@ const playSound = (): void => {
 // would fight over one name with two writers. Subagent panes set their own
 // pane title instead (per-pane, `select-pane -T`) — invisible to the user,
 // but subagent.ts polls it to know when that pane's turn finished.
+// Calls happen back-to-back within a single tick (e.g. busy -> blocked while
+// handling ask_user_question). execFile is async, so without serialization a
+// later status's tmux process could finish before an earlier one's, letting
+// the stale status win and leave the tab stuck. Chain them so tmux always
+// applies them in call order.
+let windowStatusChain: Promise<void> = Promise.resolve();
 const setWindowStatus = (status: AgentStatus): void => {
   const pane = process.env.TMUX_PANE;
   if (!pane) return;
   const title = statusTitle(status);
-  execFile(
-    "tmux",
-    IS_SUBAGENT
-      ? ["select-pane", "-t", pane, "-T", title]
-      : ["rename-window", "-t", pane, title],
-    { timeout: 2000 },
-    () => {},
+  windowStatusChain = windowStatusChain.then(
+    () =>
+      new Promise((resolve) => {
+        execFile(
+          "tmux",
+          IS_SUBAGENT
+            ? ["select-pane", "-t", pane, "-T", title]
+            : ["rename-window", "-t", pane, title],
+          { timeout: 2000 },
+          () => resolve(),
+        );
+      }),
   );
 };
 

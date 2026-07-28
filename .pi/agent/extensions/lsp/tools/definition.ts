@@ -1,7 +1,8 @@
-import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
 import {
   anchorGuidelines,
+  anchorParams,
+  capText,
   formatLocations,
   runNavTool,
   type DriverErr,
@@ -21,19 +22,7 @@ export const definitionTool = defineTool({
   promptGuidelines: anchorGuidelines(
     "Use lsp_definition to locate where a symbol is declared before modifying it or reading wider source.",
   ),
-  parameters: Type.Object({
-    file: Type.String({ description: "Abs or cwd-relative." }),
-    line: Type.Number({
-      minimum: 1,
-      description: "1-indexed line number.",
-    }),
-    symbol: Type.Optional(
-      Type.String({
-        description:
-          "Substring on the line to anchor the column. Omit to use the first non-whitespace token.",
-      }),
-    ),
-  }),
+  parameters: anchorParams,
   async execute(_id, params, signal, onUpdate, ctx) {
     return runNavTool<DriverLocResult>(
       "definition",
@@ -43,9 +32,10 @@ export const definitionTool = defineTool({
       onUpdate,
       (res, cwd) => {
         const locs = res.locations ?? [];
+        const t = capText(formatLocations(locs, cwd, "definition(s)"));
         return {
-          text: formatLocations(locs, cwd, "definition(s)"),
-          details: { count: locs.length },
+          text: t.text,
+          details: { count: locs.length, truncated: t.truncated },
         };
       },
     );

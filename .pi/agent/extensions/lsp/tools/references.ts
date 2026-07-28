@@ -1,12 +1,8 @@
-import { Type } from "typebox";
-import {
-  DEFAULT_MAX_BYTES,
-  DEFAULT_MAX_LINES,
-  defineTool,
-  truncateHead,
-} from "@earendil-works/pi-coding-agent";
+import { defineTool } from "@earendil-works/pi-coding-agent";
 import {
   anchorGuidelines,
+  anchorParams,
+  capText,
   formatLocations,
   runNavTool,
   type DriverErr,
@@ -26,19 +22,7 @@ export const referencesTool = defineTool({
   promptGuidelines: anchorGuidelines(
     "Use lsp_references before renaming or changing a function's signature to find every caller.",
   ),
-  parameters: Type.Object({
-    file: Type.String({ description: "Abs or cwd-relative." }),
-    line: Type.Number({
-      minimum: 1,
-      description: "1-indexed line number.",
-    }),
-    symbol: Type.Optional(
-      Type.String({
-        description:
-          "Substring on the line to anchor the column. Omit to use the first non-whitespace token.",
-      }),
-    ),
-  }),
+  parameters: anchorParams,
   async execute(_id, params, signal, onUpdate, ctx) {
     return runNavTool<DriverLocResult>(
       "references",
@@ -48,17 +32,9 @@ export const referencesTool = defineTool({
       onUpdate,
       (res, cwd) => {
         const locs = res.locations ?? [];
-        const full = formatLocations(locs, cwd, "reference(s)");
-        const t = truncateHead(full, {
-          maxLines: DEFAULT_MAX_LINES,
-          maxBytes: DEFAULT_MAX_BYTES,
-        });
-        let text = t.content;
-        if (t.truncated) {
-          text += `\n\n[truncated: shown ${t.outputLines}/${t.totalLines} lines]`;
-        }
+        const t = capText(formatLocations(locs, cwd, "reference(s)"));
         return {
-          text,
+          text: t.text,
           details: { count: locs.length, truncated: t.truncated },
         };
       },

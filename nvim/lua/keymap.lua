@@ -24,7 +24,6 @@ for _, direction in ipairs(pane_directions) do
     end, { desc = direction.name .. ' Pane' })
 end
 
--- Paste without replacing clipboard
 vim.keymap.set('v', '<leader>p', '"_dP', { desc = 'Paste without replacing clipboard' })
 
 -- Delete/change without yanking (dd, diw, ciw, etc.)
@@ -97,7 +96,6 @@ local function get_run_cmd()
     return cmd, root
 end
 
--- <leader>rf: Run in floating terminal
 local last_run_term = nil
 vim.keymap.set('n', '<leader>rf', function()
     vim.cmd 'w'
@@ -119,7 +117,6 @@ vim.keymap.set('n', '<leader>rf', function()
     })
 end, { desc = '[R]un [F]loat' })
 
--- <leader>rr: Run in next tmux window
 vim.keymap.set('n', '<leader>rr', function()
     vim.cmd 'w'
     if vim.env.TMUX == nil then

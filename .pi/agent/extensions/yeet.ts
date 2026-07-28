@@ -2,12 +2,9 @@
 // (does NOT pollute main conversation). Leaves a short marker entry in
 // history after success.
 
-import {
-  BorderedLoader,
-  type ExtensionAPI,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Box, Text } from "@earendil-works/pi-tui";
-import { sideChannelComplete } from "./shared/llm";
+import { sideChannelWithLoader } from "./shared/llm";
 
 const MSG_PROMPT =
   "Write a Conventional Commits message for the diff. Terse and exact: no fluff, why over what. The diff is the only source of truth for WHAT changed — base the subject and body entirely on it. A user hint (if present) may ONLY be consulted to disambiguate WHY (e.g. picking a scope, or explaining a non-obvious rationale in the body); never let it introduce, emphasize, or replace a description of a change that isn't actually in the diff. Format: `<type>(<scope>)!: <subject>` where type ∈ {feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert}; scope optional; `!` only for breaking changes. Subject: imperative mood ('add', 'fix' — not 'added', 'adds'), lowercase, ≤50 chars when possible (hard cap 72), no trailing period, don't restate a file name the scope already names. Body: skip entirely when subject is self-explanatory; add only for non-obvious WHY, breaking changes, security fixes, data migrations, or reverts (these ALWAYS get a body — never subject-only); one blank line after subject, wrap at 72 chars, bullets `-` not `*`, MAY be multiple paragraphs. NEVER write: 'this commit', 'I', 'we', 'now', 'currently', 'as requested by', emoji, or any AI attribution. Optional footers one blank line after body, each `Token: value` or `Token #value`; tokens use `-` instead of spaces (e.g. `Reviewed-by`, `Refs: #123`, `Closes #42`), except `BREAKING CHANGE` which stays uppercase with a space. Recent commit subjects (if present) show this repo's established type/scope vocabulary and phrasing — match them; reuse an existing scope when the change touches the same area rather than inventing a new one. No fences, no preamble. Output ONLY the message.";
@@ -133,48 +130,33 @@ export default function (pi: ExtensionAPI) {
       //    Fixed to sonnet-5, no thinking — a commit message needs no
       //    reasoning budget, and pinning it keeps cost/latency predictable
       //    regardless of whatever model the session itself is using.
+      const candidate = ctx.modelRegistry.find(
+        YEET_MODEL_PROVIDER,
+        YEET_MODEL_ID,
+      );
       const yeetModel =
-        ctx.modelRegistry.find(YEET_MODEL_PROVIDER, YEET_MODEL_ID) ?? ctx.model;
-      const message = await ctx.ui.custom<string | null>(
-        (tui, theme, _kb, done) => {
-          const loader = new BorderedLoader(
-            tui,
-            theme,
-            `yeet → ${yeetModel!.id}`,
-          );
-          loader.onAbort = () => done(null);
-          (async (): Promise<string | null> => {
-            const r = await sideChannelComplete(ctx, {
-              systemPrompt: MSG_PROMPT,
-              model: yeetModel,
-              thinkingEnabled: YEET_THINKING_ENABLED,
-              messages: [
+        candidate && ctx.modelRegistry.hasConfiguredAuth(candidate)
+          ? candidate
+          : ctx.model;
+      const message = await sideChannelWithLoader(
+        ctx,
+        `yeet → ${yeetModel!.id}`,
+        {
+          systemPrompt: MSG_PROMPT,
+          model: yeetModel,
+          thinkingEnabled: YEET_THINKING_ENABLED,
+          messages: [
+            {
+              role: "user",
+              content: [
                 {
-                  role: "user",
-                  content: [
-                    {
-                      type: "text",
-                      text: `${hint}${branchBlock}${historyBlock}Diffstat:\n${diffstat}\n\nDiff:\n${diffSnippet}`,
-                    },
-                  ],
-                  timestamp: Date.now(),
+                  type: "text",
+                  text: `${hint}${branchBlock}${historyBlock}Diffstat:\n${diffstat}\n\nDiff:\n${diffSnippet}`,
                 },
               ],
-              signal: loader.signal,
-            });
-            if (r.ok) return r.text;
-            if (r.reason === "aborted") return null;
-            throw new Error(r.error ?? r.reason);
-          })()
-            .then(done)
-            .catch((e) => {
-              ctx.ui.notify(
-                `yeet error: ${e instanceof Error ? e.message : String(e)}`,
-                "error",
-              );
-              done(null);
-            });
-          return loader;
+              timestamp: Date.now(),
+            },
+          ],
         },
       );
 

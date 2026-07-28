@@ -3,7 +3,6 @@ if vim.g.pi_agent then return end
 
 vim.pack.add {
     'https://github.com/folke/flash.nvim',
-    'https://github.com/NMAC427/guess-indent.nvim',
     'https://github.com/lewis6991/gitsigns.nvim',
 }
 
@@ -20,8 +19,6 @@ vim.api.nvim_create_autocmd('InsertEnter', {
         require('nvim-autopairs').setup {}
     end,
 })
-
-require('guess-indent').setup {}
 
 require('gitsigns').setup {
     signs = {

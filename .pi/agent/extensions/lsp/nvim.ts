@@ -43,6 +43,30 @@ const startings: Record<Lane, Promise<NvimSession> | null> = {
   main: null,
   inline: null,
 };
+// Per-lane abort fanned out to in-flight callLua promises on shutdown — the
+// RPC channel closing on kill is not guaranteed to reject pending requests,
+// and a hanging promise here hangs the awaiting tool call forever.
+const laneAborts: Record<Lane, AbortController> = {
+  main: new AbortController(),
+  inline: new AbortController(),
+};
+
+// Last-resort net for abrupt host death (unhandled throw): if the
+// session_shutdown hook never ran, reap the children via the one teardown
+// path (shutdownNvim — its SIGKILL fallback timer can't fire at exit, but
+// SIGTERM plus the --embed channel closing is enough). Guarded on
+// globalThis: hot reload builds a fresh module graph and would otherwise
+// stack a listener per reload.
+if (!(globalThis as Record<string, unknown>).__piLspExitHook) {
+  (globalThis as Record<string, unknown>).__piLspExitHook = true;
+  process.on("exit", () => {
+    try {
+      shutdownNvim();
+    } catch {
+      /* ignore */
+    }
+  });
+}
 
 const spawnNvim = async (
   lane: Lane,
@@ -121,6 +145,10 @@ const shutdownLane = (lane: Lane): void => {
   if (!session) return;
   const { proc } = session;
   sessions[lane] = null;
+  // Reject in-flight/queued callLua promises tied to this instance; the next
+  // call gets a fresh controller alongside the respawn.
+  laneAborts[lane].abort(new Error(`nvim[${lane}] shut down`));
+  laneAborts[lane] = new AbortController();
   // proc.killed only means a signal was sent, not that the process died.
   // Track real exit so the SIGKILL fallback actually fires on a nvim that
   // ignores SIGTERM (headless --embed can linger) -> no orphans.
@@ -151,9 +179,7 @@ export const shutdownNvim = (): void => {
 export const isRunning = (lane: Lane = "main"): boolean =>
   sessions[lane] !== null;
 
-// Serialize lua chunks per lane: `vim.wait` pumps the event loop and can run a
-// second chunk mid-call, mutating shared buffer state. Chain each after the
-// last, independently per nvim instance.
+// Per-lane queue implementing the serialization described above (Lane).
 const queueTails: Record<Lane, Promise<unknown>> = {
   main: Promise.resolve(),
   inline: Promise.resolve(),
@@ -174,26 +200,39 @@ export const callLua = async <T = unknown>(
   signal: AbortSignal | undefined,
   onProgress?: ProgressFn,
   lane: Lane = "main",
+  // Checked when the queued task starts; returning false skips the lua call
+  // (used by the feedback pipeline so a stale run can't reach nvim's
+  // file-writing stages after a new turn began).
+  preflight?: () => boolean,
 ): Promise<T> => {
   const client = await getNvim(lane, cwd, onProgress);
-  if (signal?.aborted) throw new Error("aborted");
-  const exec = enqueue(lane, () => client.lua(code, args as never) as Promise<T>);
-  if (!signal) return exec;
-  // Abort just stops awaiting: the queued lua can't be cancelled and runs to
-  // completion in nvim (bounded by lua-side budgets).
+  const combined = signal
+    ? AbortSignal.any([signal, laneAborts[lane].signal])
+    : laneAborts[lane].signal;
+  if (combined.aborted) throw new Error("aborted");
+  const exec = enqueue(lane, () => {
+    // Re-check when the queued task actually starts — it may have waited
+    // behind a long run, during which the caller aborted, the lane was shut
+    // down, or the work went stale.
+    if (combined.aborted) throw new Error("aborted");
+    if (preflight && !preflight()) throw new Error("stale");
+    return client.lua(code, args as never) as Promise<T>;
+  });
+  // Abort just stops awaiting: lua already running can't be cancelled and
+  // runs to completion in nvim (bounded by lua-side budgets).
   return new Promise<T>((resolve, reject) => {
     const onAbort = () => {
-      signal.removeEventListener("abort", onAbort);
+      combined.removeEventListener("abort", onAbort);
       reject(new Error("aborted"));
     };
-    signal.addEventListener("abort", onAbort, { once: true });
+    combined.addEventListener("abort", onAbort, { once: true });
     exec.then(
       (v) => {
-        signal.removeEventListener("abort", onAbort);
+        combined.removeEventListener("abort", onAbort);
         resolve(v);
       },
       (e) => {
-        signal.removeEventListener("abort", onAbort);
+        combined.removeEventListener("abort", onAbort);
         reject(e);
       },
     );

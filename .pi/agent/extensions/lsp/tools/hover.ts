@@ -1,6 +1,11 @@
-import { Type } from "typebox";
 import { defineTool } from "@earendil-works/pi-coding-agent";
-import { anchorGuidelines, runNavTool, type DriverErr } from "../utils";
+import {
+  anchorGuidelines,
+  anchorParams,
+  capText,
+  runNavTool,
+  type DriverErr,
+} from "../utils";
 
 interface DriverHoverResult extends DriverErr {
   text?: string;
@@ -15,19 +20,7 @@ export const hoverTool = defineTool({
   promptGuidelines: anchorGuidelines(
     "Use lsp_hover to inspect a symbol's type or signature without reading the whole source file.",
   ),
-  parameters: Type.Object({
-    file: Type.String({ description: "Abs or cwd-relative." }),
-    line: Type.Number({
-      minimum: 1,
-      description: "1-indexed line number.",
-    }),
-    symbol: Type.Optional(
-      Type.String({
-        description:
-          "Substring on the line to anchor the column. Omit to use the first non-whitespace token.",
-      }),
-    ),
-  }),
+  parameters: anchorParams,
   async execute(_id, params, signal, onUpdate, ctx) {
     return runNavTool<DriverHoverResult>(
       "hover",
@@ -35,10 +28,13 @@ export const hoverTool = defineTool({
       ctx,
       signal,
       onUpdate,
-      (res) => ({
-        text: res.text?.trim() || "No hover information",
-        details: { line: params.line },
-      }),
+      (res) => {
+        const t = capText(res.text?.trim() || "No hover information");
+        return {
+          text: t.text,
+          details: { line: params.line, truncated: t.truncated },
+        };
+      },
     );
   },
 });

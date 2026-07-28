@@ -12,13 +12,10 @@
 // /btw again.
 //
 // Inspired by Claude Code's /btw command.
-import {
-  BorderedLoader,
-  type ExtensionAPI,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { collectTextMessages } from "./shared/message";
-import { sideChannelComplete } from "./shared/llm";
+import { sideChannelWithLoader } from "./shared/llm";
 import { barWidget } from "./shared/widget";
 
 // Minimal caveman-mode system prompt. No edit/tool restrictions needed —
@@ -85,39 +82,10 @@ export default function (pi: ExtensionAPI) {
         timestamp: Date.now(),
       });
 
-      const result = await ctx.ui.custom<string | null>(
-        (tui, theme, _kb, done) => {
-          const loader = new BorderedLoader(
-            tui,
-            theme,
-            `btw → ${ctx.model!.id}`,
-          );
-          loader.onAbort = () => done(null);
-
-          const run = async (): Promise<string | null> => {
-            const r = await sideChannelComplete(ctx, {
-              systemPrompt: SIDE_PROMPT,
-              messages,
-              signal: loader.signal,
-            });
-            if (r.ok) return r.text;
-            if (r.reason === "aborted") return null;
-            throw new Error(r.error ?? r.reason);
-          };
-
-          run()
-            .then(done)
-            .catch((e) => {
-              ctx.ui.notify(
-                `btw error: ${e instanceof Error ? e.message : String(e)}`,
-                "error",
-              );
-              done(null);
-            });
-
-          return loader;
-        },
-      );
+      const result = await sideChannelWithLoader(ctx, `btw → ${ctx.model.id}`, {
+        systemPrompt: SIDE_PROMPT,
+        messages,
+      });
 
       if (result === null) {
         ctx.ui.notify("btw cancelled", "info");

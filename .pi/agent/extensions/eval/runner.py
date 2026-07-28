@@ -123,14 +123,34 @@ def main() -> None:
         except BaseException:
             error = traceback.format_exc()
 
-        # Best-effort JSON serializability check; fall back to repr.
+        # Best-effort JSON serializability check; fall back to repr. A late
+        # SIGINT (soft interrupt landing after the cell already finished, e.g.
+        # while serializing a huge value) must not swallow the done event —
+        # that would make the host needlessly escalate to a respawn and lose
+        # all session state. Degrade the value instead.
         try:
             json.dumps(value, default=str)
             value_out = value
+        except KeyboardInterrupt:
+            value_out = None
+            error = error or "KeyboardInterrupt during result serialization"
         except Exception:
             value_out = repr(value)
 
-        emit({"id": rid, "op": "done", "value": value_out, "error": error})
+        try:
+            emit({"id": rid, "op": "done", "value": value_out, "error": error})
+        except KeyboardInterrupt:
+            # A partial line may have been written; terminate it so the
+            # degraded done below stays parseable (host drops the fragment).
+            os.write(3, b"\n")
+            emit(
+                {
+                    "id": rid,
+                    "op": "done",
+                    "value": None,
+                    "error": error or "KeyboardInterrupt while emitting result",
+                }
+            )
 
     # The host sends SIGINT on cell timeout (soft interrupt). When it lands
     # inside a cell, _exec_cell's BaseException net turns it into a normal
@@ -153,9 +173,9 @@ def main() -> None:
         try:
             handle(req)
         except KeyboardInterrupt:
-            # Interrupt landed outside the cell's own exception net (e.g.
-            # during result serialization); no done event is sent — the host
-            # escalates to a respawn if it never arrives.
+            # Final net: interrupt landed outside all of handle()'s own
+            # guards. No done event was sent — the host escalates to a
+            # respawn if it never arrives.
             continue
 
 

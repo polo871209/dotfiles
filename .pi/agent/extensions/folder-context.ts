@@ -39,6 +39,17 @@ export default function (pi: ExtensionAPI) {
   // cares about that folder, without waiting for the next user turn.
   const blocks: string[] = [];
 
+  // Cap what rides every LLM call: a long session across a large repo would
+  // otherwise grow this without bound. Oldest folders are evicted first —
+  // recently touched ones are the ones the session still cares about.
+  const MAX_TOTAL_BYTES = 24 * 1024;
+  const evictToCap = () => {
+    let total = blocks.reduce((n, b) => n + Buffer.byteLength(b), 0);
+    while (blocks.length > 1 && total > MAX_TOTAL_BYTES) {
+      total -= Buffer.byteLength(blocks.shift()!);
+    }
+  };
+
   pi.on("session_start", () => {
     injected.clear();
     blocks.length = 0;
@@ -100,6 +111,7 @@ export default function (pi: ExtensionAPI) {
           blocks.push(
             `Folder context loaded from \`${candidate}\`:\n\n${content}`,
           );
+          evictToCap();
         } catch {
           // allow retry on next call
         }

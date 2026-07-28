@@ -301,10 +301,15 @@ function loadAgents(): AgentConfig[] {
 }
 
 function loadModelRouting(): ModelRoutingConfig {
-  const parsed = JSON.parse(
-    fs.readFileSync(MODEL_MAP_PATH, "utf-8"),
-  ) as ModelRoutingConfig;
-  return parsed;
+  try {
+    return JSON.parse(
+      fs.readFileSync(MODEL_MAP_PATH, "utf-8"),
+    ) as ModelRoutingConfig;
+  } catch {
+    // Missing/malformed map must not break extension load; agents then
+    // simply inherit the parent model.
+    return { inherit: [], providers: {} };
+  }
 }
 
 const formatDuration = (ms: number): string => {

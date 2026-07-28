@@ -13,9 +13,10 @@
 // only non-deterministic step and is gated on a real error/warning remaining.
 // fix=false stops after stage 3 (diagnose-only; used when /lsp-fix is off).
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import * as fs from "node:fs";
 import { MAX_FILES, runDriver } from "./driver";
 import { applyFixes, LLM_TARGET_SEVERITIES } from "./llm-fix";
-import type { DriverResult } from "./types";
+import type { Diag, DriverResult } from "./types";
 
 export interface FixPipelineResult {
   final: DriverResult;
@@ -35,8 +36,16 @@ export const runFixPipeline = async (
   stale: () => boolean = () => false,
 ): Promise<FixPipelineResult | null> => {
   if (stale()) return null;
-  // Stages 1–3: diagnose + deterministic LSP code-fix + re-diagnose.
-  const first = await runDriver(files.slice(0, MAX_FILES), cwd, signal);
+  // Stages 1–3: diagnose + deterministic LSP code-fix + re-diagnose. The
+  // preflight re-checks staleness when the queued nvim call actually starts
+  // (it may have waited behind another run) — stage 2 writes files.
+  const notStale = () => !stale();
+  const first = await runDriver(
+    files.slice(0, MAX_FILES),
+    cwd,
+    signal,
+    notStale,
+  );
   if (!first) return null;
 
   // Gate stage 4 on a real error/warning surviving the deterministic pass.
@@ -53,16 +62,46 @@ export const runFixPipeline = async (
     fixedFiles = fixResults.map((f) => f.file);
     if (fixedFiles.length > 0) {
       // Stage 5: re-diagnose only the rewritten files, merge over originals.
-      const second = await runDriver(fixedFiles, cwd, signal);
+      const second = await runDriver(fixedFiles, cwd, signal, notStale);
       if (second) {
+        // Rollback net for the one non-deterministic stage: an LLM "fix"
+        // that left the file with MORE errors/warnings than before is
+        // restored to its pre-fix bytes (unless something else touched the
+        // file since) and dropped from the report.
+        const targetCount = (diags: Diag[], file: string) =>
+          diags.filter(
+            (d) => d.file === file && LLM_TARGET_SEVERITIES.has(d.severity),
+          ).length;
+        const reverted = new Set<string>();
+        for (const fr of fixResults) {
+          if (
+            targetCount(second.diagnostics, fr.file) <=
+            targetCount(first.diagnostics, fr.file)
+          )
+            continue;
+          try {
+            if (!stale() && fs.readFileSync(fr.file, "utf8") === fr.after) {
+              fs.writeFileSync(fr.file, fr.before, "utf8");
+              reverted.add(fr.file);
+            }
+          } catch {
+            /* leave as-is; still reported below */
+          }
+        }
+        fixResults = fixResults.filter((fr) => !reverted.has(fr.file));
+        fixedFiles = fixedFiles.filter((f) => !reverted.has(f));
         const patchedSet = new Set(fixedFiles);
         final = {
           formatted: Array.from(
-            new Set([...first.formatted, ...second.formatted]),
+            new Set(
+              [...first.formatted, ...second.formatted].filter(
+                (f) => !reverted.has(f),
+              ),
+            ),
           ),
           diagnostics: [
             ...first.diagnostics.filter((d) => !patchedSet.has(d.file)),
-            ...second.diagnostics,
+            ...second.diagnostics.filter((d) => patchedSet.has(d.file)),
           ],
         };
       }

@@ -409,7 +409,7 @@ const installFooter = (pi: ExtensionAPI) => {
         const usageText =
           usage?.percent != null ? `${usage.percent.toFixed(1)}%` : "";
 
-        // Flags owned by lsp/feedback and lark.ts (globalThis so they
+        // Flags owned by lsp/feedback and skill-packs.ts (globalThis so they
         // survive /reload).
         const g = globalThis as Record<string, unknown>;
         // Only shown when off/on the non-default way, so the default setup

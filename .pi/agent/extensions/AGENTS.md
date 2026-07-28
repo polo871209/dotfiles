@@ -30,8 +30,7 @@ Before changing Pi-native behavior, read directly relevant documentation in the 
 ### Cleaner context
 
 - **`btw.ts`** — answers quick side questions without adding them to main history.
-- **`lark.ts`** — enables Lark/Feishu skills only when requested.
-- **`gws.ts`** — enables Google Workspace skills only when requested.
+- **`skill-packs.ts`** — enables Lark/Feishu or Google Workspace skills only when requested.
 - **`folder-context.ts`** — loads path-specific agent instructions when files are touched.
 
 ### Workflow shortcuts
@@ -39,7 +38,7 @@ Before changing Pi-native behavior, read directly relevant documentation in the 
 - **`go.ts`** — resumes an interrupted or stalled agent turn.
 - **`yeet.ts`** — stages, commits, and pushes current changes with a generated Conventional Commit.
 - **`copy.ts`** — copies a selected code block or the session transcript.
-- **`skip-xhigh.ts`** — removes `xhigh` and `max` from thinking-level cycling.
+- **`usage.ts`** — reports Claude Pro/Max and Codex/ChatGPT subscription usage and quota reset times on request.
 - **`auto-rename.ts`** — gives established sessions descriptive names.
 
 ### Outside-pi surface

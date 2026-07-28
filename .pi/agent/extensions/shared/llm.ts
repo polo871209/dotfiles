@@ -12,7 +12,10 @@ import {
   type Message,
   type Model,
 } from "@earendil-works/pi-ai/compat";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+  BorderedLoader,
+  type ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 
 function resolveSideModel(ctx: ExtensionContext) {
   const spec = process.env.PI_SIDE_MODEL?.trim();
@@ -42,6 +45,32 @@ export type SideChannelResult =
       reason: "no-model" | "no-auth" | "aborted" | "error";
       error?: string;
     };
+
+// Interactive variant: run the side-channel call behind a BorderedLoader
+// (abortable via its esc handling), notifying on failure. Returns the text,
+// or null when aborted / failed — the caller only branches on null.
+export async function sideChannelWithLoader(
+  ctx: ExtensionContext,
+  label: string,
+  opts: Omit<SideChannelOpts, "signal">,
+): Promise<string | null> {
+  return ctx.ui.custom<string | null>((tui, theme, _kb, done) => {
+    const loader = new BorderedLoader(tui, theme, label);
+    loader.onAbort = () => done(null);
+    void (async () => {
+      const r = await sideChannelComplete(ctx, {
+        ...opts,
+        signal: loader.signal,
+      });
+      if (r.ok) return done(r.text);
+      if (r.reason !== "aborted") {
+        ctx.ui.notify(`${label}: ${r.error ?? r.reason}`, "error");
+      }
+      done(null);
+    })();
+    return loader;
+  });
+}
 
 export async function sideChannelComplete(
   ctx: ExtensionContext,

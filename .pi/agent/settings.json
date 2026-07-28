@@ -1,10 +1,11 @@
 {
   "lastChangelogVersion": "0.82.1",
   "defaultProvider": "anthropic",
-  "defaultModel": "claude-sonnet-5",
-  "defaultThinkingLevel": "minimal",
+  "defaultModel": "claude-fable-5",
+  "defaultThinkingLevel": "medium",
   "theme": "catppuccin-mocha",
   "quietStartup": true,
+  "showCacheMissNotices": false,
   "packages": [],
   "warnings": {
     "anthropicExtraUsage": false
@@ -15,5 +16,8 @@
   "branchSummary": {
     "reserveTokens": 500000
   },
-  "hideThinkingBlock": true
+  "hideThinkingBlock": true,
+  "steeringMode": "all",
+  "enableInstallTelemetry": false,
+  "defaultProjectTrust": "always"
 }

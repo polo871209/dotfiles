@@ -132,7 +132,6 @@ const batHighlight: HighlightFn = (code: string, lang?: string) => {
 
   result = decorate(result);
   if (cache.size >= MAX_CACHE) {
-    // simple FIFO eviction
     const firstKey = cache.keys().next().value;
     if (firstKey !== undefined) cache.delete(firstKey);
   }
@@ -187,7 +186,8 @@ const installPatch = () => {
   }
   const wrapper = function (this: { theme?: object }, width: number) {
     const t = this.theme as
-      { highlightCode?: HighlightFn; codeBlockBorder?: BorderFn } | undefined;
+      | { highlightCode?: HighlightFn; codeBlockBorder?: BorderFn }
+      | undefined;
     if (t && typeof t === "object") {
       // Always (re)assign, so reload picks up new batHighlight closure.
       t.highlightCode = batHighlight;
