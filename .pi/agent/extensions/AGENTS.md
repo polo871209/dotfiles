@@ -22,9 +22,9 @@ Before changing Pi-native behavior, read directly relevant documentation in the 
 
 - **`web-search.ts`** — searches the web and fetches readable page content for external research.
 - **`eval/`** — runs persistent Python or JavaScript for iterative computation and bulk aggregation.
-- **`lsp/`** — provides symbol navigation, diagnostics, and post-edit feedback for code work.
-- **`github-pr.ts`** — fetches concise PR metadata, failures, review threads, and optional diffs for PR analysis.
-- **`subagent.ts`** — delegates fully specified research, repository recon, or implementation work requiring no user decisions.
+- **`lsp/`** — provides symbol navigation and deterministic post-edit diagnostics and fixes for code work.
+- **`github-pr.ts`** — fetches concise PR metadata, failures, review threads, diffs, or a single section, for PR analysis.
+- **`subagent.ts`** — delegates fully specified medium or large research, repository recon, or implementation work requiring no user decisions, and can hand back one field of a structured result on request.
 - **`ask/`** — presents structured choices when a request needs clarification.
 
 ### Cleaner context
@@ -36,7 +36,7 @@ Before changing Pi-native behavior, read directly relevant documentation in the 
 ### Workflow shortcuts
 
 - **`go.ts`** — resumes an interrupted or stalled agent turn.
-- **`yeet.ts`** — stages, commits, and pushes current changes with a generated Conventional Commit.
+- **`yeet.ts`** — validates, generates Conventional Commits with Sonnet 4.6 or Codex fallback, and pushes current changes with progress.
 - **`copy.ts`** — copies a selected code block or the session transcript.
 - **`usage.ts`** — reports Claude Pro/Max and Codex/ChatGPT subscription usage and quota reset times on request.
 - **`auto-rename.ts`** — gives established sessions descriptive names.

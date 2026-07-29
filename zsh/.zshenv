@@ -15,6 +15,7 @@ export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 # Google Cloud
 export CLOUDSDK_CONFIG="$HOME/.gcloud"
 export CLOUDSDK_PYTHON="$HOME/.local/share/mise/shims/python3"
+export CLOUDSDK_PYTHON_SITEPACKAGES=1
 export GOOGLE_APPLICATION_CREDENTIALS="$CLOUDSDK_CONFIG/application_default_credentials.json"
 
 # Docker

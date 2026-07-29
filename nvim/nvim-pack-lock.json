@@ -6,7 +6,7 @@
     },
     "blink.cmp": {
       "rev": "451168851e8e2466bc97ee3e026c3dcb9141ce07",
-      "src": "git@github.com:saghen/blink.cmp",
+      "src": "https://github.com/saghen/blink.cmp",
       "version": "1.0.0 - 2.0.0"
     },
     "catppuccin": {
@@ -51,7 +51,7 @@
     },
     "nvim-autopairs": {
       "rev": "59bce2eef357189c3305e25bc6dd2d138c1683f5",
-      "src": "git@github.com:windwp/nvim-autopairs"
+      "src": "https://github.com/windwp/nvim-autopairs"
     },
     "nvim-dap": {
       "rev": "4f5deb110d9ff8994d96c21df95e2271d11214f9",

@@ -119,6 +119,20 @@ const params = Type.Object({
       description: "Keep resolved/outdated review threads (default false)",
     }),
   ),
+  select: Type.Optional(
+    Type.Union(
+      [
+        Type.Literal("files"),
+        Type.Literal("checks"),
+        Type.Literal("comments"),
+        Type.Literal("diff"),
+      ],
+      {
+        description:
+          "Return only one section instead of the full report — cheaper when you already know what you need.",
+      },
+    ),
+  ),
 });
 
 export default function (pi: ExtensionAPI) {
@@ -133,7 +147,7 @@ export default function (pi: ExtensionAPI) {
       return new Text(theme.fg("dim", `  ${s}`), 0, 0);
     },
     description:
-      "Fetch a GitHub PR (URL or number) as signal-only markdown: metadata, description, changed files, failing checks, and unresolved review threads. Use instead of `gh pr view`.",
+      "Fetch a GitHub PR (URL or number) as signal-only markdown: metadata, description, changed files, failing checks, and unresolved review threads. Use instead of `gh pr view`. Pass `select` to fetch just one section.",
     parameters: params,
     async execute(_id, raw, signal, _onUpdate, _ctx) {
       const a = raw as {
@@ -142,6 +156,7 @@ export default function (pi: ExtensionAPI) {
         diff?: boolean;
         includeBots?: boolean;
         includeResolved?: boolean;
+        select?: "files" | "checks" | "comments" | "diff";
       };
       const parsed = parsePr(a.pr);
       if (!parsed) {
@@ -154,7 +169,8 @@ export default function (pi: ExtensionAPI) {
       }
       const repo = a.repo ?? parsed.repo;
       const num = parsed.number;
-      const wantDiff = a.diff === true;
+      const wantDiff = a.diff === true || a.select === "diff";
+      const select = a.select;
 
       const repoArgs = repo ? ["--repo", repo] : [];
       const ownerRepo = repo ?? "";
@@ -261,25 +277,33 @@ export default function (pi: ExtensionAPI) {
       };
 
       const out: string[] = [];
-      const draft = m.isDraft ? " (draft)" : "";
-      out.push(`# PR #${m.number}: ${m.title}`);
-      out.push(`${m.url}`);
-      const dec = m.reviewDecision ? `, ${m.reviewDecision}` : "";
-      out.push(
-        `**${m.state}${draft}** · \`${m.baseRefName}\` ← \`${m.headRefName}\` · @${m.author?.login ?? "?"} · ${m.mergeable}${dec}`,
-      );
-      out.push(
-        `+${fmt(m.additions)} / −${fmt(m.deletions)} across ${m.changedFiles} file(s)` +
-          (m.labels.length
-            ? ` · labels: ${m.labels.map((l) => l.name).join(", ")}`
-            : ""),
-      );
+      const wantHeader = !select;
+      const wantChecks = !select || select === "checks";
+      const wantFiles = !select || select === "files";
+      const wantComments = !select || select === "comments";
+      const wantDiffSection = !select || select === "diff";
 
-      const body = cleanBody(m.body || "");
-      if (body) out.push(`\n## Description\n${body}`);
+      if (wantHeader) {
+        const draft = m.isDraft ? " (draft)" : "";
+        out.push(`# PR #${m.number}: ${m.title}`);
+        out.push(`${m.url}`);
+        const dec = m.reviewDecision ? `, ${m.reviewDecision}` : "";
+        out.push(
+          `**${m.state}${draft}** · \`${m.baseRefName}\` ← \`${m.headRefName}\` · @${m.author?.login ?? "?"} · ${m.mergeable}${dec}`,
+        );
+        out.push(
+          `+${fmt(m.additions)} / −${fmt(m.deletions)} across ${m.changedFiles} file(s)` +
+            (m.labels.length
+              ? ` · labels: ${m.labels.map((l) => l.name).join(", ")}`
+              : ""),
+        );
+
+        const body = cleanBody(m.body || "");
+        if (body) out.push(`\n## Description\n${body}`);
+      }
 
       // Checks: summarize counts, list only non-passing.
-      const rollup = m.statusCheckRollup ?? [];
+      const rollup = wantChecks ? (m.statusCheckRollup ?? []) : [];
       if (rollup.length) {
         const norm = rollup.map((c) => ({
           name: c.name || c.context || "check",
@@ -306,7 +330,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       // Changed files.
-      if (m.files?.length) {
+      if (wantFiles && m.files?.length) {
         out.push(`\n## Files`);
         for (const f of m.files) {
           out.push(
@@ -318,7 +342,7 @@ export default function (pi: ExtensionAPI) {
       // Comments + review threads from GraphQL.
       let nComments = 0;
       let nThreads = 0;
-      if (gql.code === 0 && gql.stdout) {
+      if (wantComments && gql.code === 0 && gql.stdout) {
         try {
           const data = JSON.parse(gql.stdout) as {
             data: {
@@ -379,14 +403,18 @@ export default function (pi: ExtensionAPI) {
         } catch {
           out.push(`\n_(could not parse comments/review threads)_`);
         }
-      } else if (gql.stderr && !gql.stderr.includes("skipped")) {
+      } else if (
+        wantComments &&
+        gql.stderr &&
+        !gql.stderr.includes("skipped")
+      ) {
         out.push(
           `\n_(comments unavailable: ${gql.stderr.trim().split("\n")[0]})_`,
         );
       }
 
       // Diff last — biggest, most useful for code review.
-      if (wantDiff && diff.code === 0 && diff.stdout) {
+      if (wantDiffSection && wantDiff && diff.code === 0 && diff.stdout) {
         let d = diff.stdout;
         let note = "";
         if (Buffer.byteLength(d) > MAX_DIFF_BYTES) {

@@ -16,9 +16,6 @@ local CODEACTION_TIMEOUT_MS = 2000
 local PER_FILE_BUDGET_MS = 4500
 local SETTLE_MS = 1000
 
--- run_fast_lint + pull_diagnostics live on _G.PiLspShared (driver.lua).
-local run_fast_lint = function(bufnr) _G.PiLspShared.run_fast_lint(bufnr) end
-
 local FIXALL_KINDS = {
     'source.fixAll',
     'source.organizeImports',
@@ -153,7 +150,9 @@ function M.run(files)
             vim.wait(math.min(2000, remaining()), function() return #vim.lsp.get_clients { bufnr = bufnr } > 0 end, 50)
 
             pull_diagnostics(bufnr, remaining)
-            run_fast_lint(bufnr)
+            -- User-configured diagnostic autocmds (including nvim-lint) were
+            -- triggered by the normal buffer events above. Do not select or
+            -- invoke a linter here; just allow all producers to publish.
             vim.wait(math.min(800, remaining()), function() return false end, 50)
 
             -- 2) Safe auto-fixes (organizeImports + source.fixAll); their
@@ -168,7 +167,6 @@ function M.run(files)
             end
 
             pull_diagnostics(bufnr, remaining)
-            run_fast_lint(bufnr)
         end
     end
 

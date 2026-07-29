@@ -1,31 +1,36 @@
 // folder-context — when the agent touches a path via read/edit/write/grep/
 // find/ls, walk from that path's dir up to (but NOT including) the session
-// cwd and inject every ancestor's AGENTS.md (or CLAUDE.md). cwd itself is
-// skipped — pi already loads the cwd's AGENTS.md as project context. Paths
-// outside cwd are ignored.
+// cwd and inject every ancestor's AGENTS.md. cwd itself is skipped — pi
+// already loads the cwd's AGENTS.md as project context. Paths outside cwd
+// are ignored.
 //
-// Priority per dir: AGENTS.md > CLAUDE.md. README.md is intentionally NOT a
-// candidate — it's unbounded prose, and as steer context it rides every
-// subsequent turn. A candidate is loaded at most once per session (mtime
-// changes mid-session are not picked up — restart to refresh).
+// CLAUDE.md and README.md are intentionally NOT candidates — only AGENTS.md
+// is the convention this harness follows. A candidate is loaded at most
+// once per session (mtime changes mid-session are not picked up — restart
+// to refresh).
 //
-// Injection rides the `context` hook (fires before every LLM call, including
-// mid-turn calls after a tool result), not before_agent_start (fires once
-// per outer user turn, before the tool loop starts) or a one-off steer
-// message (ages into buried history). Appending on `context` means a folder
-// discovered by tool N is visible to the LLM call that follows tool N —
-// same turn, no need to wait for the next user prompt. (before_agent_start
-// would land in the literal system-prompt string, but pi serializes these
-// custom messages as role "user" either way, so that purity buys nothing
-// — not worth trading away same-turn immediacy for.)
+// Injection uses pi.sendMessage(), which appends a real persisted message to
+// session history — sent exactly once, visible to the LLM call that follows
+// the same turn (same-turn immediacy) and to every call after that as
+// ordinary history, with no resending logic needed.
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { CustomMessage } from "@earendil-works/pi-agent-core";
 
-const CANDIDATES = ["AGENTS.md", "CLAUDE.md"] as const;
+const CONTEXT_FILE = "AGENTS.md";
 const TARGET_TOOLS = new Set(["read", "edit", "write", "grep", "find", "ls"]);
+
+// Resolve symlinks so the same file reached through different path spellings
+// (e.g. `~/.pi/agent` symlinked elsewhere) dedupes correctly. Falls back to
+// the plain resolved path if the file vanished between existsSync and here.
+function canonical(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+}
 
 export default function (pi: ExtensionAPI) {
   // Subagents get a clean context: only their own agent .md + tools, no
@@ -34,37 +39,28 @@ export default function (pi: ExtensionAPI) {
 
   // candidate abs path → true once loaded (never reloaded, even on edit)
   const injected = new Set<string>();
-  // Accumulated blocks, resent in full on every `context` call (not stored in
-  // session history) so the rule stays present for as long as the session
-  // cares about that folder, without waiting for the next user turn.
-  const blocks: string[] = [];
-
-  // Cap what rides every LLM call: a long session across a large repo would
-  // otherwise grow this without bound. Oldest folders are evicted first —
-  // recently touched ones are the ones the session still cares about.
-  const MAX_TOTAL_BYTES = 24 * 1024;
-  const evictToCap = () => {
-    let total = blocks.reduce((n, b) => n + Buffer.byteLength(b), 0);
-    while (blocks.length > 1 && total > MAX_TOTAL_BYTES) {
-      total -= Buffer.byteLength(blocks.shift()!);
-    }
-  };
 
   pi.on("session_start", () => {
     injected.clear();
-    blocks.length = 0;
   });
 
-  pi.on("context", (event) => {
-    if (!blocks.length) return;
-    const msg: CustomMessage = {
-      role: "custom",
-      customType: "folder-context",
-      content: blocks.join("\n\n"),
-      display: false,
-      timestamp: Date.now(),
-    };
-    return { messages: [...event.messages, msg] };
+  // Seed `injected` with whatever pi already put in the system prompt for
+  // this turn — the global agentDir file plus the cwd ancestor chain
+  // (resource-loader.js: loadProjectContextFiles). Without this, a path
+  // under agentDir (e.g. agentDir/extensions/*) would have its ancestor
+  // walk re-read and re-inject agentDir's own AGENTS.md, duplicating what's
+  // already in the system prompt. Re-seeding every turn (not just
+  // session_start) picks up files pi (re)loaded after a /reload.
+  //
+  // Realpath both sides of the dedup check: pi resolves agentDir (e.g.
+  // `~/.pi/agent`) without following symlinks, while this handler's own
+  // walk is rooted at `ctx.cwd`, which may reach the same file through a
+  // different (symlinked) path string. Without realpath, the two spellings
+  // of the same file never compare equal and the dedup silently no-ops.
+  pi.on("before_agent_start", (event) => {
+    for (const cf of event.systemPromptOptions.contextFiles ?? []) {
+      injected.add(canonical(cf.path));
+    }
   });
 
   pi.on("tool_result", async (event, ctx) => {
@@ -100,22 +96,21 @@ export default function (pi: ExtensionAPI) {
     ancestors.reverse();
 
     for (const d of ancestors) {
-      for (const name of CANDIDATES) {
-        const candidate = resolve(d, name);
-        if (!existsSync(candidate)) continue;
-        if (injected.has(candidate)) break; // already loaded this session
+      const rawCandidate = resolve(d, CONTEXT_FILE);
+      if (!existsSync(rawCandidate)) continue;
+      const candidate = canonical(rawCandidate);
+      if (injected.has(candidate)) continue; // already loaded this session
 
-        try {
-          const content = readFileSync(candidate, "utf-8");
-          injected.add(candidate);
-          blocks.push(
-            `Folder context loaded from \`${candidate}\`:\n\n${content}`,
-          );
-          evictToCap();
-        } catch {
-          // allow retry on next call
-        }
-        break; // first match in this dir wins
+      try {
+        const content = readFileSync(rawCandidate, "utf-8");
+        injected.add(candidate);
+        pi.sendMessage({
+          customType: "folder-context",
+          content: `Folder context loaded from \`${rawCandidate}\`:\n\n${content}`,
+          display: false,
+        });
+      } catch {
+        // allow retry on next call
       }
     }
   });

@@ -84,19 +84,6 @@ vim.api.nvim_create_autocmd('FileType', {
     end,
 })
 
--- Filetype detection
-vim.filetype.add {
-    filename = {
-        ['.envrc'] = 'sh',
-        ['BUILD'] = 'bzl',
-        ['BUILD.bazel'] = 'bzl',
-        ['WORKSPACE'] = 'bzl',
-        ['WORKSPACE.bazel'] = 'bzl',
-        ['MODULE.bazel'] = 'bzl',
-    },
-    extension = { bzl = 'bzl' },
-}
-
 vim.api.nvim_create_autocmd('TextYankPost', {
     desc = 'Highlight when yanking text',
     group = vim.api.nvim_create_augroup('kickstart-highlight-yank', { clear = true }),

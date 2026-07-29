@@ -1,12 +1,7 @@
-// Post-edit feedback pipeline. Two passes by nature:
-//   - Inline (per edit, tool_result): format-only, fast. The formatted bytes
-//     are folded back into the agent's own edit result so its view stays in
-//     sync with disk — no surprise re-read, no extra context entry.
-//   - Batched (turn end, agent_settled): run the staged fix pipeline (pipeline.ts)
-//     off-thread — format, diagnose, deterministic LSP code-fix, then LLM fix
-//     only for surviving errors/warnings; when a fix rewrites a file, inject a
-//     compact diff once so the next edit targets current bytes. Widget renders
-//     the result; leftovers notify.
+// Inline formatting keeps edit results synchronized with disk. At
+// agent_settled, one deterministic batched pass applies safe LSP actions and
+// reads Neovim's aggregate diagnostics. Survivors are returned to the same
+// main agent as a bounded follow-up turn.
 //
 // registerFeedback(pi) is called from lsp/index.ts — this is part of the lsp
 // extension (shares its nvim), not a standalone one.
@@ -17,22 +12,12 @@ import type {
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { displayPath, toAbs } from "../utils";
-import { barWidget } from "../../shared/widget";
-import {
-  ensureFeedbackLoaded,
-  formatFile,
-  MAX_FILE_BYTES,
-  MAX_FILES,
-} from "./driver";
+import { displayPath, formatDiagLine, sortDiagnostics, toAbs } from "../utils";
+import { ensureFeedbackLoaded, formatFile, MAX_FILE_BYTES } from "./driver";
 import { runFixPipeline } from "./pipeline";
 import { changeNote } from "./diff";
-import { buildWidgetLines } from "./widget";
 
-const WIDGET_KEY = "lsp-feedback";
-// Background auto-fix default. Overridable at launch via `--lsp-fix=false`;
-// `/lsp-fix` then toggles it per session.
-const AUTO_FIX_FLAG = "lsp-fix";
+const MAX_REPAIR_FOLLOWUPS = 2;
 const TRACKED_TOOLS = new Set(["edit", "write", "str_replace", "create"]);
 
 const GIT_WALK_MAX_DEPTH = 8;
@@ -110,19 +95,10 @@ const extractPath = (input: unknown): string | undefined => {
 };
 
 export function registerFeedback(pi: ExtensionAPI): void {
-  pi.registerFlag(AUTO_FIX_FLAG, {
-    description: "Background LSP auto-fix after edits (toggle with /lsp-fix)",
-    type: "boolean",
-    default: true,
-  });
-
   const touched = new Set<string>();
   let reported = false;
-  let autoFix = true;
-  // Mirror for tui.ts's footer indicator (globalThis so it survives /reload).
-  const publishAutoFix = () => {
-    (globalThis as Record<string, unknown>).__lspFixEnabled = autoFix;
-  };
+  let repairFollowups = 0;
+  let repairContinuationPending = false;
   let cwd = process.cwd();
   // Bumped each turn start; a background runFeedback captured the value when
   // scheduled and bails if it changed, so a stale run finishing after a NEW
@@ -137,72 +113,55 @@ export function registerFeedback(pi: ExtensionAPI): void {
   const runFeedback = async (
     files: string[],
     ctx: ExtensionContext,
-    fix: boolean,
     gen: number,
   ): Promise<void> => {
     const projectCwd = ctx.cwd ?? cwd;
     const result = await runFixPipeline(
       files,
       projectCwd,
-      ctx,
       ctx.signal,
-      fix,
       // Stale = a new turn started; pipeline stops before its write stages.
       () => gen !== generation,
     );
     if (!result) return;
     // Same guard for UI/message side effects.
     if (gen !== generation) return;
-    const { final, fixedFiles, fixResults, hadFixable } = result;
+    const { final } = result;
 
-    const lines = buildWidgetLines(
-      final,
-      projectCwd,
-      fixedFiles,
-      hadFixable && !fix,
-    );
-    if (!lines) return;
-    const overflow = files.length - Math.min(files.length, MAX_FILES);
-    if (overflow > 0) {
-      lines.splice(
-        lines.length - 1,
-        0,
-        `  (skipped ${overflow} more file(s) over limit of ${MAX_FILES})`,
-      );
+    if (final.diagnostics.length === 0) {
+      touched.clear();
+      repairFollowups = 0;
     }
-    ctx.ui.setWidget(WIDGET_KEY, barWidget(lines), {
-      placement: "aboveEditor",
-    });
 
-    // Auto-fix rewrote files behind the agent (async, between turns). Surface a
-    // compact diff once so the next edit targets current bytes instead of
-    // forcing a full-file re-read.
-    for (const fr of fixResults) {
-      // Use the bytes applyFixes wrote, not a fresh disk read — intervening
-      // unrelated edits would otherwise get mislabeled as auto-fix.
-      if (fr.after === fr.before) continue;
-      const text = changeNote(
-        fr.before,
-        fr.after,
-        displayPath(fr.file, projectCwd),
-        "auto-fixed",
+    if (final.diagnostics.length === 0) return;
+
+    if (repairFollowups >= MAX_REPAIR_FOLLOWUPS) return;
+    repairFollowups++;
+    repairContinuationPending = true;
+    const diagnostics = sortDiagnostics(final.diagnostics)
+      .map((d) => formatDiagLine(d, projectCwd))
+      .join("\n");
+    try {
+      pi.sendMessage(
+        {
+          customType: "lsp-feedback-diagnostics",
+          content:
+            "Deterministic LSP feedback still reports diagnostics across the files touched in this task. Fix them, then finish the task. Do not delegate this repair.\n" +
+            diagnostics,
+          display: false,
+        },
+        { deliverAs: "followUp", triggerTurn: true },
       );
-      try {
-        pi.sendMessage(
-          { customType: "lsp-feedback-fix", content: text, display: false },
-          { deliverAs: "nextTurn" },
-        );
-      } catch {
-        /* best effort */
-      }
+    } catch {
+      repairContinuationPending = false;
     }
   };
 
   pi.on("session_start", async (_event, ctx) => {
     cwd = ctx.cwd ?? process.cwd();
-    autoFix = pi.getFlag(AUTO_FIX_FLAG) !== false;
-    publishAutoFix();
     reset();
+    repairFollowups = 0;
+    repairContinuationPending = false;
     // Warm nvim + feedback lua in the background so the first edit skips spawn
     // + init.lua + LSP-attach. Deferred a tick to keep the sync prefix (file
     // read + spawn syscall) off pi's startup path.
@@ -217,7 +176,11 @@ export function registerFeedback(pi: ExtensionAPI): void {
   pi.on("before_agent_start", async (_event, ctx) => {
     generation++;
     reported = false;
-    ctx.ui.setWidget(WIDGET_KEY, undefined);
+    if (repairContinuationPending) repairContinuationPending = false;
+    else {
+      touched.clear();
+      repairFollowups = 0;
+    }
   });
 
   // Format one file in place, register it for the batched diagnostics pass, and
@@ -241,8 +204,8 @@ export function registerFeedback(pi: ExtensionAPI): void {
 
   // Inline format-on-save: format each touched file and fold the deltas into
   // the agent's own tool result, keeping its view synced to disk (no re-read)
-  // without a separate context entry. The slow diagnostics + LLM auto-fix run
-  // batched at agent_settled over the same `touched` set.
+  // without a separate context entry. Deterministic diagnostics and safe LSP
+  // actions run batched at agent_settled over the same `touched` set.
   pi.on("tool_result", async (event) => {
     if (event.isError) return;
 
@@ -261,33 +224,14 @@ export function registerFeedback(pi: ExtensionAPI): void {
     if (reported || touched.size === 0) return;
     if (isRebasing(ctx.cwd ?? cwd)) return;
     const files = Array.from(touched);
-    touched.clear();
     reported = true;
     // Fire-and-forget: return immediately so pi marks the turn idle.
     // The widget appears when the background work finishes.
-    void runFeedback(files, ctx, autoFix, generation).catch((e) => {
+    void runFeedback(files, ctx, generation).catch((e) => {
       console.error(
         "[lsp-feedback] background run failed:",
         e instanceof Error ? e.message : String(e),
       );
     });
-  });
-
-  pi.registerCommand("lsp-fix", {
-    description:
-      "Toggle background LSP auto-fix for this session. `/lsp-fix` flips it; `/lsp-fix on|off` sets it explicitly.",
-    handler: async (args, ctx) => {
-      const arg = args.trim().toLowerCase();
-      if (arg === "on" || arg === "off") {
-        autoFix = arg === "on";
-      } else if (arg === "") {
-        autoFix = !autoFix;
-      } else {
-        ctx.ui.notify(`lsp-fix: unknown arg '${arg}' (use on/off)`, "warning");
-        return;
-      }
-      publishAutoFix();
-      ctx.ui.notify(`lsp-feedback auto-fix ${autoFix ? "on" : "off"}`, "info");
-    },
   });
 }

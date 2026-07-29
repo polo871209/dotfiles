@@ -1,4 +1,5 @@
 [settings]
+minimum_release_age = "0"
 # Avoid compiling Python from source; use precompiled builds
 python.compile = false
 
@@ -25,7 +26,7 @@ atuin = "latest"
 bat = "latest"
 carapace = "latest"
 direnv = "latest"
-eza = "0.23.4"                     # pinned: asdf plugin uses cargo-quickinstall, macOS build for newer versions missing
+eza = "0.23.5"
 fastfetch = "latest"
 fd = "latest"
 fzf = "latest"
@@ -40,7 +41,7 @@ zoxide = "latest"
 # Git / GitHub
 "github:googleworkspace/cli" = { version = "latest", exe = "gws" }
 gh = "latest"
-lazygit = "latest"
+lazygit = "0.63.1"
 
 # Kubernetes / cloud / containers
 "aqua:docker/cli" = "latest"
@@ -77,6 +78,7 @@ kubens = "latest"
 "github:DonIsaac/zlint" = "latest"
 "npm:eslint_d" = "latest"
 "npm:@biomejs/biome" = "latest"
+"npm:prettier" = "latest"
 prek = "latest"
 semgrep = "latest"
 "pipx:sqlfluff" = "latest"

@@ -1,7 +1,4 @@
 {
-  "inherit": ["worker"],
-  "providers": {
-    "anthropic": "anthropic/claude-sonnet-5",
-    "openai-codex": "openai-codex/gpt-5.6-terra"
-  }
+  "anthropic": "anthropic/claude-sonnet-5",
+  "openai-codex": "openai-codex/gpt-5.6-luna"
 }

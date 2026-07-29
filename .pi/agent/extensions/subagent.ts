@@ -46,17 +46,19 @@ interface AgentConfig {
   description: string;
   hidden: boolean;
   tools: string[];
-  thinking?: string;
   maxDurationMs?: number;
   systemPrompt: string;
 }
 
-interface ModelRoutingConfig {
-  inherit: string[];
-  providers: Record<string, string>;
-}
+// provider name -> model to use for every subagent when the parent session
+// is on that provider (e.g. codex parent -> luna subagents, anthropic parent
+// -> sonnet subagents). Same rule for all agents, no per-agent exceptions.
+type ModelRoutingConfig = Record<string, string>;
+
+const SUBAGENT_THINKING = "medium";
 
 interface Progress {
+  id?: string;
   agent: string;
   task: string;
   model: string;
@@ -66,6 +68,44 @@ interface Progress {
   lastMessage: string;
   output: string;
   error?: string;
+}
+
+// Structured results a subagent captured mid- or end-of-run via `retain`,
+// keyed by the subagent's own target id ("sub-<agent>-<ts>-<rand>"), so the
+// parent can pull one field instead of re-reading the whole transcript.
+const resultStore = (() => {
+  const g = globalThis as unknown as {
+    __piSubagentResults?: Map<string, unknown>;
+  };
+  return (g.__piSubagentResults ??= new Map());
+})();
+
+// Trailing ```result-json fenced block a subagent ends its output with.
+// Optional convention: only stripped/cached when present and valid JSON.
+const RESULT_BLOCK_RE = /```result-json\s*\n([\s\S]*?)\n```\s*$/;
+
+function extractResultBlock(text: string, id: string): string {
+  const m = text.match(RESULT_BLOCK_RE);
+  if (!m) return text;
+  try {
+    resultStore.set(id, JSON.parse(m[1]!));
+  } catch {
+    return text; // not valid JSON — leave the block in the transcript untouched
+  }
+  return (
+    text.slice(0, m.index).trimEnd() +
+    `\n\n[structured result captured — id: ${id}. Use subagent_result to pull a field instead of re-reading this transcript.]`
+  );
+}
+
+function getByPath(obj: unknown, path: string | undefined): unknown {
+  if (!path) return obj;
+  let cur = obj;
+  for (const key of path.split(".").filter(Boolean)) {
+    if (cur == null || typeof cur !== "object") return undefined;
+    cur = (cur as Record<string, unknown>)[key];
+  }
+  return cur;
 }
 
 const AGENTS_DIR = path.join(getAgentDir(), "agents");
@@ -226,13 +266,6 @@ async function releasePanelSlot(paneId: string): Promise<void> {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-function workerThinking(level: string): string {
-  if (level === "off" || level === "minimal") return level;
-  if (level === "low") return "minimal";
-  if (level === "medium") return "low";
-  return "medium";
-}
-
 function expandToolPatterns(patterns: string[], allNames: string[]): string[] {
   const out = new Set<string>();
   for (const p of patterns) {
@@ -277,10 +310,8 @@ function loadAgents(): AgentConfig[] {
       .split(",")
       .map((t) => t.trim())
       .filter((t) => t.length > 0);
-    const str = (v: string | boolean | undefined): string | undefined =>
-      typeof v === "string" && v ? v : undefined;
     const secsToMs = (v: string | boolean | undefined): number | undefined => {
-      const n = Number(str(v));
+      const n = Number(typeof v === "string" ? v : undefined);
       return Number.isFinite(n) && n > 0 ? n * 1000 : undefined;
     };
     out.push({
@@ -288,7 +319,6 @@ function loadAgents(): AgentConfig[] {
       description: frontmatter.description,
       hidden: frontmatter.hidden === true,
       tools,
-      thinking: str(frontmatter.thinking),
       maxDurationMs: secsToMs(frontmatter.maxDuration),
       // Only the agent's own .md content — no shared preamble (SYSTEM.md is
       // the main session's own prompt, not a subagent default) and no other
@@ -308,7 +338,7 @@ function loadModelRouting(): ModelRoutingConfig {
   } catch {
     // Missing/malformed map must not break extension load; agents then
     // simply inherit the parent model.
-    return { inherit: [], providers: {} };
+    return {};
   }
 }
 
@@ -459,6 +489,20 @@ const initialProgress = (
   output: "",
 });
 
+const resultParams = () =>
+  Type.Object({
+    id: Type.String({
+      description:
+        'Subagent id from a prior subagent call\'s output ("structured result captured — id: ...")',
+    }),
+    path: Type.Optional(
+      Type.String({
+        description:
+          'Dot path into the captured JSON, e.g. "findings.0.path". Omit to return the whole object.',
+      }),
+    ),
+  });
+
 function toolsFlagValue(
   agent: AgentConfig,
   pi: ExtensionAPI,
@@ -494,11 +538,7 @@ async function runInTmux(
 
   const sysFile = path.join(os.tmpdir(), `pi-subagent-sys-${target}.txt`);
   const taskFile = path.join(os.tmpdir(), `pi-subagent-task-${target}.txt`);
-  const systemPrompt =
-    thinking && agent.name === "worker"
-      ? `${agent.systemPrompt}\n\nThinking budget is reduced to ${thinking}; work directly within it.`
-      : agent.systemPrompt;
-  fs.writeFileSync(sysFile, systemPrompt, "utf-8");
+  fs.writeFileSync(sysFile, agent.systemPrompt, "utf-8");
   fs.writeFileSync(taskFile, task, "utf-8");
   const cleanupFiles = () => {
     try {
@@ -631,7 +671,7 @@ async function runInTmux(
     "-S",
     "-400",
   ]);
-  const finalText = headTruncate(rawOutput.trim(), MAX_OUTPUT_BYTES);
+  let finalText = headTruncate(rawOutput.trim(), MAX_OUTPUT_BYTES);
 
   if (finalStatus === "blocked") {
     cleanupFiles();
@@ -653,6 +693,7 @@ async function runInTmux(
 
   await releasePanelSlot(paneId);
   cleanupFiles();
+  finalText = extractResultBlock(finalText, target);
   progress.status = "done";
   progress.output = finalText;
   return {
@@ -682,12 +723,14 @@ export default function (pi: ExtensionAPI) {
     name: "subagent",
     label: "Subagent",
     description:
-      `Delegate a task to a specialized subagent running in isolation. ` +
+      `Delegate medium or large work to a specialized subagent running in isolation. ` +
+      `Never use for small localized tasks, simple edits, single-file changes, or quick lookups. ` +
       `Returns text only. Use worker only with a precise execution brief that should not require parent clarification or repeat verification; resolve vague scope first. ` +
       `Dispatch independent tasks as multiple parallel subagent calls in one response. ` +
       `Use to keep this session focused (offload web research, recon, or end-to-end implementation).\n\n` +
       `Available agents:\n${agentList}\n\n` +
-      `Subagents cannot spawn further subagents.`,
+      `Subagents cannot spawn further subagents.\n\n` +
+      "If a task asks for a structured result, the subagent should end its reply with a fenced ```result-json ... ``` block; pull a field from it afterward with subagent_result instead of re-reading the transcript.",
     parameters: params,
     renderShell: "self",
 
@@ -717,18 +760,14 @@ export default function (pi: ExtensionAPI) {
       const parentModel = ctx.model
         ? `${ctx.model.provider}/${ctx.model.id}`
         : undefined;
+      // Same rule for every agent: route to the model-map entry for the
+      // parent's provider (codex parent -> luna, anthropic parent -> sonnet),
+      // falling back to the parent's own model if unmapped.
       const model =
-        agent.name === "worker"
-          ? parentModel
-          : (args.model ??
-            (modelRouting.inherit.includes(agent.name)
-              ? parentModel
-              : ((ctx.model && modelRouting.providers[ctx.model.provider]) ??
-                parentModel)));
-      const thinking =
-        agent.name === "worker"
-          ? workerThinking(pi.getThinkingLevel())
-          : agent.thinking;
+        args.model ??
+        (ctx.model && modelRouting[ctx.model.provider]) ??
+        parentModel;
+      const thinking = SUBAGENT_THINKING;
 
       const progress = initialProgress(agent, args.task, model ?? "default");
 
@@ -753,6 +792,33 @@ export default function (pi: ExtensionAPI) {
         push,
         signal,
       );
+    },
+  });
+
+  pi.registerTool<ReturnType<typeof resultParams>, undefined>({
+    name: "subagent_result",
+    label: "Subagent Result",
+    description:
+      "Pull a field (or the whole object) out of a subagent's captured ```result-json``` block by id, instead of re-reading its full transcript.",
+    parameters: resultParams(),
+    async execute(_toolCallId, rawParams) {
+      const { id, path: fieldPath } = rawParams as {
+        id: string;
+        path?: string;
+      };
+      if (!resultStore.has(id)) {
+        const msg = `subagent_result: no structured result captured for id "${id}"`;
+        return {
+          content: [{ type: "text", text: msg }],
+          details: undefined,
+          error: msg,
+        };
+      }
+      const value = getByPath(resultStore.get(id), fieldPath);
+      return {
+        content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
+        details: undefined,
+      };
     },
   });
 }
