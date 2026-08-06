@@ -17,7 +17,7 @@ export const referencesTool = defineTool({
   name: "lsp_references",
   label: "LSP References",
   description:
-    "Find every USE of ONE symbol at file:line (requires anchor). More reliable than grep for usage finding — no false hits from substring matches, and follows re-exports. For 'where is X called' this is the tool, not codegraph_search.",
+    "Find every USE of ONE symbol at file:line (requires anchor). More reliable than grep for usage finding — no false hits from substring matches, and follows re-exports. For 'where is X called' this is the tool.",
   promptSnippet: "List all places that reference a symbol",
   promptGuidelines: anchorGuidelines(
     "Use lsp_references before renaming or changing a function's signature to find every caller.",

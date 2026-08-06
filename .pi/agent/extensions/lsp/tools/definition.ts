@@ -17,7 +17,7 @@ export const definitionTool = defineTool({
   name: "lsp_definition",
   label: "LSP Definition",
   description:
-    "Jump to canonical declaration of ONE symbol at file:line (requires anchor; resolves re-exports, overloads). For name-only search without an anchor, use codegraph_search or grep first to get a location, then this for the canonical def.",
+    "Jump to canonical declaration of ONE symbol at file:line (requires anchor; resolves re-exports, overloads). For name-only search without an anchor, use grep first to get a location, then this for the canonical def.",
   promptSnippet: "Find where a symbol is declared",
   promptGuidelines: anchorGuidelines(
     "Use lsp_definition to locate where a symbol is declared before modifying it or reading wider source.",

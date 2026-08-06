@@ -121,7 +121,7 @@ function bridgeHandler(state: SessionState): BridgeHandler {
       return flattenToolResult(result);
     }
     // Extension tools that opted in via exposeRegisteredToolsToEval
-    // (web_search, fetch_content, github_pr, lsp_*, codegraph_*, …).
+    // (web_search, fetch_content, github_pr, lsp_*, …).
     // Args skip pi's schema validation here; a tool's own error is returned
     // to the cell as an exception.
     const ext = evalBridgeTools().get(name);
@@ -373,10 +373,10 @@ export default function (pi: ExtensionAPI) {
     label: "Eval",
     description:
       "Run code in persistent Python and JavaScript kernels for iterative, stateful work — state persists across cells and across separate tool calls, in one kernel per language per session. Not for a single one-off command; use `bash`/`read` directly for those.\n\n" +
-      'Inside cell code, `tool.<name>({...})` invokes pi tools with their normal argument schemas: built-ins (`read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`) plus extension tools (`web_search`, `fetch_content`, `github_pr`, `lsp_*`, `codegraph_*`); `tool.list()` enumerates what is callable, `tree({path,max_depth})` is extra. Great for fan-out: query a tool N times in a loop, keep raw output in the kernel, return only the aggregate. Shortcuts: `read(path)`, `write(path,content)`, `tree(path)`, `env(key?, value?)` (no args: full env dict; one: get; two: set), `completion(prompt, model?, system?, schema?)` for a oneshot stateless model call (model: "default" or "provider/id"; schema: JSON-Schema for structured output).\n\n' +
+      'Inside cell code, `tool.<name>({...})` invokes pi tools with their normal argument schemas: built-ins (`read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`) plus extension tools (`web_search`, `fetch_content`, `github_pr`, `lsp_*`); `tool.list()` enumerates what is callable, `tree({path,max_depth})` is extra. Great for fan-out: query a tool N times in a loop, keep raw output in the kernel, return only the aggregate. Shortcuts: `read(path)`, `write(path,content)`, `tree(path)`, `env(key?, value?)` (no args: full env dict; one: get; two: set), `completion(prompt, model?, system?, schema?)` for a oneshot stateless model call (model: "default" or "provider/id"; schema: JSON-Schema for structured output).\n\n' +
       'Call `install("pkg1", "pkg2")` to add Python packages, persists across pi restarts. JS cells support top-level await and package imports; use `globalThis` / `state` to persist values across cells.',
     promptSnippet:
-      "eval: persistent py + js kernels; share state across tool calls; `tool.*` proxy invokes pi tools (read/write/edit/bash/grep/find/ls/tree, web_search/fetch_content/github_pr/lsp_*/codegraph_*) — fan out in a loop, return only the aggregate.",
+      "eval: persistent py + js kernels; share state across tool calls; `tool.*` proxy invokes pi tools (read/write/edit/bash/grep/find/ls/tree, web_search/fetch_content/github_pr/lsp_*) — fan out in a loop, return only the aggregate.",
     parameters: EvalParams,
     async execute(_callId, params: EvalParamsT, signal, onUpdate, ctx) {
       try {

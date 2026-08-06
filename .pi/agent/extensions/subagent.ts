@@ -110,6 +110,7 @@ function getByPath(obj: unknown, path: string | undefined): unknown {
 
 const AGENTS_DIR = path.join(getAgentDir(), "agents");
 const MODEL_MAP_PATH = path.join(AGENTS_DIR, "model-map.json");
+const SYSTEM_PROMPT_PATH = path.join(getAgentDir(), "SYSTEM.md");
 const MAX_OUTPUT_BYTES = 32 * 1024;
 const UPDATE_INTERVAL_MS = 150;
 const TASK_PREVIEW_MAX = 140;
@@ -286,6 +287,12 @@ function expandToolPatterns(patterns: string[], allNames: string[]): string[] {
 
 function loadAgents(): AgentConfig[] {
   if (!fs.existsSync(AGENTS_DIR)) return [];
+  let sharedPreamble = "";
+  try {
+    sharedPreamble = fs.readFileSync(SYSTEM_PROMPT_PATH, "utf-8").trim();
+  } catch {
+    /* no shared SYSTEM.md — agents fall back to their own body only */
+  }
   const out: AgentConfig[] = [];
   for (const entry of fs.readdirSync(AGENTS_DIR)) {
     if (!entry.endsWith(".md")) continue;
@@ -320,11 +327,10 @@ function loadAgents(): AgentConfig[] {
       hidden: frontmatter.hidden === true,
       tools,
       maxDurationMs: secsToMs(frontmatter.maxDuration),
-      // Only the agent's own .md content — no shared preamble (SYSTEM.md is
-      // the main session's own prompt, not a subagent default) and no other
-      // injected context, so every subagent starts from a clean, unambiguous
-      // slate defined entirely by its own file.
-      systemPrompt: body.trim(),
+      // Same base system prompt as the main session (SYSTEM.md), with the
+      // agent's own .md content appended — so every subagent shares the same
+      // ground rules and only differs by its own file's addition.
+      systemPrompt: `${sharedPreamble}\n\n${body.trim()}`,
     });
   }
   return out;
