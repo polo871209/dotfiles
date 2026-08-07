@@ -10,6 +10,15 @@ vim.filetype.add {
     extension = {
         bzl = 'bzl',
         j2 = 'jinja',
+        mdx = 'markdown',
+    },
+    pattern = {
+        -- lsp/yamlls.lua and plugin/format.lua target these compound
+        -- filetypes for schema/formatter selection; nvim has no builtin
+        -- ftdetect for them, so without this they never fire.
+        ['.*/%.github/workflows/.*%.ya?ml'] = 'yaml.github',
+        ['.*docker%-compose[^/]*%.ya?ml'] = 'yaml.docker-compose',
+        ['.*%.gitlab%-ci%.ya?ml'] = 'yaml.gitlab',
     },
 }
 

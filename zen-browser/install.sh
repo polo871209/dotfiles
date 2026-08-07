@@ -63,7 +63,8 @@ echo -e "${GREEN}✓ Found profile: $PROFILE_PATH${NC}"
 create_symlink() {
     local source="$1"
     local target="$2"
-    local filename=$(basename "$source")
+    local filename
+    filename=$(basename "$source")
 
     if [ -L "$target" ]; then
         echo -e "${YELLOW}⚠ Removing existing symlink: $filename${NC}"

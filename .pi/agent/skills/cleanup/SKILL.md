@@ -32,7 +32,7 @@ Rules:
 **Hard rules:**
 
 - Surgical. Touch only dead/comment lines. No reformatting, no renames, no "while I'm here" refactors.
-- Use LSP references (`lsp_references`) before deleting any exported symbol. If used outside scope, leave and report.
+- Use `lsp` (`action: "references"`) before deleting any exported symbol. If used outside scope, leave and report.
 - Public API (exported from package entry) — do NOT delete without confirming. List candidates instead.
 - Match existing style.
 - After edits, report: files touched, lines removed, anything flagged-but-skipped.

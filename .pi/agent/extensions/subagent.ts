@@ -70,6 +70,38 @@ interface Progress {
   error?: string;
 }
 
+// Live registry of every run this session has started (foreground or
+// background), keyed by run id — backs subagent_manage's list (fleet overview) and
+// steer/stop actions (by id). globalThis-backed like resultStore so
+// an extension reload doesn't orphan runs still in flight.
+interface RunRecord {
+  id: string;
+  paneId?: string;
+  controller: AbortController;
+  progress: Progress;
+}
+const runsStore = (() => {
+  const g = globalThis as unknown as {
+    __piSubagentRuns?: Map<string, RunRecord>;
+  };
+  return (g.__piSubagentRuns ??= new Map());
+})();
+const MAX_TRACKED_RUNS = 50;
+
+// Bound the registry: drop oldest finished runs first once over the cap so a
+// long session doesn't accumulate unbounded history; running ones are kept
+// regardless of age.
+function pruneRunsStore(): void {
+  if (runsStore.size <= MAX_TRACKED_RUNS) return;
+  const finished = [...runsStore.values()]
+    .filter((r) => r.progress.status !== "running")
+    .sort((a, b) => a.progress.startedAt - b.progress.startedAt);
+  for (const r of finished) {
+    if (runsStore.size <= MAX_TRACKED_RUNS) break;
+    runsStore.delete(r.id);
+  }
+}
+
 // Structured results a subagent captured mid- or end-of-run via `retain`,
 // keyed by the subagent's own target id ("sub-<agent>-<ts>-<rand>"), so the
 // parent can pull one field instead of re-reading the whole transcript.
@@ -94,7 +126,7 @@ function extractResultBlock(text: string, id: string): string {
   }
   return (
     text.slice(0, m.index).trimEnd() +
-    `\n\n[structured result captured — id: ${id}. Use subagent_result to pull a field instead of re-reading this transcript.]`
+    `\n\n[structured result captured — id: ${id}. Use subagent_manage (action: result) to pull a field instead of re-reading this transcript.]`
   );
 }
 
@@ -117,6 +149,9 @@ const TASK_PREVIEW_MAX = 140;
 const FORBIDDEN_TOOLS = new Set(["ask_user_question", "subagent"]);
 const DEFAULT_MAX_DURATION_MS = 3_600_000;
 const TMUX_POLL_MS = 500;
+const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
+const MAX_WAIT_TIMEOUT_MS = 300_000;
+const WAIT_POLL_MS = 500;
 
 const execFileAsync = promisify(execFile);
 
@@ -417,9 +452,20 @@ const buildParams = () =>
         "Self-contained execution brief. For worker, give exact scope, relevant paths and context, constraints, completion criteria, verification, and expected report; resolve ambiguity before delegating.",
     }),
     model: Type.Optional(Type.String()),
+    background: Type.Optional(
+      Type.Boolean({
+        description:
+          "Return immediately with a run id instead of waiting for the subagent to finish. Check progress, steer, stop, or pull the result via subagent_manage.",
+      }),
+    ),
   });
 
-type SubagentArgs = { agent: string; task: string; model?: string };
+type SubagentArgs = {
+  agent: string;
+  task: string;
+  model?: string;
+  background?: boolean;
+};
 
 const statusIcon = (theme: Theme, p: Progress): string => {
   if (p.status === "running") return theme.fg("warning", "⟳");
@@ -495,19 +541,52 @@ const initialProgress = (
   output: "",
 });
 
-const resultParams = () =>
+// Shared by the four passive/control ops on already-tracked runs (list,
+// result, steer, stop, wait) — one tool with an `action` enum instead of
+// four, since they overlap heavily on `id` and none needs subagent's custom
+// renderCall/renderResult.
+const manageParams = () =>
   Type.Object({
-    id: Type.String({
-      description:
-        'Subagent id from a prior subagent call\'s output ("structured result captured — id: ...")',
-    }),
+    action: Type.Union([
+      Type.Literal("list"),
+      Type.Literal("result"),
+      Type.Literal("steer"),
+      Type.Literal("stop"),
+      Type.Literal("wait"),
+    ]),
+    id: Type.Optional(
+      Type.String({
+        description:
+          "Run id from a subagent call's output or from action=list. Required for result/steer/stop. Optional for wait — omit to wait on any currently-running run.",
+      }),
+    ),
     path: Type.Optional(
       Type.String({
         description:
-          'Dot path into the captured JSON, e.g. "findings.0.path". Omit to return the whole object.',
+          'Dot path into the captured JSON, e.g. "findings.0.path". Only for action=result; omit to return the whole object.',
+      }),
+    ),
+    message: Type.Optional(
+      Type.String({
+        description: "Text to send to the subagent. Required for action=steer.",
+      }),
+    ),
+    timeout_ms: Type.Optional(
+      Type.Number({
+        minimum: 1000,
+        description: `Max ms to block for action=wait (default ${DEFAULT_WAIT_TIMEOUT_MS}, capped at ${MAX_WAIT_TIMEOUT_MS}). Ignored by other actions.`,
       }),
     ),
   });
+
+const formatRunLine = (r: RunRecord): string => {
+  const p = r.progress;
+  const dur = formatDuration(
+    p.status === "running" ? Date.now() - p.startedAt : p.durationMs,
+  );
+  const msg = p.status === "running" ? p.lastMessage : (p.error ?? "");
+  return `${r.id}  [${p.status}]  ${p.agent}  ${dur}${msg ? `  — ${msg}` : ""}`;
+};
 
 function toolsFlagValue(
   agent: AgentConfig,
@@ -535,13 +614,13 @@ async function runInTmux(
   progress: Progress,
   push: () => void,
   signal: AbortSignal | undefined,
+  target: string,
+  record: RunRecord,
 ): Promise<{
   content: { type: "text"; text: string }[];
   details: Progress;
   error?: string;
 }> {
-  const target = `sub-${agent.name}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-
   const sysFile = path.join(os.tmpdir(), `pi-subagent-sys-${target}.txt`);
   const taskFile = path.join(os.tmpdir(), `pi-subagent-task-${target}.txt`);
   fs.writeFileSync(sysFile, agent.systemPrompt, "utf-8");
@@ -596,6 +675,7 @@ async function runInTmux(
   // Best effort: name the pane after the subagent for readability before
   // notifier.ts (running inside it) takes over with status suffixes.
   void tmuxRun(["select-pane", "-t", paneId, "-T", target]);
+  record.paneId = paneId;
 
   let aborted = false;
   const onAbort = () => {
@@ -731,12 +811,12 @@ export default function (pi: ExtensionAPI) {
     description:
       `Delegate medium or large work to a specialized subagent running in isolation. ` +
       `Never use for small localized tasks, simple edits, single-file changes, or quick lookups. ` +
-      `Returns text only. Use worker only with a precise execution brief that should not require parent clarification or repeat verification; resolve vague scope first. ` +
+      `Returns text only. Resolve vague scope before dispatching — give each agent a precise execution brief. ` +
       `Dispatch independent tasks as multiple parallel subagent calls in one response. ` +
       `Use to keep this session focused (offload web research, recon, or end-to-end implementation).\n\n` +
       `Available agents:\n${agentList}\n\n` +
-      `Subagents cannot spawn further subagents.\n\n` +
-      "If a task asks for a structured result, the subagent should end its reply with a fenced ```result-json ... ``` block; pull a field from it afterward with subagent_result instead of re-reading the transcript.",
+      `Subagents cannot spawn further subagents. Pass background: true to get a run id back immediately instead of waiting; check, steer, or stop it with subagent_manage.\n\n` +
+      "If a task asks for a structured result, the subagent should end its reply with a fenced ```result-json ... ``` block; pull a field from it afterward with subagent_manage (action: result) instead of re-reading the transcript.",
     parameters: params,
     renderShell: "self",
 
@@ -775,7 +855,23 @@ export default function (pi: ExtensionAPI) {
         parentModel;
       const thinking = SUBAGENT_THINKING;
 
+      const target = `sub-${agent.name}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
       const progress = initialProgress(agent, args.task, model ?? "default");
+      progress.id = target;
+
+      // Own AbortController so subagent_manage can stop a background run
+      // that has no live framework signal (its tool call already returned).
+      const controller = new AbortController();
+      if (signal) {
+        if (signal.aborted) controller.abort();
+        else
+          signal.addEventListener("abort", () => controller.abort(), {
+            once: true,
+          });
+      }
+      const record: RunRecord = { id: target, controller, progress };
+      runsStore.set(target, record);
+      pruneRunsStore();
 
       // Throttled push so render redraws don't pile up under fast event bursts.
       const pushNow = () => {
@@ -787,7 +883,7 @@ export default function (pi: ExtensionAPI) {
       };
       const push = throttle(pushNow, UPDATE_INTERVAL_MS);
 
-      return await runInTmux(
+      const runPromise = runInTmux(
         pi,
         agent,
         args.task,
@@ -796,33 +892,206 @@ export default function (pi: ExtensionAPI) {
         ctx.cwd,
         progress,
         push,
-        signal,
+        controller.signal,
+        target,
+        record,
       );
+
+      if (args.background) {
+        // Fire-and-forget: runInTmux mutates `progress` (shared with the
+        // record already in runsStore) as it goes, so subagent_manage (list) sees
+        // live state without us awaiting here.
+        runPromise.catch((err) => {
+          progress.status = "failed";
+          progress.error = String(err);
+        });
+        return {
+          content: [
+            {
+              type: "text",
+              text: `subagent '${agent.name}' started in background (id: ${target}). Use subagent_manage to check on it, steer/stop it, or pull its result if it ends with a result-json block.`,
+            },
+          ],
+          details: { ...progress },
+        };
+      }
+
+      return await runPromise;
     },
   });
 
-  pi.registerTool<ReturnType<typeof resultParams>, undefined>({
-    name: "subagent_result",
-    label: "Subagent Result",
+  pi.registerTool<ReturnType<typeof manageParams>, undefined>({
+    name: "subagent_manage",
+    label: "Subagent Manage",
     description:
-      "Pull a field (or the whole object) out of a subagent's captured ```result-json``` block by id, instead of re-reading its full transcript.",
-    parameters: resultParams(),
+      "Inspect or control subagent runs tracked this session. Actions:\n" +
+      "- list: every tracked run (running + recently finished) with id, agent, status, duration, last message/error.\n" +
+      "- result: pull a field (or the whole object) out of a run's captured ```result-json``` block by id, instead of re-reading its full transcript.\n" +
+      "- steer: send a message into a running run's pane as follow-up input.\n" +
+      "- stop: abort a running run.\n" +
+      "- wait: block until a run (by id) or any currently-running run finishes, instead of polling list — returns as soon as one does, or on timeout.",
+    parameters: manageParams(),
     async execute(_toolCallId, rawParams) {
-      const { id, path: fieldPath } = rawParams as {
-        id: string;
+      const {
+        action,
+        id,
+        path: fieldPath,
+        message,
+        timeout_ms,
+      } = rawParams as {
+        action: "list" | "result" | "steer" | "stop" | "wait";
+        id?: string;
         path?: string;
+        message?: string;
+        timeout_ms?: number;
       };
-      if (!resultStore.has(id)) {
-        const msg = `subagent_result: no structured result captured for id "${id}"`;
+
+      if (action === "list") {
+        const runs = [...runsStore.values()].sort(
+          (a, b) => b.progress.startedAt - a.progress.startedAt,
+        );
+        const text =
+          runs.length === 0
+            ? "No subagent runs tracked this session."
+            : runs.map(formatRunLine).join("\n");
+        return { content: [{ type: "text", text }], details: undefined };
+      }
+
+      if (action === "wait") {
+        if (id && !runsStore.has(id)) {
+          const msg = `subagent_manage: no tracked run with id "${id}"`;
+          return {
+            content: [{ type: "text", text: msg }],
+            details: undefined,
+            error: msg,
+          };
+        }
+        const targets = id
+          ? [runsStore.get(id)!]
+          : [...runsStore.values()].filter(
+              (r) => r.progress.status === "running",
+            );
+        if (targets.length === 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "subagent_manage: no runs currently running.",
+              },
+            ],
+            details: undefined,
+          };
+        }
+        const timeoutMs = Math.min(
+          Math.max(timeout_ms ?? DEFAULT_WAIT_TIMEOUT_MS, 1000),
+          MAX_WAIT_TIMEOUT_MS,
+        );
+        const deadline = Date.now() + timeoutMs;
+        while (true) {
+          const finished = targets.filter(
+            (r) => r.progress.status !== "running",
+          );
+          if (finished.length > 0) {
+            return {
+              content: [
+                { type: "text", text: finished.map(formatRunLine).join("\n") },
+              ],
+              details: undefined,
+            };
+          }
+          if (Date.now() >= deadline) {
+            const label =
+              targets.length === 1
+                ? targets[0]!.id
+                : `${targets.length} run(s)`;
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `subagent_manage: timed out after ${formatDuration(timeoutMs)} waiting on ${label}.`,
+                },
+              ],
+              details: undefined,
+            };
+          }
+          await sleep(WAIT_POLL_MS);
+        }
+      }
+
+      if (!id) {
+        const msg = `subagent_manage: 'id' is required for action '${action}'.`;
         return {
           content: [{ type: "text", text: msg }],
           details: undefined,
           error: msg,
         };
       }
-      const value = getByPath(resultStore.get(id), fieldPath);
+
+      if (action === "result") {
+        if (!resultStore.has(id)) {
+          const msg = `subagent_manage: no structured result captured for id "${id}"`;
+          return {
+            content: [{ type: "text", text: msg }],
+            details: undefined,
+            error: msg,
+          };
+        }
+        const value = getByPath(resultStore.get(id), fieldPath);
+        return {
+          content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
+          details: undefined,
+        };
+      }
+
+      // steer / stop
+      const record = runsStore.get(id);
+      if (!record) {
+        const msg = `subagent_manage: no tracked run with id "${id}"`;
+        return {
+          content: [{ type: "text", text: msg }],
+          details: undefined,
+          error: msg,
+        };
+      }
+      if (action === "stop") {
+        record.controller.abort();
+        return {
+          content: [
+            {
+              type: "text",
+              text: `subagent '${record.progress.agent}' (${id}) stop requested.`,
+            },
+          ],
+          details: undefined,
+        };
+      }
+      // steer
+      if (record.progress.status !== "running" || !record.paneId) {
+        const msg = `subagent_manage: run "${id}" is not running, cannot steer.`;
+        return {
+          content: [{ type: "text", text: msg }],
+          details: undefined,
+          error: msg,
+        };
+      }
+      if (!message) {
+        const msg =
+          "subagent_manage: 'message' is required for action 'steer'.";
+        return {
+          content: [{ type: "text", text: msg }],
+          details: undefined,
+          error: msg,
+        };
+      }
+      await tmuxRun(["send-keys", "-t", record.paneId, "-l", message]);
+      await tmuxRun(["send-keys", "-t", record.paneId, "Enter"]);
       return {
-        content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
+        content: [
+          {
+            type: "text",
+            text: `sent to subagent '${record.progress.agent}' (${id}).`,
+          },
+        ],
         details: undefined,
       };
     },

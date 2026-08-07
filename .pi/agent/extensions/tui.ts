@@ -1,8 +1,7 @@
-// Customizes pi TUI: input text color, slim footer, pins the editor to the
-// bottom of the viewport even when the conversation is short, renders the
-// autocomplete dropdown as a floating overlay above the editor — the dropdown
-// covers the conversation lines underneath instead of pushing the editor up or
-// reserving a permanent gap.
+// Customizes pi TUI: input text color, slim footer, strips a container
+// margin artifact, renders the autocomplete dropdown as a floating overlay
+// above the editor — the dropdown covers the conversation lines underneath
+// instead of pushing the editor up or reserving a permanent gap.
 import {
   CustomEditor,
   type ExtensionAPI,
@@ -11,36 +10,15 @@ import {
 import type { Theme as PiTheme } from "@earendil-works/pi-coding-agent";
 import {
   Editor,
-  TUI,
+  TuiAltScreen,
+  TuiMainScreen,
   type Component,
   type EditorTheme,
   type OverlayHandle,
+  type TUI,
   truncateToWidth,
   visibleWidth,
 } from "@earendil-works/pi-tui";
-
-// Pi reloads extensions with moduleCache:false, so this module's top-level
-// state is re-bound on /new while the prototype patch from the first load stays
-// in place. Stash the editor reference on the TUI instance itself so the patch
-// always reads the live binding, not a stale module-local variable.
-const PINNED_EDITOR_KEY = "__piPinnedEditor";
-
-const getPinnedEditor = (tui: TUI): Component | null =>
-  (tui as unknown as Record<string, Component | null>)[PINNED_EDITOR_KEY] ??
-  null;
-
-const setPinnedEditor = (tui: TUI, editor: Component): void => {
-  (tui as unknown as Record<string, Component | null>)[PINNED_EDITOR_KEY] =
-    editor;
-};
-
-const containsComponent = (node: Component, target: Component): boolean => {
-  if (node === target) return true;
-  const kids = (node as unknown as { children?: Component[] }).children;
-  if (!Array.isArray(kids)) return false;
-  for (const k of kids) if (containsComponent(k, target)) return true;
-  return false;
-};
 
 // pi's own message containers render with a 1-column left margin (a real
 // space character in the terminal grid, not screen padding), so selecting
@@ -55,93 +33,28 @@ const LEADING_MARGIN =
 const stripLeadingMargin = (lines: string[]): string[] =>
   lines.map((l) => l.replace(LEADING_MARGIN, "$1"));
 
-// Patch TUI.render to split children at the editor and fill the gap above it
-// with blank lines so the editor (and its bottom-anchored autocomplete overlay)
-// sits at the bottom of the viewport even on a fresh session. As the
-// conversation grows the filler shrinks to 0 and normal scrolling takes over.
-const PIN_TAG = "__bottomPinned";
-const installBottomPinPatch = () => {
-  const proto = TUI.prototype as unknown as {
+// Patch render on both concrete screen classes (regular and fullscreen) to
+// strip the leading margin from every rendered line. Re-installable across
+// /reload the same way pi's own patches are: walk past wrapper layers from
+// previous module loads to the true original before wrapping again.
+const MARGIN_TAG = "__marginStripped";
+const installMarginStripPatch = (klass: {
+  prototype: { render(width: number): string[] };
+}) => {
+  const proto = klass.prototype as unknown as {
     render(width: number): string[];
-    children: Component[];
-    terminal: { rows: number; columns: number };
   };
-
-  // Re-installable across /reload: walk past wrappers from previous module
-  // loads to the true original, then install a fresh wrapper bound to this
-  // module's live helpers (a stale wrapper would keep old closures alive and
-  // miss features added since, e.g. code-block marker harvesting).
   let origRender = proto.render as unknown as {
     (width: number): string[];
-    [PIN_TAG]?: { orig: (width: number) => string[] };
+    [MARGIN_TAG]?: { orig: (width: number) => string[] };
   };
-  while (origRender[PIN_TAG]) {
-    origRender = origRender[PIN_TAG].orig as typeof origRender;
+  while (origRender[MARGIN_TAG]) {
+    origRender = origRender[MARGIN_TAG].orig as typeof origRender;
   }
   const wrapper = function (this: typeof proto, width: number): string[] {
-    const editor = getPinnedEditor(this as unknown as TUI);
-    let editorIdx = -1;
-    if (editor) {
-      for (let i = 0; i < this.children.length; i++) {
-        if (containsComponent(this.children[i], editor)) {
-          editorIdx = i;
-          break;
-        }
-      }
-    }
-
-    const finalize = (lines: string[]): string[] => stripLeadingMargin(lines);
-
-    if (editorIdx <= 0) {
-      const out = finalize(origRender.call(this, width));
-      (this as unknown as { __pinLastHeight?: number }).__pinLastHeight =
-        out.length;
-      return out;
-    }
-
-    const before: string[] = [];
-    for (let i = 0; i < editorIdx; i++)
-      before.push(...this.children[i].render(width));
-    const rest: string[] = [];
-    for (let i = editorIdx; i < this.children.length; i++)
-      rest.push(...this.children[i].render(width));
-    // Pad up to the bottom of the *current viewport*, not just terminal.rows:
-    // when a tall transient UI (dialog, questionnaire) collapses, the frame
-    // shrinks but the terminal viewport top stays put, so anchoring to rows
-    // alone leaves the editor stranded mid-screen with blank rows below it.
-    // Cap at the previous frame height: filler must never GROW the frame,
-    // otherwise padding raises previousViewportTop which demands more filler
-    // next render (runaway repaint loop on a fresh session's first turn).
-    const self = this as unknown as {
-      previousViewportTop?: number;
-      __pinLastHeight?: number;
-    };
-    const viewportTop = self.previousViewportTop ?? 0;
-    const content = before.length + rest.length;
-    // Only pad past terminal.rows while the content above the editor still
-    // reaches the viewport top (the dialog-collapse case: filler lands inside
-    // the visible region and diffs cleanly). When it doesn't — the chat was
-    // truncated by /new, /compact, or session switch — padding would write
-    // blanks into rows the differ tracks as scrollback, forcing a full
-    // clear+redraw on EVERY render until the new conversation outgrows the
-    // old one (sustained flicker). Pad only to rows instead: the TUI does one
-    // clean full redraw and previousViewportTop resets to the short frame.
-    const contentReachesViewport = before.length >= viewportTop;
-    const maxHeight = contentReachesViewport
-      ? Math.max(
-          this.terminal.rows,
-          Math.min(viewportTop + this.terminal.rows, self.__pinLastHeight ?? 0),
-        )
-      : this.terminal.rows;
-    const filler = Math.max(0, maxHeight - content);
-    const lines =
-      filler > 0
-        ? [...before, ...new Array<string>(filler).fill(""), ...rest]
-        : [...before, ...rest];
-    self.__pinLastHeight = lines.length;
-    return finalize(lines);
+    return stripLeadingMargin(origRender.call(this, width));
   } as unknown as typeof origRender;
-  wrapper[PIN_TAG] = { orig: origRender };
+  wrapper[MARGIN_TAG] = { orig: origRender };
   proto.render = wrapper;
 };
 
@@ -297,7 +210,6 @@ class ThemedEditor extends CustomEditor {
     private readonly getTheme: () => PiTheme,
   ) {
     super(tui, editorTheme, keybindings);
-    setPinnedEditor(tui, this);
   }
 
   render(width: number): string[] {
@@ -312,19 +224,6 @@ const installInputColor = (pi: ExtensionAPI) => {
       (tui, editorTheme, keybindings) =>
         new ThemedEditor(tui, editorTheme, keybindings, () => ctx.ui.theme),
     );
-  });
-};
-
-// No header at all — live info (session name, model, context %) lives in
-// the footer, and terminal/tmux titles are notifier.ts's territory.
-const installHeader = (pi: ExtensionAPI) => {
-  pi.on("session_start", async (_event, ctx) => {
-    ctx.ui.setHeader(() => ({
-      invalidate() {},
-      render(): string[] {
-        return [];
-      },
-    }));
   });
 };
 
@@ -384,6 +283,13 @@ const installCollapsedTools = (pi: ExtensionAPI) => {
   });
 };
 
+// e.g. 1000 -> "1.0k", 1000000 -> "1.0M".
+const formatTokenCount = (n: number): string => {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return `${n}`;
+};
+
 const installFooter = (pi: ExtensionAPI) => {
   pi.on("session_start", async (_event, ctx) => {
     ctx.ui.setFooter((_tui, theme, footerData) => ({
@@ -407,24 +313,31 @@ const installFooter = (pi: ExtensionAPI) => {
 
         const usage = ctx.getContextUsage?.();
         const usageText =
-          usage?.percent != null ? `${usage.percent.toFixed(1)}%` : "";
+          usage?.percent != null
+            ? `${usage.percent.toFixed(1)}%/${formatTokenCount(usage.contextWindow)}`
+            : "";
 
-        // Flags owned by lsp/feedback and skill-packs.ts (globalThis so they
-        // survive /reload).
-        const g = globalThis as Record<string, unknown>;
-        // Only shown when off/on the non-default way, so the default setup
-        // (fix on, lark off) keeps a clean footer.
-        const lspFixOn = g.__lspFixEnabled !== false;
-        const lspText = lspFixOn ? "" : "fix:off";
-        const lspColored = lspText ? theme.fg("dim", lspText) : "";
-        const larkOn = g.__larkSkillsEnabled === true;
-        const larkText = larkOn ? "lark:on" : "";
+        // Subagent panes are narrow tmux slivers — the full footer wraps or
+        // gets clipped, so show only usage/model/thinking there.
+        if (process.env.PI_IS_SUBAGENT === "1") {
+          const subLeft = [
+            usageText,
+            thinkingText ? `${modelName} • ${thinkingText}` : modelName,
+          ]
+            .filter(Boolean)
+            .join("   ");
+          return [theme.fg("dim", subLeft)];
+        }
+
+        // lark/gws statuses come from skill-toggle.ts via ctx.ui.setStatus,
+        // exposed here through footerData.
+        const statuses = footerData.getExtensionStatuses();
+        const larkText = statuses.get("lark") ?? "";
         // Lark brand blue.
         const larkColored = larkText
           ? `\x1b[38;2;51;112;255m${larkText}\x1b[39m`
           : "";
-        const gwsOn = g.__gwsSkillsEnabled === true;
-        const gwsText = gwsOn ? "gws:on" : "";
+        const gwsText = statuses.get("gws") ?? "";
         // Google brand blue.
         const gwsColored = gwsText
           ? `\x1b[38;2;66;133;244m${gwsText}\x1b[39m`
@@ -434,7 +347,6 @@ const installFooter = (pi: ExtensionAPI) => {
           pwd,
           usageText,
           thinkingText ? `${modelName} • ${thinkingText}` : modelName,
-          lspText,
           larkText,
           gwsText,
         ]
@@ -447,7 +359,6 @@ const installFooter = (pi: ExtensionAPI) => {
           theme.fg("dim", `${pwd}   `) +
           (usageText ? theme.fg("dim", `${usageText}   `) : "") +
           modelColored +
-          (lspColored ? `   ${lspColored}` : "") +
           (larkColored ? `   ${larkColored}` : "") +
           (gwsColored ? `   ${gwsColored}` : "");
 
@@ -479,12 +390,12 @@ const installFooter = (pi: ExtensionAPI) => {
   });
 };
 
-installBottomPinPatch();
+installMarginStripPatch(TuiMainScreen);
+installMarginStripPatch(TuiAltScreen);
 installAutocompleteAbovePatch();
 
 export default function (pi: ExtensionAPI) {
   installInputColor(pi);
-  installHeader(pi);
   installFooter(pi);
   installWorking(pi);
   installCollapsedTools(pi);

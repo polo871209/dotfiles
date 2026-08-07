@@ -72,6 +72,13 @@ export function registerSkillToggle(
     return { skillPaths: [skillsDir] };
   });
 
+  // Publish on/off state through the built-in footer-status channel (reset
+  // on every reload) instead of extensions reaching into each other's
+  // globalThis flags directly.
+  pi.on("session_start", async (_event, ctx) => {
+    ctx.ui.setStatus(name, isEnabled() ? `${name}:on` : undefined);
+  });
+
   pi.registerCommand(name, {
     description: `Flip ${label} on/off (off by default); /${name} update to sync the clone`,
     handler: async (args, ctx) => {

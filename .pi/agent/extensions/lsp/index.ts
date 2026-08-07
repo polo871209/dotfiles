@@ -1,9 +1,9 @@
 // lsp — the LSP subsystem, backed by a persistent headless nvim it owns
 // (warm-spawned at session_start by the feedback pass, else lazy on first tool
 // call; torn down on session shutdown). Two halves:
-//   - Navigation tools (pull): hover, definition, type-definition,
-//     implementation, references, document symbols, and the on-demand
-//     read-only lsp_diagnostics.
+//   - Navigation (pull): one `lsp` tool with an action enum (hover,
+//     definition, references, implementation, type_definition,
+//     document_symbols, and the on-demand read-only diagnostics).
 //   - Feedback pass (push, ./feedback): formats edits inline and runs batched
 //     diagnostics + LLM auto-fix after a turn. See ./feedback/index.ts.
 
@@ -11,12 +11,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { callDriver, isRunning, shutdownNvim } from "./nvim";
 import { exposeRegisteredToolsToEval } from "../shared/bridge-tools";
 import { registerFeedback } from "./feedback";
-import { hoverTool } from "./tools/hover";
-import { definitionTool } from "./tools/definition";
-import { referencesTool } from "./tools/references";
-import { diagnosticsTool } from "./tools/diagnostics";
-import { implementationTool, typeDefinitionTool } from "./tools/navigation";
-import { documentSymbolsTool } from "./tools/symbols";
+import { lspTool } from "./tool";
 import { displayPath } from "./utils";
 
 interface StatusResult {
@@ -26,13 +21,7 @@ interface StatusResult {
 
 export default function (pi: ExtensionAPI) {
   exposeRegisteredToolsToEval(pi);
-  pi.registerTool(hoverTool);
-  pi.registerTool(definitionTool);
-  pi.registerTool(referencesTool);
-  pi.registerTool(diagnosticsTool);
-  pi.registerTool(implementationTool);
-  pi.registerTool(typeDefinitionTool);
-  pi.registerTool(documentSymbolsTool);
+  pi.registerTool(lspTool);
 
   registerFeedback(pi);
 

@@ -1,23 +1,32 @@
 {
-  "lastChangelogVersion": "0.83.0",
+  "lastChangelogVersion": "0.84.0",
+
   "defaultProvider": "anthropic",
   "defaultModel": "claude-sonnet-5",
   "defaultThinkingLevel": "medium",
+  "hideThinkingBlock": true,
+
   "theme": "catppuccin-mocha",
   "quietStartup": true,
+  "outputPad": 0,
+  "tuiMode": "fullscreen",
+  "fullscreenScrollbar": "hidden",
   "showCacheMissNotices": false,
-  "packages": [],
-  "warnings": {
-    "anthropicExtraUsage": false
-  },
+
+  "steeringMode": "all",
+
   "compaction": {
     "reserveTokens": 730000
   },
   "branchSummary": {
     "reserveTokens": 500000
   },
-  "hideThinkingBlock": true,
-  "steeringMode": "all",
-  "enableInstallTelemetry": false,
-  "defaultProjectTrust": "always"
+
+  "warnings": {
+    "anthropicExtraUsage": false
+  },
+
+  "packages": [],
+  "defaultProjectTrust": "always",
+  "enableInstallTelemetry": false
 }

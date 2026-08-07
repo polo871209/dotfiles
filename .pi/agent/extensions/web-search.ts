@@ -37,7 +37,22 @@
 // Deliberately out of scope, don't re-add without a real need: multi-provider
 // search, curator/summary-review UI, YouTube/video/PDF extraction, any config
 // file. If a future provider is genuinely free/zero-config like Exa, add it
-// as an alternative in exaSearch's caller, not a whole fallback chain.
+// as an alternative in exaSearch's caller, not a whole fallback chain. Also
+// skipped: upstream's inline image fetch (new dep, no demonstrated need) and
+// its `mode: "answer"` page-QA (an LLM call for something a plain fetch +
+// read already covers). Upstream's domainFilter/recencyFilter aren't
+// portable here either — mcp.exa.ai's public keyless surface exposes only
+// `web_search_exa`/`web_fetch_exa` (verified live), no advanced/filtered
+// variant; that needs a paid Exa key upstream requires for the same feature.
+//
+// Ported from upstream since (SHA-pinned as above): fetch_content's
+// offset-based continuation with clean line-boundary truncation instead of a
+// hard char cut (extract.ts's line-boundary slicing), streamed response-size
+// enforcement instead of trusting Content-Length alone, `mode: "raw"` to
+// bypass Readability for JSON/debugging (all three from the 0.16.0-0.18.0
+// fetch-content work), and disabling git's interactive credential prompt
+// during GitHub clones so a private/mistyped repo can't hang the process
+// waiting on stdin (from the unreleased PR #193 fix).
 //
 // mapLimit() bounds concurrency for multi-query/multi-url calls (4 searches,
 // 3 fetches in flight) instead of unbounded Promise.all — same reasoning as
@@ -344,9 +359,82 @@ async function exaSearch(
   return results;
 }
 
+// Reads the body incrementally so a chunked/compressed response with no (or
+// a lying) Content-Length header can't be buffered unbounded before the
+// MAX_RESPONSE_BYTES check below ever runs.
+async function readBoundedText(
+  res: Response,
+  maxBytes: number,
+): Promise<string> {
+  if (!res.body) return res.text();
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let received = 0;
+  let out = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      received += value.byteLength;
+      if (received > maxBytes) {
+        throw new Error(
+          `Response too large (>${Math.round(maxBytes / 1024 / 1024)}MB)`,
+        );
+      }
+      out += decoder.decode(value, { stream: true });
+    }
+  } finally {
+    reader.cancel().catch(() => {});
+  }
+  out += decoder.decode();
+  return out;
+}
+
+// Slices `content` to at most MAX_CONTENT_CHARS starting at `offset`, cutting
+// on the last newline in range instead of mid-line, and reports where a
+// follow-up fetch_content({ offset }) call should resume.
+function sliceWithContinuation(
+  content: string,
+  offset: number,
+): {
+  text: string;
+  truncated: boolean;
+  nextOffset: number;
+  totalChars: number;
+} {
+  const totalChars = content.length;
+  const start = Math.min(Math.max(offset, 0), totalChars);
+  let end = Math.min(start + MAX_CONTENT_CHARS, totalChars);
+  if (end < totalChars) {
+    const lastNewline = content.lastIndexOf("\n", end);
+    if (lastNewline > start) end = lastNewline;
+  }
+  return {
+    text: content.slice(start, end),
+    truncated: end < totalChars,
+    nextOffset: end,
+    totalChars,
+  };
+}
+
+function withContinuationFooter(
+  content: string,
+  offset: number,
+  url: string,
+): string {
+  const { text, truncated, nextOffset, totalChars } = sliceWithContinuation(
+    content,
+    offset,
+  );
+  if (!truncated) return text;
+  return `${text}\n\n[showing chars ${offset}-${nextOffset} of ${totalChars} total — call fetch_content again with { url: "${url}", offset: ${nextOffset} } to continue]`;
+}
+
 async function fetchReadable(
   url: string,
   signal?: AbortSignal,
+  mode: "readable" | "raw" = "readable",
+  offset = 0,
 ): Promise<{ title: string; content: string }> {
   const res = await fetchSafely(url, signal);
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
@@ -367,9 +455,9 @@ async function fetchReadable(
     throw new Error(`Unsupported content type: ${baseType || "unknown"}`);
   }
 
-  const text = await res.text();
-  if (!contentType.includes("html")) {
-    return { title: url, content: text.slice(0, MAX_CONTENT_CHARS) };
+  const text = await readBoundedText(res, MAX_RESPONSE_BYTES);
+  if (mode === "raw" || !contentType.includes("html")) {
+    return { title: url, content: withContinuationFooter(text, offset, url) };
   }
 
   const { document } = parseHTML(text);
@@ -379,7 +467,7 @@ async function fetchReadable(
   const markdown = turndown.turndown(article.content ?? "");
   return {
     title: article.title || url,
-    content: markdown.slice(0, MAX_CONTENT_CHARS),
+    content: withContinuationFooter(markdown, offset, url),
   };
 }
 
@@ -429,8 +517,16 @@ const cloneCache = new Map<string, Promise<string>>();
 
 function execGitClone(args: string[], signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = execFile("git", args, { timeout: CLONE_TIMEOUT_MS }, (err) =>
-      err ? reject(err) : resolve(),
+    const child = execFile(
+      "git",
+      args,
+      {
+        timeout: CLONE_TIMEOUT_MS,
+        // A private/nonexistent repo would otherwise make git block waiting
+        // for a username/password on the controlling terminal.
+        env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "echo" },
+      },
+      (err) => (err ? reject(err) : resolve()),
     );
     if (signal) {
       const onAbort = () => child.kill();
@@ -621,6 +717,8 @@ function describeGithubPath(root: string, info: GitHubUrlInfo): string {
 async function fetchOne(
   url: string,
   signal?: AbortSignal,
+  mode: "readable" | "raw" = "readable",
+  offset = 0,
 ): Promise<{ title: string; content: string }> {
   const gh = parseGitHubUrl(url);
   if (gh && !gh.refIsFullSha) {
@@ -636,7 +734,7 @@ async function fetchOne(
       // fall through to HTML fetch below
     }
   }
-  return fetchReadable(url, signal);
+  return fetchReadable(url, signal, mode, offset);
 }
 
 export default function (pi: ExtensionAPI) {
@@ -654,12 +752,13 @@ export default function (pi: ExtensionAPI) {
     name: "web_search",
     label: "Web Search",
     description:
-      "Search the web, no API key required. Returns title, URL, and a content snippet per result.",
+      "Search the web. Returns title, URL, and a content snippet per result.",
     promptSnippet:
       "Search the web for research questions. Prefer multiple varied `queries` over one.",
     renderResult(result, _options, theme: Theme) {
       const d = result.details as
-        { queries?: string[]; totalResults?: number } | undefined;
+        | { queries?: string[]; totalResults?: number }
+        | undefined;
       return new Text(
         theme.fg(
           "dim",
@@ -765,6 +864,18 @@ export default function (pi: ExtensionAPI) {
     parameters: Type.Object({
       url: Type.Optional(Type.String()),
       urls: Type.Optional(Type.Array(Type.String())),
+      mode: Type.Optional(
+        Type.Union([Type.Literal("readable"), Type.Literal("raw")], {
+          description:
+            "'readable' (default) extracts the article as markdown. 'raw' returns the original response text verbatim, useful for JSON APIs or debugging.",
+        }),
+      ),
+      offset: Type.Optional(
+        Type.Number({
+          description:
+            "Character offset to resume from when a previous call was truncated.",
+        }),
+      ),
     }),
     async execute(_callId, params, signal) {
       const urlList = (
@@ -787,10 +898,12 @@ export default function (pi: ExtensionAPI) {
           details: {},
         };
       }
+      const mode = params.mode === "raw" ? "raw" : "readable";
+      const offset = Math.max(Math.floor(params.offset ?? 0), 0);
 
       const results = await mapLimit(urlList, 3, async (url) => {
         try {
-          const { title, content } = await fetchOne(url, signal);
+          const { title, content } = await fetchOne(url, signal, mode, offset);
           return { url, title, content, error: null as string | null };
         } catch (err) {
           return { url, title: "", content: "", error: errMsg(err) };

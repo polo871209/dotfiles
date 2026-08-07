@@ -23,7 +23,8 @@ PRELUDE_PATH = os.path.join(os.path.dirname(__file__), "prelude.py")
 def _start_parent_watchdog() -> None:
     """Self-terminate if reparented: when the host (pi) is SIGKILL'd the kernel
     is otherwise orphaned and lingers, leaking RAM across pi restarts."""
-    if os.name != "posix":
+    os_name = os.name
+    if os_name != "posix":
         return
     ppid = os.getppid()
     if ppid <= 1:
@@ -65,7 +66,7 @@ def _build_globals() -> dict:
     g: dict = {"__name__": "__main__", "__builtins__": __builtins__}
     with open(PRELUDE_PATH, "r", encoding="utf-8") as f:
         prelude_src = f.read()
-    exec(compile(prelude_src, PRELUDE_PATH, "exec"), g)
+    exec(compile(prelude_src, PRELUDE_PATH, "exec"), g)  # noqa: S102 -- trusted local prelude, not user input
     return g
 
 
@@ -81,9 +82,9 @@ def _exec_cell(code: str, g: dict) -> object:
         ast.fix_missing_locations(body_module)
         ast.fix_missing_locations(expr_module)
         if body_module.body:
-            exec(compile(body_module, "<cell>", "exec"), g)
+            exec(compile(body_module, "<cell>", "exec"), g)  # noqa: S102 -- executing user cell code is this module's purpose
         return eval(compile(expr_module, "<cell>", "eval"), g)
-    exec(compile(tree, "<cell>", "exec"), g)
+    exec(compile(tree, "<cell>", "exec"), g)  # noqa: S102
     return None
 
 
@@ -120,7 +121,7 @@ def main() -> None:
         try:
             with redirect_stdout(stdout_fwd), redirect_stderr(stderr_fwd):
                 value = _exec_cell(code, globals_dict)
-        except BaseException:
+        except BaseException:  # noqa: BLE001 -- must surface any cell failure (incl. SystemExit) as a result, never crash the kernel
             error = traceback.format_exc()
 
         # Best-effort JSON serializability check; fall back to repr. A late
@@ -134,7 +135,7 @@ def main() -> None:
         except KeyboardInterrupt:
             value_out = None
             error = error or "KeyboardInterrupt during result serialization"
-        except Exception:
+        except Exception:  # noqa: BLE001 -- fall back to repr for any non-JSON-serializable value
             value_out = repr(value)
 
         try:

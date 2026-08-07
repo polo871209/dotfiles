@@ -44,16 +44,23 @@ local function is_ignored(bufnr)
     return false
 end
 
+-- sqlfluff shells out to a separate process per lint/format and is
+-- noticeably slower than the other formatters here, so it runs
+-- post-write (format_after_save) instead of blocking the sync save path.
+local SLOW_FORMATTERS_BY_FT = { sql = true }
+
 require('conform').setup {
     notify_on_error = false,
     format_on_save = function(bufnr)
-        if not format_on_save_enabled or is_ignored(bufnr) then return end
-        return { timeout_ms = 1500, lsp_format = 'fallback' }
+        if not format_on_save_enabled or is_ignored(bufnr) or SLOW_FORMATTERS_BY_FT[vim.bo[bufnr].filetype] then return end
+        return { timeout_ms = 500, lsp_format = 'fallback' }
+    end,
+    format_after_save = function(bufnr)
+        if not format_on_save_enabled or is_ignored(bufnr) or not SLOW_FORMATTERS_BY_FT[vim.bo[bufnr].filetype] then return end
+        return { lsp_format = 'fallback' }
     end,
     formatters_by_ft = {
         bzl = { 'buildifier' },
-        c = { 'clang-format' },
-        cpp = { 'clang-format' },
         css = biome_or_prettier,
         cue = { 'cue_fmt' },
         go = { 'goimports' },
@@ -64,12 +71,10 @@ require('conform').setup {
         jsonnet = { 'jsonnetfmt' },
         lua = { 'stylua' },
         markdown = { 'prettier' },
-        ['markdown.mdx'] = { 'prettier' },
-        mdx = { 'prettier' },
-        protobuf = { 'buf' },
+        proto = { 'buf' },
         python = { 'ruff_fix', 'ruff_format', 'ruff_organize_imports' },
         sql = { 'sqlfluff' },
-        terraform = { 'terraform_fmt' },
+        tf = { 'terraform_fmt' },
         typescript = biome_or_prettier,
         typescriptreact = biome_or_prettier,
         yaml = { 'prettier' },
@@ -79,9 +84,6 @@ require('conform').setup {
         zig = { 'zigfmt' },
     },
     formatters = {
-        ['clang-format'] = {
-            prepend_args = { '--style={BasedOnStyle: Google, IndentWidth: 4, ReflowComments: false}' },
-        },
         jsonnetfmt = {
             args = { '--indent', '0', '--max-blank-lines', '2', '--sort-imports', '--string-style', 's', '--comment-style', 's', '--no-pad-objects', '-' },
         },

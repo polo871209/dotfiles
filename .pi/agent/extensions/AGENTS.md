@@ -24,7 +24,7 @@ Before changing Pi-native behavior, read directly relevant documentation in the 
 - **`eval/`** — runs persistent Python or JavaScript for iterative computation and bulk aggregation.
 - **`lsp/`** — provides symbol navigation and deterministic post-edit diagnostics and fixes for code work.
 - **`github-pr.ts`** — fetches concise PR metadata, failures, review threads, diffs, or a single section, for PR analysis.
-- **`subagent.ts`** — delegates fully specified medium or large research, repository recon, or implementation work requiring no user decisions, and can hand back one field of a structured result on request.
+- **`subagent.ts`** — delegates fully specified medium or large research, repository recon, or implementation work requiring no user decisions, optionally in the background; lists, steers, or stops tracked runs, and can hand back one field of a structured result on request.
 - **`ask/`** — presents structured choices when a request needs clarification.
 
 ### Cleaner context
@@ -49,7 +49,6 @@ Before changing Pi-native behavior, read directly relevant documentation in the 
 ### TUI taste
 
 - **`tui.ts`** — keeps the interface compact and exposes relevant session state.
-- **`code-blocks.ts`** — highlights and frames fenced code blocks.
 
 ## Layout
 

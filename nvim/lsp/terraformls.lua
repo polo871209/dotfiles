@@ -1,6 +1,6 @@
 return {
     cmd = { 'terraform-ls', 'serve' },
-    filetypes = { 'terraform', 'hcl', 'tf' },
+    filetypes = { 'hcl', 'tf', 'terraform-vars' },
     root_markers = { '.terraform', '.git' },
     settings = {
         terraform = {

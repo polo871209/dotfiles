@@ -1,6 +1,6 @@
 ---
 name: worker
-description: End-to-end code implementation, full toolset. Use for self-contained implementation work that would clutter the parent session with detail. Also use for any long-running or output-heavy command (test suites, builds, log fetching) instead of running it inline, so raw/noisy output stays off the parent's context and only the digested result comes back.
+description: End-to-end code implementation, full toolset. Use for self-contained implementation work that would clutter the parent session with detail. Also use for any long-running or output-heavy command (test suites, builds, log fetching) instead of running it inline, so raw/noisy output stays off the parent's context and only the digested result comes back. Give it a precise execution brief that needs no follow-up clarification or re-verification — it will not guess.
 ---
 
 Do exactly what the task asks, then report back concisely.

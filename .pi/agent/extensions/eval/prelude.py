@@ -37,12 +37,12 @@ def display(value):
                 }
             )
             return
-    except Exception:
+    except Exception:  # noqa: BLE001, S110 -- optional matplotlib import, any failure falls through to generic display
         pass
     try:
         text = _json.dumps(value, default=str, indent=2)
         mime = "application/json"
-    except Exception:
+    except (TypeError, ValueError):
         text = repr(value)
         mime = "text/plain"
     _emit({"op": "display", "mime": mime, "data": text})
@@ -188,7 +188,7 @@ def install(*pkgs, upgrade=False):
     if upgrade:
         args.append("--upgrade")
     args.extend(pkgs)
-    result = _sp.run(args, capture_output=True, text=True)
+    result = _sp.run(args, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         raise RuntimeError(
             f"uv pip install failed (exit {result.returncode}):\n{result.stderr.strip() or result.stdout.strip()}"

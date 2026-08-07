@@ -88,7 +88,7 @@ local function try_format(bufnr, timeout_ms)
     return vim.api.nvim_buf_get_changedtick(bufnr) ~= before
 end
 
-local function pull_diagnostics(bufnr, remaining) _G.PiLspShared.pull_diagnostics(bufnr, math.min(1500, remaining())) end
+local function pull_diagnostics(bufnr) _G.PiLspShared.pull_diagnostics(bufnr) end
 
 -- A repeated path would otherwise open/format/pull-diagnostics twice and
 -- double-count that file's diagnostics in the result.
@@ -149,7 +149,7 @@ function M.run(files)
             --    per-edit hook already formatted these files.
             vim.wait(math.min(2000, remaining()), function() return #vim.lsp.get_clients { bufnr = bufnr } > 0 end, 50)
 
-            pull_diagnostics(bufnr, remaining)
+            pull_diagnostics(bufnr)
             -- User-configured diagnostic autocmds (including nvim-lint) were
             -- triggered by the normal buffer events above. Do not select or
             -- invoke a linter here; just allow all producers to publish.
@@ -166,7 +166,7 @@ function M.run(files)
                 if refmt then table.insert(formatted, vim.api.nvim_buf_get_name(bufnr)) end
             end
 
-            pull_diagnostics(bufnr, remaining)
+            pull_diagnostics(bufnr)
         end
     end
 

@@ -173,7 +173,7 @@ export function registerFeedback(pi: ExtensionAPI): void {
     }, 0);
   });
 
-  pi.on("before_agent_start", async (_event, ctx) => {
+  pi.on("before_agent_start", async (_event, _ctx) => {
     generation++;
     reported = false;
     if (repairContinuationPending) repairContinuationPending = false;

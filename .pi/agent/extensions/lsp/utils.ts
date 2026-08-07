@@ -8,21 +8,7 @@ import {
   type AgentToolResult,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
 import { callDriver } from "./nvim";
-
-// The {file, line, symbol} anchor schema shared by every anchor-based nav
-// tool (hover/definition/references/implementation/type_definition).
-export const anchorParams = Type.Object({
-  file: Type.String({ description: "Abs or cwd-relative." }),
-  line: Type.Number({ minimum: 1, description: "1-indexed line number." }),
-  symbol: Type.Optional(
-    Type.String({
-      description:
-        "Substring on the line to anchor the column. Omit to use the first non-whitespace token.",
-    }),
-  ),
-});
 
 // Cap tool output at pi's default budgets so an unbounded LSP response
 // (overload-heavy definitions, giant hover docs) can't flood agent context.
@@ -48,12 +34,6 @@ export interface LspLocation {
 export interface DriverErr {
   ok: boolean;
   error?: string;
-}
-
-export interface NavParams {
-  file: string;
-  line: number;
-  symbol?: string;
 }
 
 // Wraps the toAbs → progress → callDriver → ok/err pattern shared by every
@@ -101,37 +81,6 @@ export async function withDriver<R extends DriverErr>(
   };
 }
 
-// Anchor-shaped (file, line, symbol) tools — hover/definition/references/
-// implementation/type_definition.
-export async function runNavTool<R extends DriverErr>(
-  driverFn: string,
-  params: NavParams,
-  ctx: ExtensionContext,
-  signal: AbortSignal | undefined,
-  onUpdate: ((r: AgentToolResult<unknown>) => void) | undefined,
-  render: (
-    res: R,
-    cwd: string,
-  ) => { text: string; details?: Record<string, unknown> },
-): Promise<AgentToolResult<unknown>> {
-  const file = toAbs(normalizeAtPath(params.file), ctx.cwd);
-  return withDriver<R>(
-    ctx,
-    driverFn,
-    [file, params.line, params.symbol ?? ""],
-    signal,
-    onUpdate,
-    render,
-  );
-}
-
-// Shared promptGuidelines for the anchor-based nav tools: a one-line purpose
-// plus the anchor-freshness reminder. Keeps the nav tools consistent.
-export const anchorGuidelines = (purpose: string): string[] => [
-  purpose,
-  "Anchor at a current file:line — stale line numbers cause misses.",
-];
-
 export const displayPath = (abs: string, cwd: string): string => {
   if (!abs) return abs;
   const rel = path.relative(cwd, abs);
@@ -172,7 +121,7 @@ const SEV_RANK: Record<Severity, number> = {
   hint: 3,
 };
 
-// Shared by lsp_diagnostics and the post-edit feedback widget so severity
+// Shared by the lsp tool's diagnostics action and the post-edit feedback widget so severity
 // ordering and line formatting stay identical between the two.
 export const sortDiagnostics = <D extends Diag>(diags: D[]): D[] =>
   [...diags].sort((a, b) => {
