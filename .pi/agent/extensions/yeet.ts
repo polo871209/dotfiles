@@ -8,7 +8,7 @@ import { sideChannelWithLoader } from "./shared/llm";
 import { barWidget } from "./shared/widget";
 
 const MSG_PROMPT =
-  "Write a Conventional Commits message for the diff. Terse and exact: no fluff, why over what. The diff is the only source of truth for WHAT changed — base the subject and body entirely on it. A user hint (if present) may ONLY be consulted to disambiguate WHY (e.g. picking a scope, or explaining a non-obvious rationale in the body); never let it introduce, emphasize, or replace a description of a change that isn't actually in the diff. Format: `<type>(<scope>)!: <subject>` where type ∈ {feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert}; scope optional; `!` only for breaking changes. Subject: imperative mood ('add', 'fix' — not 'added', 'adds'), lowercase, ≤50 chars when possible (hard cap 72), no trailing period, don't restate a file name the scope already names. Body: skip entirely when subject is self-explanatory; add only for non-obvious WHY, breaking changes, security fixes, data migrations, or reverts (these ALWAYS get a body — never subject-only); one blank line after subject, wrap at 72 chars, bullets `-` not `*`, MAY be multiple paragraphs. NEVER write: 'this commit', 'I', 'we', 'now', 'currently', 'as requested by', emoji, or any AI attribution. Optional footers one blank line after body, each `Token: value` or `Token #value`; tokens use `-` instead of spaces (e.g. `Reviewed-by`, `Refs: #123`, `Closes #42`), except `BREAKING CHANGE` which stays uppercase with a space. Recent commit subjects (if present) show this repo's established type/scope vocabulary and phrasing — match them; reuse an existing scope when the change touches the same area rather than inventing a new one. No fences, no preamble. Output ONLY the message.";
+  "Write a Conventional Commits message for the diff. Output ONLY the raw commit message itself — never a preamble, restated instructions, reasoning, or analysis before it (e.g. never start with something like 'Looking at the diff, I need to understand...'). Terse and exact: no fluff, why over what. The diff is the only source of truth for WHAT changed — base the subject and body entirely on it. A user hint (if present) may ONLY be consulted to disambiguate WHY (e.g. picking a scope, or explaining a non-obvious rationale in the body); never let it introduce, emphasize, or replace a description of a change that isn't actually in the diff. Format: `<type>(<scope>)!: <subject>` where type ∈ {feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert}; scope optional; `!` only for breaking changes. Subject: imperative mood ('add', 'fix' — not 'added', 'adds'), lowercase, ≤50 chars when possible (hard cap 72), no trailing period, don't restate a file name the scope already names. Body: skip entirely when subject is self-explanatory; add only for non-obvious WHY, breaking changes, security fixes, data migrations, or reverts (these ALWAYS get a body — never subject-only); one blank line after subject, wrap at 72 chars, bullets `-` not `*`, MAY be multiple paragraphs. NEVER write: 'this commit', 'I', 'we', 'now', 'currently', 'as requested by', emoji, or any AI attribution. Optional footers one blank line after body, each `Token: value` or `Token #value`; tokens use `-` instead of spaces (e.g. `Reviewed-by`, `Refs: #123`, `Closes #42`), except `BREAKING CHANGE` which stays uppercase with a space. Recent commit subjects (if present) show this repo's established type/scope vocabulary and phrasing — match them; reuse an existing scope when the change touches the same area rather than inventing a new one. No fences, no preamble. Output ONLY the message.";
 
 const YEET_MSG_TYPE = "yeet-marker";
 const YEET_WIDGET_KEY = "yeet-progress";
@@ -220,8 +220,21 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      // Sanitize: strip wrapping quotes/backticks, common LLM prefix labels.
-      const cleanMessage = message
+      // Sanitize: drop any preamble/reasoning before the actual subject line
+      // (models sometimes think out loud first, e.g. "Looking at the diff,
+      // I need to understand..."), then strip wrapping quotes/backticks and
+      // common LLM prefix labels.
+      const COMMIT_TYPES =
+        "feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert";
+      const subjectLineRe = new RegExp(
+        `^(?:${COMMIT_TYPES})(?:\\([\\w.-]+\\))?!?:\\s`,
+        "i",
+      );
+      const lines = message.trim().split("\n");
+      const subjectIndex = lines.findIndex((l) => subjectLineRe.test(l.trim()));
+      const trimmedMessage =
+        subjectIndex > 0 ? lines.slice(subjectIndex).join("\n") : message;
+      const cleanMessage = trimmedMessage
         .replace(/^\s*(?:subject|title|commit(?:\s*message)?|message):\s*/i, "")
         .replace(/^["'`]+|["'`]+$/g, "")
         .trim();

@@ -4,15 +4,7 @@
 - **Non-mutation**: execute immediately, no asking.
 - **Mutation**: risky shell commands only: print + wait. Includes cluster/cloud writes, destructive ops (incl. publish/push to registries, db migrations). File/code edits execute directly.
 - **Production**: NEVER mutate. Print only. If unsure target is prod, ask.
-
-## Code
-
-**Minimum code solving the problem. Touch only what you must. Clean up only your own mess.**
-
-- No features, abstractions, or configurability beyond what was asked.
-- NEVER "improve" or refactor adjacent code that isn't broken. Match existing style.
-- Remove imports/vars/functions YOUR changes orphaned. NEVER touch pre-existing dead code; mention it instead.
-- Comments: short, WHY not WHAT; none if obvious. No history ("Replaces…", "Legacy…"); write current state. No decorative dividers (`# ====`, banners).
+- **Comments**: short, WHY not WHAT; none if obvious. No history ("Replaces…", "Legacy…"); write current state. No decorative dividers (`# ====`, banners). No em dashes (—).
 
 ## Tone
 

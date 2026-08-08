@@ -13,11 +13,11 @@ Each axis runs as a **`reviewer` sub-agent** (read-only, hidden — invoke via t
 
 ## Process
 
-### 1. Rebase onto the default branch, then pin the fixed point
+### 1. Pin the fixed point, then rebase onto it
 
-First rebase the branch onto the default branch's tip. Skip when the branch is the default branch or already up to date. On conflict, follow `./rebase.md`.
+Whatever the user said is the fixed point — a commit SHA, branch name, tag, `HEAD~5`, etc. If they didn't specify one, use the branch's **base ref**: `origin/$(gh pr view --json baseRefName -q .baseRefName)`, falling back to the default branch's remote tip when there's no PR. The base ref is what this branch is actually proposed against, so the diff covers only this branch's own changes.
 
-Then pin the fixed point. Whatever the user said is the fixed point — a commit SHA, branch name, tag, `HEAD~5`, etc. If they didn't specify one, default to the default branch.
+Then rebase the branch onto the fixed point's tip. Skip when it's already up to date or the fixed point isn't a branch tip. On conflict, follow `./rebase.md`.
 
 Capture the diff command once: `git diff <fixed-point>...HEAD` (three-dot, so the comparison is against the merge-base). Also note the list of commits via `git log <fixed-point>..HEAD --oneline`.
 
@@ -57,7 +57,7 @@ Standards always runs; Spec only when step 2 found a spec — then send both `su
 
 ### 5. Aggregate
 
-Present each report that ran under `## Standards` and `## Spec` headings, verbatim or lightly cleaned. Do **not** merge or rerank findings — the two axes are deliberately separate (see _Why two axes_).
+Note the fixed point used, then present each report that ran under `## Standards` and `## Spec` headings, verbatim or lightly cleaned. Do **not** merge or rerank findings — the two axes are deliberately separate (see _Why two axes_).
 
 End with a one-line summary: total findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes — that's the reranking the separation exists to prevent.
 

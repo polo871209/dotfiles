@@ -55,7 +55,7 @@ interface AgentConfig {
 // -> sonnet subagents). Same rule for all agents, no per-agent exceptions.
 type ModelRoutingConfig = Record<string, string>;
 
-const SUBAGENT_THINKING = "medium";
+const SUBAGENT_THINKING = "high";
 
 interface Progress {
   id?: string;
