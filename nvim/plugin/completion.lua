@@ -1,15 +1,17 @@
 -- Agent nvim skips cosmetic plugins.
 if vim.g.pi_agent then return end
 
--- Lazy-load on first InsertEnter (~10ms off cold startup).
+-- vim.pack.add sources blink's own plugin/blink-cmp.lua, which merges blink's
+-- extra completion capabilities into vim.lsp.config('*'); that has to land
+-- before any client starts, so it cannot be deferred. Only setup() is lazy.
+vim.pack.add {
+    { src = 'https://github.com/saghen/blink.cmp', version = vim.version.range '1.x' },
+}
+
 vim.api.nvim_create_autocmd('InsertEnter', {
     group = vim.api.nvim_create_augroup('blink-lazy', { clear = true }),
     once = true,
     callback = function()
-        vim.pack.add {
-            { src = 'https://github.com/saghen/blink.cmp', version = vim.version.range '1.x' },
-        }
-
         require('blink.cmp').setup {
             keymap = {
                 preset = 'super-tab',

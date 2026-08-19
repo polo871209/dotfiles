@@ -7,6 +7,24 @@ vim.pack.add {
 
 require('catppuccin').setup {
     transparent_background = true,
+
+    -- Listed explicitly: auto_integrations calls vim.pack.get(), which shells
+    -- out to git per plugin and costs ~200ms at startup.
+    integrations = {
+        blink_cmp = { enabled = true, style = 'bordered' },
+        flash = true,
+        gitsigns = true,
+        mini = { enabled = true, indentscope_color = 'overlay2' },
+        neotree = true,
+        render_markdown = true,
+        which_key = true,
+    },
+
+    -- Catppuccin italicises comments by default.
+    styles = {
+        comments = {},
+    },
+
     custom_highlights = function()
         return {
             -- Gruvbox-style popup backgrounds
@@ -17,4 +35,3 @@ require('catppuccin').setup {
 }
 
 vim.cmd.colorscheme 'catppuccin-mocha'
-vim.cmd.hi 'Comment gui=none'

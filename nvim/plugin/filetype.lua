@@ -1,3 +1,25 @@
+-- Size-based detection wins over every other rule, so a huge file opens as
+-- `bigfile` (see after/ftplugin/bigfile.lua) and nothing expensive attaches.
+-- Returning nil for normal files lets detection carry on.
+--
+-- The cutoff tracks the language server, not nvim: a 30MB go file opens in
+-- ~250ms with treesitter attached, while gopls took 4.3GB on it (jsonls 309MB
+-- on 9MB of json). Below this, highlighting is worth more than the savings.
+local BIGFILE_SIZE = 10 * 1024 * 1024
+
+vim.filetype.add {
+    pattern = {
+        ['.*'] = {
+            function(path)
+                if not path then return end
+                local stat = vim.uv.fs_stat(path)
+                if stat and stat.type == 'file' and stat.size > BIGFILE_SIZE then return 'bigfile' end
+            end,
+            { priority = math.huge },
+        },
+    },
+}
+
 vim.filetype.add {
     filename = {
         ['.envrc'] = 'sh',

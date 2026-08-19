@@ -15,9 +15,6 @@ main
 .opencode/package-lock.json
 opencode/package-lock.json
 
-# Editor
-.nvim-run
-
 # Env
 .env
 .envrc

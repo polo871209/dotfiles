@@ -6,19 +6,8 @@ vim.pack.add {
     'https://github.com/lewis6991/gitsigns.nvim',
 }
 
--- Flash jump
 vim.keymap.set('n', 's', function() require('flash').jump() end, { desc = 'Flash' })
 vim.keymap.set('n', 'S', function() require('flash').treesitter() end, { desc = 'Flash Treesitter' })
-
--- Lazy-load autopairs on first InsertEnter.
-vim.api.nvim_create_autocmd('InsertEnter', {
-    group = vim.api.nvim_create_augroup('autopairs-lazy', { clear = true }),
-    once = true,
-    callback = function()
-        vim.pack.add { 'https://github.com/windwp/nvim-autopairs' }
-        require('nvim-autopairs').setup {}
-    end,
-})
 
 require('gitsigns').setup {
     signs = {

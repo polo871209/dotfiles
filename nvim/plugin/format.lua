@@ -23,8 +23,24 @@ end, { desc = 'Toggle split/join' })
 -- into it via config, or for Markdown/YAML which Biome doesn't format yet.
 -- Prettier itself is not installed globally, so it only works inside
 -- projects with a local node_modules/prettier.
-local biome_configs = { 'biome.json', 'biome.jsonc' }
-local prettier_configs = { '.prettierrc', '.prettierrc.json', '.prettierrc.yaml', '.prettierrc.yml' }
+local biome_configs = { 'biome.json', 'biome.jsonc', '.biome.json', '.biome.jsonc' }
+-- Keep in sync with the set conform's own prettier formatter roots on (see
+-- conform/formatters/prettierd.lua); a spelling missing here silently falls
+-- through to Biome.
+local prettier_configs = {
+    '.prettierrc',
+    '.prettierrc.json',
+    '.prettierrc.yml',
+    '.prettierrc.yaml',
+    '.prettierrc.json5',
+    '.prettierrc.js',
+    '.prettierrc.cjs',
+    '.prettierrc.mjs',
+    '.prettierrc.toml',
+    'prettier.config.js',
+    'prettier.config.cjs',
+    'prettier.config.mjs',
+}
 local function biome_or_prettier(bufnr)
     local path = vim.api.nvim_buf_get_name(bufnr)
     if vim.fs.find(biome_configs, { upward = true, path = path })[1] then return { 'biome' } end
@@ -51,16 +67,21 @@ local SLOW_FORMATTERS_BY_FT = { sql = true }
 
 require('conform').setup {
     notify_on_error = false,
+    -- Applied to every format call, so neither save hook nor <leader>f repeats
+    -- it. timeout_ms only binds the sync path.
+    default_format_opts = { timeout_ms = 500, lsp_format = 'fallback' },
     format_on_save = function(bufnr)
         if not format_on_save_enabled or is_ignored(bufnr) or SLOW_FORMATTERS_BY_FT[vim.bo[bufnr].filetype] then return end
-        return { timeout_ms = 500, lsp_format = 'fallback' }
+        return {}
     end,
     format_after_save = function(bufnr)
         if not format_on_save_enabled or is_ignored(bufnr) or not SLOW_FORMATTERS_BY_FT[vim.bo[bufnr].filetype] then return end
-        return { lsp_format = 'fallback' }
+        return {}
     end,
     formatters_by_ft = {
         bzl = { 'buildifier' },
+        c = { 'clang-format' },
+        cpp = { 'clang-format' },
         css = biome_or_prettier,
         cue = { 'cue_fmt' },
         go = { 'goimports' },
@@ -93,22 +114,15 @@ require('conform').setup {
     },
 }
 
+-- conform reads the current mode itself and formats only the selection when
+-- called from visual mode, so this covers both whole-buffer and range.
 vim.keymap.set('', '<leader>f', function()
     if is_ignored(0) then return end
-    require('conform').format { async = true, lsp_format = 'fallback' }
+    require('conform').format { async = true }
 end, { desc = '[F]ormat buffer' })
 
--- Agent nvim skips snacks (see plugin/snacks.lua); an unguarded require here
--- errors inside the scheduled callback during --embed startup and wedges the
--- RPC channel — every agent lua call then hangs forever.
-if not vim.g.pi_agent then
-    vim.schedule(function()
-        require('snacks').toggle
-            .new({
-                name = 'Format on Save',
-                get = function() return format_on_save_enabled end,
-                set = function(state) format_on_save_enabled = state end,
-            })
-            :map '<leader>tf'
-    end)
-end
+require('toggle').map('<leader>tf', {
+    name = 'Format on Save',
+    get = function() return format_on_save_enabled end,
+    set = function(state) format_on_save_enabled = state end,
+})

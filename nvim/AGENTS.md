@@ -4,7 +4,7 @@ Two consumers: interactive nvim, and the pi agent's headless `--embed` instance 
 
 ## Gotcha: agent nvim skips plugins
 
-`plugin/` files guarded by `if vim.g.pi_agent then return end` (snacks, mini, treesitter, …) never load in the agent instance. Referencing a skipped plugin from an unguarded file errors during embed startup and wedges the RPC channel — every pi edit then hangs forever.
+`plugin/` files guarded by `if vim.g.pi_agent then return end` (mini, treesitter, neo-tree, picker, …) never load in the agent instance. Referencing a skipped plugin from an unguarded file errors during embed startup and wedges the RPC channel — every pi edit then hangs forever.
 
 Any configuration loaded by the agent instance that references a skipped plugin must gate that reference with `if not vim.g.pi_agent then ... end`. After changing such configuration, run:
 

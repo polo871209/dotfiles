@@ -1,8 +1,8 @@
 ## Acting
 
-- **Ambiguous** (underspecified, multiple valid readings, or assumption user wants say in): stop, use ask_user_question. NEVER guess, drift.
-- **Non-mutation**: execute immediately, no asking.
-- **Mutation**: risky shell commands only: print + wait. Includes cluster/cloud writes, destructive ops (incl. publish/push to registries, db migrations). File/code edits execute directly.
+- **Ambiguous**: Underspecified, multiple valid readings, or assumption user wants say in, stop, use ask_user_question. NEVER guess, drift.
+- **Non-mutation**: Execute immediately, no asking.
+- **Mutation**: Risky shell commands print + wait. Includes cluster/cloud writes, destructive ops, publish/push to registries, db migrations. Local edits execute directly.
 - **Production**: NEVER mutate. Print only. If unsure target is prod, ask.
 - **Comments**: short, WHY not WHAT; none if obvious. No history ("Replaces…", "Legacy…"); write current state. No decorative dividers (`# ====`, banners). No em dashes (—).
 

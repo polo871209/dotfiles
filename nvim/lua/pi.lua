@@ -74,14 +74,15 @@ end
 --- pane_current_command; pi sets its own pane title starting with "π" instead
 --- (see notifier.ts / interactive-mode.updateTerminalTitle), which is what we
 --- match on.
----@return table[]  { pane_id, window_name }
+---@return table[]  { pane_id, window_index, window_name }
 local function tmux_pi_panes()
-    local r = vim.system({ 'tmux', 'list-panes', '-s', '-F', '#{pane_id}\t#{pane_title}\t#{window_name}' }, { text = true, timeout = TIMEOUT }):wait()
+    local fmt = '#{pane_id}\t#{pane_title}\t#{window_index}\t#{window_name}'
+    local r = vim.system({ 'tmux', 'list-panes', '-s', '-F', fmt }, { text = true, timeout = TIMEOUT }):wait()
     if r.code ~= 0 or not r.stdout then return {} end
     local out = {}
     for line in r.stdout:gmatch '[^\n]+' do
-        local pane_id, pane_title, window_name = line:match '^([^\t]*)\t([^\t]*)\t(.*)$'
-        if pane_title and pane_title:match '^π' then table.insert(out, { pane_id = pane_id, window_name = window_name }) end
+        local pane_id, pane_title, window_index, window_name = line:match '^([^\t]*)\t([^\t]*)\t([^\t]*)\t(.*)$'
+        if pane_title and pane_title:match '^π' then table.insert(out, { pane_id = pane_id, window_index = window_index, window_name = window_name }) end
     end
     return out
 end
@@ -98,7 +99,7 @@ local function resolve_socket(cb)
     local live = {}
     for _, p in ipairs(tmux_pi_panes()) do
         local sock = socket_for_pane(p.pane_id)
-        if sock then table.insert(live, { pane_id = p.pane_id, window_name = p.window_name, sock = sock }) end
+        if sock then table.insert(live, { window_index = p.window_index, window_name = p.window_name, sock = sock }) end
     end
     if #live == 0 then
         notify('No pi listener found in this tmux session. Is .pi/agent/extensions/tmux-bridge.ts loaded?', vim.log.levels.ERROR)
@@ -109,9 +110,11 @@ local function resolve_socket(cb)
         cb(live[1].sock)
         return
     end
+    -- Labelled with the tmux window index, which is what the status line shows
+    -- and the only thing distinguishing two panes with the same title.
     vim.ui.select(live, {
         prompt = 'Send to which pi agent?',
-        format_item = function(p) return p.window_name end,
+        format_item = function(p) return ('%s  %s'):format(p.window_index, p.window_name) end,
     }, function(choice) cb(choice and choice.sock or nil) end)
 end
 
