@@ -7,7 +7,7 @@ Personal agent harness built on [pi](https://github.com/earendil-works/pi): more
 ## Design rules
 
 1. **Deterministic first.** If a script, regex, or hard-coded branch can do the step, don't prompt an LLM.
-2. **Protect main-agent context.** Keep data out of history unless the next turn needs it. Before authoring an extension, custom tool, or skill, read `~/.pi/agent/skills/writing-agent-instructions/SKILL.md`.
+2. **Protect main-agent context.** Keep data out of history unless the next turn needs it.
 3. **Hooks idempotent.** Dedupe repeatable lifecycle side effects per session.
 4. **Agent borrows from dev environment.** Nvim config remains the source of truth for LSP, formatters, and diagnostics; don't reimplement them for the agent.
 5. **Say what, not how.** Model-facing descriptions and this capability index state capability and trigger, never mechanism.
@@ -20,18 +20,18 @@ Before changing Pi-native behavior, read directly relevant documentation in the 
 
 ### Bigger toolbox for the model
 
-- **`web-search.ts`** — searches the web and fetches readable page content for external research.
-- **`eval/`** — runs persistent Python or JavaScript for iterative computation and bulk aggregation.
+- **`web-search.ts`** — searches or fetches one or many web targets for external research, returning GitHub content as local context.
+- **`eval/`** — runs persistent Python for iterative computation and bulk aggregation.
 - **`lsp/`** — provides symbol navigation and deterministic post-edit diagnostics and fixes for code work.
 - **`github-pr.ts`** — fetches concise PR metadata, failures, review threads, diffs, or a single section, for PR analysis.
-- **`subagent.ts`** — delegates fully specified medium or large research, repository recon, or implementation work requiring no user decisions, optionally in the background; lists, steers, or stops tracked runs, and can hand back one field of a structured result on request.
+- **`subagent.ts`** — delegates medium or large research, repository recon, or implementation while supporting background control and compact structured results.
 - **`ask/`** — presents structured choices when a request needs clarification.
 
 ### Cleaner context
 
 - **`btw.ts`** — answers quick side questions without adding them to main history.
 - **`skill-packs.ts`** — enables Lark/Feishu or Google Workspace skills only when requested.
-- **`folder-context.ts`** — loads path-specific agent instructions when files are touched.
+- **`folder-context.ts`** — loads scoped agent instructions when files are touched and refreshes them after edits.
 
 ### Workflow shortcuts
 
@@ -44,7 +44,7 @@ Before changing Pi-native behavior, read directly relevant documentation in the 
 ### Outside-pi surface
 
 - **`notifier.ts`** — reports agent status through desktop and terminal surfaces when attention is elsewhere.
-- **`tmux-bridge.ts`** — sends Nvim selections or diagnostics to a Pi session in the same tmux session.
+- **`tmux-bridge.ts`** — sends Nvim selections or diagnostics to Pi with line-accurate, size-bounded file context.
 
 ### TUI taste
 
@@ -58,7 +58,7 @@ extensions/
 ├── node_modules → ../npm/node_modules
 ├── *.ts          single-file extensions
 ├── ask/          ask_user_question dialog
-├── eval/         persistent kernels
+├── eval/         persistent Python
 ├── lsp/          navigation and post-edit feedback
 └── shared/       shared extension utilities
 ```

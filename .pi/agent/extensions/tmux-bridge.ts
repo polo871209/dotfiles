@@ -27,6 +27,56 @@ function socketPathForPane(paneId: string): string {
   return path.join(os.tmpdir(), `pi-tmux-pane-${safe}.sock`);
 }
 
+type FilePayload = {
+  path: string;
+  sline: number;
+  eline: number;
+  ft?: string;
+  content: string;
+};
+
+// Keep complete snapshots below 80 KiB; large snapshots focus the injected
+// context on the selection while preserving source line numbers for edits/cites.
+const FULL_SNAPSHOT_MAX_BYTES = 80 * 1024;
+const SURROUNDING_LINES = 40;
+
+export function formatFileSnapshot(f: FilePayload): string {
+  const srcLines = f.content.split(/\r?\n/);
+  const total = srcLines.length;
+  const selectedStart = Math.min(Math.max(Math.floor(f.sline), 1), total);
+  const selectedEnd = Math.min(
+    Math.max(Math.floor(f.eline), selectedStart),
+    total,
+  );
+  const complete =
+    Buffer.byteLength(f.content, "utf8") <= FULL_SNAPSHOT_MAX_BYTES;
+  const from = complete ? 1 : Math.max(1, selectedStart - SURROUNDING_LINES);
+  const to = complete
+    ? total
+    : Math.min(total, selectedEnd + SURROUNDING_LINES);
+  const width = String(total).length;
+  const numbered = srcLines
+    .slice(from - 1, to)
+    .map((line, i) => `${String(from + i).padStart(width)} | ${line}`)
+    .join("\n");
+  const omitted: string[] = [];
+  if (from > 1) omitted.push(`[... omitted lines 1-${from - 1} ...]`);
+  if (to < total) omitted.push(`[... omitted lines ${to + 1}-${total} ...]`);
+  const rangeNote = complete
+    ? "This is the complete file snapshot at capture time."
+    : `This bounded snapshot includes the selected lines plus ${SURROUNDING_LINES} surrounding lines where available.`;
+  const readNote = complete
+    ? `Read \`${f.path}\` only if later state is needed.`
+    : `Read \`${f.path}\` only if omitted context or later state is needed.`;
+  return (
+    `${f.path} — ${rangeNote} Selected range: lines ${f.sline}-${f.eline}. ${readNote} ` +
+    `Each line has a true source-number gutter (\"N | code\"); use it for exact citations. ` +
+    `The gutter is not file content: strip \"N | \" when quoting or editing.\n` +
+    `${omitted.length > 0 ? `${omitted.join("\n")}\n` : ""}` +
+    `\`\`\`${f.ft ?? ""}\n${numbered}\n\`\`\``
+  );
+}
+
 export default function (pi: ExtensionAPI) {
   if (process.env.PI_IS_SUBAGENT) return; // subagents don't get their own bridge
   const paneId = process.env.TMUX_PANE;
@@ -50,14 +100,6 @@ export default function (pi: ExtensionAPI) {
     box.addChild(new Text(theme.fg("accent", label), 0, 0));
     return box;
   });
-
-  type FilePayload = {
-    path: string;
-    sline: number;
-    eline: number;
-    ft?: string;
-    content: string;
-  };
 
   const handleLine = (line: string) => {
     const trimmed = line.trim();
@@ -89,23 +131,9 @@ export default function (pi: ExtensionAPI) {
     try {
       const f = payload.file;
       if (f && typeof f.content === "string" && typeof f.path === "string") {
-        // Inject the file as a custom message (full content -> LLM, compact in
-        // TUI), then the question as the user message that triggers the turn.
-        // Prefix every line with a real file line-number gutter so the model
-        // cites the editor's actual lines instead of recounting the snippet
-        // (which drifts on files with headers/comments).
-        const srcLines = f.content.split("\n");
-        const width = String(srcLines.length).length;
-        const numbered = srcLines
-          .map((l, i) => `${String(i + 1).padStart(width)} | ${l}`)
-          .join("\n");
-        const block =
-          `${f.path} — ENTIRE file below; do NOT read it again, you already have all of it. ` +
-          `Each line is prefixed with a display-only line-number gutter ("N | code"). ` +
-          `Use those numbers to cite lines exactly — never recount or renumber. ` +
-          `The gutter is NOT part of the file: strip the "N | " prefix when quoting code or matching text for an edit. ` +
-          `The user is asking about lines ${f.sline}-${f.eline}.\n` +
-          `\`\`\`${f.ft ?? ""}\n${numbered}\n\`\`\``;
+        // Inject a complete small snapshot or a focused large-file snapshot,
+        // then the question as the user message that triggers the turn.
+        const block = formatFileSnapshot(f);
         // nextTurn queues the file so prompt() injects it right after the user
         // message (agent-session pushes pending nextTurn msgs below the prompt),
         // making it render under the input instead of above it.

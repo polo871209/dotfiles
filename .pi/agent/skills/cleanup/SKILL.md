@@ -1,38 +1,76 @@
 ---
 name: cleanup
-description: Strip dead code and useless comments from files touched this session, per house rules.
+description: Remove proven dead code and low-value comments from files edited this session.
 disable-model-invocation: true
 ---
 
-Clean up dead code and comments. **Scope: files you edited in THIS session OR files dirty in `git status --porcelain`** (union of the two). Do NOT touch any file outside that set, even if you spot issues there. If the set is empty, stop and say so.
+Remove only code and comments proven not to affect behavior. Skip uncertain candidates instead of guessing.
 
-Rules:
+## 1. Pin scope
 
-**Comments — delete if any apply:**
+Build the allowed file set from these modes:
 
-- Decorative dividers (`# ====`, `# ----`, banners, boxes).
-- Restates what the next line obviously does ("increment i", "loop over items").
-- History notes ("Replaces…", "Legacy…", "Previously…", "Was X, now Y"). Keep current state only.
-- Commented-out code with no TODO/explanation.
-- Stale: contradicts the code below it.
+- **Session mode** by default: files edited by the agent during this session.
+- **Named mode** when the user supplies files, directories, or globs: every matching file, whether clean or dirty.
+- **Dirty-worktree mode** only when the user explicitly requests whole-worktree cleanup: every modified or untracked file in the current worktree.
 
-**Comments — keep / rewrite:**
+Combine explicitly requested named and dirty-worktree scopes; explicit exclusions win. Git-dirty status alone does not grant permission outside dirty-worktree mode.
 
-- WHY, not WHAT. Non-obvious intent, tradeoff, gotcha, link to issue.
-- Shorten verbose explanations to one line where possible.
+Session mode requires reliable session-edit provenance. Preserve pre-existing user changes and clean only material introduced or made obsolete by this session. If provenance is unavailable, skip the file unless the user authorizes it through named or dirty-worktree mode.
 
-**Dead code — delete:**
+Exclude generated files, vendored code, lockfiles, snapshots, and minified assets. Override this exclusion only when the user names the exact file or explicitly requests that artifact class.
 
-- Unreferenced functions, classes, exports, constants, imports, types.
-- Unreachable branches (always-false guards, post-`return` statements).
-- Vars assigned but never read.
-- `try/catch` that only re-throws unchanged.
-- Defensive checks for impossible scenarios.
+If the allowed set is empty, stop and report that nothing qualifies.
 
-**Hard rules:**
+Completion: every candidate belongs to the allowed set and has a clear reason for becoming cleanup work.
 
-- Surgical. Touch only dead/comment lines. No reformatting, no renames, no "while I'm here" refactors.
-- Use `lsp` (`action: "references"`) before deleting any exported symbol. If used outside scope, leave and report.
-- Public API (exported from package entry) — do NOT delete without confirming. List candidates instead.
-- Match existing style.
-- After edits, report: files touched, lines removed, anything flagged-but-skipped.
+## 2. Find and prove candidates
+
+Capture the allowed files' current state before editing. Inspect diffs for tracked dirty files and the full contents of clean or untracked files. Preserve every baseline change that is not a proven cleanup candidate.
+
+Prefer deterministic evidence from diagnostics, compiler or linter output, LSP references, repository search, package entrypoints, and manifests.
+
+Before deleting a symbol, account for static references and plausible dynamic use such as reflection, registration, serialization, configuration keys, string lookup, or framework conventions. Treat exported symbols as public until entrypoints and package boundaries prove otherwise.
+
+If absence of use cannot be proven, leave the candidate and report it.
+
+Completion: every proposed deletion has evidence that it is unreachable, unreferenced, redundant, or comment-only, and every pre-existing non-candidate change is accounted for.
+
+## Comment rules
+
+Delete a comment when any condition applies:
+
+- Decorative divider, banner, box, or visual filler.
+- Restates the next line or narrates obvious control flow.
+- Records history instead of current intent.
+- Comments out code without a concrete TODO or explanation.
+- Contradicts the code it describes.
+
+Keep or shorten comments that carry:
+
+- Non-obvious intent, trade-off, invariant, gotcha, or issue link.
+- Public API documentation.
+- License or copyright text.
+- Generated-file markers, formatter controls, linter directives, type suppressions, or other tool instructions.
+- A concrete TODO that still applies.
+
+Rewrite only to preserve the same meaning more concisely.
+
+## Dead-code rules
+
+Delete when proven unused or unreachable:
+
+- Imports, locals, constants, private functions, classes, exports, or types.
+- Statements after unconditional control transfer.
+- Branches whose condition is provably constant.
+- Variables assigned but never read.
+- `try/catch` blocks that only rethrow the same error unchanged.
+- Defensive checks made impossible by an enforced type or invariant.
+
+Do not delete compatibility hooks, public API, registrations, schema fields, serialization fields, or extension points based only on text search.
+
+## 3. Apply surgical edits
+
+Touch only candidate lines. Do not reformat, rename, reorder, simplify live logic, or perform adjacent refactors. Match existing style.
+
+Completion: the cleanup diff contains only deletions and meaning-preserving comment rewrites justified by the rules above.

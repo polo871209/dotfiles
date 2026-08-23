@@ -1,0 +1,5 @@
+{
+  "name": "pi-extensions-runtime",
+  "private": true,
+  "type": "module"
+}

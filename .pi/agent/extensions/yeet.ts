@@ -7,8 +7,24 @@ import { Box, Text } from "@earendil-works/pi-tui";
 import { sideChannelWithLoader } from "./shared/llm";
 import { barWidget } from "./shared/widget";
 
-const MSG_PROMPT =
-  "Write a Conventional Commits message for the diff. Output ONLY the raw commit message itself — never a preamble, restated instructions, reasoning, or analysis before it (e.g. never start with something like 'Looking at the diff, I need to understand...'). Terse and exact: no fluff, why over what. The diff is the only source of truth for WHAT changed — base the subject and body entirely on it. A user hint (if present) may ONLY be consulted to disambiguate WHY (e.g. picking a scope, or explaining a non-obvious rationale in the body); never let it introduce, emphasize, or replace a description of a change that isn't actually in the diff. Format: `<type>(<scope>)!: <subject>` where type ∈ {feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert}; scope optional; `!` only for breaking changes. Subject: imperative mood ('add', 'fix' — not 'added', 'adds'), lowercase, ≤50 chars when possible (hard cap 72), no trailing period, don't restate a file name the scope already names. Body: skip entirely when subject is self-explanatory; add only for non-obvious WHY, breaking changes, security fixes, data migrations, or reverts (these ALWAYS get a body — never subject-only); one blank line after subject, wrap at 72 chars, bullets `-` not `*`, MAY be multiple paragraphs. NEVER write: 'this commit', 'I', 'we', 'now', 'currently', 'as requested by', emoji, or any AI attribution. Optional footers one blank line after body, each `Token: value` or `Token #value`; tokens use `-` instead of spaces (e.g. `Reviewed-by`, `Refs: #123`, `Closes #42`), except `BREAKING CHANGE` which stays uppercase with a space. Recent commit subjects (if present) show this repo's established type/scope vocabulary and phrasing — match them; reuse an existing scope when the change touches the same area rather than inventing a new one. No fences, no preamble. Output ONLY the message.";
+const MSG_PROMPT = `
+## Input authority
+Write a Conventional Commits message for the diff. Keep it terse and exact: no fluff, why over what. The diff is the only source of truth for WHAT changed; base the subject and body entirely on it. A user hint may ONLY disambiguate WHY, such as choosing a scope or explaining non-obvious rationale in the body. It must not introduce, emphasize, or replace a change absent from the diff.
+
+## Subject
+Format: \`<type>(<scope>)!: <subject>\` where type ∈ {feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert}; scope is optional; \`!\` means a breaking change. Use imperative mood (\`add\`, \`fix\` — not \`added\`, \`adds\`), lowercase, ≤50 chars when possible (hard cap 72), no trailing period, and do not restate a file name already named by the scope.
+
+## Body
+Skip when the subject is self-explanatory. Otherwise explain only non-obvious WHY, breaking changes, security fixes, data migrations, or reverts; these ALWAYS get a body, never subject-only. Put one blank line after the subject, wrap at 72 chars, use \`-\` rather than \`*\`, and allow multiple paragraphs.
+
+## Footers
+Put optional footers one blank line after the body. Use \`Token: value\` or \`Token #value\`; replace spaces with \`-\` in tokens (for example \`Reviewed-by\`, \`Refs: #123\`, \`Closes #42\`), except \`BREAKING CHANGE\`, which stays uppercase with a space. Match recent commit subjects' established type/scope vocabulary and phrasing; reuse an existing scope for the same area.
+
+## Forbidden output
+Do not write a preamble, restated instructions, reasoning, or analysis before the message. Do not write \`this commit\`, \`I\`, \`we\`, \`now\`, \`currently\`, \`as requested by\`, emoji, or AI attribution. Do not begin with \"Looking at the diff, I need to understand...\". Do not use fences.
+
+## Completion/output condition
+Return the raw commit message itself, starting with the Conventional Commits subject and containing no surrounding commentary.`;
 
 const YEET_MSG_TYPE = "yeet-marker";
 const YEET_WIDGET_KEY = "yeet-progress";

@@ -237,13 +237,20 @@ const isPaneVisible = async (): Promise<boolean> => {
   }
 };
 
-// When pi's pane is hidden, find a visible pane to carry the passthrough (same
-// ghostty surface). null = nothing visible (fully detached).
+// When pi's pane is hidden, find a visible pane to carry the passthrough.
+// Scoped to *our* session (-s): other sessions render in other ghostty
+// windows, so a cross-session carrier would show the banner (and clobber the
+// window title) on the wrong surface. null = our session not visible
+// anywhere (detached) — caller falls back to osascript.
 const getVisiblePaneTty = async (): Promise<string | null> => {
+  const pane = process.env.TMUX_PANE;
+  if (!pane) return null;
   try {
     const out = await execFileP("tmux", [
       "list-panes",
-      "-a",
+      "-s",
+      "-t",
+      pane,
       "-F",
       "#{pane_tty} #{session_attached} #{window_active} #{pane_active}",
     ]);

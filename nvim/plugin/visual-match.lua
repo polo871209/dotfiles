@@ -26,29 +26,19 @@ local function selection()
     -- Blockwise selections are not contiguous text.
     if mode ~= 'v' and mode ~= 'V' then return end
 
-    local cursor = vim.api.nvim_win_get_cursor(0)
-    local anchor = vim.fn.getpos 'v'
+    local anchor, cursor = vim.fn.getpos 'v', vim.fn.getpos '.'
     local first, fcol = anchor[2], anchor[3] - 1
-    local last, lcol = cursor[1], cursor[2]
+    local last, lcol = cursor[2], cursor[3] - 1
     if first > last or (first == last and fcol > lcol) then
         first, fcol, last, lcol = last, lcol, first, fcol
     end
     if last - first + 1 > MAX_LINES then return end
 
     local buf = vim.api.nvim_get_current_buf()
-    local lines = vim.api.nvim_buf_get_lines(buf, first - 1, last, false)
+    -- Handles empty lines, virtual columns, and multibyte endpoints safely.
+    local lines = vim.fn.getregion(anchor, cursor, { type = mode, exclusive = false })
     if #lines == 0 then return end
-
-    if mode == 'v' then
-        -- Trim the tail first: on a single-line selection both edits apply to
-        -- the same string, and fcol is an offset into the untrimmed line.
-        -- 'selection' is inclusive, so the cursor's own character stays in.
-        local tail = lines[#lines]
-        lines[#lines] = tail:sub(1, lcol + vim.str_utf_end(tail, lcol + 1) + 1)
-        lines[1] = lines[1]:sub(fcol + 1)
-    else
-        fcol = 0
-    end
+    if mode == 'V' then fcol = 0 end
 
     local chars = 0
     for _, line in ipairs(lines) do

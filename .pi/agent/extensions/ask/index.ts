@@ -16,7 +16,6 @@ import {
   MAX_LABEL_LENGTH,
   MAX_OPTIONS,
   MAX_QUESTIONS,
-  MIN_OPTIONS,
   type QuestionParams,
   QuestionParamsSchema,
   type QuestionnaireResult,
@@ -53,27 +52,15 @@ function clampParams(params: QuestionParams): QuestionParams {
   };
 }
 
-const DESCRIPTION = `Present the user with one or more structured multiple-choice questions and wait for their answer. This is the PRIMARY way to resolve ambiguity — reach for it directly instead of guessing or asking in plain prose, and call it in the SAME turn you hit the ambiguity (don't first write out the question as text).
-
-Call it when the request is ambiguous (underspecified, multiple valid readings, or an assumption the user would want a say in), or to offer a clear set of directions to take.
-
-Mechanics:
-- Up to ${MAX_QUESTIONS} questions per call, each with ${MIN_OPTIONS}-${MAX_OPTIONS} options. Group all clarifying questions into ONE call — never stack back-to-back calls.
-- header / label length limits are soft: over-long values auto-truncate, NEVER rejected — don't avoid the tool or pad/trim to fit.
-- Single-select questions get a free-text "Type something." row automatically; the user can also pick "Chat about this" to abandon and talk it through.
-- Set multiSelect: true when multiple answers are valid (suppresses the free-text row).
-- If you recommend an option, make it FIRST and append "(Recommended)" to its label.
-- Do NOT author options labeled "Other", "Type something.", "Chat about this", or "Next" — reserved, rejected.`;
+const DESCRIPTION =
+  "Ask an interactive user to choose when a request needs a decision among multiple valid readings or directions. Call in the same turn ambiguity appears, not after prose; do not use when available tools can determine the facts.";
 
 export function registerAskUserQuestionTool(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "ask_user_question",
     label: "Ask User Question",
     description: DESCRIPTION,
-    promptSnippet: `Ask the user up to ${MAX_QUESTIONS} structured multiple-choice questions (${MIN_OPTIONS}-${MAX_OPTIONS} options each) instead of guessing when a request is ambiguous`,
-    promptGuidelines: [
-      "Underspecified request, blocked without a concrete decision → ask_user_question, same turn, not prose. See description for the full mechanics.",
-    ],
+    promptSnippet: "Structured choice dialog",
     parameters: QuestionParamsSchema,
 
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {

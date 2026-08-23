@@ -1,10 +1,11 @@
 ---
-name: writing-agent-instructions
-description: Read before writing or editing any agent-facing instructions — an agent skill (SKILL.md and whatever it links to), a tool/function description, or an extension's injected context. Covers discoverability, information hierarchy, and token-lean design.
-disable-model-invocation: true
+name: writing-for-agents
+description: Writing documents for agents. Use when creating or editing skills or modifying AGENTS.md.
 ---
 
 A skill, tool description, or extension prompt exists to wrangle **predictability** out of a stochastic system — the agent taking the same _process_ every run, not necessarily producing the same output (a brainstorming skill should predictably diverge; its tokens vary, its behavior doesn't). Every rule below is a lever on that, not an end in itself.
+
+When writing or editing a skill, read [`SKILL-MECHANICS.md`](SKILL-MECHANICS.md) for frontmatter, invocation choice, and router skills.
 
 A skill is a directory with a `SKILL.md` file. Everything else is freeform — no required folder names, no required nesting. A file only gets read if something already loaded points at it with a working relative path; a folder named `references/` that nothing links to is dead weight, and a link named anything else that fires reliably is fine. Structure is a convention for your own scanability, not a schema the loader enforces.
 

@@ -28,7 +28,7 @@
 //   describeGithubPath): simplified rewrite of github-extract.ts's
 //   extractGitHub. Same core idea (shallow `git clone`, tree/README for repo
 //   root, dir listing or file content for blob/tree paths, local path handed
-//   back for read/bash). Deliberately dropped: `gh` CLI integration (plain
+//   back for local inspection). Deliberately dropped: `gh` CLI integration (plain
 //   `git clone` over https covers public repos), GitHub API fallback for
 //   oversized/private repos or 40-char-SHA refs (those just fall through to
 //   the normal HTML fetch instead), and the ~/.pi/web-search.json config
@@ -656,7 +656,7 @@ function describeGithubPath(root: string, info: GitHubUrlInfo): string {
     lines.push("## Structure", buildRepoTree(root), "");
     const readme = readRepoReadme(root);
     if (readme) lines.push("## README.md", readme, "");
-    lines.push(`Explore further with read/bash at ${root}`);
+    lines.push(`Explore further at local path: ${root}`);
     return lines.join("\n");
   }
 
@@ -669,7 +669,7 @@ function describeGithubPath(root: string, info: GitHubUrlInfo): string {
       "## Structure",
       buildRepoTree(root),
       "",
-      `Explore further with read/bash at ${root}`,
+      `Explore further at local path: ${root}`,
     );
     return lines.join("\n");
   }
@@ -688,14 +688,14 @@ function describeGithubPath(root: string, info: GitHubUrlInfo): string {
         })
         .join("\n") || "(empty)",
     );
-    lines.push("", `Explore further with read/bash at ${target}`);
+    lines.push("", `Explore further at local path: ${target}`);
     return lines.join("\n");
   }
 
   if (isBinaryFile(target)) {
     lines.push(
       `## ${path}`,
-      `Binary file (${stat.size}B). Use read/bash at ${target} to inspect.`,
+      `Binary file (${stat.size}B). Full local path: ${target}`,
     );
     return lines.join("\n");
   }
@@ -737,6 +737,53 @@ async function fetchOne(
   return fetchReadable(url, signal, mode, offset);
 }
 
+const nonEmptyText = Type.String({ minLength: 1 });
+const searchQueries = Type.Array(nonEmptyText, {
+  minItems: 1,
+  description: "Varied queries for broad research.",
+});
+export const searchParameters = Type.Intersect([
+  Type.Union([
+    Type.Object({
+      query: nonEmptyText,
+      queries: Type.Optional(searchQueries),
+    }),
+    Type.Object({
+      query: Type.Optional(Type.String()),
+      queries: searchQueries,
+    }),
+  ]),
+  Type.Object({
+    numResults: Type.Optional(
+      Type.Number({ minimum: 1, maximum: 10, default: 5 }),
+    ),
+  }),
+]);
+const fetchUrls = Type.Array(nonEmptyText, {
+  minItems: 1,
+  description: "URLs to fetch.",
+});
+export const fetchParameters = Type.Intersect([
+  Type.Union([
+    Type.Object({
+      url: nonEmptyText,
+      urls: Type.Optional(fetchUrls),
+    }),
+    Type.Object({
+      url: Type.Optional(Type.String()),
+      urls: fetchUrls,
+    }),
+  ]),
+  Type.Object({
+    mode: Type.Optional(
+      Type.Union([Type.Literal("readable"), Type.Literal("raw")], {
+        default: "readable",
+      }),
+    ),
+    offset: Type.Optional(Type.Number({ minimum: 0, default: 0 })),
+  }),
+]);
+
 export default function (pi: ExtensionAPI) {
   exposeRegisteredToolsToEval(pi);
   pi.on("session_shutdown", () => {
@@ -752,9 +799,8 @@ export default function (pi: ExtensionAPI) {
     name: "web_search",
     label: "Web Search",
     description:
-      "Search the web. Returns title, URL, and a content snippet per result.",
-    promptSnippet:
-      "Search the web for research questions. Prefer multiple varied `queries` over one.",
+      "Search the web. Use query for direct lookup or varied queries for broad research; returns title, URL, snippets, and explicit zero-result states.",
+    promptSnippet: "Direct lookup: query. Broad research: varied queries.",
     renderResult(result, _options, theme: Theme) {
       const d = result.details as
         | { queries?: string[]; totalResults?: number }
@@ -768,18 +814,7 @@ export default function (pi: ExtensionAPI) {
         0,
       );
     },
-    parameters: Type.Object({
-      query: Type.Optional(Type.String()),
-      queries: Type.Optional(
-        Type.Array(Type.String(), {
-          description:
-            "Searched in sequence; vary phrasing for broader coverage.",
-        }),
-      ),
-      numResults: Type.Optional(
-        Type.Number({ description: "Results per query (default 5, max 10)." }),
-      ),
-    }),
+    parameters: searchParameters,
     async execute(_callId, params, signal) {
       const queryList = (
         Array.isArray(params.queries)
@@ -823,10 +858,14 @@ export default function (pi: ExtensionAPI) {
       for (const { query, results, error } of queryResults) {
         if (queryList.length > 1) output += `## Query: "${query}"\n\n`;
         if (error) {
-          output += `Error: ${error}\n\n`;
+          output += `0 results (error: ${error})\n\n`;
           continue;
         }
         totalResults += results.length;
+        if (results.length === 0) {
+          output += "0 results.\n\n";
+          continue;
+        }
         output +=
           results
             .map(
@@ -837,7 +876,14 @@ export default function (pi: ExtensionAPI) {
       }
 
       return {
-        content: [{ type: "text", text: output.trim() }],
+        content: [
+          {
+            type: "text",
+            text:
+              output.trim() ||
+              `0 results across ${queryList.length} quer${queryList.length === 1 ? "y" : "ies"}.`,
+          },
+        ],
         details: { queries: queryList, totalResults },
       };
     },
@@ -847,9 +893,9 @@ export default function (pi: ExtensionAPI) {
     name: "fetch_content",
     label: "Fetch Content",
     description:
-      "Fetch a URL and extract its readable content as markdown (e.g. to read a web_search result in full). GitHub repo/file/dir URLs are cloned locally instead of scraped — the result includes a local path to explore further with read/bash.",
+      "Fetch a URL and extract readable markdown, or return raw text. GitHub repo/file/dir URLs are cloned locally instead of scraped; the result includes a local path for further inspection and continuation offsets when truncated.",
     promptSnippet:
-      "Read the full content of a URL, such as a web_search result or a GitHub repo/file link.",
+      "Fetch a direct page or GitHub link; use offset to continue truncated content.",
     renderResult(result, _options, theme: Theme) {
       const d = result.details as { urls?: string[]; ok?: number } | undefined;
       return new Text(
@@ -861,22 +907,7 @@ export default function (pi: ExtensionAPI) {
         0,
       );
     },
-    parameters: Type.Object({
-      url: Type.Optional(Type.String()),
-      urls: Type.Optional(Type.Array(Type.String())),
-      mode: Type.Optional(
-        Type.Union([Type.Literal("readable"), Type.Literal("raw")], {
-          description:
-            "'readable' (default) extracts the article as markdown. 'raw' returns the original response text verbatim, useful for JSON APIs or debugging.",
-        }),
-      ),
-      offset: Type.Optional(
-        Type.Number({
-          description:
-            "Character offset to resume from when a previous call was truncated.",
-        }),
-      ),
-    }),
+    parameters: fetchParameters,
     async execute(_callId, params, signal) {
       const urlList = (
         Array.isArray(params.urls)

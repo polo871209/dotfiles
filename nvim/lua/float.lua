@@ -55,7 +55,7 @@ function M.input(opts, on_confirm)
         col = anchor.col,
         zindex = 60,
     })
-    vim.wo[win].wrap = true
+    vim.wo[win].wrap = false
 
     local group = vim.api.nvim_create_augroup('float_input_' .. buf, { clear = true })
     local done = false

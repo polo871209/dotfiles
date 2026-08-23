@@ -361,24 +361,14 @@ export const lspTool = defineTool({
   name: "lsp",
   label: "LSP",
   description:
-    "Query language server info for a symbol or file. Actions:\n" +
-    "- hover: type signature + docs for symbol at file:line.\n" +
-    "- definition: canonical declaration (resolves re-exports/overloads). No anchor -> grep first.\n" +
-    "- references: every USE of symbol at file:line; more reliable than grep, follows re-exports.\n" +
-    "- implementation: concrete implementors of an interface/abstract symbol at file:line.\n" +
-    "- type_definition: TYPE declaration of a value/variable at file:line (vs definition's value site).\n" +
-    "- document_symbols: outline of all symbols in a file, no anchor needed.\n" +
-    '- diagnostics: LSP+linter diagnostics, read-only. Pass files[] for specific files, file for one file, or omit both (or file:"*") for the whole repo. Do NOT call to verify files you just edited — post-edit checks are automatic. Use only on explicit request or to inspect a reported error not yet seen.\n' +
-    "- rename: rename the symbol at file:line to new_name and apply+save the edit across every affected file (follows re-exports/imports via the LSP's own workspace edit).",
+    "Language-server navigation, symbol outlines, diagnostics, and rename. Actions: hover (type/docs), definition (canonical declaration), references (all uses), implementation (concrete implementors), type_definition (value type), document_symbols (file outline), diagnostics (read-only file/workspace check), rename (apply/save workspace edits).",
   promptSnippet:
     "Navigate symbols, inspect types, rename, or check diagnostics",
   promptGuidelines: [
-    "Anchor actions (hover/definition/references/implementation/type_definition/rename) need file+line; symbol picks the column on that line, omit for the first non-whitespace token.",
-    "Anchor at a current file:line — stale line numbers cause misses.",
-    "Use references before renaming or changing a function's signature to find every caller.",
-    "rename applies and saves immediately across every affected file — confirm scope with references first if unsure.",
-    "Prefer document_symbols over reading a whole file when you only need to find a member or understand structure.",
-    "diagnostics with no file/files scans the whole repo (git-tracked + untracked-not-ignored files, capped); slower than a single-file check, so only do this when the user actually wants a repo-wide sweep.",
+    "Anchor at a current file:line for hover/definition/references/implementation/type_definition/rename; stale lines cause misses. symbol selects the column, or omit it for the first non-whitespace token.",
+    "Use references before rename or a signature change to find every caller; rename applies and saves immediately across affected files.",
+    "Prefer document_symbols to reading a whole file when locating a member or understanding structure.",
+    "diagnostics with no file/files scans the capped workspace; post-edit diagnostics are automatic, so use this only on explicit request or a reported error.",
   ],
   parameters: Type.Object({
     action: Type.Union(
@@ -397,7 +387,7 @@ export const lspTool = defineTool({
     file: Type.Optional(
       Type.String({
         description:
-          'Abs or cwd-relative. Required for all actions except diagnostics, where it\'s optional (one file, or "*"/omitted for the whole repo).',
+          'Abs or cwd-relative. Required for anchor/document_symbols/rename; diagnostics accepts file, files, or neither (or "*") for workspace.',
       }),
     ),
     files: Type.Optional(
@@ -410,7 +400,7 @@ export const lspTool = defineTool({
       Type.Number({
         minimum: 1,
         description:
-          "1-indexed line number. Required for hover/definition/references/implementation/type_definition.",
+          "1-indexed line; required for hover/definition/references/implementation/type_definition/rename.",
       }),
     ),
     symbol: Type.Optional(
@@ -420,7 +410,7 @@ export const lspTool = defineTool({
       }),
     ),
     new_name: Type.Optional(
-      Type.String({ description: "Required for action=rename." }),
+      Type.String({ description: "New name; required for action=rename." }),
     ),
   }),
   async execute(_id, params, signal, onUpdate, ctx) {

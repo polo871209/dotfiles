@@ -14,7 +14,7 @@ _current_id = ""
 def _emit(event):
     # Emit a kernel event to the host over fd 3 (control channel).
     event.setdefault("id", _current_id)
-    line = _json.dumps(event, default=str) + "\n"
+    line = _json.dumps(event, default=str, allow_nan=False) + "\n"
     _os.write(3, line.encode("utf-8"))
 
 
@@ -40,7 +40,7 @@ def display(value):
     except Exception:  # noqa: BLE001, S110 -- optional matplotlib import, any failure falls through to generic display
         pass
     try:
-        text = _json.dumps(value, default=str, indent=2)
+        text = _json.dumps(value, default=str, indent=2, allow_nan=False)
         mime = "application/json"
     except (TypeError, ValueError):
         text = repr(value)
@@ -73,7 +73,8 @@ class _ToolCallable:
                 "session": self._proxy._session,
                 "name": self._name,
                 "args": merged,
-            }
+            },
+            allow_nan=False,
         ).encode("utf-8")
         req = _urlreq.Request(
             f"{self._proxy._base}/v1/tool",
@@ -142,7 +143,7 @@ def env(key=None, value=None):
 
     No args -> full env dict. One arg -> value of `key` or None. Two args ->
     set `key=value` (coerced to str), return `value`. Scoped to this Python
-    subprocess; does not affect the host pi process or JS kernel.
+    subprocess; does not affect the host pi process.
     """
     if key is None:
         return dict(_os.environ)

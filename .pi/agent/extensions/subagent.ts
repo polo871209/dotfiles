@@ -102,7 +102,7 @@ function pruneRunsStore(): void {
   }
 }
 
-// Structured results a subagent captured mid- or end-of-run via `retain`,
+// Structured results captured from a run's trailing ```result-json block,
 // keyed by the subagent's own target id ("sub-<agent>-<ts>-<rand>"), so the
 // parent can pull one field instead of re-reading the whole transcript.
 const resultStore = (() => {
@@ -116,18 +116,18 @@ const resultStore = (() => {
 // Optional convention: only stripped/cached when present and valid JSON.
 const RESULT_BLOCK_RE = /```result-json\s*\n([\s\S]*?)\n```\s*$/;
 
-function extractResultBlock(text: string, id: string): string {
+export function extractResultBlock(
+  text: string,
+  id: string,
+): { text: string; captured: boolean } {
   const m = text.match(RESULT_BLOCK_RE);
-  if (!m) return text;
+  if (!m) return { text, captured: false };
   try {
     resultStore.set(id, JSON.parse(m[1]!));
   } catch {
-    return text; // not valid JSON — leave the block in the transcript untouched
+    return { text, captured: false }; // invalid JSON stays ordinary transcript text
   }
-  return (
-    text.slice(0, m.index).trimEnd() +
-    `\n\n[structured result captured — id: ${id}. Use subagent_manage (action: result) to pull a field instead of re-reading this transcript.]`
-  );
+  return { text: text.slice(0, m.index).trimEnd(), captured: true };
 }
 
 function getByPath(obj: unknown, path: string | undefined): unknown {
@@ -444,18 +444,32 @@ function throttle<F extends (...args: never[]) => void>(fn: F, ms: number): F {
   }) as F;
 }
 
-const buildParams = () =>
+const buildParams = (agents: AgentConfig[]) =>
   Type.Object({
-    agent: Type.String({ description: "Which subagent to dispatch" }),
+    agent:
+      agents.length === 1
+        ? Type.Literal(agents[0]!.name, {
+            description: "Agent route.",
+          })
+        : Type.Union(
+            agents.map((agent) => Type.Literal(agent.name)),
+            { description: "Agent route." },
+          ),
     task: Type.String({
       description:
-        "Self-contained execution brief. For worker, give exact scope, relevant paths and context, constraints, completion criteria, verification, and expected report; resolve ambiguity before delegating.",
+        "Self-contained brief: scope, paths, constraints, completion criteria, verification, and expected report.",
     }),
-    model: Type.Optional(Type.String()),
+    model: Type.Optional(
+      Type.String({
+        description:
+          "Optional provider/model override; otherwise use the parent provider's mapped model, then inherit the parent model.",
+      }),
+    ),
     background: Type.Optional(
       Type.Boolean({
+        default: false,
         description:
-          "Return immediately with a run id instead of waiting for the subagent to finish. Check progress, steer, stop, or pull the result via subagent_manage.",
+          "Start without waiting; use subagent_manage to inspect or control the run.",
       }),
     ),
   });
@@ -546,38 +560,49 @@ const initialProgress = (
 // four, since they overlap heavily on `id` and none needs subagent's custom
 // renderCall/renderResult.
 const manageParams = () =>
-  Type.Object({
-    action: Type.Union([
-      Type.Literal("list"),
-      Type.Literal("result"),
-      Type.Literal("steer"),
-      Type.Literal("stop"),
-      Type.Literal("wait"),
-    ]),
-    id: Type.Optional(
-      Type.String({
-        description:
-          "Run id from a subagent call's output or from action=list. Required for result/steer/stop. Optional for wait — omit to wait on any currently-running run.",
-      }),
-    ),
-    path: Type.Optional(
-      Type.String({
-        description:
-          'Dot path into the captured JSON, e.g. "findings.0.path". Only for action=result; omit to return the whole object.',
-      }),
-    ),
-    message: Type.Optional(
-      Type.String({
-        description: "Text to send to the subagent. Required for action=steer.",
-      }),
-    ),
-    timeout_ms: Type.Optional(
-      Type.Number({
-        minimum: 1000,
-        description: `Max ms to block for action=wait (default ${DEFAULT_WAIT_TIMEOUT_MS}, capped at ${MAX_WAIT_TIMEOUT_MS}). Ignored by other actions.`,
-      }),
-    ),
-  });
+  Type.Union([
+    Type.Object({ action: Type.Literal("list") }),
+    Type.Object({
+      action: Type.Literal("result"),
+      id: Type.String({ description: "Run id from subagent output or list." }),
+      path: Type.Optional(
+        Type.String({
+          description:
+            'Dot path into captured JSON, e.g. "findings.0.path"; omit for the whole object.',
+        }),
+      ),
+    }),
+    Type.Object({
+      action: Type.Literal("steer"),
+      id: Type.String({ description: "Running run id." }),
+      message: Type.String({ description: "Follow-up text." }),
+    }),
+    Type.Object({
+      action: Type.Literal("stop"),
+      id: Type.String({ description: "Run id to abort." }),
+    }),
+    Type.Object({
+      action: Type.Literal("wait"),
+      id: Type.Optional(
+        Type.String({ description: "Run id; omit for any running run." }),
+      ),
+      timeout_ms: Type.Optional(
+        Type.Number({
+          minimum: 1000,
+          maximum: MAX_WAIT_TIMEOUT_MS,
+          default: DEFAULT_WAIT_TIMEOUT_MS,
+          description: "Wait limit in milliseconds.",
+        }),
+      ),
+    }),
+  ]);
+
+type ManageArgs =
+  | { action: "list" }
+  | { action: "result"; id: string; path?: string }
+  | { action: "steer"; id: string; message: string }
+  | { action: "stop"; id: string }
+  | { action: "wait"; id?: string; timeout_ms?: number };
 
 const formatRunLine = (r: RunRecord): string => {
   const p = r.progress;
@@ -757,7 +782,13 @@ async function runInTmux(
     "-S",
     "-400",
   ]);
-  let finalText = headTruncate(rawOutput.trim(), MAX_OUTPUT_BYTES);
+  // Extract before truncating: a valid result block may sit beyond the output
+  // budget. Invalid blocks remain ordinary transcript text.
+  const extracted = extractResultBlock(rawOutput.trim(), target);
+  let finalText = headTruncate(extracted.text, MAX_OUTPUT_BYTES);
+  if (extracted.captured) {
+    finalText += `\n\n[structured result captured — id: ${target}. Use subagent_manage (action: result) to pull a field instead of re-reading this transcript.]`;
+  }
 
   if (finalStatus === "blocked") {
     cleanupFiles();
@@ -779,7 +810,6 @@ async function runInTmux(
 
   await releasePanelSlot(paneId);
   cleanupFiles();
-  finalText = extractResultBlock(finalText, target);
   progress.status = "done";
   progress.output = finalText;
   return {
@@ -800,23 +830,23 @@ export default function (pi: ExtensionAPI) {
   // per-turn description cost — a skill that knows the name invokes them.
   const agentList = agents
     .filter((a) => !a.hidden)
-    .map((a) => `  ${a.name}: ${a.description}`)
+    .map((a) => {
+      const summary = a.description.replace(/\s+/g, " ").trim();
+      return `  ${a.name}: ${summary.length > 140 ? `${summary.slice(0, 137)}…` : summary}`;
+    })
     .join("\n");
 
-  const params = buildParams();
+  const params = buildParams(agents);
 
   pi.registerTool<typeof params, Progress | undefined>({
     name: "subagent",
     label: "Subagent",
     description:
-      `Delegate medium or large work to a specialized subagent running in isolation. ` +
-      `Never use for small localized tasks, simple edits, single-file changes, or quick lookups. ` +
-      `Returns text only. Resolve vague scope before dispatching — give each agent a precise execution brief. ` +
-      `Dispatch independent tasks as multiple parallel subagent calls in one response. ` +
-      `Use to keep this session focused (offload web research, recon, or end-to-end implementation).\n\n` +
-      `Available agents:\n${agentList}\n\n` +
-      `Subagents cannot spawn further subagents. Pass background: true to get a run id back immediately instead of waiting; check, steer, or stop it with subagent_manage.\n\n` +
-      "If a task asks for a structured result, the subagent should end its reply with a fenced ```result-json ... ``` block; pull a field from it afterward with subagent_manage (action: result) instead of re-reading the transcript.",
+      `Delegate medium or large research, recon, or implementation work. Choose a route from the agent parameter; independent calls may run in parallel. ` +
+      `The optional model overrides provider/model routing; otherwise the parent provider map is used, falling back to the parent model. ` +
+      `Use background for asynchronous runs, then subagent_manage for status or control.\n\n` +
+      `Routes:\n${agentList}\n\n` +
+      "For a structured result, ask the subagent to end with a valid fenced ```result-json ... ``` block; retrieve fields with subagent_manage (action: result).",
     parameters: params,
     renderShell: "self",
 
@@ -924,27 +954,15 @@ export default function (pi: ExtensionAPI) {
     name: "subagent_manage",
     label: "Subagent Manage",
     description:
-      "Inspect or control subagent runs tracked this session. Actions:\n" +
-      "- list: every tracked run (running + recently finished) with id, agent, status, duration, last message/error.\n" +
-      "- result: pull a field (or the whole object) out of a run's captured ```result-json``` block by id, instead of re-reading its full transcript.\n" +
-      "- steer: send a message into a running run's pane as follow-up input.\n" +
-      "- stop: abort a running run.\n" +
-      "- wait: block until a run (by id) or any currently-running run finishes, instead of polling list — returns as soon as one does, or on timeout.",
+      "Inspect or control tracked subagent runs; choose an action and provide only that action's fields.",
     parameters: manageParams(),
     async execute(_toolCallId, rawParams) {
-      const {
-        action,
-        id,
-        path: fieldPath,
-        message,
-        timeout_ms,
-      } = rawParams as {
-        action: "list" | "result" | "steer" | "stop" | "wait";
-        id?: string;
-        path?: string;
-        message?: string;
-        timeout_ms?: number;
-      };
+      const params = rawParams as ManageArgs;
+      const action = params.action;
+      const id = "id" in params ? params.id : undefined;
+      const fieldPath = "path" in params ? params.path : undefined;
+      const message = "message" in params ? params.message : undefined;
+      const timeout_ms = "timeout_ms" in params ? params.timeout_ms : undefined;
 
       if (action === "list") {
         const runs = [...runsStore.values()].sort(

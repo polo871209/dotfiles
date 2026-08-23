@@ -58,7 +58,7 @@ class _StreamForwarder(io.TextIOBase):
             "stream": self._name,
             "text": s,
         }
-        os.write(3, (json.dumps(event) + "\n").encode("utf-8"))
+        os.write(3, (json.dumps(event, allow_nan=False) + "\n").encode("utf-8"))
         return len(s)
 
 
@@ -95,21 +95,15 @@ def main() -> None:
     stderr_fwd = _StreamForwarder("stderr", globals_dict)
 
     def emit(event: dict) -> None:
-        os.write(3, (json.dumps(event, default=str) + "\n").encode("utf-8"))
+        os.write(
+            3, (json.dumps(event, default=str, allow_nan=False) + "\n").encode("utf-8")
+        )
 
     def handle(req: dict) -> None:
         nonlocal globals_dict
         rid = req.get("id", "")
         op = req.get("op")
         globals_dict["_current_id"] = rid
-
-        if op == "reset":
-            globals_dict = _build_globals()
-            globals_dict["_current_id"] = rid
-            stdout_fwd._globals = globals_dict
-            stderr_fwd._globals = globals_dict
-            emit({"id": rid, "op": "done", "value": None, "error": None})
-            return
 
         if op != "run":
             emit({"id": rid, "op": "done", "value": None, "error": f"unknown op: {op}"})
@@ -130,7 +124,7 @@ def main() -> None:
         # that would make the host needlessly escalate to a respawn and lose
         # all session state. Degrade the value instead.
         try:
-            json.dumps(value, default=str)
+            json.dumps(value, default=str, allow_nan=False)
             value_out = value
         except KeyboardInterrupt:
             value_out = None

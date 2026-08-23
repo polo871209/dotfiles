@@ -121,7 +121,7 @@ export function sentinelsToAppend(question: QuestionData): SentinelKind[] {
 
 export const OptionSchema = Type.Object({
   label: Type.String({
-    description: `The display text for this option that the user will see and select. Should be concise (1-5 words, aim for ≤${MAX_LABEL_LENGTH} chars). Over-long labels are auto-truncated, never rejected.`,
+    description: `Display text for the option (1-5 words, aim for ≤${MAX_LABEL_LENGTH} chars); over-long labels are auto-truncated, never rejected. If recommending one, put it first and append "(Recommended)". Reserved labels: "Other", "Type something.", "Chat about this", "Next".`,
   }),
   description: Type.String({
     description:
@@ -138,7 +138,7 @@ export const QuestionSchema = Type.Object({
     description: `Very short chip/tag shown next to the question (aim for ≤${MAX_HEADER_LENGTH} chars). Examples: "Auth method", "Library", "Approach". Over-long headers are auto-truncated, never rejected.`,
   }),
   options: Type.Array(OptionSchema, {
-    description: `The available choices for this question. Aim for ${MIN_OPTIONS}-${MAX_OPTIONS} options (soft limit — extra ones are dropped, and a single-select question always gets a free-text fallback row for free, so 1 is still usable). Each option should be a distinct, mutually exclusive choice (unless multiSelect is enabled). The 'Type something.' row is appended automatically — do NOT author it.`,
+    description: `Available choices (soft limit ${MIN_OPTIONS}-${MAX_OPTIONS}; extras are dropped). A single-select question with one authored option remains usable because a free-text fallback is appended. Keep choices distinct unless multiSelect is enabled.`,
   }),
   multiSelect: Type.Optional(
     Type.Boolean({
@@ -187,7 +187,8 @@ export interface QuestionnaireResult {
 // semantic guards only; no_ui stays inline at the call site.
 
 export type ValidationResult =
-  { ok: true } | { ok: false; error: QuestionnaireError; message: string };
+  | { ok: true }
+  | { ok: false; error: QuestionnaireError; message: string };
 
 export function validateQuestionnaire(typed: QuestionParams): ValidationResult {
   if (typed.questions.length === 0) {

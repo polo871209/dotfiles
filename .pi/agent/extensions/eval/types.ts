@@ -1,7 +1,5 @@
 // Shared types for the eval extension.
 
-export type Language = "py" | "js";
-
 export interface DisplayItem {
   mime: string;
   data: string;
@@ -9,7 +7,6 @@ export interface DisplayItem {
 
 export interface CellResult {
   title?: string;
-  language: Language;
   stdout: string;
   stderr: string;
   value: unknown;
@@ -17,11 +14,10 @@ export interface CellResult {
   displays: DisplayItem[];
   durationMs: number;
   timedOut?: boolean;
+  aborted?: boolean;
 }
 
-// Wire protocol — kernel <-> host over the runner's stdin/stdout (JSON lines).
-export type KernelRequest =
-  { id: string; op: "run"; code: string } | { id: string; op: "reset" };
+export type KernelRequest = { id: string; op: "run"; code: string };
 
 export interface KernelEventDisplay {
   id: string;
@@ -42,9 +38,10 @@ export interface KernelEventDone {
   error: string | null;
 }
 export type KernelEvent =
-  KernelEventDisplay | KernelEventStream | KernelEventDone;
+  | KernelEventDisplay
+  | KernelEventStream
+  | KernelEventDone;
 
-// Bridge protocol — Python prelude -> host over loopback HTTP.
 export interface BridgeRequest {
   session: string;
   name: string;

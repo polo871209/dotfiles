@@ -1,8 +1,5 @@
 // Long-lived Python kernel: spawn `python3 runner.py`, multiplex requests over
-// stdin (JSON lines) and events over a third pipe (fd 3).
-//
-// User stdout/stderr from runner are forwarded as `stream` events on fd 3, so
-// stdout of the child process itself is unused (kept piped & ignored).
+// stdin and events over fd 3.
 
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -17,18 +14,19 @@ import type {
 } from "./types";
 
 interface PendingRun {
+  id: string;
   resolve: (r: CellResult) => void;
   result: CellResult;
   startedAt: number;
   timeoutSec: number;
   timeout: NodeJS.Timeout | null;
   escalation: NodeJS.Timeout | null;
-  interrupted: boolean;
+  interruptReason: "aborted" | "timedOut" | null;
   onProgress?: (r: CellResult) => void;
+  signal?: AbortSignal;
+  onAbort?: () => void;
 }
 
-// Grace period between SIGINT (soft interrupt, state preserved) and
-// SIGTERM + respawn (state lost) when a cell exceeds its timeout.
 const INTERRUPT_GRACE_MS = 2000;
 
 interface VenvInfo {
@@ -37,11 +35,6 @@ interface VenvInfo {
 }
 
 let cachedVenv: VenvInfo | null = null;
-
-// Latest stable CPython minor. Bump when a new stable lands; the venv is
-// recreated on mismatch (installed packages are wiped, reinstall via
-// install()). Patch upgrades need no bump: the venv symlinks mise's python,
-// so 3.x.y -> 3.x.z is picked up automatically.
 const PYTHON_VERSION = "3.14";
 
 function venvPythonMinor(dir: string): string | null {
@@ -85,13 +78,13 @@ export interface PyKernelOptions {
   bridgeUrl: string;
   bridgeToken: string;
   bridgeSession: string;
+  cwd?: string;
   python?: string;
 }
 
 export class PyKernel {
   #proc: ChildProcess;
   #pending = new Map<string, PendingRun>();
-  #pendingResets = new Map<string, () => void>();
   #eventBuf = "";
   #closed = false;
   #ready: Promise<void>;
@@ -101,6 +94,7 @@ export class PyKernel {
     const venv = ensureVenv();
     const python = opts.python ?? venv.python;
     this.#proc = spawn(python, ["-u", runnerPath], {
+      cwd: opts.cwd,
       stdio: ["pipe", "pipe", "pipe", "pipe"],
       env: {
         ...process.env,
@@ -113,25 +107,17 @@ export class PyKernel {
       },
     });
 
-    // fd 3 is the kernel event channel.
     const eventStream = this.#proc.stdio[3] as NodeJS.ReadableStream | null;
     if (!eventStream) throw new Error("python kernel: fd 3 unavailable");
     eventStream.setEncoding?.("utf-8");
     eventStream.on("data", (chunk: string) => this.#onEventChunk(chunk));
-    // Unref process + every pipe so tests/standalone hosts can exit when work
-    // settles; pi keeps its own refs to this kernel object.
     this.#proc.unref();
     (this.#proc.stdin as { unref?: () => void } | null)?.unref?.();
     (this.#proc.stdout as { unref?: () => void } | null)?.unref?.();
     (this.#proc.stderr as { unref?: () => void } | null)?.unref?.();
     (eventStream as { unref?: () => void }).unref?.();
 
-    // Broken pipe on stdin (kernel died between an alive check and a write)
-    // emits 'error'; without a listener Node turns it into a process-wide
-    // uncaughtException. Swallow it — the exit handler does the real cleanup.
     this.#proc.stdin?.on("error", () => {});
-    // Discard child stdout (user code redirects to fd 3 anyway); surface stderr
-    // to the host stderr for boot diagnostics.
     this.#proc.stdout?.resume();
     this.#proc.stderr?.setEncoding("utf-8");
     this.#proc.stderr?.on("data", (s) =>
@@ -139,19 +125,21 @@ export class PyKernel {
     );
 
     this.#ready = new Promise<void>((resolve, reject) => {
-      // No explicit hello; the runner is ready as soon as it starts reading
-      // stdin. Resolve next tick.
-      queueMicrotask(resolve);
+      this.#proc.once("spawn", resolve);
       this.#proc.once("error", (err) => {
         this.#closed = true;
         reject(err);
-      });
-      this.#proc.once("exit", (code) => {
-        this.#closed = true;
         for (const pending of this.#pending.values()) {
-          pending.result.error =
-            pending.result.error ??
-            `python kernel exited with code ${code} mid-run`;
+          pending.result.error ??= `python kernel failed: ${err.message}`;
+          this.#finalize(pending);
+        }
+        this.#pending.clear();
+      });
+      this.#proc.once("exit", (code, signal) => {
+        this.#closed = true;
+        const reason = code === null ? `signal ${signal}` : `code ${code}`;
+        for (const pending of this.#pending.values()) {
+          pending.result.error ??= `python kernel exited with ${reason} mid-run`;
           this.#finalize(pending);
         }
         this.#pending.clear();
@@ -172,62 +160,47 @@ export class PyKernel {
     timeoutSec: number,
     title: string | undefined,
     onProgress?: (r: CellResult) => void,
+    signal?: AbortSignal,
   ): Promise<CellResult> {
+    const result: CellResult = {
+      title,
+      stdout: "",
+      stderr: "",
+      value: null,
+      error: null,
+      displays: [],
+      durationMs: 0,
+    };
+    if (signal?.aborted) {
+      result.aborted = true;
+      result.error = "cell aborted before start";
+      return result;
+    }
     if (this.#closed) throw new Error("python kernel has exited");
+
     const id = randomUUID();
     return new Promise<CellResult>((resolve) => {
-      const result: CellResult = {
-        title,
-        language: "py",
-        stdout: "",
-        stderr: "",
-        value: null,
-        error: null,
-        displays: [],
-        durationMs: 0,
-      };
       const pending: PendingRun = {
+        id,
         resolve,
         result,
         startedAt: Date.now(),
         timeoutSec,
         timeout: null,
         escalation: null,
-        interrupted: false,
+        interruptReason: null,
         onProgress,
+        signal,
       };
-      pending.timeout = setTimeout(() => {
-        // Soft interrupt first: SIGINT raises KeyboardInterrupt inside the
-        // cell, which the runner reports as a normal done event — kernel
-        // state survives. Escalate to kill + respawn only when the
-        // interpreter is stuck in native code that never checks signals.
-        pending.interrupted = true;
-        try {
-          this.#proc.kill("SIGINT");
-        } catch {}
-        pending.escalation = setTimeout(() => {
-          result.timedOut = true;
-          result.error =
-            result.error ??
-            `cell timed out after ${timeoutSec}s (interrupt ignored; kernel killed, state lost)`;
-          // Remove before dispose: dispose's exit handler re-walks #pending
-          // and would double-finalize this entry otherwise.
-          this.#pending.delete(id);
-          this.dispose();
-          this.#finalize(pending);
-        }, INTERRUPT_GRACE_MS);
-      }, timeoutSec * 1000);
+      const abort = () => this.#interrupt(pending, "aborted");
+      pending.onAbort = abort;
+      signal?.addEventListener("abort", abort, { once: true });
       this.#pending.set(id, pending);
+      pending.timeout = setTimeout(
+        () => this.#interrupt(pending, "timedOut"),
+        timeoutSec * 1000,
+      );
       this.#send({ id, op: "run", code });
-    });
-  }
-
-  async reset(): Promise<void> {
-    if (this.#closed) return;
-    const id = randomUUID();
-    await new Promise<void>((resolve) => {
-      this.#pendingResets.set(id, resolve);
-      this.#send({ id, op: "reset" });
     });
   }
 
@@ -239,27 +212,40 @@ export class PyKernel {
     } catch {}
   }
 
+  #interrupt(pending: PendingRun, reason: "aborted" | "timedOut"): void {
+    if (pending.interruptReason) return;
+    pending.interruptReason = reason;
+    try {
+      this.#proc.kill("SIGINT");
+    } catch {}
+    pending.escalation = setTimeout(() => {
+      const label =
+        reason === "aborted"
+          ? "aborted"
+          : `timed out after ${pending.timeoutSec}s`;
+      pending.result[reason === "aborted" ? "aborted" : "timedOut"] = true;
+      pending.result.error =
+        pending.result.error ??
+        `cell ${label} (interrupt ignored; kernel killed, state lost)`;
+      this.#pending.delete(pending.id);
+      this.dispose();
+      this.#finalize(pending);
+    }, INTERRUPT_GRACE_MS);
+  }
+
   #send(req: KernelRequest): void {
     const line = JSON.stringify(req) + "\n";
     try {
-      // A botched spawn leaves stdin null; optional chaining would silently
-      // no-op and the pending would only resolve via its timeout.
       if (!this.#proc.stdin) throw new Error("kernel stdin unavailable");
       this.#proc.stdin.write(line);
     } catch (err) {
-      // Kernel died between the alive check and this write. Finalize the
-      // matching pending so the caller gets an error result instead of a hung
-      // promise; mark closed so the next run respawns.
       this.#closed = true;
-      const msg = `python kernel write failed: ${err instanceof Error ? err.message : String(err)}`;
       const pending = this.#pending.get(req.id);
       if (pending) {
         this.#pending.delete(req.id);
-        pending.result.error = pending.result.error ?? msg;
+        pending.result.error ??= `python kernel write failed: ${err instanceof Error ? err.message : String(err)}`;
         this.#finalize(pending);
       }
-      this.#pendingResets.get(req.id)?.();
-      this.#pendingResets.delete(req.id);
     }
   }
 
@@ -281,42 +267,38 @@ export class PyKernel {
   }
 
   #onEvent(event: KernelEvent): void {
-    if (event.op === "done") {
-      const resetResolve = this.#pendingResets.get(event.id);
-      if (resetResolve) {
-        this.#pendingResets.delete(event.id);
-        resetResolve();
-        return;
-      }
-    }
     const pending = this.#pending.get(event.id);
     if (!pending) return;
     switch (event.op) {
       case "stream":
         if (event.stream === "stdout") pending.result.stdout += event.text;
         else pending.result.stderr += event.text;
-        pending.onProgress?.(pending.result);
+        try {
+          pending.onProgress?.(pending.result);
+        } catch {}
         break;
       case "display":
         pending.result.displays.push({
           mime: event.mime,
           data: event.data,
         } satisfies DisplayItem);
-        pending.onProgress?.(pending.result);
+        try {
+          pending.onProgress?.(pending.result);
+        } catch {}
         break;
       case "done":
         pending.result.value = event.value;
         if (event.error) pending.result.error = event.error;
-        if (pending.interrupted) {
-          // Done arrived after the soft interrupt: the cell was cut short but
-          // the kernel (and its state) survived.
+        if (pending.interruptReason === "timedOut") {
           pending.result.timedOut = true;
+          pending.result.error = `cell timed out after ${pending.timeoutSec}s (interrupted; kernel state preserved)`;
+        } else if (pending.interruptReason === "aborted") {
+          pending.result.aborted = true;
           pending.result.error =
-            `cell timed out after ${pending.timeoutSec}s (interrupted; kernel state preserved)` +
-            (event.error ? `\n${event.error}` : "");
+            "cell aborted (interrupted; kernel state preserved)";
         }
-        this.#finalize(pending);
         this.#pending.delete(event.id);
+        this.#finalize(pending);
         break;
     }
   }
@@ -324,6 +306,9 @@ export class PyKernel {
   #finalize(pending: PendingRun): void {
     if (pending.timeout) clearTimeout(pending.timeout);
     if (pending.escalation) clearTimeout(pending.escalation);
+    if (pending.signal && pending.onAbort) {
+      pending.signal.removeEventListener("abort", pending.onAbort);
+    }
     pending.result.durationMs = Date.now() - pending.startedAt;
     pending.resolve(pending.result);
   }

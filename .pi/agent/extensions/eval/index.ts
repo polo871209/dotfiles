@@ -1,13 +1,9 @@
-// eval — persistent Python kernel with a loopback tool bridge.
-//
-// Mirrors the omp/oh-my-pi "Code execution w/ tool-calling" pattern: cell code
-// inside the kernel can call `tool.read({...})`, `tool.write(...)`, `tree(...)`
-// which round-trip back into this host extension via a local HTTP bridge.
-
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import {
+  DEFAULT_MAX_BYTES,
+  DEFAULT_MAX_LINES,
   createBashTool,
   createEditTool,
   createFindTool,
@@ -15,6 +11,8 @@ import {
   createLsTool,
   createReadTool,
   createWriteTool,
+  formatSize,
+  truncateTail,
   type ExtensionAPI,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
@@ -29,41 +27,67 @@ import {
   setBridgeSignal,
   type BridgeHandler,
   type BridgeRegistration,
-} from "./bridge";
-import { PyKernel } from "./py-kernel";
-import { JsKernel } from "./js-kernel";
-import type { CellResult } from "./types";
-import { sideChannelComplete } from "../shared/llm";
-import { evalBridgeTools } from "../shared/bridge-tools";
+} from "./bridge.ts";
+import { PyKernel } from "./py-kernel.ts";
+import type { CellResult } from "./types.ts";
+import { sideChannelComplete } from "../shared/llm.ts";
+import { evalBridgeTools } from "../shared/bridge-tools.ts";
 
-const Cell = Type.Object({
-  language: Type.Union([Type.Literal("py"), Type.Literal("js")]),
-  code: Type.String(),
-  title: Type.Optional(Type.String()),
-  timeout: Type.Optional(Type.Number({ minimum: 1, maximum: 600 })),
-  reset: Type.Optional(Type.Boolean()),
-});
+const Cell = Type.Object(
+  {
+    code: Type.String({
+      description:
+        "Python code to execute; final expression becomes cell value.",
+    }),
+    title: Type.Optional(
+      Type.String({ description: "Short label for this cell's result." }),
+    ),
+    timeout: Type.Optional(
+      Type.Number({
+        description: "Cell timeout in seconds; defaults to 30, range 1 to 600.",
+        minimum: 1,
+        maximum: 600,
+      }),
+    ),
+    reset: Type.Optional(
+      Type.Boolean({
+        description: "Start this cell in a fresh Python kernel and state.",
+      }),
+    ),
+  },
+  { additionalProperties: false },
+);
 
-const EvalParams = Type.Object({
-  cells: Type.Array(Cell, { minItems: 1 }),
-});
+const EvalParams = Type.Object(
+  {
+    cells: Type.Array(Cell, {
+      description:
+        "Python cells run sequentially and stop after the first error.",
+      minItems: 1,
+    }),
+  },
+  { additionalProperties: false },
+);
 
 type EvalParamsT = Static<typeof EvalParams>;
 
 interface SessionState {
   py: PyKernel | null;
-  js: JsKernel | null;
   registration: BridgeRegistration | null;
   cwd: string;
-  // AgentTool's generic is constrained to TSchema; `any` here is unavoidable.
   builtins: Record<string, AgentTool<any>> | null;
-  // Refreshed at the start of every execute() call, so completion() always
-  // sees the live model/auth for this session even though the SessionState
-  // itself outlives any single call.
   ctx: ExtensionContext | null;
 }
 
-// Strip ```json fences models sometimes wrap structured output in.
+interface ExecutionDetails {
+  totalCells: number;
+  completedCells: number;
+  failedCell?: number;
+  aborted?: boolean;
+  timedOut?: boolean;
+  durationMs: number;
+}
+
 function extractJsonText(text: string): string {
   const trimmed = text.trim();
   const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
@@ -79,9 +103,6 @@ function buildCompletionSystem(system: unknown, schema: unknown): string {
   return `${base}\n\nRespond with ONLY a single JSON value matching this JSON Schema, no prose, no code fence:\n${JSON.stringify(schema)}`;
 }
 
-// Resolve the `model` bridge arg: omitted/"default" defers to
-// sideChannelComplete's own PI_SIDE_MODEL / session-model fallback;
-// "provider/id" resolves an explicit model.
 function resolveCompletionModel(ctx: ExtensionContext, spec: unknown) {
   if (typeof spec !== "string" || !spec.trim() || spec === "default") {
     return undefined;
@@ -104,31 +125,22 @@ function resolveCompletionModel(ctx: ExtensionContext, spec: unknown) {
   return model;
 }
 
-const sessions = new Map<string, SessionState>();
-
 function bridgeHandler(state: SessionState): BridgeHandler {
   return async (name, args, signal) => {
     const builtins = ensureBuiltins(state);
-    // Forward to pi's built-in tools when a matching one exists.
     if (builtins[name]) {
       const t = builtins[name]!;
-      const id = `eval-bridge-${randomUUID()}`;
       const result = await t.execute(
-        id,
+        `eval-bridge-${randomUUID()}`,
         args as Static<typeof t.parameters>,
         signal,
       );
       return flattenToolResult(result);
     }
-    // Extension tools that opted in via exposeRegisteredToolsToEval
-    // (web_search, fetch_content, github_pr, lsp_*, …).
-    // Args skip pi's schema validation here; a tool's own error is returned
-    // to the cell as an exception.
     const ext = evalBridgeTools().get(name);
     if (ext) {
-      if (!state.ctx) {
+      if (!state.ctx)
         throw new Error(`tool.${name} unavailable: no active tool context`);
-      }
       const result = await ext.execute(
         `eval-bridge-${randomUUID()}`,
         args,
@@ -139,7 +151,7 @@ function bridgeHandler(state: SessionState): BridgeHandler {
       return flattenToolResult(result);
     }
     switch (name) {
-      case "list": {
+      case "list":
         return [
           ...Object.keys(ensureBuiltins(state)),
           ...evalBridgeTools().keys(),
@@ -147,15 +159,12 @@ function bridgeHandler(state: SessionState): BridgeHandler {
           "completion",
           "list",
         ].sort();
-      }
       case "completion": {
-        if (!state.ctx) {
+        if (!state.ctx)
           throw new Error("completion unavailable: no active tool context");
-        }
         const promptText = String(args.prompt ?? "").trim();
         if (!promptText)
           throw new Error("completion requires a non-empty prompt");
-        const model = resolveCompletionModel(state.ctx, args.model);
         const schema = args.schema;
         const result = await sideChannelComplete(state.ctx, {
           systemPrompt: buildCompletionSystem(args.system, schema),
@@ -166,14 +175,13 @@ function bridgeHandler(state: SessionState): BridgeHandler {
               timestamp: Date.now(),
             },
           ],
-          model,
+          model: resolveCompletionModel(state.ctx, args.model),
           signal,
         });
-        if (!result.ok) {
+        if (!result.ok)
           throw new Error(
             `completion failed: ${result.error ?? result.reason}`,
           );
-        }
         if (schema) {
           try {
             return JSON.parse(extractJsonText(result.text));
@@ -204,17 +212,15 @@ function bridgeHandler(state: SessionState): BridgeHandler {
             const e = entries[i];
             if (!e) continue;
             const last = i === entries.length - 1;
-            const branch = last ? "└── " : "├── ";
             out.push(
-              `${prefix}${branch}${e.name}${e.isDirectory() ? "/" : ""}`,
+              `${prefix}${last ? "└── " : "├── "}${e.name}${e.isDirectory() ? "/" : ""}`,
             );
-            if (e.isDirectory()) {
+            if (e.isDirectory())
               await walk(
                 path.join(dir, e.name),
                 depth + 1,
                 prefix + (last ? "    " : "│   "),
               );
-            }
           }
         }
         await walk(root, 1, "");
@@ -226,42 +232,18 @@ function bridgeHandler(state: SessionState): BridgeHandler {
   };
 }
 
-function getSession(sessionFile: string, cwd: string): SessionState {
-  let state = sessions.get(sessionFile);
-  if (state) {
-    if (state.cwd !== cwd) {
-      state.cwd = cwd;
-      state.builtins = null;
-    }
-    return state;
-  }
-  state = {
-    py: null,
-    js: null,
-    registration: null,
-    cwd,
-    builtins: null,
-    ctx: null,
-  };
-  sessions.set(sessionFile, state);
-  return state;
-}
-
 function ensureBuiltins(state: SessionState): Record<string, AgentTool<any>> {
   if (state.builtins) return state.builtins;
-  const cwd = state.cwd;
   const tools = [
-    createReadTool(cwd),
-    createWriteTool(cwd),
-    createEditTool(cwd),
-    createBashTool(cwd),
-    createGrepTool(cwd),
-    createFindTool(cwd),
-    createLsTool(cwd),
+    createReadTool(state.cwd),
+    createWriteTool(state.cwd),
+    createEditTool(state.cwd),
+    createBashTool(state.cwd),
+    createGrepTool(state.cwd),
+    createFindTool(state.cwd),
+    createLsTool(state.cwd),
   ] as unknown as AgentTool<any>[];
-  const map: Record<string, AgentTool<any>> = {};
-  for (const t of tools) map[t.name] = t;
-  state.builtins = map;
+  state.builtins = Object.fromEntries(tools.map((tool) => [tool.name, tool]));
   return state.builtins;
 }
 
@@ -271,8 +253,7 @@ function flattenToolResult(result: AgentToolResult<unknown>): unknown {
     .map((c) => c.text)
     .join("");
   const images = result.content.filter((c) => c.type === "image");
-  if (images.length === 0) return text;
-  return { text, images };
+  return images.length === 0 ? text : { text, images };
 }
 
 async function ensureBridge(state: SessionState): Promise<BridgeRegistration> {
@@ -282,14 +263,11 @@ async function ensureBridge(state: SessionState): Promise<BridgeRegistration> {
 }
 
 async function ensurePyKernel(state: SessionState): Promise<PyKernel> {
-  // Recycle a dead kernel: once the interpreter exits (OOM kill, native
-  // segfault, os._exit, host crash) the cached handle is permanently closed,
-  // so reusing it would throw "python kernel has exited" for the rest of the
-  // session. Drop it and spawn a fresh one transparently.
   if (state.py?.alive) return state.py;
   state.py = null;
   const reg = await ensureBridge(state);
   const kernel = new PyKernel({
+    cwd: state.cwd,
     bridgeUrl: reg.url,
     bridgeToken: reg.token,
     bridgeSession: reg.session,
@@ -304,27 +282,17 @@ async function ensurePyKernel(state: SessionState): Promise<PyKernel> {
   return kernel;
 }
 
-async function ensureJsKernel(state: SessionState): Promise<JsKernel> {
-  if (state.js) return state.js;
-  const reg = await ensureBridge(state);
-  state.js = new JsKernel({
-    bridgeUrl: reg.url,
-    bridgeToken: reg.token,
-    bridgeSession: reg.session,
-  });
-  await state.js.ready();
-  return state.js;
-}
-
 function formatResult(r: CellResult, idx: number): string {
-  const head = `[${idx + 1}/${r.title || "cell"}]${r.timedOut ? " TIMEOUT" : ""}`;
+  const head = `[${idx + 1}]${r.title ? ` ${r.title}` : ""}${r.timedOut ? " TIMEOUT" : r.aborted ? " ABORTED" : ""}`;
   const parts = [head];
   if (r.stdout) parts.push(r.stdout.trimEnd());
   if (r.stderr) parts.push(`stderr:\n${r.stderr.trimEnd()}`);
   for (const d of r.displays) {
-    if (d.mime === "image/png")
-      parts.push(`<image ${d.mime} ${d.data.length}b>`);
-    else parts.push(`display(${d.mime}):\n${d.data}`);
+    parts.push(
+      d.mime === "image/png"
+        ? `<image ${d.mime} ${d.data.length}b>`
+        : `display(${d.mime}):\n${d.data}`,
+    );
   }
   if (r.value !== null && r.value !== undefined) {
     parts.push(
@@ -335,175 +303,174 @@ function formatResult(r: CellResult, idx: number): string {
   return parts.join("\n");
 }
 
-export default function (pi: ExtensionAPI) {
-  // pi installs no unhandledRejection handler, so Node's default (terminate)
-  // applies process-wide. A stray async rejection anywhere — a kernel pipe
-  // dying, an aborted bridge fetch — would otherwise exit pi. Having a listener
-  // suppresses the default; we log every rejection (so genuine bugs stay
-  // visible in stderr) but NEVER re-throw, because re-throwing here was turning
-  // recoverable hiccups into hard pi crashes.
-  const onUnhandled = (reason: unknown) => {
-    const msg =
-      reason instanceof Error
-        ? (reason.stack ?? reason.message)
-        : String(reason);
-    const evalOrigin =
-      /eval-bridge|eval\/(bridge|py-kernel|js-kernel|index)/.test(msg);
-    process.stderr.write(
-      `[eval extension] swallowed unhandled rejection${evalOrigin ? "" : " (non-eval origin)"}: ${msg}\n`,
-    );
-  };
-  // Reloads re-run this default() without firing session_shutdown, so an old
-  // listener can linger; drop any prior instance before adding ours.
-  process.off("unhandledRejection", onUnhandled);
-  process.on("unhandledRejection", onUnhandled);
-
-  pi.on("session_shutdown", async () => {
-    process.off("unhandledRejection", onUnhandled);
-    for (const state of sessions.values()) {
-      state.py?.dispose();
-      state.js?.dispose();
-      state.registration?.unregister();
-    }
-    sessions.clear();
+function boundOutput(summary: string, body: string): string {
+  if (!body) return summary;
+  const budget = Math.max(
+    1024,
+    DEFAULT_MAX_BYTES - Buffer.byteLength(summary) - 512,
+  );
+  const bounded = truncateTail(body, {
+    maxBytes: budget,
+    maxLines: Math.max(1, DEFAULT_MAX_LINES - 4),
   });
+  const parts = [summary];
+  if (bounded.content) parts.push(bounded.content);
+  if (bounded.truncated) {
+    parts.push(
+      `[Output truncated: showing last ${bounded.outputLines}/${bounded.totalLines} lines ` +
+        `(${formatSize(bounded.outputBytes)}/${formatSize(bounded.totalBytes)}). ` +
+        "Return a smaller aggregate or write full output to a file.]",
+    );
+  }
+  return parts.join("\n\n");
+}
 
+function details(
+  results: CellResult[],
+  total: number,
+  failedCell?: number,
+  aborted = false,
+): ExecutionDetails {
+  const last = results.at(-1);
+  return {
+    totalCells: total,
+    completedCells: results.length,
+    ...(failedCell === undefined ? {} : { failedCell: failedCell + 1 }),
+    ...(aborted || last?.aborted ? { aborted: true } : {}),
+    ...(last?.timedOut ? { timedOut: true } : {}),
+    durationMs: results.reduce((sum, result) => sum + result.durationMs, 0),
+  };
+}
+
+export default function (pi: ExtensionAPI) {
+  const state: SessionState = {
+    py: null,
+    registration: null,
+    cwd: "",
+    builtins: null,
+    ctx: null,
+  };
+  let cleaned = false;
+
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    state.py?.dispose();
+    state.py = null;
+    state.registration?.unregister();
+    state.registration = null;
+    state.builtins = null;
+    state.ctx = null;
+  };
+
+  pi.on("session_shutdown", cleanup);
   pi.registerTool({
     name: "eval",
     label: "Eval",
     description:
-      "Run code in persistent Python and JavaScript kernels for iterative, stateful work — state persists across cells and across separate tool calls, in one kernel per language per session. Not for a single one-off command; use `bash`/`read` directly for those.\n\n" +
-      'Inside cell code, `tool.<name>({...})` invokes pi tools with their normal argument schemas: built-ins (`read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`) plus extension tools (`web_search`, `fetch_content`, `github_pr`, `lsp`); `tool.list()` enumerates what is callable, `tree({path,max_depth})` is extra. Every `tool.*` call (including `tool.list()`) is async — always `await` it, e.g. `const names = await tool.list();`. Great for fan-out: query a tool N times in a loop, keep raw output in the kernel, return only the aggregate. Shortcuts: `read(path)`, `write(path,content)`, `tree(path)`, `env(key?, value?)` (no args: full env dict; one: get; two: set), `completion(prompt, model?, system?, schema?)` for a oneshot stateless model call (model: "default" or "provider/id"; schema: JSON-Schema for structured output).\n\n' +
-      'Call `install("pkg1", "pkg2")` to add Python packages, persists across pi restarts. JS cells support top-level await and package imports; use `globalThis` / `state` to persist values across cells.',
+      "Run persistent Python for iterative computation and bulk tool aggregation. Use `bash` or `read` for one-off work. State persists across cells and calls. Use `tool.<name>(args)` inside cells for bulk tool work; discover names with `tool.list()`. Keep raw responses in the kernel and return a compact aggregate. Helpers: `read`, `write`, `tree`, `env`, `completion`, and `install`; installed packages persist across Pi sessions. Large output is truncated; return a smaller aggregate or write it to a file.",
     promptSnippet:
-      "eval: persistent py + js kernels; share state across tool calls; `tool.*` proxy invokes pi tools (read/write/edit/bash/grep/find/ls/tree, web_search/fetch_content/github_pr/lsp) — fan out in a loop, return only the aggregate.",
+      "eval: persistent Python for iterative computation and bulk aggregation; use bash/read for one-off work, discover bridged tools with `tool.list()`, and return a compact aggregate.",
     parameters: EvalParams,
+    executionMode: "sequential",
     async execute(_callId, params: EvalParamsT, signal, onUpdate, ctx) {
-      try {
-        const sessionFile = ctx.sessionManager.getSessionFile?.() ?? "default";
-        const state = getSession(sessionFile, ctx.cwd);
-        state.cwd = ctx.cwd;
-        state.ctx = ctx;
-        // Make the current call's signal available to bridge tool calls.
-        const reg = await ensureBridge(state);
-        setBridgeSignal(reg.session, signal);
-
-        const results: CellResult[] = [];
-        let firstError: number | null = null;
-        // Every streamed update MUST be a valid AgentToolResult. pi's renderer
-        // runs getTextOutput(result) → result.content.filter(...) on each
-        // partial; a bare { results } (no content) crashes it with
-        // "Cannot read properties of undefined (reading 'filter')".
-        const toUpdate = (snapshot: CellResult[], status?: string) => {
-          const text =
-            snapshot.map((r, i) => formatResult(r, i)).join("\n\n") ||
-            status ||
-            "running…";
-          return {
-            content: [{ type: "text" as const, text }],
-            details: { results: snapshot },
-          };
-        };
-        const emit = (status?: string) => {
-          try {
-            onUpdate?.(toUpdate(results, status));
-          } catch {}
-        };
-
-        try {
-          for (let i = 0; i < params.cells.length; i++) {
-            if (signal?.aborted) break;
-            const cell = params.cells[i]!;
-            if (cell.reset) {
-              if (cell.language === "py") {
-                state.py?.dispose();
-                state.py = null;
-              } else {
-                state.js?.reset();
-                state.js = null;
-              }
-            }
-            emit(
-              `[${i + 1}/${params.cells.length}] ${cell.language}${cell.title ? " " + cell.title : ""}`,
-            );
-            const onProgress = (partial: CellResult) => {
-              try {
-                onUpdate?.(toUpdate([...results, partial]));
-              } catch {}
-            };
-            let r: CellResult;
-            if (cell.language === "py") {
-              const kernel = await ensurePyKernel(state);
-              r = await kernel.run(
-                cell.code,
-                cell.timeout ?? 30,
-                cell.title,
-                onProgress,
-              );
-              // Timeout is soft-interrupted first (kernel survives); if it
-              // escalated to a kill, ensurePyKernel sees !alive and respawns.
-            } else {
-              const kernel = await ensureJsKernel(state);
-              r = await kernel.run(
-                cell.code,
-                cell.timeout ?? 30,
-                cell.title,
-                onProgress,
-              );
-            }
-            results.push(r);
-            emit();
-            if (r.error) {
-              firstError = i;
-              break;
-            }
-          }
-        } finally {
-          setBridgeSignal(reg.session, undefined);
-        }
-
-        const body = results.map((r, i) => formatResult(r, i)).join("\n\n");
-        const summary =
-          firstError !== null
-            ? `Cell ${firstError + 1} failed. ${results.length}/${params.cells.length} cells ran.`
-            : `${results.length} cells ran.`;
-
-        // Image displays (e.g. matplotlib figures) go back as real image
-        // content so the model can actually see them, not just a byte-count
-        // placeholder in the text body.
-        const content: (
-          | { type: "text"; text: string }
-          | { type: "image"; data: string; mimeType: string }
-        )[] = [{ type: "text", text: `${summary}\n\n${body}` }];
-        for (const r of results) {
-          for (const d of r.displays) {
-            if (d.mime.startsWith("image/")) {
-              content.push({ type: "image", data: d.data, mimeType: d.mime });
-            }
-          }
-        }
-
-        return {
-          content,
-          details: { results, isError: firstError !== null },
-          isError: firstError !== null,
-        };
-      } catch (err) {
-        // Last line of defence: execute() must never reject, or pi surfaces it as
-        // "No result provided" (and an unhandled rejection can take pi down).
-        // Return the failure as a normal tool error so the kernel/bridge can be
-        // debugged from the conversation.
-        const msg =
-          err instanceof Error ? (err.stack ?? err.message) : String(err);
-        process.stderr.write(`[eval extension] execute() failed: ${msg}\n`);
-        return {
-          content: [
-            { type: "text", text: `eval failed (host error):\n${msg}` },
-          ],
-          details: { isError: true },
-          isError: true,
-        };
+      if (cleaned) throw new Error("eval extension is shut down");
+      if (signal?.aborted) throw new Error("eval aborted before cell start");
+      if (state.cwd && state.cwd !== ctx.cwd) {
+        state.py?.dispose();
+        state.py = null;
+        state.registration?.unregister();
+        state.registration = null;
+        state.builtins = null;
       }
+      state.cwd = ctx.cwd;
+      state.ctx = ctx;
+      const reg = await ensureBridge(state);
+      setBridgeSignal(reg.session, signal);
+      const results: CellResult[] = [];
+      let failedCell: number | undefined;
+
+      const emit = (status?: string, active?: CellResult) => {
+        const summary = `[${results.length}/${params.cells.length} cells]`;
+        const visible = active ? [...results, active] : results;
+        const output = visible.map((r, i) => formatResult(r, i)).join("\n\n");
+        const body =
+          [output, status].filter(Boolean).join("\n\n") || "running…";
+        try {
+          onUpdate?.({
+            content: [
+              { type: "text" as const, text: boundOutput(summary, body) },
+            ],
+            details: details(
+              results,
+              params.cells.length,
+              failedCell,
+              signal?.aborted,
+            ),
+          });
+        } catch {}
+      };
+
+      try {
+        for (let i = 0; i < params.cells.length; i++) {
+          if (signal?.aborted) {
+            failedCell = i;
+            break;
+          }
+          const cell = params.cells[i]!;
+          if (cell.reset) {
+            state.py?.dispose();
+            state.py = null;
+          }
+          emit(
+            `[${i + 1}/${params.cells.length}]${cell.title ? ` ${cell.title}` : " cell"}`,
+          );
+          const kernel = await ensurePyKernel(state);
+          const result = await kernel.run(
+            cell.code,
+            cell.timeout ?? 30,
+            cell.title,
+            (partial) => emit(undefined, partial),
+            signal,
+          );
+          results.push(result);
+          if (result.error) failedCell = i;
+          emit();
+          if (failedCell !== undefined) break;
+        }
+      } finally {
+        setBridgeSignal(reg.session, undefined);
+      }
+
+      const last = results.at(-1);
+      const summary =
+        failedCell === undefined
+          ? `${results.length} cells ran.`
+          : signal?.aborted || last?.aborted
+            ? `Cell ${failedCell + 1} aborted. ${results.length}/${params.cells.length} cells ran.`
+            : last?.timedOut
+              ? `Cell ${failedCell + 1} timed out. ${results.length}/${params.cells.length} cells ran.`
+              : `Cell ${failedCell + 1} failed. ${results.length}/${params.cells.length} cells ran.`;
+      const body = results.map((r, i) => formatResult(r, i)).join("\n\n");
+      const text = boundOutput(summary, body);
+      if (failedCell !== undefined) throw new Error(text);
+
+      const content: (
+        | { type: "text"; text: string }
+        | { type: "image"; data: string; mimeType: string }
+      )[] = [{ type: "text", text }];
+      for (const result of results) {
+        for (const display of result.displays) {
+          if (display.mime.startsWith("image/")) {
+            content.push({
+              type: "image",
+              data: display.data,
+              mimeType: display.mime,
+            });
+          }
+        }
+      }
+      return { content, details: details(results, params.cells.length) };
     },
   });
 }
