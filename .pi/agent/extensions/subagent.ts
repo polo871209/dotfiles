@@ -17,6 +17,14 @@
 //
 // Status comes from notifier.ts, which sets the child pane's tmux pane title
 // to reflect busy/ask/done — polled here instead of a parsed JSON event stream.
+//
+// Context isolation: the only thing suppressed is --no-session (parent
+// conversation history doesn't carry over). AGENTS.md/CLAUDE.md discovery,
+// skills, and prompt templates all load same as any session — folder-
+// context.ts and subagent.ts still early-exit under PI_IS_SUBAGENT so a
+// subagent can't inject extra ancestor AGENTS.md beyond normal discovery or
+// spawn its own subagents. Beyond that, whatever the task string doesn't
+// say, the subagent doesn't know — write tasks self-contained.
 
 import { execFile } from "node:child_process";
 import { parseStatusTitle } from "./shared/status";
@@ -457,7 +465,8 @@ const buildParams = (agents: AgentConfig[]) =>
           ),
     task: Type.String({
       description:
-        "Self-contained brief: scope, paths, constraints, completion criteria, verification, and expected report.",
+        "Self-contained brief: scope, paths, constraints, completion criteria, verification, and expected report. " +
+        "The subagent starts with no session history — state everything task-specific it needs to know.",
     }),
     model: Type.Optional(
       Type.String({
@@ -668,7 +677,6 @@ async function runInTmux(
     "PI_IS_SUBAGENT=1",
     "pi",
     "--no-session",
-    "--no-context-files",
     `--system-prompt "$(cat '${sysFile}')"`,
   ];
   if (toolsFlag) parts.push(`--tools ${toolsFlag}`);

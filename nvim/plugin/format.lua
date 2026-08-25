@@ -9,6 +9,10 @@ require('guess-indent').setup {}
 -- Lazy-load treesj behind its only keymap (~9ms off cold startup).
 local treesj_loaded = false
 vim.keymap.set('n', '<leader>m', function()
+    if not pcall(vim.treesitter.get_parser, 0) then
+        vim.notify('TreeSJ: no treesitter parser for this buffer', vim.log.levels.WARN)
+        return
+    end
     if not treesj_loaded then
         treesj_loaded = true
         vim.pack.add { 'https://github.com/Wansmer/treesj' }
