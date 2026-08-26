@@ -88,8 +88,9 @@ local function tmux_pi_panes()
 end
 
 --- Resolve which pi socket to send to: the session's only live pi bridge, or
---- a vim.ui.select prompt when there are several.
----@param cb fun(sock: string?)
+--- a vim.ui.select prompt when there are several. Also returns the pane id so
+--- callers can bring that pane into view after sending.
+---@param cb fun(sock: string?, pane_id: string?)
 local function resolve_socket(cb)
     if vim.env.TMUX == nil then
         notify('pi integration requires tmux', vim.log.levels.ERROR)
@@ -99,7 +100,7 @@ local function resolve_socket(cb)
     local live = {}
     for _, p in ipairs(tmux_pi_panes()) do
         local sock = socket_for_pane(p.pane_id)
-        if sock then table.insert(live, { window_index = p.window_index, window_name = p.window_name, sock = sock }) end
+        if sock then table.insert(live, { pane_id = p.pane_id, window_index = p.window_index, window_name = p.window_name, sock = sock }) end
     end
     if #live == 0 then
         notify('No pi listener found in this tmux session. Is .pi/agent/extensions/tmux-bridge.ts loaded?', vim.log.levels.ERROR)
@@ -107,7 +108,7 @@ local function resolve_socket(cb)
         return
     end
     if #live == 1 then
-        cb(live[1].sock)
+        cb(live[1].sock, live[1].pane_id)
         return
     end
     -- Labelled with the tmux window index, which is what the status line shows
@@ -115,7 +116,16 @@ local function resolve_socket(cb)
     vim.ui.select(live, {
         prompt = 'Send to which pi agent?',
         format_item = function(p) return ('%s  %s'):format(p.window_index, p.window_name) end,
-    }, function(choice) cb(choice and choice.sock or nil) end)
+    }, function(choice) cb(choice and choice.sock or nil, choice and choice.pane_id or nil) end)
+end
+
+--- Bring a tmux pane into view for the attached client, best effort/async.
+---@param pane_id string
+local function focus_pane(pane_id)
+    -- switch-client moves the client to the pane's session/window; select-pane
+    -- then makes it active within that window if it wasn't already.
+    vim.system({ 'tmux', 'switch-client', '-t', pane_id }, { timeout = TIMEOUT })
+    vim.system({ 'tmux', 'select-pane', '-t', pane_id }, { timeout = TIMEOUT })
 end
 
 --- Send a JSON object as one line to a pi socket. Fully async.
@@ -162,23 +172,23 @@ function M.send_selection()
     local filepath = vim.fn.fnamemodify(bufname, ':.')
     local ft = vim.bo[buf].filetype or ''
 
-    resolve_socket(function(sock)
+    resolve_socket(function(sock, pane_id)
         if not sock then return end
-        vim.ui.input({ prompt = 'pi: ' }, function(input)
-            if not input or input == '' then return end
-            -- Send the whole file so pi answers with zero extra read round-trip (pi's
-            -- edit/write read from disk at exec time, so editing never needs a prior
-            -- read either). The bridge injects it as a collapsed custom message so the
-            -- conversation stays compact; the selection just marks the focus range.
-            local all = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), '\n')
-            -- tmux-bridge drops socket lines >256KB; for big files send a reference and
-            -- let pi read them itself instead of the message being silently dropped.
-            if #all <= 200000 then
-                send(sock, { prompt = input, file = { path = filepath, sline = sline, eline = eline, ft = ft, content = all } })
-            else
-                send(sock, { text = string.format('%s\n\nRe: %s lines %d-%d. Read the file for full context.', input, filepath, sline, eline) })
-            end
-        end)
+        -- Drop the snapshot into pi's own input editor and hand focus to that
+        -- pane instead of prompting here: vim.ui.input has no slash-commands or
+        -- completion, pi's real editor does. Send the whole file so pi answers
+        -- with zero extra read round-trip (pi's edit/write read from disk at
+        -- exec time, so editing never needs a prior read either); the selection
+        -- just marks the focus range.
+        local all = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), '\n')
+        -- tmux-bridge drops socket lines >256KB; for big files send a reference and
+        -- let pi read them itself instead of the message being silently dropped.
+        if #all <= 200000 then
+            send(sock, { file = { path = filepath, sline = sline, eline = eline, ft = ft, content = all } })
+        else
+            send(sock, { paste = string.format('Re: %s lines %d-%d. Read the file for full context.', filepath, sline, eline) })
+        end
+        if pane_id then focus_pane(pane_id) end
     end)
 end
 

@@ -10,13 +10,20 @@
 // Socket path: <tmpdir>/pi-tmux-pane-<sanitized-pane-id>.sock
 //
 // Wire format: one JSON object per line, e.g.
-//   {"text": "hello"}
-//   {"prompt": "...", "file": {"path": ..., "sline": ..., "eline": ..., "ft": ..., "content": ...}}
+//   {"text": "hello"}                     -- send immediately, triggers a turn
+//   {"paste": "some reference text"}      -- drop into pi's own input editor, no turn
+//   {"file": {"path": ..., "sline": ..., "eline": ..., "ft": ..., "content": ...}}
+//                                          -- format a line-numbered snapshot and drop
+//                                             that into pi's own input editor, no turn
+//
+// "paste"/"file" land in the real pi editor (ctx.ui.pasteToEditor) rather than
+// being sent as a message directly, so the user finishes composing there with
+// full slash-command support and pi's own completion — neither exists in an
+// nvim-side input prompt.
 import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { Box, Text } from "@earendil-works/pi-tui";
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
@@ -86,27 +93,12 @@ export default function (pi: ExtensionAPI) {
   let server: net.Server | undefined;
   let currentCtx: ExtensionContext | undefined;
 
-  // Files pushed from nvim arrive as a custom message so the LLM gets full
-  // content (convertToLlm maps custom -> user) while the TUI shows one compact
-  // line. The file body lives in the user's editor, so we never expand it here.
-  pi.registerMessageRenderer("nvim-file", (message, opts, theme) => {
-    const d = message.details as
-      | { path: string; sline: number; eline: number }
-      | undefined;
-    const label = d ? `${d.path} (L${d.sline}-${d.eline})` : "file context";
-    const box = new Box(0, opts.outputPad, (t) =>
-      theme.bg("customMessageBg", t),
-    );
-    box.addChild(new Text(theme.fg("accent", label), 0, 0));
-    return box;
-  });
-
   const handleLine = (line: string) => {
     const trimmed = line.trim();
     if (!trimmed) return;
     let payload: {
       text?: string;
-      prompt?: string;
+      paste?: string;
       file?: FilePayload;
       mode?: "steer" | "followUp";
     };
@@ -131,26 +123,29 @@ export default function (pi: ExtensionAPI) {
     try {
       const f = payload.file;
       if (f && typeof f.content === "string" && typeof f.path === "string") {
-        // Inject a complete small snapshot or a focused large-file snapshot,
-        // then the question as the user message that triggers the turn.
-        const block = formatFileSnapshot(f);
-        // nextTurn queues the file so prompt() injects it right after the user
-        // message (agent-session pushes pending nextTurn msgs below the prompt),
-        // making it render under the input instead of above it.
-        pi.sendMessage(
-          {
-            customType: "nvim-file",
-            content: block,
-            display: true,
-            details: {
-              path: f.path,
-              sline: f.sline,
-              eline: f.eline,
-            },
-          },
-          { deliverAs: "nextTurn" },
-        );
-        pi.sendUserMessage(payload.prompt ?? "", opts);
+        // Drop the formatted snapshot into pi's own input editor instead of
+        // sending it as a message: the user finishes composing there, with
+        // full slash-command support and pi's completion, and sends it
+        // themselves whenever they're ready.
+        const ui = currentCtx?.ui;
+        if (ui) {
+          // pi-tui's editor collapses any paste over 10 lines/1000 chars into
+          // a bare "[paste #N +M lines]" marker with no path/line info, fed
+          // straight to the cursor with no trailing newline. Feed the header
+          // as its own short paste so it stays literal text instead of
+          // collapsing (keeps the range visible pre-send and doubles as the
+          // "content is already below, no re-read needed" cue for pi), then
+          // a final "\n" paste so typing lands on a fresh line instead of
+          // glued to the marker.
+          ui.pasteToEditor(`${f.path} (L${f.sline}-${f.eline}):\n`);
+          ui.pasteToEditor(formatFileSnapshot(f));
+          ui.pasteToEditor("\n");
+        }
+        return;
+      }
+      const paste = payload.paste;
+      if (typeof paste === "string") {
+        currentCtx?.ui.pasteToEditor(`${paste}\n`);
         return;
       }
       const text = payload.text;
