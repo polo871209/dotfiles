@@ -7,17 +7,28 @@
 // extensions/AGENTS.md's "deterministic first" rule argues against.
 //
 // Not a port of npm:pi-background-tasks — same shape (spawn, track, tail
-// output, notify on exit) reimplemented minimally: no footer dock, no
-// EventBus, no hash-verified retrieval, no Fusion/delegate multi-agent
-// tools. Those solve problems this harness doesn't have (subagent.ts already
-// covers agent-shaped delegation with steer/stop/wait).
+// output) reimplemented minimally: no footer dock, no EventBus, no
+// hash-verified retrieval, no Fusion/delegate multi-agent tools. Those solve
+// problems this harness doesn't have (subagent.ts already covers
+// agent-shaped delegation with steer/stop/wait).
 //
 // Job lifetime is tied to this pi process, not a separate daemon: children
 // are spawned attached (not detached/unref'd) so their exit always updates
-// status and fires a notification while the session is open. If the session
-// exits first, the child is killed with it — background here means
-// "off the conversation turn", not "survives quitting pi". A dev server you
-// want to outlive the session belongs in its own terminal/tmux pane, not here.
+// status while the session is open. If the session exits first, the child is
+// killed with it — background here means "off the conversation turn", not
+// "survives quitting pi". A dev server you want to outlive the session
+// belongs in its own terminal/tmux pane, not here.
+//
+// No desktop notification on job exit — every job's every exit pinging
+// regardless of duration or focus proved too noisy for what's meant to be a
+// quiet background tool.
+//
+// Instead the job wakes pi itself: on exit the extension injects a followUp
+// message carrying status + log tail, with triggerTurn so an idle agent
+// starts a turn on it. So the agent fires bg_run and *ends its turn* — no
+// sleep-poll loop burning turns to ask "done yet?", no wall-clock waste. The
+// only jobs that don't wake anyone are ones killed via bg_kill (the agent
+// asked, it already knows) and ones reaped by session_shutdown.
 
 import { spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs";
@@ -25,7 +36,6 @@ import * as path from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { exposeRegisteredToolsToEval } from "./shared/bridge-tools";
-import { notifyExternal } from "./notifier";
 
 interface Job {
   id: string;
@@ -40,17 +50,21 @@ interface Job {
   exitCode: number | null;
   child: ChildProcess;
   timeoutTimer?: ReturnType<typeof setTimeout>;
+  /** Cleared by bg_kill: a kill the agent requested needs no wake-up. */
+  wakeOnExit: boolean;
 }
-
-const IS_SUBAGENT = process.env.PI_IS_SUBAGENT === "1";
-// Set once session_shutdown starts killing running jobs, so their resulting
-// exit events don't fire a notification for a job nobody's waiting on—the
-// session (and its notifier) is on its way out anyway.
-let sessionShuttingDown = false;
 
 const MAX_TRACKED_JOBS = 50;
 const DEFAULT_LOG_TAIL_LINES = 200;
 const MAX_LOG_TAIL_CHARS = 20_000;
+// The wake message lands in context unprompted, so it carries a far smaller
+// tail than an explicit bg_logs call the agent asked for.
+const WAKE_TAIL_LINES = 40;
+const WAKE_TAIL_CHARS = 4_000;
+
+// Jobs reaped by session_shutdown must not wake an agent whose session is
+// already tearing down.
+let sessionShuttingDown = false;
 
 // globalThis-backed like subagent.ts's runsStore: pi loads each extension in
 // an isolated module graph, and a reload must not orphan jobs already running.
@@ -90,6 +104,31 @@ function tailLines(text: string, lines: number): string {
     : tail;
 }
 
+// Self-contained completion report: the agent gets this unprompted after its
+// turn ended, so it carries enough (verdict, exit code, duration, tail) to
+// act on without a follow-up bg_logs round-trip.
+function wakeReport(j: Job): string {
+  const verdict = j.status === "done" ? "finished" : j.status;
+  const dur = formatDuration((j.endedAt ?? Date.now()) - j.startedAt);
+  const head =
+    `bg job '${j.name}' ${verdict} (${j.id}, exit=${j.exitCode ?? "?"}, ${dur}).` +
+    ` Full log: ${j.logPath}`;
+  let tail = "";
+  try {
+    const raw = fs.readFileSync(j.logPath, "utf-8");
+    const cut = tailLines(raw, WAKE_TAIL_LINES);
+    tail =
+      cut.length > WAKE_TAIL_CHARS
+        ? cut.slice(cut.length - WAKE_TAIL_CHARS)
+        : cut;
+  } catch {
+    /* log unreadable — head alone still tells the agent what happened */
+  }
+  return tail.trim()
+    ? `${head}\n\nlast ${WAKE_TAIL_LINES} lines:\n${tail.trim()}`
+    : `${head}\n\n(no output)`;
+}
+
 function formatJobLine(j: Job): string {
   const dur = formatDuration((j.endedAt ?? Date.now()) - j.startedAt);
   const exit = j.exitCode === null ? "" : ` exit=${j.exitCode}`;
@@ -117,9 +156,12 @@ export default function (pi: ExtensionAPI) {
     name: "bg_run",
     label: "Background Run",
     description:
-      "Start a shell command in the background and return immediately — no agent involved, for long/noisy deterministic commands (builds, test suites, dev servers, migrations) that need tracking, not reasoning. Poll with bg_status/bg_logs, stop with bg_kill; fires a desktop notification on completion.",
+      "Start a shell command in the background and return immediately — no agent involved, for long/noisy deterministic commands (builds, test suites, dev servers, migrations) that need tracking, not reasoning. " +
+      "On exit the job wakes you with its status and log tail, so end your turn after starting it. " +
+      "WRONG: bg_run then sleep/bg_status in a loop waiting for it. RIGHT: bg_run, finish the turn, handle the completion message when it arrives. " +
+      "bg_status/bg_logs are for inspecting a job mid-flight on the user's behalf; bg_kill stops one.",
     promptSnippet:
-      "Long/noisy shell command needing no reasoning: bg_run, then bg_status/bg_logs/bg_kill.",
+      "Long/noisy shell command needing no reasoning: bg_run, then end the turn — it wakes you on exit. Never sleep-poll it.",
     parameters: Type.Object({
       command: Type.String({
         minLength: 1,
@@ -183,6 +225,7 @@ export default function (pi: ExtensionAPI) {
         status: "running",
         exitCode: null,
         child,
+        wakeOnExit: true,
       };
       jobsStore.set(id, job);
       pruneJobsStore();
@@ -199,18 +242,19 @@ export default function (pi: ExtensionAPI) {
                 ? "done"
                 : "failed";
         }
-        // A subagent's bg job finishing isn't the parent's turn ending —
-        // notifying here would fire a desktop ping for work nobody at the
-        // keyboard is waiting on (same rationale as notifier.ts's IS_SUBAGENT
-        // guard). Same for a job reaped by session_shutdown — the session
-        // (and whoever'd see the ping) is already gone.
-        if (!IS_SUBAGENT && !sessionShuttingDown) {
-          const verdict = job.status === "done" ? "finished" : job.status;
-          void notifyExternal(
-            `${job.name} ${verdict} (${formatDuration(job.endedAt - job.startedAt)})`,
-            job.cwd,
-          );
-        }
+        if (!job.wakeOnExit || sessionShuttingDown) return;
+        // followUp + triggerTurn: queued behind a turn already in flight,
+        // or starts one if the agent is idle — the wake that replaces
+        // sleep-polling.
+        pi.sendMessage(
+          {
+            customType: "bg-run-complete",
+            content: wakeReport(job),
+            display: true,
+            details: { id: job.id, status: job.status, exitCode: job.exitCode },
+          },
+          { deliverAs: "followUp", triggerTurn: true },
+        );
       });
 
       if (params.timeoutSeconds) {
@@ -353,6 +397,7 @@ export default function (pi: ExtensionAPI) {
           details: {},
         };
       }
+      job.wakeOnExit = false;
       try {
         job.child.kill("SIGTERM");
       } catch (err) {

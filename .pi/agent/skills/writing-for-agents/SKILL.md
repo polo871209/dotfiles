@@ -3,7 +3,7 @@ name: writing-for-agents
 description: Writing documents for agents. Use when creating or editing skills or modifying AGENTS.md.
 ---
 
-A skill, tool description, or extension prompt exists to wrangle **predictability** out of a stochastic system — the agent taking the same _process_ every run, not necessarily producing the same output (a brainstorming skill should predictably diverge; its tokens vary, its behavior doesn't). Every rule below is a lever on that, not an end in itself.
+A skill, tool description, extension prompt, or code comment exists to wrangle **predictability** out of a stochastic system — the agent taking the same _process_ every run, not necessarily producing the same output (a brainstorming skill should predictably diverge; its tokens vary, its behavior doesn't). Every rule below is a lever on that, not an end in itself.
 
 When writing or editing a skill, read [`SKILL-MECHANICS.md`](SKILL-MECHANICS.md) for frontmatter, invocation choice, and router skills.
 
@@ -77,6 +77,8 @@ Names for diagnosing a skill that isn't landing, each paired with its cure:
 ## Writing for the agent, not the human
 
 Third-person imperative ("Extract the field...") not first/second person. Numbered steps with explicit decision branches ("if X, do A; else do B") over prose that hides the branch in a sentence. Pick one term per concept and never swap it for a synonym mid-skill. No README/CHANGELOG/install-guide framing — skills aren't human docs, and none of that survives the no-op test for an agent reader anyway.
+
+Never hard-wrap markdown prose: one paragraph is one line, however long. The reader wraps at their own width, so injected newlines only fix the text to a width nobody asked for and make every later edit re-flow a whole block in the diff. Markdown only — comments inside source files still wrap at the code's usual width.
 
 Match instruction strictness to task fragility: prose heuristics where many approaches are valid, a parameterized script where one pattern is preferred, an exact script with fixed args where the task is fragile and must be deterministic. A migration script wants the last; a code review wants the first.
 

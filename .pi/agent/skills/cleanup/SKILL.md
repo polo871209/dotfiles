@@ -38,6 +38,8 @@ Completion: every proposed deletion has evidence that it is unreachable, unrefer
 
 ## Comment rules
 
+A comment's primary reader today is an agent, not a human, so judge every comment as agent-facing prose: invoke the `writing-for-agents` skill before ruling on any of them. Two of its rules decide most cases — the **no-op test** (a comment that changes no reader's behavior is dead weight, even when true) and the **scar tissue** exception (a comment that reads as redundant often exists because a model already failed that way once, so inferable is not sufficient to delete).
+
 Delete a comment when any condition applies:
 
 - Decorative divider, banner, box, or visual filler.
@@ -53,6 +55,7 @@ Keep or shorten comments that carry:
 - License or copyright text.
 - Generated-file markers, formatter controls, linter directives, type suppressions, or other tool instructions.
 - A concrete TODO that still applies.
+- Scar tissue: a caveat that reads as obvious but plausibly exists because someone already got it wrong.
 
 Rewrite only to preserve the same meaning more concisely.
 
