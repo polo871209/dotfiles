@@ -1,7 +1,7 @@
 {
   "lastChangelogVersion": "0.84.3",
   "defaultProvider": "anthropic",
-  "defaultModel": "claude-sonnet-5",
+  "defaultModel": "claude-opus-5",
   "defaultThinkingLevel": "high",
   "hideThinkingBlock": true,
   "theme": "catppuccin-mocha",

@@ -41,6 +41,7 @@ zoxide = "latest"
 # Git / GitHub
 "github:googleworkspace/cli" = { version = "latest", exe = "gws" }
 gh = "latest"
+glab = "latest"
 lazygit = "0.63.1"
 
 # Kubernetes / cloud / containers

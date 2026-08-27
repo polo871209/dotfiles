@@ -6,19 +6,65 @@ vim.keymap.set({ 'n', 'i' }, '<C-.>', '<cmd>bnext<CR>', { desc = 'Next Buffer' }
 vim.keymap.set('n', '<leader>-', '<cmd>split<CR>', { desc = 'Horizontal Split' })
 vim.keymap.set('n', '<leader>|', '<cmd>vsplit<CR>', { desc = 'Vertical Split' })
 
-local pane_directions = {
-    { key = 'h', vim = 'h', tmux = '-L', name = 'Left' },
-    { key = 'j', vim = 'j', tmux = '-D', name = 'Down' },
-    { key = 'k', vim = 'k', tmux = '-U', name = 'Up' },
-    { key = 'l', vim = 'l', tmux = '-R', name = 'Right' },
-}
-for _, direction in ipairs(pane_directions) do
-    vim.keymap.set('n', '<C-' .. direction.key .. '>', function()
-        local window = vim.api.nvim_get_current_win()
-        vim.cmd('wincmd ' .. direction.vim)
-        if window == vim.api.nvim_get_current_win() and vim.env.TMUX then vim.fn.system { 'tmux', 'select-pane', direction.tmux } end
-    end, { desc = direction.name .. ' Pane' })
+-- Move between nvim splits first, hand the key to tmux only at the edges.
+-- tmux/tmux.conf binds the same keys and forwards them here whenever the pane
+-- runs nvim, so both sides must agree or the sender eats them.
+local function tmux(...)
+    -- $TMUX is "socket,pid,session"; -S pins the command to that server so a
+    -- non-default socket (tmux -L) still resolves.
+    local socket = vim.split(vim.env.TMUX, ',')[1]
+    local cmd = { 'tmux', '-S', socket, ... }
+    return vim.system(cmd, { text = true }):wait().stdout or ''
 end
+
+local function is_zoomed() return vim.trim(tmux('display-message', '-p', '#{window_zoomed_flag}')) == '1' end
+
+--- `wincmd` throws E11 in the command-line window; nothing to navigate there.
+---@param arg string
+local function wincmd(arg) pcall(vim.cmd, 'wincmd ' .. arg) end
+
+local tmux_pane = { h = '-L', j = '-D', k = '-U', l = '-R' }
+
+-- Whether the last hop crossed out of nvim, so <C-\> knows which side owns
+-- "previous". A fresh nvim was entered from tmux, hence the initial true.
+local came_from_tmux = true
+
+---@param direction 'h'|'j'|'k'|'l'
+local function navigate(direction)
+    local win = vim.api.nvim_get_current_win()
+    wincmd(direction)
+    if win ~= vim.api.nvim_get_current_win() then
+        came_from_tmux = false
+        return
+    end
+    -- No split that way, so tmux takes over. A zoomed pane is deliberately
+    -- fullscreen, so leaving it on <C-hjkl> is almost never what was meant.
+    if not vim.env.TMUX or is_zoomed() then return end
+    tmux('select-pane', tmux_pane[direction])
+    came_from_tmux = true
+end
+
+local function last_active()
+    if vim.env.TMUX and came_from_tmux then return tmux('select-pane', '-l') end
+    wincmd 'p'
+end
+
+-- Cycles every split, then every tmux pane: on the last split, wrap back to the
+-- first one and let tmux advance instead.
+local function next_pane()
+    if vim.env.TMUX and vim.fn.winnr() == vim.fn.winnr '$' then
+        wincmd 't'
+        return tmux('select-pane', '-t:.+')
+    end
+    wincmd 'w'
+end
+
+vim.keymap.set('n', '<C-h>', function() navigate 'h' end, { desc = 'Left Pane' })
+vim.keymap.set('n', '<C-j>', function() navigate 'j' end, { desc = 'Down Pane' })
+vim.keymap.set('n', '<C-k>', function() navigate 'k' end, { desc = 'Up Pane' })
+vim.keymap.set('n', '<C-l>', function() navigate 'l' end, { desc = 'Right Pane' })
+vim.keymap.set('n', '<C-\\>', last_active, { desc = 'Last Active Pane' })
+vim.keymap.set('n', '<C-Space>', next_pane, { desc = 'Next Pane' })
 
 vim.keymap.set('v', '<leader>p', '"_dP', { desc = 'Paste without replacing clipboard' })
 
