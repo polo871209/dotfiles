@@ -5,7 +5,13 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { callLua, isRunning, type Lane, loadLua } from "../nvim";
+import {
+  callLua,
+  isRunning,
+  laneGeneration,
+  type Lane,
+  loadLua,
+} from "../nvim";
 import type { DriverResult } from "./types";
 
 const FEEDBACK_LUA = path.join(import.meta.dirname, "..", "feedback.lua");
@@ -23,18 +29,22 @@ const logDriver = (msg: string) => {
   }
 };
 
-// Load _G.PiFeedback into a lane's nvim once per session. Re-check
-// isRunning() so /lsp-restart forces a reload of _G.PiFeedback into the fresh
-// nvim.
-const feedbackLoaded: Record<Lane, boolean> = { main: false, inline: false };
+// Load _G.PiFeedback into a lane's nvim once per nvim instance. Keyed on the
+// lane generation, not a bare boolean: after a restart the lane may already
+// have respawned (isRunning() true again) while carrying none of our lua.
+const feedbackLoadedGen: Record<Lane, number | null> = {
+  main: null,
+  inline: null,
+};
 export const ensureFeedbackLoaded = async (
   cwd: string,
   lane: Lane = "main",
 ): Promise<void> => {
-  if (feedbackLoaded[lane] && isRunning(lane)) return;
+  if (feedbackLoadedGen[lane] === laneGeneration(lane) && isRunning(lane))
+    return;
   const src = fs.readFileSync(FEEDBACK_LUA, "utf8");
   await loadLua(cwd, src, lane);
-  feedbackLoaded[lane] = true;
+  feedbackLoadedGen[lane] = laneGeneration(lane);
 };
 
 // Lua side enforces PER_FILE_BUDGET_MS = 4500 + ~1s settle. Match here

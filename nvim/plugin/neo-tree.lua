@@ -88,9 +88,7 @@ end
 vim.keymap.set('n', '\\', function()
     load_neotree()
     local bufname = vim.api.nvim_buf_get_name(0)
-    if bufname == '' or vim.bo.filetype == 'ministarter' or vim.bo.buftype ~= '' then
-        vim.cmd 'Neotree toggle'
-    else
-        vim.cmd 'Neotree reveal'
-    end
+    -- reveal errors on paths that are not on disk (deleted/renamed file, scratch buffers).
+    local revealable = bufname ~= '' and vim.bo.buftype == '' and vim.bo.filetype ~= 'ministarter' and vim.uv.fs_stat(bufname) ~= nil
+    vim.cmd(revealable and 'Neotree reveal' or 'Neotree toggle')
 end, { desc = 'NeoTree toggle/reveal', silent = true })

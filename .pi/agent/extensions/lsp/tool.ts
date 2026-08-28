@@ -11,6 +11,7 @@ import {
   type AgentToolResult,
 } from "@earendil-works/pi-coding-agent";
 import { run } from "../shared/exec";
+import { isRunning, shutdownNvim } from "./nvim";
 import {
   capText,
   displayPath,
@@ -116,7 +117,12 @@ const ANCHOR_ACTIONS = [
 type AnchorAction = (typeof ANCHOR_ACTIONS)[number];
 
 interface LspParams {
-  action: AnchorAction | "document_symbols" | "diagnostics" | "rename";
+  action:
+    | AnchorAction
+    | "document_symbols"
+    | "diagnostics"
+    | "rename"
+    | "restart";
   file?: string;
   files?: string[];
   line?: number;
@@ -166,6 +172,14 @@ interface RenameFileEdit {
 interface RenameResult extends DriverErr {
   files?: RenameFileEdit[];
   edit_count?: number;
+}
+interface StatusFile {
+  file: string;
+  bufnr: number;
+  clients: string[];
+}
+interface StatusResult extends DriverErr {
+  files?: StatusFile[];
 }
 
 const ANCHOR_LABEL: Record<AnchorAction, string> = {
@@ -296,6 +310,34 @@ async function runRename(
   );
 }
 
+// Same teardown as the /lsp-restart command, then a warm respawn via a
+// status call so the result reflects a real, healthy nvim instead of
+// deferring the failure to the next navigation call.
+async function runRestart(
+  ctx: Parameters<Parameters<typeof defineTool>[0]["execute"]>[4],
+  signal: AbortSignal | undefined,
+  onUpdate: Parameters<Parameters<typeof defineTool>[0]["execute"]>[3],
+): Promise<AgentToolResult<unknown>> {
+  const was = isRunning();
+  shutdownNvim();
+  return withDriver<StatusResult>(
+    ctx,
+    "status",
+    [],
+    signal,
+    onUpdate,
+    (res) => {
+      const files = res.files ?? [];
+      const prev = was ? "killed previous nvim" : "nvim was not running";
+      return {
+        text: `LSP restarted (${prev}); fresh nvim ready with ${files.length} buffer(s).`,
+        details: { restarted: was, buffers: files.length },
+      };
+    },
+    "LSP restart failed",
+  );
+}
+
 async function runDiagnostics(
   params: LspParams,
   ctx: Parameters<Parameters<typeof defineTool>[0]["execute"]>[4],
@@ -361,7 +403,7 @@ export const lspTool = defineTool({
   name: "lsp",
   label: "LSP",
   description:
-    "Language-server navigation, symbol outlines, diagnostics, and rename. Actions: hover (type/docs), definition (canonical declaration), references (all uses), implementation (concrete implementors), type_definition (value type), document_symbols (file outline), diagnostics (read-only file/workspace check), rename (apply/save workspace edits).",
+    "Language-server navigation, symbol outlines, diagnostics, and rename. Actions: hover (type/docs), definition (canonical declaration), references (all uses), implementation (concrete implementors), type_definition (value type), document_symbols (file outline), diagnostics (read-only file/workspace check), rename (apply/save workspace edits), restart (respawn the LSP server).",
   promptSnippet:
     "Navigate symbols, inspect types, rename, or check diagnostics",
   promptGuidelines: [
@@ -369,6 +411,7 @@ export const lspTool = defineTool({
     "Use references before rename or a signature change to find every caller; rename applies and saves immediately across affected files.",
     "Prefer document_symbols to reading a whole file when locating a member or understanding structure.",
     "diagnostics with no file/files scans the capped workspace; post-edit diagnostics are automatic, so use this only on explicit request or a reported error.",
+    "Use restart when results look stale or the server seems wedged (missing diagnostics after config/dependency changes, repeated timeouts); it kills and respawns nvim, so retry the failed call once afterwards.",
   ],
   parameters: Type.Object({
     action: Type.Union(
@@ -381,6 +424,7 @@ export const lspTool = defineTool({
         Type.Literal("document_symbols"),
         Type.Literal("diagnostics"),
         Type.Literal("rename"),
+        Type.Literal("restart"),
       ],
       { description: "Which LSP operation to run." },
     ),
@@ -415,6 +459,9 @@ export const lspTool = defineTool({
   }),
   async execute(_id, params, signal, onUpdate, ctx) {
     const p = params as LspParams;
+    if (p.action === "restart") {
+      return runRestart(ctx, signal, onUpdate);
+    }
     if (p.action === "rename") {
       return runRename(p, ctx, signal, onUpdate);
     }

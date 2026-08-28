@@ -48,6 +48,10 @@ export type Lane = "main" | "inline";
 const LANES: Lane[] = ["main", "inline"];
 
 const sessions: Record<Lane, NvimSession | null> = { main: null, inline: null };
+// Bumped on every successful spawn. Modules that load lua into a lane once
+// (e.g. _G.PiFeedback) key their "already loaded" flag on this, so a restart
+// can't leave them pointing at a fresh nvim that never got their source.
+const generations: Record<Lane, number> = { main: 0, inline: 0 };
 const startings: Record<Lane, Promise<NvimSession> | null> = {
   main: null,
   inline: null,
@@ -123,6 +127,7 @@ const spawnNvim = async (
     );
   }
   await client.lua(driverSrc, []);
+  generations[lane] += 1;
   onProgress?.("nvim ready");
   return { proc, client };
 };
@@ -187,6 +192,9 @@ export const shutdownNvim = (): void => {
 
 export const isRunning = (lane: Lane = "main"): boolean =>
   sessions[lane] !== null;
+
+export const laneGeneration = (lane: Lane = "main"): number =>
+  generations[lane];
 
 // Per-lane queue implementing the serialization described above (Lane).
 const queueTails: Record<Lane, Promise<unknown>> = {
