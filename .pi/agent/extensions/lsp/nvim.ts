@@ -10,8 +10,17 @@ import { attach, type NeovimClient } from "neovim";
 
 const DRIVER_PATH = path.join(import.meta.dirname, "driver.lua");
 const LOG_FILE = path.join(os.tmpdir(), "pi-lsp.log");
+const LOG_TTL_MS = 24 * 60 * 60 * 1000;
 
+// Crash-diagnostic scratch, useful for hours not weeks: a day-old file is
+// dropped rather than appended to, so it can't grow across months of sessions.
 const log = (msg: string) => {
+  try {
+    const stale = fs.statSync(LOG_FILE).mtimeMs < Date.now() - LOG_TTL_MS;
+    if (stale) fs.rmSync(LOG_FILE, { force: true });
+  } catch {
+    /* no log yet */
+  }
   try {
     fs.appendFileSync(
       LOG_FILE,
