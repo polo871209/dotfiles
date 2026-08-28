@@ -390,12 +390,6 @@ const notify = async (projectName: string, message: string): Promise<void> => {
   playSound();
 };
 
-// Reused by other extensions (e.g. bg-run.ts) that finish work outside the
-// normal agent-turn lifecycle and still want the same focus-aware desktop
-// ping instead of duplicating the ghostty/osascript/throttle logic.
-export const notifyExternal = (message: string, cwd = process.cwd()) =>
-  notify(path.basename(cwd), message);
-
 export default function (pi: ExtensionAPI) {
   let projectName = path.basename(process.cwd());
 

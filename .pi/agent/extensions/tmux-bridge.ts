@@ -13,17 +13,19 @@
 //   {"text": "hello"}                     -- send immediately, triggers a turn
 //   {"paste": "some reference text"}      -- drop into pi's own input editor, no turn
 //   {"file": {"path": ..., "sline": ..., "eline": ..., "ft": ..., "content": ...}}
-//                                          -- format a line-numbered snapshot and drop
-//                                             that into pi's own input editor, no turn
+//                                          -- queue a line-numbered snapshot for the
+//                                             next user prompt, no turn
 //
-// "paste"/"file" land in the real pi editor (ctx.ui.pasteToEditor) rather than
-// being sent as a message directly, so the user finishes composing there with
-// full slash-command support and pi's own completion — neither exists in an
-// nvim-side input prompt.
+// "paste" lands in the real pi editor (ctx.ui.pasteToEditor) rather than being
+// sent as a message directly, so the user finishes composing there with full
+// slash-command support and pi's own completion — neither exists in an
+// nvim-side input prompt. "file" instead rides along as a queued custom
+// message so the editor (and the transcript) stay free of snapshot bulk.
 import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { Box, Text } from "@earendil-works/pi-tui";
 import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
@@ -46,6 +48,13 @@ type FilePayload = {
 // context on the selection while preserving source line numbers for edits/cites.
 const FULL_SNAPSHOT_MAX_BYTES = 80 * 1024;
 const SURROUNDING_LINES = 40;
+const SNAPSHOT_MESSAGE_TYPE = "tmux-bridge-file";
+
+type SnapshotDetails = { path: string; sline: number; eline: number };
+
+function snapshotLabel(d: SnapshotDetails): string {
+  return `${d.path} (L${d.sline}-${d.eline})`;
+}
 
 export function formatFileSnapshot(f: FilePayload): string {
   const srcLines = f.content.split(/\r?\n/);
@@ -69,16 +78,13 @@ export function formatFileSnapshot(f: FilePayload): string {
   const omitted: string[] = [];
   if (from > 1) omitted.push(`[... omitted lines 1-${from - 1} ...]`);
   if (to < total) omitted.push(`[... omitted lines ${to + 1}-${total} ...]`);
-  const rangeNote = complete
-    ? "This is the complete file snapshot at capture time."
-    : `This bounded snapshot includes the selected lines plus ${SURROUNDING_LINES} surrounding lines where available.`;
-  const readNote = complete
-    ? `Read \`${f.path}\` only if later state is needed.`
-    : `Read \`${f.path}\` only if omitted context or later state is needed.`;
+  const scopeNote = complete
+    ? "Whole file at capture time"
+    : `Lines ${from}-${to} of ${total}`;
   return (
-    `${f.path} — ${rangeNote} Selected range: lines ${f.sline}-${f.eline}. ${readNote} ` +
-    `Each line has a true source-number gutter (\"N | code\"); use it for exact citations. ` +
-    `The gutter is not file content: strip \"N | \" when quoting or editing.\n` +
+    `${snapshotLabel(f)}\n` +
+    `${scopeNote}; gutter \"N | \" is the true line number, not content: cite by it, strip it when quoting or editing. ` +
+    `Re-read only for ${complete ? "later state" : "omitted lines or later state"}.\n` +
     `${omitted.length > 0 ? `${omitted.join("\n")}\n` : ""}` +
     `\`\`\`${f.ft ?? ""}\n${numbered}\n\`\`\``
   );
@@ -86,6 +92,24 @@ export function formatFileSnapshot(f: FilePayload): string {
 
 export default function (pi: ExtensionAPI) {
   if (process.env.PI_IS_SUBAGENT) return; // subagents don't get their own bridge
+
+  // Transcript shows one dim line per snapshot; the numbered body is only a
+  // ctrl+r expand away, and always reaches the model regardless.
+  pi.registerMessageRenderer<SnapshotDetails>(
+    SNAPSHOT_MESSAGE_TYPE,
+    (message, { expanded, outputPad }, theme) => {
+      const details = message.details;
+      const label = details ? snapshotLabel(details) : "file snapshot";
+      const body =
+        expanded && typeof message.content === "string"
+          ? `\n${message.content}`
+          : "";
+      const box = new Box(outputPad, 0, (t) => theme.bg("customMessageBg", t));
+      box.addChild(new Text(`${theme.fg("dim", label)}${body}`, 0, 0));
+      return box;
+    },
+  );
+
   const paneId = process.env.TMUX_PANE;
   if (!process.env.TMUX || !paneId) return; // not in tmux — nothing to do
   const sockPath = socketPathForPane(paneId);
@@ -123,24 +147,18 @@ export default function (pi: ExtensionAPI) {
     try {
       const f = payload.file;
       if (f && typeof f.content === "string" && typeof f.path === "string") {
-        // Drop the formatted snapshot into pi's own input editor instead of
-        // sending it as a message: the user finishes composing there, with
-        // full slash-command support and pi's completion, and sends it
-        // themselves whenever they're ready.
-        const ui = currentCtx?.ui;
-        if (ui) {
-          // pi-tui's editor collapses any paste over 10 lines/1000 chars into
-          // a bare "[paste #N +M lines]" marker with no path/line info, fed
-          // straight to the cursor with no trailing newline. Feed the header
-          // as its own short paste so it stays literal text instead of
-          // collapsing (keeps the range visible pre-send and doubles as the
-          // "content is already below, no re-read needed" cue for pi), then
-          // a final "\n" paste so typing lands on a fresh line instead of
-          // glued to the marker.
-          ui.pasteToEditor(`${f.path} (L${f.sline}-${f.eline}):\n`);
-          ui.pasteToEditor(formatFileSnapshot(f));
-          ui.pasteToEditor("\n");
-        }
+        // "nextTurn" rides along with whatever the user types next without
+        // triggering a turn on its own, so the editor stays empty for the
+        // question while the snapshot still reaches the model.
+        pi.sendMessage<SnapshotDetails>(
+          {
+            customType: SNAPSHOT_MESSAGE_TYPE,
+            content: formatFileSnapshot(f),
+            display: true,
+            details: { path: f.path, sline: f.sline, eline: f.eline },
+          },
+          { deliverAs: "nextTurn" },
+        );
         return;
       }
       const paste = payload.paste;
