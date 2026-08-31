@@ -89,4 +89,5 @@ semgrep = "latest"
 # Other
 "npm:@earendil-works/pi-coding-agent" = "latest"
 ffmpeg = "latest"
+"github:yt-dlp/yt-dlp" = "latest"
 redis = "8.8.0"

@@ -20,7 +20,7 @@ Before changing Pi-native behavior, read directly relevant documentation in the 
 
 ### Bigger toolbox for the model
 
-- **`web-search.ts`** — searches or fetches one or many web targets for external research, returning GitHub content as local context.
+- **`web-search.ts`** — searches or fetches one or many web targets for external research, returning GitHub content as local context and YouTube videos as timestamp-free transcripts.
 - **`eval/`** — runs persistent Python for iterative computation and bulk aggregation.
 - **`lsp/`** — provides symbol navigation and deterministic post-edit diagnostics and fixes for code work.
 - **`github-pr.ts`** — fetches concise PR metadata, failures, review threads, diffs, or a single section, for PR analysis.

@@ -34,9 +34,15 @@
 //   the normal HTML fetch instead), and the ~/.pi/web-search.json config
 //   knobs for clone path/timeout/size limit (hardcoded constants instead).
 //
+// - YouTube transcripts (parseYouTubeVideoId/fetchYouTubeTranscript): not a
+//   port — upstream used a Python youtube-transcript-api sidecar, this asks
+//   `yt-dlp` (installed via mise) for the caption track alone. A watch page
+//   yields nothing through Readability, so fetch_content routes video URLs
+//   here and returns one timestamp-free paragraph.
+//
 // Deliberately out of scope, don't re-add without a real need: multi-provider
-// search, curator/summary-review UI, YouTube/video/PDF extraction, any config
-// file. If a future provider is genuinely free/zero-config like Exa, add it
+// search, curator/summary-review UI, non-YouTube video/PDF extraction, any
+// config file. If a future provider is genuinely free/zero-config like Exa, add it
 // as an alternative in exaSearch's caller, not a whole fallback chain. Also
 // skipped: upstream's inline image fetch (new dep, no demonstrated need) and
 // its `mode: "answer"` page-QA (an LLM call for something a plain fetch +
@@ -78,6 +84,7 @@ import {
   statSync,
   rmSync,
   mkdirSync,
+  mkdtempSync,
   openSync,
   readSync,
   closeSync,
@@ -164,6 +171,20 @@ const BINARY_EXTENSIONS = new Set([
   ".so",
   ".dylib",
 ]);
+
+const YOUTUBE_HOSTS = new Set([
+  "youtube.com",
+  "www.youtube.com",
+  "m.youtube.com",
+  "music.youtube.com",
+  "youtu.be",
+  "www.youtu.be",
+]);
+const YOUTUBE_PATH_PREFIXES = ["shorts", "embed", "live", "v"];
+const YOUTUBE_ID = /^[A-Za-z0-9_-]{11}$/;
+const YT_DLP_TIMEOUT_MS = 90_000;
+// Matches en, en-US, en-orig — auto-captions use suffixed codes.
+const YT_PREFERRED_SUB_LANGS = "en.*";
 
 const turndown = new TurndownService({
   headingStyle: "atx",
@@ -406,8 +427,14 @@ function sliceWithContinuation(
   const start = Math.min(Math.max(offset, 0), totalChars);
   let end = Math.min(start + MAX_CONTENT_CHARS, totalChars);
   if (end < totalChars) {
+    // Snap back only to a break near the window's end. A body that is one
+    // long paragraph (a YouTube transcript) has its last newline in the
+    // metadata header, and rewinding there would return almost nothing.
+    const minBreak = start + Math.floor((end - start) * 0.9);
     const lastNewline = content.lastIndexOf("\n", end);
-    if (lastNewline > start) end = lastNewline;
+    const lastSpace = content.lastIndexOf(" ", end);
+    if (lastNewline > minBreak) end = lastNewline;
+    else if (lastSpace > minBreak) end = lastSpace;
   }
   return {
     text: content.slice(start, end),
@@ -469,6 +496,260 @@ async function fetchReadable(
     title: article.title || url,
     content: withContinuationFooter(markdown, offset, url),
   };
+}
+
+// Returns the video id for URLs that carry captions, null for channel/
+// playlist/search pages (those still go through the normal HTML fetch).
+function parseYouTubeVideoId(rawUrl: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return null;
+  }
+  if (!YOUTUBE_HOSTS.has(url.hostname.toLowerCase())) return null;
+
+  const segments = url.pathname.split("/").filter(Boolean);
+  const candidates: Array<string | undefined> = [
+    url.searchParams.get("v") ?? undefined,
+  ];
+  if (url.hostname.toLowerCase().endsWith("youtu.be"))
+    candidates.push(segments[0]);
+  if (segments.length >= 2 && YOUTUBE_PATH_PREFIXES.includes(segments[0]))
+    candidates.push(segments[1]);
+
+  for (const candidate of candidates) {
+    if (candidate && YOUTUBE_ID.test(candidate)) return candidate;
+  }
+  return null;
+}
+
+function execCapture(
+  file: string,
+  args: string[],
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = execFile(
+      file,
+      args,
+      { timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 },
+      (err, stdout, stderr) => {
+        if (err) {
+          // execFile's own message inlines the whole argv, which buries the
+          // one useful line ("Video unavailable", "Sign in to confirm"...).
+          const detail = stderr
+            .split(/\r?\n/)
+            .map((l) => l.replace(/^ERROR:\s*/, "").trim())
+            .filter(Boolean)
+            .pop();
+          const failure = new Error(
+            detail ? `${file}: ${detail}` : `${file} failed: ${err.message}`,
+          ) as NodeJS.ErrnoException;
+          failure.code = (err as NodeJS.ErrnoException).code;
+          reject(failure);
+          return;
+        }
+        resolve({ stdout, stderr });
+      },
+    );
+    if (signal) {
+      const onAbort = () => child.kill();
+      signal.addEventListener("abort", onAbort, { once: true });
+      child.once("exit", () => signal.removeEventListener("abort", onAbort));
+    }
+  });
+}
+
+// VTT -> prose. Auto-captions repeat each line as the caption block scrolls,
+// so an adjacent-line dedupe is required or every sentence lands twice; it's
+// adjacent-only so genuine repetition later in the video survives. Cue lines
+// break mid-sentence, so the kept lines are joined into one paragraph rather
+// than emitted as ~40-char lines that read as false structure.
+function vttToText(raw: string): string {
+  const out: string[] = [];
+  let previous = "";
+  for (const rawLine of raw.split(/\r?\n/)) {
+    if (/^(WEBVTT|NOTE|STYLE|REGION)\b/.test(rawLine)) continue;
+    if (/^(Kind|Language):/.test(rawLine)) continue;
+    if (rawLine.includes("-->")) continue;
+    if (/^\d+$/.test(rawLine.trim())) continue;
+    const line = decodeEntities(rawLine.replace(/<[^>]*>/g, ""))
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!line || line === previous) continue;
+    out.push(line);
+    previous = line;
+  }
+  return out.join(" ").replace(/\s+/g, " ").trim();
+}
+
+function decodeEntities(text: string): string {
+  return text
+    .replace(/&nbsp;/g, " ")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) =>
+      String.fromCodePoint(parseInt(code, 16)),
+    )
+    .replace(/&amp;/g, "&");
+}
+
+async function downloadSubtitleFile(
+  dir: string,
+  videoId: string,
+  langs: string,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  await execCapture(
+    "yt-dlp",
+    [
+      "--skip-download",
+      "--write-subs",
+      "--write-auto-subs",
+      "--write-info-json",
+      "--sub-format",
+      "vtt",
+      "--sub-langs",
+      langs,
+      "--no-playlist",
+      "--no-warnings",
+      "--no-progress",
+      "-o",
+      join(dir, "sub"),
+      `https://www.youtube.com/watch?v=${videoId}`,
+    ],
+    YT_DLP_TIMEOUT_MS,
+    signal,
+  );
+  const files = readdirSync(dir)
+    .filter((f) => f.endsWith(".vtt"))
+    .sort();
+  // Human-authored tracks land on the bare code (sub.en.vtt); auto-generated
+  // ones on suffixed variants (sub.en-orig.vtt), so prefer the shortest name.
+  const best = files.sort((a, b) => a.length - b.length)[0];
+  return best ? join(dir, best) : null;
+}
+
+// Second chance for videos captioned only in another language: ask what tracks
+// exist rather than downloading every one of them speculatively. Picking the
+// alphabetically first code would hand back an auto-translation ("ab"), so
+// prefer the `-orig` track YouTube tags as the spoken language, then any
+// human-authored track over the machine-translated pile.
+async function fallbackSubLang(
+  videoId: string,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  const { stdout } = await execCapture(
+    "yt-dlp",
+    [
+      "--list-subs",
+      "--skip-download",
+      "--no-playlist",
+      "--no-warnings",
+      `https://www.youtube.com/watch?v=${videoId}`,
+    ],
+    YT_DLP_TIMEOUT_MS,
+    signal,
+  );
+  const manual: string[] = [];
+  const automatic: string[] = [];
+  let bucket: string[] | null = null;
+  for (const line of stdout.split(/\r?\n/)) {
+    if (/^\[info\] Available automatic captions/.test(line)) {
+      bucket = automatic;
+      continue;
+    }
+    if (/^\[info\] Available subtitles/.test(line)) {
+      bucket = manual;
+      continue;
+    }
+    if (/^\[/.test(line)) {
+      bucket = null;
+      continue;
+    }
+    const code = line.match(/^([A-Za-z0-9_-]{2,})\s+\S/)?.[1];
+    if (!bucket || !code || code === "Language" || code === "live_chat")
+      continue;
+    bucket.push(code);
+  }
+  return (
+    manual.find((c) => c.endsWith("-orig")) ??
+    automatic.find((c) => c.endsWith("-orig")) ??
+    manual[0] ??
+    automatic[0] ??
+    null
+  );
+}
+
+function readVideoMetadata(dir: string): Record<string, unknown> {
+  const infoFile = readdirSync(dir).find((f) => f.endsWith(".info.json"));
+  if (!infoFile) return {};
+  try {
+    return JSON.parse(readFileSync(join(dir, infoFile), "utf-8"));
+  } catch {
+    return {};
+  }
+}
+
+async function fetchYouTubeTranscript(
+  url: string,
+  videoId: string,
+  signal?: AbortSignal,
+  offset = 0,
+): Promise<{ title: string; content: string }> {
+  const dir = mkdtempSync(join(tmpdir(), "pi-youtube-"));
+  try {
+    let subtitleFile = await downloadSubtitleFile(
+      dir,
+      videoId,
+      YT_PREFERRED_SUB_LANGS,
+      signal,
+    );
+    if (!subtitleFile) {
+      const fallbackLang = await fallbackSubLang(videoId, signal);
+      if (fallbackLang)
+        subtitleFile = await downloadSubtitleFile(
+          dir,
+          videoId,
+          fallbackLang,
+          signal,
+        );
+    }
+    if (!subtitleFile)
+      throw new Error("no subtitles or auto-captions available for this video");
+
+    const transcript = vttToText(readFileSync(subtitleFile, "utf-8"));
+    if (!transcript) throw new Error("subtitle track was empty");
+
+    const info = readVideoMetadata(dir);
+    const title =
+      typeof info.title === "string" ? info.title : `YouTube ${videoId}`;
+    const header = [
+      typeof info.channel === "string" ? `Channel: ${info.channel}` : null,
+      typeof info.duration_string === "string"
+        ? `Duration: ${info.duration_string}`
+        : null,
+      `Transcript language: ${subtitleFile.match(/\.([A-Za-z0-9_-]+)\.vtt$/)?.[1] ?? "unknown"}`,
+      "Timestamps removed.",
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    return {
+      title,
+      content: withContinuationFooter(
+        `${header}\n\n${transcript}`,
+        offset,
+        url,
+      ),
+    };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 interface GitHubUrlInfo {
@@ -720,6 +1001,18 @@ async function fetchOne(
   mode: "readable" | "raw" = "readable",
   offset = 0,
 ): Promise<{ title: string; content: string }> {
+  const videoId = parseYouTubeVideoId(url);
+  if (videoId) {
+    try {
+      return await fetchYouTubeTranscript(url, videoId, signal, offset);
+    } catch (err) {
+      // Missing binary is an environment problem, not a "no captions" answer:
+      // fall back to the page HTML so the call still returns something.
+      if ((err as NodeJS.ErrnoException)?.code !== "ENOENT")
+        throw new Error(`YouTube transcript failed: ${errMsg(err)}`);
+    }
+  }
+
   const gh = parseGitHubUrl(url);
   if (gh && !gh.refIsFullSha) {
     try {
@@ -893,9 +1186,9 @@ export default function (pi: ExtensionAPI) {
     name: "fetch_content",
     label: "Fetch Content",
     description:
-      "Fetch a URL and extract readable markdown, or return raw text. GitHub repo/file/dir URLs are cloned locally instead of scraped; the result includes a local path for further inspection and continuation offsets when truncated.",
+      'Fetch a URL as readable markdown. GitHub links return a local clone path to read further; YouTube video links return the transcript as one timestamp-free paragraph; mode "raw" returns unprocessed text for JSON or debugging.',
     promptSnippet:
-      "Fetch a direct page or GitHub link; use offset to continue truncated content.",
+      "Fetch a page, GitHub link, or YouTube transcript; use offset to resume truncated content.",
     renderResult(result, _options, theme: Theme) {
       const d = result.details as { urls?: string[]; ok?: number } | undefined;
       return new Text(
