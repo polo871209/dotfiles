@@ -7,14 +7,23 @@
 // agent to send to. Subagent panes (PI_IS_SUBAGENT) are excluded — they
 // never open a bridge socket.
 //
-// Socket path: <tmpdir>/pi-tmux-pane-<sanitized-pane-id>.sock
+// Socket path: <tmpdir>/pi-tmux-pane-<sanitized-pane-id>-<pid>.sock. The pid
+// keeps a crashed pi's leftover socket file from shadowing the live one, and
+// lets the client find bridges by globbing rather than by guessing which pane
+// runs pi (pi reports as "node", and its pane title is decoration that moves
+// with session state).
 //
 // Wire format: one JSON object per line, e.g.
 //   {"text": "hello"}                     -- send immediately, triggers a turn
 //   {"paste": "some reference text"}      -- drop into pi's own input editor, no turn
 //   {"file": {"path": ..., "sline": ..., "eline": ..., "ft": ..., "content": ...}}
-//                                          -- queue a line-numbered snapshot for the
-//                                             next user prompt, no turn
+//                                          -- line-numbered snapshot: steers a running
+//                                             turn, else rides the next user prompt
+// Optional "mode": "steer" | "followUp" | "nextTurn" overrides that choice.
+//
+// Each line is answered with one JSON line, {"ok":true,"delivered":<where>} or
+// {"ok":false,"error":...}, so the client can report what actually happened
+// instead of assuming a successful write means the message landed.
 //
 // "paste" lands in the real pi editor (ctx.ui.pasteToEditor) rather than being
 // sent as a message directly, so the user finishes composing there with full
@@ -33,7 +42,15 @@ import * as path from "node:path";
 
 function socketPathForPane(paneId: string): string {
   const safe = paneId.replace(/[^a-zA-Z0-9_-]/g, "_");
-  return path.join(os.tmpdir(), `pi-tmux-pane-${safe}.sock`);
+  return path.join(os.tmpdir(), `pi-tmux-pane-${safe}-${process.pid}.sock`);
+}
+
+// Clients send absolute paths because their cwd need not match pi's; show the
+// short form when the file is under this session's cwd.
+function displayPath(filePath: string): string {
+  if (!path.isAbsolute(filePath)) return filePath;
+  const rel = path.relative(process.cwd(), filePath);
+  return rel && !rel.startsWith("..") ? rel : filePath;
 }
 
 type FilePayload = {
@@ -53,7 +70,7 @@ const SNAPSHOT_MESSAGE_TYPE = "tmux-bridge-file";
 type SnapshotDetails = { path: string; sline: number; eline: number };
 
 function snapshotLabel(d: SnapshotDetails): string {
-  return `${d.path} (L${d.sline}-${d.eline})`;
+  return `${displayPath(d.path)} (L${d.sline}-${d.eline})`;
 }
 
 export function formatFileSnapshot(f: FilePayload): string {
@@ -117,14 +134,17 @@ export default function (pi: ExtensionAPI) {
   let server: net.Server | undefined;
   let currentCtx: ExtensionContext | undefined;
 
-  const handleLine = (line: string) => {
+  type Ack = { ok: true; delivered: string } | { ok: false; error: string };
+  const VALID_MODES = new Set(["steer", "followUp", "nextTurn"]);
+
+  const handleLine = (line: string): Ack => {
     const trimmed = line.trim();
-    if (!trimmed) return;
+    if (!trimmed) return { ok: false, error: "empty line" };
     let payload: {
       text?: string;
       paste?: string;
       file?: FilePayload;
-      mode?: "steer" | "followUp";
+      mode?: "steer" | "followUp" | "nextTurn";
     };
     try {
       payload = JSON.parse(trimmed);
@@ -133,45 +153,78 @@ export default function (pi: ExtensionAPI) {
         "tmux-bridge: dropped malformed JSON line",
         "warning",
       );
-      return;
+      return { ok: false, error: "malformed JSON" };
     }
 
-    const VALID_MODES = new Set(["steer", "followUp"]);
-    const mode =
-      payload.mode && VALID_MODES.has(payload.mode) ? payload.mode : "steer";
+    const requested =
+      payload.mode && VALID_MODES.has(payload.mode) ? payload.mode : undefined;
     const idle = currentCtx?.isIdle() ?? true;
-    // When idle, sendUserMessage triggers a turn immediately.
-    // When streaming, deliverAs is required.
-    const opts = idle ? undefined : { deliverAs: mode };
 
     try {
       const f = payload.file;
       if (f && typeof f.content === "string" && typeof f.path === "string") {
-        // "nextTurn" rides along with whatever the user types next without
-        // triggering a turn on its own, so the editor stays empty for the
-        // question while the snapshot still reaches the model.
-        pi.sendMessage<SnapshotDetails>(
-          {
-            customType: SNAPSHOT_MESSAGE_TYPE,
-            content: formatFileSnapshot(f),
-            display: true,
-            details: { path: f.path, sline: f.sline, eline: f.eline },
-          },
-          { deliverAs: "nextTurn" },
-        );
-        return;
+        const message = {
+          customType: SNAPSHOT_MESSAGE_TYPE,
+          content: formatFileSnapshot(f),
+          display: true,
+          details: { path: f.path, sline: f.sline, eline: f.eline },
+        };
+        const where = displayPath(f.path);
+        // Idle: land in the transcript now. "nextTurn" instead holds the
+        // snapshot back and injects it *after* the next user message (see
+        // _pendingNextTurnMessages in agent-session), so the model reads the
+        // question before the code it refers to, and until that prompt is sent
+        // nothing confirms the selection arrived at all.
+        if (idle && !requested) {
+          pi.sendMessage<SnapshotDetails>(message, { triggerTurn: false });
+          return { ok: true, delivered: `${where} added to context` };
+        }
+        // Mid-run, steering is the earliest safe insertion point: appending
+        // straight into a live request risks splitting a tool_use from its
+        // tool_result. Delivery lands after the current assistant turn's tool
+        // calls, and steeringMode "one-at-a-time" (the default) releases one
+        // queued snapshot per turn.
+        const deliverAs = requested ?? "steer";
+        pi.sendMessage<SnapshotDetails>(message, { deliverAs });
+        return {
+          ok: true,
+          delivered:
+            deliverAs === "nextTurn"
+              ? `${where} attached to your next prompt`
+              : `${where} ${deliverAs === "steer" ? "steering the running turn" : "queued as follow-up"}`,
+        };
       }
       const paste = payload.paste;
       if (typeof paste === "string") {
         currentCtx?.ui.pasteToEditor(`${paste}\n`);
-        return;
+        return { ok: true, delivered: "pasted into the editor" };
       }
       const text = payload.text;
-      if (!text || typeof text !== "string") return;
-      pi.sendUserMessage(text, opts);
+      if (!text || typeof text !== "string")
+        return { ok: false, error: "no text, paste, or file in payload" };
+      // Idle, the message triggers its own turn and deliverAs is rejected.
+      if (idle) {
+        pi.sendUserMessage(text);
+        return { ok: true, delivered: "sent, turn started" };
+      }
+      // A user message must be answered, so "nextTurn" has no meaning here;
+      // the nearest delivery is once the current run finishes.
+      const deliverAs =
+        requested === "followUp" || requested === "nextTurn"
+          ? "followUp"
+          : "steer";
+      pi.sendUserMessage(text, { deliverAs });
+      return {
+        ok: true,
+        delivered:
+          deliverAs === "followUp"
+            ? "queued as follow-up"
+            : "steering the running turn",
+      };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       currentCtx?.ui.notify(`tmux-bridge: ${msg}`, "error");
+      return { ok: false, error: msg };
     }
   };
 
@@ -186,7 +239,9 @@ export default function (pi: ExtensionAPI) {
     } catch {
       /* not present */
     }
-    const MAX_BUF = 256 * 1024; // hard cap per connection to avoid DoS
+    // A whole-file snapshot is a legitimate payload, so the cap only has to
+    // stop a runaway peer; the client refuses to send anywhere near it.
+    const MAX_BUF = 2 * 1024 * 1024;
     server = net.createServer((socket: net.Socket) => {
       let buf = "";
       socket.setEncoding("utf8");
@@ -198,14 +253,17 @@ export default function (pi: ExtensionAPI) {
             "warning",
           );
           buf = "";
-          socket.destroy();
+          socket.write(
+            `${JSON.stringify({ ok: false, error: "payload too large" })}\n`,
+          );
+          socket.end();
           return;
         }
         let idx = buf.indexOf("\n");
         while (idx !== -1) {
           const line = buf.slice(0, idx);
           buf = buf.slice(idx + 1);
-          handleLine(line);
+          socket.write(`${JSON.stringify(handleLine(line))}\n`);
           idx = buf.indexOf("\n");
         }
       });
