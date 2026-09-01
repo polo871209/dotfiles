@@ -17,19 +17,21 @@
 //   {"text": "hello"}                     -- send immediately, triggers a turn
 //   {"paste": "some reference text"}      -- drop into pi's own input editor, no turn
 //   {"file": {"path": ..., "sline": ..., "eline": ..., "ft": ..., "content": ...}}
-//                                          -- line-numbered snapshot: steers a running
-//                                             turn, else rides the next user prompt
-// Optional "mode": "steer" | "followUp" | "nextTurn" overrides that choice.
+//                                          -- line-numbered snapshot pasted into the
+//                                             editor as part of the next prompt
+// Optional "mode": "steer" | "followUp" | "nextTurn" turns a snapshot into a
+// queued custom message instead, the only way to reach an already running turn.
 //
 // Each line is answered with one JSON line, {"ok":true,"delivered":<where>} or
 // {"ok":false,"error":...}, so the client can report what actually happened
 // instead of assuming a successful write means the message landed.
 //
-// "paste" lands in the real pi editor (ctx.ui.pasteToEditor) rather than being
-// sent as a message directly, so the user finishes composing there with full
-// slash-command support and pi's own completion — neither exists in an
-// nvim-side input prompt. "file" instead rides along as a queued custom
-// message so the editor (and the transcript) stay free of snapshot bulk.
+// "paste" and "file" land in the real pi editor (ctx.ui.pasteToEditor) rather
+// than being sent as messages directly, so the user finishes composing there
+// with full slash-command support and pi's own completion — neither exists in
+// an nvim-side input prompt. Editor paste handling collapses a bulky snapshot
+// to a placeholder, and the snapshot stays ordinary prompt text the user can
+// trim or drop before sending.
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -66,6 +68,7 @@ type FilePayload = {
 const FULL_SNAPSHOT_MAX_BYTES = 80 * 1024;
 const SURROUNDING_LINES = 40;
 const SNAPSHOT_MESSAGE_TYPE = "tmux-bridge-file";
+const GUTTER_SEP = " | ";
 
 type SnapshotDetails = { path: string; sline: number; eline: number };
 
@@ -90,7 +93,7 @@ export function formatFileSnapshot(f: FilePayload): string {
   const width = String(total).length;
   const numbered = srcLines
     .slice(from - 1, to)
-    .map((line, i) => `${String(from + i).padStart(width)} | ${line}`)
+    .map((line, i) => `${String(from + i).padStart(width)}${GUTTER_SEP}${line}`)
     .join("\n");
   const omitted: string[] = [];
   if (from > 1) omitted.push(`[... omitted lines 1-${from - 1} ...]`);
@@ -98,12 +101,31 @@ export function formatFileSnapshot(f: FilePayload): string {
   const scopeNote = complete
     ? "Whole file at capture time"
     : `Lines ${from}-${to} of ${total}`;
+  // edit/write read the file from disk when they run, so this snapshot alone is
+  // enough to edit from. The gutter is the one thing that must come off for
+  // oldText to match, hence a mechanical rule rather than "strip the gutter".
   return (
     `${snapshotLabel(f)}\n` +
-    `${scopeNote}; gutter \"N | \" is the true line number, not content: cite by it, strip it when quoting or editing. ` +
-    `Re-read only for ${complete ? "later state" : "omitted lines or later state"}.\n` +
+    `${scopeNote}. Every line carries a "<line number>${GUTTER_SEP}" gutter: it is the true line number, not file content. ` +
+    `Cite by it; for oldText or write content, drop each line's prefix up to and including the first "${GUTTER_SEP}" and keep the rest byte for byte. ` +
+    `edit reads the file itself, so editing needs no prior read${complete ? "" : "; read only for the omitted lines"}.\n` +
     `${omitted.length > 0 ? `${omitted.join("\n")}\n` : ""}` +
     `\`\`\`${f.ft ?? ""}\n${numbered}\n\`\`\``
+  );
+}
+
+// pi's editor expands every tab to EDITOR_TAB_WIDTH spaces on paste (pi-tui
+// components/editor.ts, normalizeText), and the edit tool's fuzzy fallback
+// forgives trailing whitespace and unicode lookalikes but not tab-vs-space. A
+// tab-indented file would therefore yield oldText that never matches, so the
+// pasted snapshot has to carry the rule for reversing the expansion.
+const EDITOR_TAB_WIDTH = 4;
+
+function tabFidelityNote(content: string): string {
+  if (!content.includes("\t")) return "";
+  return (
+    `\nThis file indents with tabs, shown above as ${EDITOR_TAB_WIDTH} spaces each. ` +
+    `Turn leading ${EDITOR_TAB_WIDTH}-space groups back into tabs in oldText, or read the file if its indentation looks mixed.`
   );
 }
 
@@ -163,35 +185,37 @@ export default function (pi: ExtensionAPI) {
     try {
       const f = payload.file;
       if (f && typeof f.content === "string" && typeof f.path === "string") {
+        const content = formatFileSnapshot(f);
+        const where = displayPath(f.path);
+        // Default: the snapshot becomes literal editor text, so it reaches the
+        // model as part of the prompt the user is typing, after the question
+        // and only once they send it.
+        if (!requested) {
+          if (!currentCtx) return { ok: false, error: "no session context" };
+          currentCtx.ui.pasteToEditor(
+            `${content}${tabFidelityNote(f.content)}\n`,
+          );
+          return { ok: true, delivered: `${where} pasted into the editor` };
+        }
         const message = {
           customType: SNAPSHOT_MESSAGE_TYPE,
-          content: formatFileSnapshot(f),
+          content,
           display: true,
           details: { path: f.path, sline: f.sline, eline: f.eline },
         };
-        const where = displayPath(f.path);
-        // Idle: land in the transcript now. "nextTurn" instead holds the
-        // snapshot back and injects it *after* the next user message (see
-        // _pendingNextTurnMessages in agent-session), so the model reads the
-        // question before the code it refers to, and until that prompt is sent
-        // nothing confirms the selection arrived at all.
-        if (idle && !requested) {
-          pi.sendMessage<SnapshotDetails>(message, { triggerTurn: false });
-          return { ok: true, delivered: `${where} added to context` };
-        }
-        // Mid-run, steering is the earliest safe insertion point: appending
-        // straight into a live request risks splitting a tool_use from its
-        // tool_result. Delivery lands after the current assistant turn's tool
-        // calls, and steeringMode "one-at-a-time" (the default) releases one
-        // queued snapshot per turn.
-        const deliverAs = requested ?? "steer";
-        pi.sendMessage<SnapshotDetails>(message, { deliverAs });
+        // An explicit mode wants the snapshot delivered without the user
+        // sending anything. "steer" is the earliest safe insertion point into a
+        // running turn: appending straight into a live request risks splitting
+        // a tool_use from its tool_result, so delivery lands after the current
+        // assistant turn's tool calls, and steeringMode "one-at-a-time" (the
+        // default) releases one queued snapshot per turn.
+        pi.sendMessage<SnapshotDetails>(message, { deliverAs: requested });
         return {
           ok: true,
           delivered:
-            deliverAs === "nextTurn"
+            requested === "nextTurn"
               ? `${where} attached to your next prompt`
-              : `${where} ${deliverAs === "steer" ? "steering the running turn" : "queued as follow-up"}`,
+              : `${where} ${requested === "steer" ? "steering the running turn" : "queued as follow-up"}`,
         };
       }
       const paste = payload.paste;

@@ -6,6 +6,8 @@ Backed by headless nvim daemons driven by `nvim.ts` → `driver.lua`. Before cha
 
 One daemon per lane (`main`, `inline`) serves every pi process on the machine — a subagent is its own pi process, so per-session editors meant 2N nvim and 2N copies of every language server. `nvim.ts` connects to `~/.cache/pi-lsp/<lane>.sock` and only spawns `nvim --headless --listen` (detached, bootstrapped by `daemon.lua`) when nobody has yet.
 
+That socket path must be derivable from nothing but `$HOME`. It reads as a free choice and it isn't: any env input (`TMPDIR`, `XDG_RUNTIME_DIR`) splits the pool the moment one tmux pane exports it and the next doesn't, and the symptom is not an error but a second daemon nobody notices.
+
 Three consequences constrain any change here:
 
 - Teardown is asymmetric. `session_shutdown` calls `disconnectNvim()`, which closes this process's socket and nothing else; the daemon exits on its own once no client has been connected for `IDLE_EXIT_MS`. Only `restartDaemons()` kills, and it kills for everyone — that is what the `lsp-restart` command and the tool's `restart` action do. Never add a kill on a session-scoped path.

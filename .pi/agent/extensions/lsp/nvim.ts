@@ -19,13 +19,13 @@ const DAEMON_PATH = path.join(import.meta.dirname, "daemon.lua");
 const LOG_FILE = path.join(os.tmpdir(), "pi-lsp.log");
 const LOG_TTL_MS = 24 * 60 * 60 * 1000;
 
-// Not os.tmpdir(): TMPDIR differs between a terminal and a launchd-spawned
-// process on macOS, and two pi processes disagreeing on the path is two
-// daemons. Keep it short — unix socket paths cap around 104 bytes.
-const RUNTIME_DIR = path.join(
-  process.env.XDG_RUNTIME_DIR ?? path.join(os.homedir(), ".cache"),
-  "pi-lsp",
-);
+// Every process has to derive the same path or the whole design silently
+// degrades into one daemon per disagreeing process. So: no env in here. Not
+// os.tmpdir() (TMPDIR differs between a terminal and a launchd-spawned process
+// on macOS) and not XDG_RUNTIME_DIR either, however conventional — one pane
+// exporting it and the next not is enough to split the pool. Keep it short too:
+// unix socket paths cap around 104 bytes.
+const RUNTIME_DIR = path.join(os.homedir(), ".cache", "pi-lsp");
 
 const CONNECT_TIMEOUT_MS = 2_000;
 const SPAWN_TIMEOUT_MS = 25_000;

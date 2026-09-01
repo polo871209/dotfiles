@@ -231,10 +231,12 @@ function M.send_selection()
     resolve_target(function(target)
         if not target then return end
         -- Drop the snapshot into pi rather than prompting here: vim.ui.input
-        -- has no slash-commands or completion, pi's own editor does. Send the
-        -- whole file so pi answers with no extra read round-trip (its
-        -- edit/write read from disk at exec time, so editing never needs a
-        -- prior read either); the selection just marks the focus range.
+        -- has no slash-commands or completion, pi's own editor does. The bridge
+        -- pastes it into that editor, so it becomes part of the prompt you
+        -- send, after your question. Send the whole file so pi answers with no
+        -- extra read round-trip (its edit/write read from disk at exec time, so
+        -- editing never needs a prior read either); the selection just marks
+        -- the focus range.
         local all = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), '\n')
         if #all <= MAX_PAYLOAD / 2 then
             send(target.sock, { file = { path = filepath, sline = sline, eline = eline, ft = ft, content = all } })
