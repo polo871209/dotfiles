@@ -71,7 +71,7 @@ function buildHintText(
   return parts.join(" · ");
 }
 
-// Derivations (formerly state/selectors)
+// Derivations
 
 function selectActiveTabIndex(
   currentTab: number,

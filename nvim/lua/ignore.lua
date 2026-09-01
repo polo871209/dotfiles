@@ -11,7 +11,6 @@ M.dirs = {
     '.windsurf',
     '.zig-cache',
     'zig-out',
-    'vendor',
 }
 
 M.files = {

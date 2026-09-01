@@ -11,7 +11,7 @@ import {
   type AgentToolResult,
 } from "@earendil-works/pi-coding-agent";
 import { run } from "../shared/exec";
-import { isRunning, shutdownNvim } from "./nvim";
+import { restartDaemons } from "./nvim";
 import {
   capText,
   displayPath,
@@ -311,15 +311,14 @@ async function runRename(
 }
 
 // Same teardown as the /lsp-restart command, then a warm respawn via a
-// status call so the result reflects a real, healthy nvim instead of
+// status call so the result reflects a real, healthy daemon instead of
 // deferring the failure to the next navigation call.
 async function runRestart(
   ctx: Parameters<Parameters<typeof defineTool>[0]["execute"]>[4],
   signal: AbortSignal | undefined,
   onUpdate: Parameters<Parameters<typeof defineTool>[0]["execute"]>[3],
 ): Promise<AgentToolResult<unknown>> {
-  const was = isRunning();
-  shutdownNvim();
+  const was = await restartDaemons();
   return withDriver<StatusResult>(
     ctx,
     "status",
@@ -328,7 +327,7 @@ async function runRestart(
     onUpdate,
     (res) => {
       const files = res.files ?? [];
-      const prev = was ? "killed previous nvim" : "nvim was not running";
+      const prev = was ? "killed previous daemon" : "no daemon was running";
       return {
         text: `LSP restarted (${prev}); fresh nvim ready with ${files.length} buffer(s).`,
         details: { restarted: was, buffers: files.length },

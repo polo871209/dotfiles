@@ -1,8 +1,9 @@
--- pi-lsp driver — loaded once into the persistent --embed nvim that lsp/
--- owns. Exposes _G.PiLsp = { hover, definition, references,
--- implementation, type_definition, document_symbols, diagnostics, rename,
--- status } for the nav tools.
--- Caches one buffer per file (mtime-invalidated) so repeat queries are warm.
+-- pi-lsp driver — loaded into the shared nvim daemon (see nvim.ts), possibly
+-- by a peer pi process rather than this one. Exposes _G.PiLsp = { hover,
+-- definition, references, implementation, type_definition, document_symbols,
+-- diagnostics, rename, status, gc } for the nav tools.
+-- Caches one buffer per file (mtime-invalidated) so repeat queries are warm;
+-- M.gc bounds that cache, since the daemon outlives every session that uses it.
 
 local M = {}
 _G.PiLsp = M
@@ -18,6 +19,16 @@ local PROGRESS_TIMEOUT_MS = 8000
 local bufs = {}
 -- file → mtime (ns). Reload buffer if disk newer.
 local mtimes = {}
+-- file → loop time of last query. Drives M.gc's eviction order.
+local last_used = {}
+
+-- The cache is unbounded warmth in a daemon that now outlives every session
+-- and roams across projects, so it needs a ceiling: each retained buffer pins
+-- its language server, and one vtsls tree is five node processes. Sized to
+-- keep a working set of files hot while letting a project the agent left an
+-- hour ago release its servers.
+local MAX_BUFS = tonumber(vim.env.PI_LSP_MAX_BUFS) or 40
+local BUF_IDLE_MS = tonumber(vim.env.PI_LSP_BUF_IDLE_MS) or (30 * 60 * 1000)
 
 -- Track in-flight WorkDoneProgress tokens via the LspProgress autocmd
 -- (nvim 0.10+). When all begin tokens have matching end events, the server
@@ -65,6 +76,7 @@ local function file_exists(file) return vim.uv.fs_stat(file) ~= nil end
 local function open_buf_nowait(file)
     local existing = bufs[file]
     local current_mtime = file_mtime(file)
+    last_used[file] = vim.uv.now()
     if existing and vim.api.nvim_buf_is_valid(existing) and mtimes[file] == current_mtime then return existing end
     vim.cmd('silent! edit ' .. vim.fn.fnameescape(file))
     local b = vim.api.nvim_get_current_buf()
@@ -85,6 +97,52 @@ local function open_buf(file)
     -- queries (references, definition) return complete results on first try.
     wait_progress_done(PROGRESS_TIMEOUT_MS)
     return b
+end
+
+local function live_buf_count(client)
+    local n = 0
+    for bufnr in pairs(client.attached_buffers or {}) do
+        if vim.api.nvim_buf_is_valid(bufnr) and vim.api.nvim_buf_is_loaded(bufnr) then n = n + 1 end
+    end
+    return n
+end
+
+local function evict(file)
+    local b = bufs[file]
+    bufs[file], mtimes[file], last_used[file] = nil, nil, nil
+    if b and vim.api.nvim_buf_is_valid(b) then pcall(vim.api.nvim_buf_delete, b, { force = true }) end
+end
+
+-- Called from the daemon sweep, never mid-request (PiDaemon.guard holds while
+-- a driver call runs), so dropping a buffer here can't pull one out from under
+-- an in-flight query. Detaching the last buffer is not enough on its own to
+-- reclaim a server, hence the explicit stop.
+function M.gc()
+    local now = vim.uv.now()
+    local live = {}
+    for f, b in pairs(bufs) do
+        if vim.api.nvim_buf_is_valid(b) then
+            table.insert(live, { file = f, used = last_used[f] or 0 })
+        else
+            evict(f)
+        end
+    end
+    table.sort(live, function(a, z) return a.used > z.used end)
+    local evicted = 0
+    for i, entry in ipairs(live) do
+        if i > MAX_BUFS or (now - entry.used) > BUF_IDLE_MS then
+            evict(entry.file)
+            evicted = evicted + 1
+        end
+    end
+    local stopped = 0
+    for _, c in ipairs(vim.lsp.get_clients()) do
+        if live_buf_count(c) == 0 then
+            pcall(c.stop, c, false)
+            stopped = stopped + 1
+        end
+    end
+    return { evicted = evicted, stopped = stopped }
 end
 
 local function find_col(bufnr, line_1idx, symbol)
@@ -510,7 +568,11 @@ function M.status()
             table.insert(files, { file = f, bufnr = b, clients = clients })
         end
     end
-    return { ok = true, files = files }
+    local servers = {}
+    for _, c in ipairs(vim.lsp.get_clients()) do
+        table.insert(servers, { name = c.name, id = c.id, root = c.root_dir, bufs = live_buf_count(c) })
+    end
+    return { ok = true, files = files, servers = servers }
 end
 
 -- Driver loaded for side-effects (_G.PiLsp). Don't return functions —

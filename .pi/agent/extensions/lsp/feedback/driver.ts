@@ -5,13 +5,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import {
-  callLua,
-  isRunning,
-  laneGeneration,
-  type Lane,
-  loadLua,
-} from "../nvim";
+import { callLua, type Lane, loadLuaOnce } from "../nvim";
 import type { DriverResult } from "./types";
 
 const FEEDBACK_LUA = path.join(import.meta.dirname, "..", "feedback.lua");
@@ -29,22 +23,18 @@ const logDriver = (msg: string) => {
   }
 };
 
-// Load _G.PiFeedback into a lane's nvim once per nvim instance. Keyed on the
-// lane generation, not a bare boolean: after a restart the lane may already
-// have respawned (isRunning() true again) while carrying none of our lua.
-const feedbackLoadedGen: Record<Lane, number | null> = {
-  main: null,
-  inline: null,
-};
+// _G.PiFeedback lives in a daemon shared with other pi processes, so "is it
+// loaded" is the daemon's answer, not ours; loadLuaOnce keys on daemon epoch +
+// source hash and no-ops when a peer already primed it.
+let feedbackSrc: { mtimeMs: number; src: string } | null = null;
 export const ensureFeedbackLoaded = async (
   cwd: string,
   lane: Lane = "main",
 ): Promise<void> => {
-  if (feedbackLoadedGen[lane] === laneGeneration(lane) && isRunning(lane))
-    return;
-  const src = fs.readFileSync(FEEDBACK_LUA, "utf8");
-  await loadLua(cwd, src, lane);
-  feedbackLoadedGen[lane] = laneGeneration(lane);
+  const mtimeMs = fs.statSync(FEEDBACK_LUA).mtimeMs;
+  if (feedbackSrc?.mtimeMs !== mtimeMs)
+    feedbackSrc = { mtimeMs, src: fs.readFileSync(FEEDBACK_LUA, "utf8") };
+  await loadLuaOnce(cwd, "feedback", feedbackSrc.src, lane);
 };
 
 // Lua side enforces PER_FILE_BUDGET_MS = 4500 + ~1s settle. Match here
@@ -53,7 +43,6 @@ const PER_FILE_BUDGET_MS = 5_500;
 const BASE_TIMEOUT_MS = 3_000;
 const nvimCallTimeoutMs = (fileCount: number): number =>
   BASE_TIMEOUT_MS + Math.max(1, fileCount) * PER_FILE_BUDGET_MS;
-export const MAX_FILES = 25;
 export const MAX_FILE_BYTES = 64 * 1024;
 
 // Full pass: format + safe code-actions + diagnostics. Used at turn end.
