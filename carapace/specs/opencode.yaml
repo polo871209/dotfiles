@@ -1,6 +1,0 @@
-# yaml-language-server: $schema=https://carapace.sh/schemas/command.json
-name: opencode
-description: open source AI coding agent
-parsing: disabled
-completion:
-  positionalany: ["$carapace.bridge.Yargs([opencode])"]

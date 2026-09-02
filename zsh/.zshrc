@@ -33,7 +33,6 @@ else
   compinit -u -C
 fi
 
-export CARAPACE_BRIDGES="zsh,fish,bash,inshellisense"
 zstyle ':completion:*' menu select
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
 zstyle ':completion:*' format $'\e[2;37mCompleting %d\e[m'

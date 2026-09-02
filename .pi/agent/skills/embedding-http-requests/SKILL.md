@@ -1,6 +1,7 @@
 ---
 name: embedding-http-requests
 description: HTTP requests written inside source-code comments and sent from there. Use when adding, fixing, or verifying one, or when editing the shared kulala.http globals.
+disable-model-invocation: true
 ---
 
 A request lives in a comment beside the code it exercises rather than in a separate `.http` file, and is sent from there with `<leader>Rs`. The syntax is the JetBrains `.http` dialect.
