@@ -45,7 +45,7 @@ Before changing Pi-native behavior, read directly relevant documentation in the 
 ### Outside-pi surface
 
 - **`notifier.ts`** — reports agent status through desktop and terminal surfaces when attention is elsewhere.
-- **`tmux-bridge.ts`** — sends Nvim selections or diagnostics to Pi with line-accurate, size-bounded file context.
+- **`tmux-bridge.ts`** — sends Nvim selections or diagnostics to Pi as a line-numbered snapshot of the selected lines.
 
 ### TUI taste
 

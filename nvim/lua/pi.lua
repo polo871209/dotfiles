@@ -233,13 +233,14 @@ function M.send_selection()
         -- Drop the snapshot into pi rather than prompting here: vim.ui.input
         -- has no slash-commands or completion, pi's own editor does. The bridge
         -- pastes it into that editor, so it becomes part of the prompt you
-        -- send, after your question. Send the whole file so pi answers with no
-        -- extra read round-trip (its edit/write read from disk at exec time, so
-        -- editing never needs a prior read either); the selection just marks
-        -- the focus range.
-        local all = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), '\n')
-        if #all <= MAX_PAYLOAD / 2 then
-            send(target.sock, { file = { path = filepath, sline = sline, eline = eline, ft = ft, content = all } })
+        -- send, after your question. Only the selected lines go over: whole-file
+        -- payloads buried the actual question in unrelated context, and pi's
+        -- edit/write read from disk at exec time, so it can pull the rest itself
+        -- when it needs it. `total` only sizes the gutter and names what was
+        -- omitted.
+        local selected = table.concat(vim.api.nvim_buf_get_lines(buf, sline - 1, eline, false), '\n')
+        if #selected <= MAX_PAYLOAD / 2 then
+            send(target.sock, { file = { path = filepath, sline = sline, eline = eline, ft = ft, content = selected, total = total } })
         else
             send(target.sock, { paste = ('Re: %s lines %d-%d. Read the file for full context.'):format(filepath, sline, eline) })
         end

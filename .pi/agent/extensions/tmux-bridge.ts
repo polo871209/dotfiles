@@ -16,9 +16,10 @@
 // Wire format: one JSON object per line, e.g.
 //   {"text": "hello"}                     -- send immediately, triggers a turn
 //   {"paste": "some reference text"}      -- drop into pi's own input editor, no turn
-//   {"file": {"path": ..., "sline": ..., "eline": ..., "ft": ..., "content": ...}}
-//                                          -- line-numbered snapshot pasted into the
-//                                             editor as part of the next prompt
+//   {"file": {"path": ..., "sline": ..., "eline": ..., "ft": ..., "content": ..., "total": ...}}
+//                                          -- line-numbered snapshot of the selected
+//                                             lines only, pasted into the editor as
+//                                             part of the next prompt
 // Optional "mode": "steer" | "followUp" | "nextTurn" turns a snapshot into a
 // queued custom message instead, the only way to reach an already running turn.
 //
@@ -60,13 +61,12 @@ type FilePayload = {
   sline: number;
   eline: number;
   ft?: string;
+  /** The selected lines only, starting at `sline`. */
   content: string;
+  /** Line count of the whole file, so the header can say what was left out. */
+  total?: number;
 };
 
-// Keep complete snapshots below 80 KiB; large snapshots focus the injected
-// context on the selection while preserving source line numbers for edits/cites.
-const FULL_SNAPSHOT_MAX_BYTES = 80 * 1024;
-const SURROUNDING_LINES = 40;
 const SNAPSHOT_MESSAGE_TYPE = "tmux-bridge-file";
 const GUTTER_SEP = " | ";
 
@@ -78,38 +78,19 @@ function snapshotLabel(d: SnapshotDetails): string {
 
 export function formatFileSnapshot(f: FilePayload): string {
   const srcLines = f.content.split(/\r?\n/);
-  const total = srcLines.length;
-  const selectedStart = Math.min(Math.max(Math.floor(f.sline), 1), total);
-  const selectedEnd = Math.min(
-    Math.max(Math.floor(f.eline), selectedStart),
-    total,
-  );
-  const complete =
-    Buffer.byteLength(f.content, "utf8") <= FULL_SNAPSHOT_MAX_BYTES;
-  const from = complete ? 1 : Math.max(1, selectedStart - SURROUNDING_LINES);
-  const to = complete
-    ? total
-    : Math.min(total, selectedEnd + SURROUNDING_LINES);
-  const width = String(total).length;
+  const from = Math.max(Math.floor(f.sline), 1);
+  const to = from + srcLines.length - 1;
+  const total = f.total && Math.floor(f.total) >= to ? Math.floor(f.total) : to;
+  // Unpadded: a right-aligned number would put leading spaces in front of the
+  // first code line, which reads as indentation that isn't in the file.
   const numbered = srcLines
-    .slice(from - 1, to)
-    .map((line, i) => `${String(from + i).padStart(width)}${GUTTER_SEP}${line}`)
+    .map((line, i) => `${from + i}${GUTTER_SEP}${line}`)
     .join("\n");
-  const omitted: string[] = [];
-  if (from > 1) omitted.push(`[... omitted lines 1-${from - 1} ...]`);
-  if (to < total) omitted.push(`[... omitted lines ${to + 1}-${total} ...]`);
-  const scopeNote = complete
-    ? "Whole file at capture time"
-    : `Lines ${from}-${to} of ${total}`;
-  // edit/write read the file from disk when they run, so this snapshot alone is
-  // enough to edit from. The gutter is the one thing that must come off for
-  // oldText to match, hence a mechanical rule rather than "strip the gutter".
+  // Phrased like read's own "[Showing lines X-Y of N]" note. The edit tool
+  // already teaches oldText, so the only thing left to say is that the gutter
+  // isn't part of the file.
   return (
-    `${snapshotLabel(f)}\n` +
-    `${scopeNote}. Every line carries a "<line number>${GUTTER_SEP}" gutter: it is the true line number, not file content. ` +
-    `Cite by it; for oldText or write content, drop each line's prefix up to and including the first "${GUTTER_SEP}" and keep the rest byte for byte. ` +
-    `edit reads the file itself, so editing needs no prior read${complete ? "" : "; read only for the omitted lines"}.\n` +
-    `${omitted.length > 0 ? `${omitted.join("\n")}\n` : ""}` +
+    `${displayPath(f.path)} lines ${from}-${to} of ${total}. The "<n>${GUTTER_SEP}" gutter is line numbers, not file content.\n` +
     `\`\`\`${f.ft ?? ""}\n${numbered}\n\`\`\``
   );
 }
