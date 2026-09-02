@@ -17,6 +17,9 @@
 //
 // Status comes from notifier.ts, which sets the child pane's tmux pane title
 // to reflect busy/ask/done — polled here instead of a parsed JSON event stream.
+// Completion and final output come from a result file the child side of this
+// same extension writes on agent_settled: pane capture is width-wrapped by
+// the TUI and scrollback-bounded, the file is neither.
 //
 // Context isolation: the only thing suppressed is --no-session (parent
 // conversation history doesn't carry over). AGENTS.md/CLAUDE.md discovery,
@@ -27,6 +30,7 @@
 // say, the subagent doesn't know — write tasks self-contained.
 
 import { execFile } from "node:child_process";
+import { collectTextMessages, extractText } from "./shared/message";
 import { parseStatusTitle } from "./shared/status";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -107,6 +111,7 @@ function pruneRunsStore(): void {
   for (const r of finished) {
     if (runsStore.size <= MAX_TRACKED_RUNS) break;
     runsStore.delete(r.id);
+    resultStore.delete(r.id); // captured results die with their run record
   }
 }
 
@@ -120,22 +125,29 @@ const resultStore = (() => {
   return (g.__piSubagentResults ??= new Map());
 })();
 
-// Trailing ```result-json fenced block a subagent ends its output with.
+// ```result-json fenced block a subagent ends its output with.
 // Optional convention: only stripped/cached when present and valid JSON.
-const RESULT_BLOCK_RE = /```result-json\s*\n([\s\S]*?)\n```\s*$/;
+// Unanchored: the capture is a live interactive pane, so pi's input box and
+// status line always trail the agent's final message — an end-of-string
+// anchor would never match. Last valid block wins, since an echoed task can
+// mention the fence earlier in the pane.
+const RESULT_BLOCK_RE = /```result-json\s*\n([\s\S]*?)\n```/g;
 
 export function extractResultBlock(
   text: string,
   id: string,
 ): { text: string; captured: boolean } {
-  const m = text.match(RESULT_BLOCK_RE);
-  if (!m) return { text, captured: false };
-  try {
-    resultStore.set(id, JSON.parse(m[1]!));
-  } catch {
-    return { text, captured: false }; // invalid JSON stays ordinary transcript text
+  let hit: { value: unknown; index: number } | undefined;
+  for (const m of text.matchAll(RESULT_BLOCK_RE)) {
+    try {
+      hit = { value: JSON.parse(m[1]!), index: m.index };
+    } catch {
+      /* invalid JSON stays ordinary transcript text */
+    }
   }
-  return { text: text.slice(0, m.index).trimEnd(), captured: true };
+  if (!hit) return { text, captured: false };
+  resultStore.set(id, hit.value);
+  return { text: text.slice(0, hit.index).trimEnd(), captured: true };
 }
 
 function getByPath(obj: unknown, path: string | undefined): unknown {
@@ -157,9 +169,6 @@ const TASK_PREVIEW_MAX = 140;
 const FORBIDDEN_TOOLS = new Set(["ask_user_question", "subagent"]);
 const DEFAULT_MAX_DURATION_MS = 3_600_000;
 const TMUX_POLL_MS = 500;
-const DEFAULT_WAIT_TIMEOUT_MS = 30_000;
-const MAX_WAIT_TIMEOUT_MS = 300_000;
-const WAIT_POLL_MS = 500;
 
 const execFileAsync = promisify(execFile);
 
@@ -466,19 +475,19 @@ const buildParams = (agents: AgentConfig[]) =>
     task: Type.String({
       description:
         "Self-contained brief: scope, paths, constraints, completion criteria, verification, and expected report. " +
-        "The subagent starts with no session history — state everything task-specific it needs to know.",
+        "No session history carries over — state everything task-specific it needs to know.",
     }),
     model: Type.Optional(
       Type.String({
         description:
-          "Optional provider/model override; otherwise use the parent provider's mapped model, then inherit the parent model.",
+          "Provider/model override; default routes on the parent provider, then falls back to the parent model.",
       }),
     ),
     background: Type.Optional(
       Type.Boolean({
         default: false,
         description:
-          "Start without waiting; use subagent_manage to inspect or control the run.",
+          "Return a run id instead of the result, for work that runs alongside yours. Default false returns the full result directly and is right unless you have other work meanwhile.",
       }),
     ),
   });
@@ -564,54 +573,47 @@ const initialProgress = (
   output: "",
 });
 
-// Shared by the four passive/control ops on already-tracked runs (list,
-// result, steer, stop, wait) — one tool with an `action` enum instead of
-// four, since they overlap heavily on `id` and none needs subagent's custom
-// renderCall/renderResult.
+// One flat object, not a discriminated union of objects: providers render a
+// top-level union as `anyOf`, so any near-miss argument comes back as a
+// per-branch error dump the model then burns turns retrying. Flat schema plus
+// runtime field checks give one actionable error line instead.
 const manageParams = () =>
-  Type.Union([
-    Type.Object({ action: Type.Literal("list") }),
-    Type.Object({
-      action: Type.Literal("result"),
-      id: Type.String({ description: "Run id from subagent output or list." }),
-      path: Type.Optional(
-        Type.String({
-          description:
-            'Dot path into captured JSON, e.g. "findings.0.path"; omit for the whole object.',
-        }),
-      ),
-    }),
-    Type.Object({
-      action: Type.Literal("steer"),
-      id: Type.String({ description: "Running run id." }),
-      message: Type.String({ description: "Follow-up text." }),
-    }),
-    Type.Object({
-      action: Type.Literal("stop"),
-      id: Type.String({ description: "Run id to abort." }),
-    }),
-    Type.Object({
-      action: Type.Literal("wait"),
-      id: Type.Optional(
-        Type.String({ description: "Run id; omit for any running run." }),
-      ),
-      timeout_ms: Type.Optional(
-        Type.Number({
-          minimum: 1000,
-          maximum: MAX_WAIT_TIMEOUT_MS,
-          default: DEFAULT_WAIT_TIMEOUT_MS,
-          description: "Wait limit in milliseconds.",
-        }),
-      ),
-    }),
-  ]);
+  Type.Object({
+    action: Type.Union(
+      [
+        Type.Literal("list"),
+        Type.Literal("result"),
+        Type.Literal("steer"),
+        Type.Literal("stop"),
+      ],
+      {
+        description:
+          "list: id, status, agent, duration for every tracked run. result: pull a finished run's result-json, or its transcript if it emitted none. steer: send follow-up text into the run. stop: abort the run.",
+      },
+    ),
+    id: Type.Optional(
+      Type.String({
+        description:
+          "Run id as printed by subagent or list. Required for result, steer, stop.",
+      }),
+    ),
+    path: Type.Optional(
+      Type.String({
+        description:
+          'result only: dot path into captured JSON, e.g. "findings.0.path"; omit for the whole object.',
+      }),
+    ),
+    message: Type.Optional(
+      Type.String({ description: "steer only: follow-up text." }),
+    ),
+  });
 
-type ManageArgs =
-  | { action: "list" }
-  | { action: "result"; id: string; path?: string }
-  | { action: "steer"; id: string; message: string }
-  | { action: "stop"; id: string }
-  | { action: "wait"; id?: string; timeout_ms?: number };
+type ManageArgs = {
+  action: "list" | "result" | "steer" | "stop";
+  id?: string;
+  path?: string;
+  message?: string;
+};
 
 const formatRunLine = (r: RunRecord): string => {
   const p = r.progress;
@@ -657,24 +659,24 @@ async function runInTmux(
 }> {
   const sysFile = path.join(os.tmpdir(), `pi-subagent-sys-${target}.txt`);
   const taskFile = path.join(os.tmpdir(), `pi-subagent-task-${target}.txt`);
-  fs.writeFileSync(sysFile, agent.systemPrompt, "utf-8");
-  fs.writeFileSync(taskFile, task, "utf-8");
+  const resultFile = path.join(os.tmpdir(), `pi-subagent-result-${target}.txt`);
+  // 0600: task/system text can carry repo paths and secrets, tmpdir is shared.
+  fs.writeFileSync(sysFile, agent.systemPrompt, { mode: 0o600 });
+  fs.writeFileSync(taskFile, task, { mode: 0o600 });
   const cleanupFiles = () => {
-    try {
-      fs.unlinkSync(sysFile);
-    } catch {
-      /* best effort */
-    }
-    try {
-      fs.unlinkSync(taskFile);
-    } catch {
-      /* best effort */
+    for (const f of [sysFile, taskFile, resultFile, `${resultFile}.tmp`]) {
+      try {
+        fs.unlinkSync(f);
+      } catch {
+        /* best effort */
+      }
     }
   };
 
   const toolsFlag = toolsFlagValue(agent, pi);
   const parts = [
     "PI_IS_SUBAGENT=1",
+    `PI_SUBAGENT_RESULT_FILE='${resultFile}'`,
     "pi",
     "--no-session",
     `--system-prompt "$(cat '${sysFile}')"`,
@@ -730,6 +732,14 @@ async function runInTmux(
       break;
     }
 
+    // Result file appearing is the primary completion signal — written
+    // child-side by this same extension on agent_settled, so it holds even
+    // when notifier.ts (pane title) is missing or broken in the child.
+    if (fs.existsSync(resultFile)) {
+      finalStatus = "idle";
+      break;
+    }
+
     const paneTitle = await tmuxOut([
       "display-message",
       "-t",
@@ -781,18 +791,25 @@ async function runInTmux(
     };
   }
 
-  const rawOutput = await tmuxOut([
-    "capture-pane",
-    "-p",
-    "-J",
-    "-t",
-    paneId,
-    "-S",
-    "-400",
-  ]);
+  // Prefer the child-written result file: the final assistant message,
+  // verbatim. Pane capture is the fallback (blocked runs, file write failed)
+  // and is width-wrapped — JSON inside it may not parse.
+  let rawOutput = "";
+  if (finalStatus === "idle") {
+    try {
+      rawOutput = fs.readFileSync(resultFile, "utf-8").trim();
+    } catch {
+      /* fall back to pane capture */
+    }
+  }
+  if (!rawOutput) {
+    rawOutput = (
+      await tmuxOut(["capture-pane", "-p", "-J", "-t", paneId, "-S", "-"])
+    ).trim();
+  }
   // Extract before truncating: a valid result block may sit beyond the output
   // budget. Invalid blocks remain ordinary transcript text.
-  const extracted = extractResultBlock(rawOutput.trim(), target);
+  const extracted = extractResultBlock(rawOutput, target);
   let finalText = headTruncate(extracted.text, MAX_OUTPUT_BYTES);
   if (extracted.captured) {
     finalText += `\n\n[structured result captured — id: ${target}. Use subagent_manage (action: result) to pull a field instead of re-reading this transcript.]`;
@@ -826,8 +843,35 @@ async function runInTmux(
   };
 }
 
+// Child side: mirror the final assistant message into the file the parent
+// named via PI_SUBAGENT_RESULT_FILE. tmp+rename so the parent's existence
+// poll never reads a partial write.
+function registerChildResultMirror(pi: ExtensionAPI): void {
+  const file = process.env.PI_SUBAGENT_RESULT_FILE;
+  if (!file) return;
+  pi.on("agent_settled", async (_event, ctx) => {
+    try {
+      const { messages } = collectTextMessages(ctx.sessionManager.getBranch());
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const m = messages[i]!;
+        if (m.role !== "assistant") continue;
+        const text = extractText(m.content).trim();
+        if (!text) continue;
+        fs.writeFileSync(`${file}.tmp`, text, { mode: 0o600 });
+        fs.renameSync(`${file}.tmp`, file);
+        break;
+      }
+    } catch {
+      /* parent falls back to pane capture */
+    }
+  });
+}
+
 export default function (pi: ExtensionAPI) {
-  if (process.env.PI_IS_SUBAGENT === "1") return;
+  if (process.env.PI_IS_SUBAGENT === "1") {
+    registerChildResultMirror(pi);
+    return;
+  }
   if (!tmuxActive()) return;
 
   const agents = loadAgents();
@@ -850,11 +894,9 @@ export default function (pi: ExtensionAPI) {
     name: "subagent",
     label: "Subagent",
     description:
-      `Delegate medium or large research, recon, or implementation work. Choose a route from the agent parameter; independent calls may run in parallel. ` +
-      `The optional model overrides provider/model routing; otherwise the parent provider map is used, falling back to the parent model. ` +
-      `Use background for asynchronous runs, then subagent_manage for status or control.\n\n` +
+      `Delegate medium or large research, recon, or implementation work to an isolated agent. Independent calls may run in parallel.\n\n` +
       `Routes:\n${agentList}\n\n` +
-      "For a structured result, ask the subagent to end with a valid fenced ```result-json ... ``` block; retrieve fields with subagent_manage (action: result).",
+      "For a compact hand-back, tell the subagent in the task to end with a fenced ```result-json ... ``` block, then pull fields with subagent_manage (action: result) instead of re-reading the transcript.",
     parameters: params,
     renderShell: "self",
 
@@ -947,7 +989,7 @@ export default function (pi: ExtensionAPI) {
           content: [
             {
               type: "text",
-              text: `subagent '${agent.name}' started in background (id: ${target}). Use subagent_manage to check on it, steer/stop it, or pull its result if it ends with a result-json block.`,
+              text: `subagent '${agent.name}' running in background, id ${target}. No result is returned here; reach it through subagent_manage.`,
             },
           ],
           details: { ...progress },
@@ -962,15 +1004,18 @@ export default function (pi: ExtensionAPI) {
     name: "subagent_manage",
     label: "Subagent Manage",
     description:
-      "Inspect or control tracked subagent runs; choose an action and provide only that action's fields.",
+      "Inspect or control subagent runs started this session.\n\n" +
+      "WRONG: call list repeatedly to watch a background run finish — each poll costs a turn and adds nothing.\n" +
+      "RIGHT: keep working, then call list once at the point the run's state gates your next step.",
     parameters: manageParams(),
     async execute(_toolCallId, rawParams) {
-      const params = rawParams as ManageArgs;
-      const action = params.action;
-      const id = "id" in params ? params.id : undefined;
-      const fieldPath = "path" in params ? params.path : undefined;
-      const message = "message" in params ? params.message : undefined;
-      const timeout_ms = "timeout_ms" in params ? params.timeout_ms : undefined;
+      const { action, id, path: fieldPath, message } = rawParams as ManageArgs;
+
+      const fail = (text: string) => ({
+        content: [{ type: "text" as const, text }],
+        details: undefined,
+        error: text,
+      });
 
       if (action === "list") {
         const runs = [...runsStore.values()].sort(
@@ -983,88 +1028,42 @@ export default function (pi: ExtensionAPI) {
         return { content: [{ type: "text", text }], details: undefined };
       }
 
-      if (action === "wait") {
-        if (id && !runsStore.has(id)) {
-          const msg = `subagent_manage: no tracked run with id "${id}"`;
-          return {
-            content: [{ type: "text", text: msg }],
-            details: undefined,
-            error: msg,
-          };
-        }
-        const targets = id
-          ? [runsStore.get(id)!]
-          : [...runsStore.values()].filter(
-              (r) => r.progress.status === "running",
-            );
-        if (targets.length === 0) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "subagent_manage: no runs currently running.",
-              },
-            ],
-            details: undefined,
-          };
-        }
-        const timeoutMs = Math.min(
-          Math.max(timeout_ms ?? DEFAULT_WAIT_TIMEOUT_MS, 1000),
-          MAX_WAIT_TIMEOUT_MS,
-        );
-        const deadline = Date.now() + timeoutMs;
-        while (true) {
-          const finished = targets.filter(
-            (r) => r.progress.status !== "running",
-          );
-          if (finished.length > 0) {
-            return {
-              content: [
-                { type: "text", text: finished.map(formatRunLine).join("\n") },
-              ],
-              details: undefined,
-            };
-          }
-          if (Date.now() >= deadline) {
-            const label =
-              targets.length === 1
-                ? targets[0]!.id
-                : `${targets.length} run(s)`;
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `subagent_manage: timed out after ${formatDuration(timeoutMs)} waiting on ${label}.`,
-                },
-              ],
-              details: undefined,
-            };
-          }
-          await sleep(WAIT_POLL_MS);
-        }
-      }
-
       if (!id) {
-        const msg = `subagent_manage: 'id' is required for action '${action}'.`;
-        return {
-          content: [{ type: "text", text: msg }],
-          details: undefined,
-          error: msg,
-        };
+        return fail(
+          `subagent_manage: 'id' is required for action '${action}'. Call action 'list' to get run ids.`,
+        );
       }
 
       if (action === "result") {
-        if (!resultStore.has(id)) {
-          const msg = `subagent_manage: no structured result captured for id "${id}"`;
+        if (resultStore.has(id)) {
+          const value = getByPath(resultStore.get(id), fieldPath);
           return {
-            content: [{ type: "text", text: msg }],
+            content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
             details: undefined,
-            error: msg,
           };
         }
-        const value = getByPath(resultStore.get(id), fieldPath);
+        // Transcript fallback: a background run's output is otherwise
+        // unreachable (list shows status only), so a missing or malformed
+        // result-json block would silently discard the whole run.
+        const run = runsStore.get(id);
+        if (!run) {
+          return fail(`subagent_manage: no tracked run with id "${id}"`);
+        }
+        if (run.progress.status === "running") {
+          return fail(
+            `subagent_manage: run "${id}" is still running; no result yet.`,
+          );
+        }
+        const text = run.progress.output || run.progress.error || "";
         return {
-          content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
+          content: [
+            {
+              type: "text",
+              text: text
+                ? `[no result-json block; returning transcript]\n${text}`
+                : `subagent_manage: run "${id}" produced no output.`,
+            },
+          ],
           details: undefined,
         };
       }
@@ -1072,12 +1071,7 @@ export default function (pi: ExtensionAPI) {
       // steer / stop
       const record = runsStore.get(id);
       if (!record) {
-        const msg = `subagent_manage: no tracked run with id "${id}"`;
-        return {
-          content: [{ type: "text", text: msg }],
-          details: undefined,
-          error: msg,
-        };
+        return fail(`subagent_manage: no tracked run with id "${id}"`);
       }
       if (action === "stop") {
         record.controller.abort();
@@ -1093,21 +1087,14 @@ export default function (pi: ExtensionAPI) {
       }
       // steer
       if (record.progress.status !== "running" || !record.paneId) {
-        const msg = `subagent_manage: run "${id}" is not running, cannot steer.`;
-        return {
-          content: [{ type: "text", text: msg }],
-          details: undefined,
-          error: msg,
-        };
+        return fail(
+          `subagent_manage: run "${id}" is not running, cannot steer.`,
+        );
       }
       if (!message) {
-        const msg =
-          "subagent_manage: 'message' is required for action 'steer'.";
-        return {
-          content: [{ type: "text", text: msg }],
-          details: undefined,
-          error: msg,
-        };
+        return fail(
+          "subagent_manage: 'message' is required for action 'steer'.",
+        );
       }
       await tmuxRun(["send-keys", "-t", record.paneId, "-l", message]);
       await tmuxRun(["send-keys", "-t", record.paneId, "Enter"]);
