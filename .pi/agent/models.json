@@ -1,5 +1,11 @@
 {
   "providers": {
+    "anthropic": {
+      "modelOverrides": {
+        "claude-fable-5": { "headers": { "user-agent": "claude-cli/2.1.260" } },
+        "claude-fable-5-1": { "headers": { "user-agent": "claude-cli/2.1.260" } }
+      }
+    },
     "openai-codex": {
       "modelOverrides": {
         "gpt-5.6-luna": { "contextWindow": 1000000 },

@@ -10,6 +10,7 @@ M.dirs = {
     '.vscode',
     '.windsurf',
     '.zig-cache',
+    'trees',
     'zig-out',
 }
 

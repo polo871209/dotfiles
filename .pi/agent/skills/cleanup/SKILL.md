@@ -14,7 +14,7 @@ Build the allowed file set from these modes:
 - **Named mode** when the user supplies files, directories, or globs: every matching file, whether clean or dirty.
 - **Dirty-worktree mode** only when the user explicitly requests whole-worktree cleanup: every modified or untracked file in the current worktree.
 
-Combine explicitly requested named and dirty-worktree scopes; explicit exclusions win. Git-dirty status alone does not grant permission outside dirty-worktree mode.
+Combine explicitly requested named and dirty-worktree scopes. Explicit exclusions win. Git-dirty status alone does not grant permission outside dirty-worktree mode.
 
 Session mode requires reliable session-edit provenance. Preserve pre-existing user changes and clean only material introduced or made obsolete by this session. If provenance is unavailable, skip the file unless the user authorizes it through named or dirty-worktree mode.
 
@@ -38,7 +38,7 @@ Completion: every proposed deletion has evidence that it is unreachable, unrefer
 
 ## Comment rules
 
-A comment's primary reader today is an agent, not a human, so judge every comment as agent-facing prose: invoke the `writing-for-agents` skill before ruling on any of them. Two of its rules decide most cases — the **no-op test** (a comment that changes no reader's behavior is dead weight, even when true) and the **scar tissue** exception (a comment that reads as redundant often exists because a model already failed that way once, so inferable is not sufficient to delete).
+A comment's primary reader today is an agent, not a human, so judge every comment as agent-facing prose: invoke the `writing-for-agents` skill before ruling on any of them. Two of its rules decide most cases: the **no-op test** (a comment that changes no reader's behavior is dead weight, even when true) and the **scar tissue** exception (a comment that reads as redundant often exists because a model already failed that way once, so inferable is not sufficient to delete).
 
 Delete a comment when any condition applies:
 
