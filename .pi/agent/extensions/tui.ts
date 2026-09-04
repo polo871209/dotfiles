@@ -15,6 +15,7 @@ import {
   type Component,
   type EditorTheme,
   type OverlayHandle,
+  type OverlayOptions,
   type TUI,
   truncateToWidth,
   visibleWidth,
@@ -86,70 +87,172 @@ const wrapWithBg = (line: string, width: number): string => {
   return `${OVERLAY_BG}${re}${filler}${SGR_RESET}`;
 };
 
-class DropdownOverlay implements Component {
-  list: { render(width: number): string[] } | null = null;
-  render(width: number): string[] {
-    if (!this.list) return [];
-    return this.list.render(width).map((line) => wrapWithBg(line, width));
-  }
-  invalidate() {}
+// Structural view of pi-tui's SelectList. `renderItem` and
+// `getPrimaryColumnWidth` are TS-private but plain methods at runtime; we
+// call them so the overlay draws items exactly like the stock dropdown
+// while owning the scroll window (see DropdownOverlay.renderList).
+interface SelectItemLike {
+  value: string;
+  label: string;
+  description?: string;
+}
+interface SelectListLike {
+  render(width: number): string[];
+  filteredItems?: SelectItemLike[];
+  selectedIndex?: number;
+  maxVisible?: number;
+  theme?: {
+    scrollInfo(text: string): string;
+    noMatch(text: string): string;
+  };
+  renderItem?(
+    item: SelectItemLike,
+    isSelected: boolean,
+    width: number,
+    descriptionSingleLine: string | undefined,
+    primaryColumnWidth: number,
+  ): string;
+  getPrimaryColumnWidth?(): number;
 }
 
 interface EditorWithOverlay {
   autocompleteState?: unknown;
-  autocompleteList?: { render(width: number): string[] };
+  autocompleteList?: SelectListLike;
   autocompleteMaxVisible?: number;
   focused?: boolean;
   tui: TUI;
   __overlay?: {
     handle: OverlayHandle | null;
     comp: DropdownOverlay;
-    lastEditorHeight: number;
+    opts: OverlayOptions;
   };
+}
+
+const isAutocompleteOpen = (editor: EditorWithOverlay): boolean =>
+  Boolean(editor.autocompleteState && editor.autocompleteList);
+
+const normalizeToSingleLine = (text: string) =>
+  text.replace(/[\r\n]+/g, " ").trim();
+
+class DropdownOverlay implements Component {
+  // Scroll window of the list we last drew. Reset when the editor swaps in a
+  // new SelectList (it does so on every keystroke that refilters).
+  private viewport: { list: SelectListLike; top: number } | null = null;
+
+  constructor(private readonly editor: EditorWithOverlay) {}
+
+  render(width: number): string[] {
+    // Read the live list at composite time, never a snapshot taken during
+    // editor.render: the editor replaces autocompleteList on every refilter
+    // and clears it on cancel, so a snapshot is one frame stale.
+    if (!isAutocompleteOpen(this.editor)) return [];
+    const list = this.editor.autocompleteList as SelectListLike;
+    return this.renderList(list, width).map((line) => wrapWithBg(line, width));
+  }
+
+  // Stock SelectList keeps the selected row pinned to the middle of the
+  // window once the list scrolls, so arrow-down moves the items instead of
+  // the marker. Draw a conventional dropdown instead: the marker walks to
+  // the edge, then the window scrolls by one.
+  private renderList(list: SelectListLike, width: number): string[] {
+    const items = list.filteredItems;
+    const selected = list.selectedIndex;
+    const maxVisible = list.maxVisible;
+    if (
+      !items ||
+      selected === undefined ||
+      maxVisible === undefined ||
+      !list.theme ||
+      typeof list.renderItem !== "function" ||
+      typeof list.getPrimaryColumnWidth !== "function"
+    ) {
+      // SelectList internals changed; fall back to the stock renderer.
+      return list.render(width);
+    }
+    const count = items.length;
+    if (count === 0) return [list.theme.noMatch("  No matching commands")];
+
+    if (this.viewport?.list !== list) this.viewport = { list, top: 0 };
+    let top = this.viewport.top;
+    if (selected < top) top = selected;
+    else if (selected >= top + maxVisible) top = selected - maxVisible + 1;
+    top = Math.max(0, Math.min(top, count - maxVisible));
+    this.viewport.top = top;
+
+    const end = Math.min(top + maxVisible, count);
+    const primaryColumnWidth = list.getPrimaryColumnWidth();
+    const lines: string[] = [];
+    for (let i = top; i < end; i++) {
+      const item = items[i];
+      if (!item) continue;
+      lines.push(
+        list.renderItem(
+          item,
+          i === selected,
+          width,
+          item.description
+            ? normalizeToSingleLine(item.description)
+            : undefined,
+          primaryColumnWidth,
+        ),
+      );
+    }
+    if (count > maxVisible) {
+      const scrollText = `  (${selected + 1}/${count})`;
+      lines.push(
+        list.theme.scrollInfo(truncateToWidth(scrollText, width - 2, "")),
+      );
+    }
+    return lines;
+  }
+
+  invalidate() {}
 }
 
 const FOOTER_ROWS = 1; // pi's footer is one row tall
 
+// Called synchronously from the editor's render. Safe because the screen
+// renders the component tree first and composites overlays afterwards, so
+// a stack push or splice here is observed in the same frame.
 const syncOverlay = (editor: EditorWithOverlay, editorHeight: number) => {
   const tui = editor.tui;
   if (!tui) return;
 
-  const state = editor.autocompleteState;
-  const list = editor.autocompleteList;
-
   let s = editor.__overlay;
   if (!s) {
-    s = { handle: null, comp: new DropdownOverlay(), lastEditorHeight: 0 };
+    s = {
+      handle: null,
+      comp: new DropdownOverlay(editor),
+      opts: {
+        // Anchor bottom-left and lift by (footer + editor height) so the
+        // overlay's bottom edge sits one row above the editor regardless
+        // of how many items the list currently renders. TUI re-runs anchor
+        // resolution on each render with the live overlay height.
+        anchor: "bottom-left",
+        offsetY: 0,
+        col: 0,
+        width: "100%",
+        maxHeight: 0,
+        nonCapturing: true,
+        // Only render while the editor holds focus and a list is open. A
+        // selector (ctx.ui.select, model/settings pickers) swaps the editor
+        // out of the tree and takes focus, so editor.render stops firing
+        // and can't hide this overlay; without the focus gate it lingers
+        // on top of the selector and blocks it.
+        visible: () => editor.focused === true && isAutocompleteOpen(editor),
+      },
+    };
     editor.__overlay = s;
   }
 
-  if (state && list) {
-    s.comp.list = list;
-    if (!s.handle || s.lastEditorHeight !== editorHeight) {
-      if (s.handle) s.handle.hide();
-      const termWidth = tui.terminal.columns;
-      const overlayMaxHeight = (editor.autocompleteMaxVisible ?? 5) + 1;
-      const overlayCol = 0;
-      const overlayWidth = termWidth;
-      // Anchor bottom-left and lift by (footer + editor height) so the
-      // overlay's bottom edge sits one row above the editor regardless
-      // of how many items the list currently renders. TUI re-runs anchor
-      // resolution on each render with the live overlay height.
-      s.handle = tui.showOverlay(s.comp, {
-        anchor: "bottom-left",
-        offsetY: -(FOOTER_ROWS + editorHeight),
-        col: overlayCol,
-        width: overlayWidth,
-        maxHeight: overlayMaxHeight,
-        nonCapturing: true,
-        // Only render while the editor holds focus. A selector (ctx.ui.select,
-        // model/settings pickers) swaps the editor out of the tree and takes
-        // focus, so editor.render stops firing and can't hide this overlay —
-        // without this gate it lingers on top of the selector and blocks it.
-        visible: () => editor.focused === true,
-      });
-      s.lastEditorHeight = editorHeight;
-    }
+  // TUI keeps a reference to this options object and re-reads it on every
+  // composite, so updating in place repositions the overlay in the same
+  // frame without a hide/show round trip.
+  s.opts.offsetY = -(FOOTER_ROWS + editorHeight);
+  s.opts.maxHeight = (editor.autocompleteMaxVisible ?? 5) + 1;
+
+  if (isAutocompleteOpen(editor)) {
+    if (!s.handle) s.handle = tui.showOverlay(s.comp, s.opts);
   } else if (s.handle) {
     s.handle.hide();
     s.handle = null;
@@ -161,7 +264,7 @@ const installAutocompleteAbovePatch = () => {
   const proto = Editor.prototype as unknown as {
     render(width: number): string[];
     autocompleteState?: unknown;
-    autocompleteList?: { render(width: number): string[] };
+    autocompleteList?: SelectListLike;
   };
 
   // Re-installable across /reload (same pattern as the bottom-pin patch):
@@ -189,12 +292,7 @@ const installAutocompleteAbovePatch = () => {
       lines = origRender.call(this, width);
     }
 
-    // Defer overlay management out of the current render pass; calling
-    // showOverlay/hideOverlay inside render would mutate TUI state mid-
-    // composite.
-    const self = this as unknown as EditorWithOverlay;
-    const editorHeight = lines.length;
-    queueMicrotask(() => syncOverlay(self, editorHeight));
+    syncOverlay(this as unknown as EditorWithOverlay, lines.length);
 
     return lines;
   } as unknown as typeof origRender;
