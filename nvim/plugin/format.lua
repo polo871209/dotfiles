@@ -109,6 +109,14 @@ require('conform').setup {
         zig = { 'zigfmt' },
     },
     formatters = {
+        -- Prose stays on one line: a paragraph is one line, and the reader wraps
+        -- at a width we cannot know. Hard wraps re-flow the whole block on the
+        -- next edit and bury the real change in the diff. The flag overrides a
+        -- project config that sets proseWrap: always, and is inert for the
+        -- non-prose filetypes that share this formatter.
+        prettier = {
+            prepend_args = { '--prose-wrap', 'preserve' },
+        },
         jsonnetfmt = {
             args = { '--indent', '0', '--max-blank-lines', '2', '--sort-imports', '--string-style', 's', '--comment-style', 's', '--no-pad-objects', '-' },
         },
