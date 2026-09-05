@@ -4,7 +4,7 @@
 import { copyToClipboard } from "@earendil-works/pi-coding-agent";
 import type {
   ExtensionAPI,
-  ExtensionCommandContext,
+  ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { collectTextMessages, extractText } from "./shared/message";
 
@@ -58,9 +58,7 @@ const previewText = (text: string): string => {
 const lineCount = (text: string): number =>
   text.length === 0 ? 1 : text.split("\n").length;
 
-const lastAssistantText = (
-  ctx: ExtensionCommandContext,
-): string | undefined => {
+const lastAssistantText = (ctx: ExtensionContext): string | undefined => {
   const { messages } = collectTextMessages(ctx.sessionManager.getBranch());
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].role !== "assistant") continue;
@@ -69,7 +67,7 @@ const lastAssistantText = (
   }
 };
 
-const formatSession = (ctx: ExtensionCommandContext): string => {
+const formatSession = (ctx: ExtensionContext): string => {
   const lines: string[] = [];
   const name = ctx.sessionManager.getSessionName?.();
   if (name) lines.push(`# ${name}`, "");
@@ -83,7 +81,7 @@ const formatSession = (ctx: ExtensionCommandContext): string => {
 };
 
 const copyWithNotify = async (
-  ctx: ExtensionCommandContext,
+  ctx: ExtensionContext,
   value: string,
   label: string,
 ): Promise<void> => {
@@ -95,47 +93,51 @@ const copyWithNotify = async (
   }
 };
 
+const copyBlocks = async (ctx: ExtensionContext): Promise<void> => {
+  const text = lastAssistantText(ctx);
+  if (!text) {
+    ctx.ui.notify("No assistant messages yet", "warning");
+    return;
+  }
+  const blocks = extractCodeBlocks(text);
+
+  if (blocks.length === 0) {
+    await copyWithNotify(ctx, text, "response");
+    return;
+  }
+  if (blocks.length === 1) {
+    await copyWithNotify(ctx, blocks[0].code, "code block");
+    return;
+  }
+
+  const blockLabels = blocks.map(
+    (b, i) =>
+      `Block ${i + 1} [${b.lang ?? "txt"}] — ${lineCount(b.code)}L — ${previewText(b.code)}`,
+  );
+
+  const selected = await ctx.ui.select("Select content to copy", blockLabels);
+  if (!selected) {
+    ctx.ui.notify("Copy cancelled", "info");
+    return;
+  }
+  const idx = blockLabels.indexOf(selected);
+  if (idx < 0) {
+    ctx.ui.notify("Copy target not found", "error");
+    return;
+  }
+  await copyWithNotify(ctx, blocks[idx].code, `code block ${idx + 1}`);
+};
+
 export default function (pi: ExtensionAPI) {
   pi.registerCommand("copy-blocks", {
     description:
       "Pick a fenced code block from last assistant response and copy",
-    handler: async (_args, ctx) => {
-      const text = lastAssistantText(ctx);
-      if (!text) {
-        ctx.ui.notify("No assistant messages yet", "warning");
-        return;
-      }
-      const blocks = extractCodeBlocks(text);
+    handler: async (_args, ctx) => copyBlocks(ctx),
+  });
 
-      if (blocks.length === 0) {
-        await copyWithNotify(ctx, text, "response");
-        return;
-      }
-      if (blocks.length === 1) {
-        await copyWithNotify(ctx, blocks[0].code, "code block");
-        return;
-      }
-
-      const blockLabels = blocks.map(
-        (b, i) =>
-          `Block ${i + 1} [${b.lang ?? "txt"}] — ${lineCount(b.code)}L — ${previewText(b.code)}`,
-      );
-
-      const selected = await ctx.ui.select(
-        "Select content to copy",
-        blockLabels,
-      );
-      if (!selected) {
-        ctx.ui.notify("Copy cancelled", "info");
-        return;
-      }
-      const idx = blockLabels.indexOf(selected);
-      if (idx < 0) {
-        ctx.ui.notify("Copy target not found", "error");
-        return;
-      }
-      await copyWithNotify(ctx, blocks[idx].code, `code block ${idx + 1}`);
-    },
+  pi.registerShortcut("ctrl+alt+c", {
+    description: "Pick a code block from the last response and copy it",
+    handler: copyBlocks,
   });
 
   pi.registerCommand("copy-all", {

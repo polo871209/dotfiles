@@ -8,6 +8,14 @@
 -- (guard), and making sure an unused daemon does not sit on a pile of language
 -- servers forever (sweep).
 
+-- An inherited GOROOT can point at a Go toolchain install that does not
+-- match the `go` binary on PATH (e.g. after a version bump elsewhere on the
+-- machine), which fails every gopls typecheck with a tool-version mismatch.
+-- Go resolves GOROOT correctly from the binary's own location when the
+-- variable is unset, so clearing a stale one here, before any server spawns,
+-- is strictly safer than forwarding it.
+if vim.env.GOROOT then vim.env.GOROOT = nil end
+
 vim.g.pi_agent = true
 vim.g.pi_daemon = true
 -- Identity for this process. Clients key their "already loaded my lua" cache

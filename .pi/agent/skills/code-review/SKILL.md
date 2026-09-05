@@ -53,7 +53,7 @@ Standards always runs. Spec runs only when step 2 found a spec, then send both `
 
 - The diff command and commit list.
 - The path or fetched contents of the spec.
-- The brief: "Report: (a) requirements the spec asked for that are missing or partial. (b) behaviour in the diff that wasn't asked for (scope creep). (c) requirements that look implemented but where the implementation looks wrong. Quote the spec line for each finding. Under 400 words."
+- The brief: "Report: (a) requirements the spec asked for that are missing or partial. (b) requirements that look implemented but where the implementation looks wrong. Quote the spec line for each finding. Under 400 words."
 
 ### 5. Aggregate
 

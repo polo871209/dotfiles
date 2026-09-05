@@ -6,7 +6,12 @@
 // serves review and editing in one pass. A diff is only a patch — agent
 // re-reads to edit anyway. Pull diff only when code isn't reachable locally.
 
-import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
+import {
+  formatSize,
+  truncateHead,
+  type ExtensionAPI,
+  type Theme,
+} from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { run } from "./shared/exec";
@@ -14,6 +19,9 @@ import { exposeRegisteredToolsToEval } from "./shared/bridge-tools";
 
 const MAX_DIFF_BYTES = 48 * 1024;
 const MAX_BODY_BYTES = 6 * 1024;
+// truncateHead applies a 2000-line cap by default. These two budgets are
+// byte-only, so disable the line limit rather than add a second one.
+const NO_LINE_CAP = Number.MAX_SAFE_INTEGER;
 
 // Bot authors whose summary comments are noise. "[bot]" suffix covers GitHub
 // Apps; the set covers App accounts presenting as normal users.
@@ -52,10 +60,11 @@ function cleanBody(body: string): string {
   );
   b = b.replace(/<!--[\s\S]*?-->/g, "");
   b = b.replace(/\n{3,}/g, "\n\n").trim();
-  if (Buffer.byteLength(b) > MAX_BODY_BYTES) {
-    b = b.slice(0, MAX_BODY_BYTES) + "\n…[body truncated]";
-  }
-  return b;
+  const r = truncateHead(b, {
+    maxBytes: MAX_BODY_BYTES,
+    maxLines: NO_LINE_CAP,
+  });
+  return r.truncated ? `${r.content}\n…[body truncated]` : r.content;
 }
 
 function parsePr(pr: string): { number: number; repo?: string } | null {
@@ -140,6 +149,8 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool<typeof params, { summary: string }>({
     name: "github_pr",
     label: "GitHub PR",
+    promptSnippet:
+      "Fetch PR metadata, failing checks, review threads, or a diff",
     // Keep the TUI quiet: the full markdown goes to the model via `content`,
     // but the terminal only shows a one-line summary from `details`.
     renderResult(result, _options, theme: Theme) {
@@ -415,12 +426,14 @@ export default function (pi: ExtensionAPI) {
 
       // Diff last — biggest, most useful for code review.
       if (wantDiffSection && wantDiff && diff.code === 0 && diff.stdout) {
-        let d = diff.stdout;
-        let note = "";
-        if (Buffer.byteLength(d) > MAX_DIFF_BYTES) {
-          d = d.slice(0, MAX_DIFF_BYTES);
-          note = `\n…[diff truncated at ${fmt(MAX_DIFF_BYTES)} bytes — read files for full context]`;
-        }
+        const cut = truncateHead(diff.stdout, {
+          maxBytes: MAX_DIFF_BYTES,
+          maxLines: NO_LINE_CAP,
+        });
+        const d = cut.content;
+        const note = cut.truncated
+          ? `\n…[diff truncated at ${formatSize(MAX_DIFF_BYTES)} of ${formatSize(cut.totalBytes)} — read files for full context]`
+          : "";
         out.push(`\n## Diff\n\`\`\`diff\n${d}\n\`\`\`${note}`);
       }
 

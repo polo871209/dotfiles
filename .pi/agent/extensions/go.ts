@@ -204,6 +204,13 @@ export default function goExtension(pi: ExtensionAPI): void {
     handler: async (_args, ctx) => go(ctx),
   });
 
+  // ctrl+alt+* is the one namespace pi leaves almost empty (it binds only
+  // ctrl+alt+]), so extension shortcuts land there and survive an upgrade.
+  pi.registerShortcut("ctrl+alt+g", {
+    description: "Re-run the agent on the current transcript",
+    handler: (ctx) => go(ctx),
+  });
+
   if (RULES.length === 0) return;
 
   pi.on("message_update", async (event) => {

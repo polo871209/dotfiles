@@ -14,11 +14,52 @@ import {
 } from "@earendil-works/pi-ai/compat";
 import {
   BorderedLoader,
+  type ExtensionAPI,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 
+export const SIDE_MODEL_FLAG = "side-model";
+
+// Two constraints meet here. A flag name belongs to exactly one extension: pi
+// scans every loaded extension for a duplicate and fails the later one
+// outright, so only one of the four consumers may call registerFlag. And
+// getFlag answers only for the extension that registered the name, so the
+// other three cannot read it through their own handle.
+//
+// The owner therefore parks its handle on globalThis, which the loader's
+// per-extension module graphs do share. auto-rename.ts is the owner because it
+// is the one consumer that registers unconditionally. Read lazily, never at
+// load time: a side-channel call always happens well after argument parsing.
+const OWNER_KEY = "__piSideModelFlagOwner";
+
+/** Owner side. Call from auto-rename.ts alone, not from the other consumers. */
+export function registerSideModelFlag(pi: ExtensionAPI): void {
+  pi.registerFlag(SIDE_MODEL_FLAG, {
+    type: "string",
+    description:
+      "Cheap model for side-channel calls (commit messages, session names, /btw), as provider/id. Overrides PI_SIDE_MODEL.",
+  });
+  // Always overwrite: /reload invalidates the previous handle, and calling
+  // getFlag on a stale one throws.
+  (globalThis as Record<string, unknown>)[OWNER_KEY] = pi;
+}
+
+function sideModelSpec(): string | undefined {
+  const owner = (globalThis as Record<string, unknown>)[OWNER_KEY] as
+    | ExtensionAPI
+    | undefined;
+  let flag: unknown;
+  try {
+    flag = owner?.getFlag(SIDE_MODEL_FLAG);
+  } catch {
+    /* handle went stale between /reload and the owner re-registering */
+  }
+  if (typeof flag === "string" && flag.trim()) return flag.trim();
+  return process.env.PI_SIDE_MODEL?.trim() || undefined;
+}
+
 function resolveSideModel(ctx: ExtensionContext) {
-  const spec = process.env.PI_SIDE_MODEL?.trim();
+  const spec = sideModelSpec();
   if (!spec) return undefined;
   const slash = spec.indexOf("/");
   if (slash < 1) return undefined;

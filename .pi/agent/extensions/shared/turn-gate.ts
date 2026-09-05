@@ -28,7 +28,7 @@ export type ReleaseSettleClaim = (outcome?: Partial<SettleOutcome>) => void;
 
 // Cap on how long a consumer waits. A producer that crashes or wedges must
 // delay the report, never swallow it.
-export const SETTLE_GATE_TIMEOUT_MS = 60_000;
+const SETTLE_GATE_TIMEOUT_MS = 60_000;
 
 interface ClaimEvent {
   id: string;
@@ -64,9 +64,9 @@ export const openSettleClaim = (pi: ExtensionAPI): ReleaseSettleClaim => {
 };
 
 export interface SettleGate {
-  // Resolves once no claim is open, or after timeoutMs. Call it
+  // Resolves once no claim is open, or after SETTLE_GATE_TIMEOUT_MS. Call it
   // synchronously from the agent_settled handler.
-  wait(timeoutMs?: number): Promise<SettleOutcome>;
+  wait(): Promise<SettleOutcome>;
 }
 
 // Consumer side. Create it once in the extension factory so the subscription
@@ -107,7 +107,7 @@ export const createSettleGate = (pi: ExtensionAPI): SettleGate => {
   });
 
   return {
-    wait: (timeoutMs = SETTLE_GATE_TIMEOUT_MS) => {
+    wait: () => {
       if (open.size === 0) return Promise.resolve(consume());
       return new Promise<SettleOutcome>((resolve) => {
         let timer: ReturnType<typeof setTimeout> | undefined;
@@ -117,7 +117,10 @@ export const createSettleGate = (pi: ExtensionAPI): SettleGate => {
           resolve(outcome);
         };
         waiters.add(finish);
-        timer = setTimeout(() => finish({ turnContinues: false }), timeoutMs);
+        timer = setTimeout(
+          () => finish({ turnContinues: false }),
+          SETTLE_GATE_TIMEOUT_MS,
+        );
         timer.unref?.();
       });
     },

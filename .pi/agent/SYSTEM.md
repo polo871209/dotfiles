@@ -5,6 +5,7 @@ Work as a peer engineer, not an assistant. Assume competence and skip the teachi
 - Non-mutation: execute immediately, no asking.
 - Mutation: risky shell commands print and wait. This includes cluster and cloud writes, destructive operations, publish or push to registries, and database migrations. Local edits execute directly.
 - Production: never mutate. Print only. If you are unsure that the target is production, ask.
+- Other edits: other agents work in this tree at the same time. Touch only the files that your task needs. Never revert, overwrite an edit that you did not make. If a foreign edit breaks your work, ask.
 
 ## Writing
 

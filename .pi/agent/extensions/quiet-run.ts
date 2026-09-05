@@ -14,13 +14,16 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  formatSize,
+  truncateTail,
+  type ExtensionAPI,
+} from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { exposeRegisteredToolsToEval } from "./shared/bridge-tools";
 
 const DEFAULT_TAIL_LINES = 20;
 const MAX_TAIL_LINES = 200;
-const MAX_RESULT_CHARS = 20_000;
 // A test suite or build can write hundreds of MB; only the newest slice is
 // ever worth re-reading, and the exact line count comes from the live stream.
 const MAX_SCAN_BYTES = 4 * 1024 * 1024;
@@ -66,10 +69,15 @@ function readLogTail(logPath: string): string {
   }
 }
 
-function clampChars(text: string): string {
-  return text.length > MAX_RESULT_CHARS
-    ? `[... truncated to last ${MAX_RESULT_CHARS} chars ...]\n${text.slice(text.length - MAX_RESULT_CHARS)}`
-    : text;
+// pi's own limits, so a quiet_run result is capped exactly like a bash result.
+// Only the body is truncated: the verdict line names the log path, and a
+// whole-result tail cut would drop it.
+function capBody(body: string): string {
+  const r = truncateTail(body);
+  if (!r.truncated) return body;
+  const limit =
+    r.truncatedBy === "lines" ? `${r.maxLines} lines` : formatSize(r.maxBytes);
+  return `[... truncated to the last ${limit} of ${formatSize(r.totalBytes)} ...]\n${r.content}`;
 }
 
 export default function (pi: ExtensionAPI) {
@@ -294,7 +302,7 @@ export default function (pi: ExtensionAPI) {
             : shown.join("\n");
       }
 
-      const text = clampChars(body ? `${head}\n${body}` : head);
+      const text = body ? `${head}\n${capBody(body)}` : head;
       const failed = timedOut || killSignal !== null || (code ?? 1) !== 0;
       return {
         content: [{ type: "text", text }],
