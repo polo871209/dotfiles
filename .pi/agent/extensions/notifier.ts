@@ -13,6 +13,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { exec, execFile } from "node:child_process";
 import { APP_TITLE, statusTitle, type AgentStatus } from "./shared/status";
+import { createSettleGate } from "./shared/turn-gate";
 import { writeFileSync } from "node:fs";
 import * as path from "node:path";
 
@@ -392,6 +393,11 @@ const notify = async (projectName: string, message: string): Promise<void> => {
 
 export default function (pi: ExtensionAPI) {
   let projectName = path.basename(process.cwd());
+  // Created here, in the factory, so the subscription exists before any turn.
+  const settleGate = createSettleGate(pi);
+  // Bumped per turn. A settle report captures it and drops itself when a new
+  // turn began while it waited on the gate.
+  let turnGeneration = 0;
 
   pi.on("session_start", async (_event, ctx) => {
     projectName = path.basename(ctx.cwd ?? process.cwd());
@@ -400,6 +406,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("agent_start", async () => {
+    turnGeneration++;
     stopDonePoll();
     setWindowStatus("busy");
   });
@@ -422,19 +429,30 @@ export default function (pi: ExtensionAPI) {
   // agent_settled, not agent_end: agent_end also fires mid auto-retry /
   // auto-compact / queued follow-ups, causing premature "done" + pings.
   pi.on("agent_settled", async () => {
-    if (IS_SUBAGENT) {
-      // subagent.ts polls this window name to know when the pane is done;
-      // no notification/sound for a background turn nobody is watching.
-      setWindowStatus("done");
-      return;
-    }
-    if (await isTerminalFocused()) {
-      setWindowStatus("idle");
-    } else {
-      setWindowStatus("done");
-      startDonePoll();
-    }
-    await notify(projectName, "done");
+    const gen = turnGeneration;
+    // Detached: pi waits for this handler, and the gate waits for seconds.
+    // The status stays "busy" meanwhile, which is what a pending repair is.
+    void (async () => {
+      // pi settles before lsp/feedback decides whether to send a repair
+      // follow-up, so an unguarded "done" here lands a second before the
+      // agent resumes on its own.
+      const { turnContinues } = await settleGate.wait();
+      // The follow-up turn owns the report now.
+      if (turnContinues || gen !== turnGeneration) return;
+      if (IS_SUBAGENT) {
+        // subagent.ts polls this window name to know when the pane is done;
+        // no notification/sound for a background turn nobody is watching.
+        setWindowStatus("done");
+        return;
+      }
+      if (await isTerminalFocused()) {
+        setWindowStatus("idle");
+      } else {
+        setWindowStatus("done");
+        startDonePoll();
+      }
+      await notify(projectName, "done");
+    })();
   });
 
   pi.on("session_shutdown", async () => {

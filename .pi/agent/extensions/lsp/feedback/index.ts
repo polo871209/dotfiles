@@ -12,6 +12,10 @@ import type {
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import {
+  openSettleClaim,
+  type ReleaseSettleClaim,
+} from "../../shared/turn-gate";
 import { displayPath, formatDiagLine, sortDiagnostics, toAbs } from "../utils";
 import { ensureFeedbackLoaded, formatFile, MAX_FILE_BYTES } from "./driver";
 import { runFixPipeline } from "./pipeline";
@@ -104,6 +108,25 @@ export function registerFeedback(pi: ExtensionAPI): void {
   // scheduled and bails if it changed, so a stale run finishing after a NEW
   // turn began can't set widgets/notify/inject notes mid-turn.
   let generation = 0;
+  // Held from the first tracked edit of a turn until this turn's pass decides
+  // whether to send a repair follow-up. Claimed at edit time, not at
+  // agent_settled, because the consumer reads the gate inside its own
+  // agent_settled handler and handler order is not ours to pick.
+  let settleClaim: { gen: number; release: ReleaseSettleClaim } | null = null;
+
+  const claimSettle = (): void => {
+    if (settleClaim?.gen === generation) return;
+    settleClaim?.release();
+    settleClaim = { gen: generation, release: openSettleClaim(pi) };
+  };
+
+  // gen-keyed so a late background run cannot release the claim that the turn
+  // after it already opened.
+  const releaseSettle = (gen: number, turnContinues = false): void => {
+    if (settleClaim?.gen !== gen) return;
+    settleClaim.release({ turnContinues });
+    settleClaim = null;
+  };
 
   const reset = () => {
     touched.clear();
@@ -111,6 +134,20 @@ export function registerFeedback(pi: ExtensionAPI): void {
   };
 
   const runFeedback = async (
+    files: string[],
+    ctx: ExtensionContext,
+    gen: number,
+  ): Promise<void> => {
+    try {
+      await runFeedbackInner(files, ctx, gen);
+    } finally {
+      // repairContinuationPending true = a follow-up turn is on its way, so
+      // the consumer of the gate must skip this settle.
+      releaseSettle(gen, repairContinuationPending);
+    }
+  };
+
+  const runFeedbackInner = async (
     files: string[],
     ctx: ExtensionContext,
     gen: number,
@@ -176,6 +213,12 @@ export function registerFeedback(pi: ExtensionAPI): void {
   pi.on("before_agent_start", async (_event, _ctx) => {
     generation++;
     reported = false;
+    // A claim from an older turn has lost its meaning: that turn's settle is
+    // over. Release it so an aborted turn cannot park the gate.
+    if (settleClaim) {
+      settleClaim.release();
+      settleClaim = null;
+    }
     if (repairContinuationPending) repairContinuationPending = false;
     else {
       touched.clear();
@@ -190,6 +233,7 @@ export function registerFeedback(pi: ExtensionAPI): void {
     if (isScratchPath(abs)) return;
     if (isIgnoredPath(abs, cwd)) return;
     touched.add(abs);
+    claimSettle();
     try {
       const before = fs.readFileSync(abs, "utf8");
       if (Buffer.byteLength(before) > MAX_FILE_BYTES) return;
@@ -221,8 +265,10 @@ export function registerFeedback(pi: ExtensionAPI): void {
   // auto-compact / queued follow-ups — auto-fix there races the agent's next
   // edits. Settled = pi will not continue on its own.
   pi.on("agent_settled", async (_event, ctx) => {
-    if (reported || touched.size === 0) return;
-    if (isRebasing(ctx.cwd ?? cwd)) return;
+    if (reported || touched.size === 0 || isRebasing(ctx.cwd ?? cwd)) {
+      releaseSettle(generation);
+      return;
+    }
     const files = Array.from(touched);
     reported = true;
     // Fire-and-forget: return immediately so pi marks the turn idle.
@@ -233,5 +279,9 @@ export function registerFeedback(pi: ExtensionAPI): void {
         e instanceof Error ? e.message : String(e),
       );
     });
+  });
+
+  pi.on("session_shutdown", () => {
+    releaseSettle(generation);
   });
 }

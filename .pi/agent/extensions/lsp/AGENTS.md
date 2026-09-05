@@ -21,6 +21,12 @@ Keep its two halves separate:
 - `tool.ts` — single consolidated `lsp` tool with an `action` enum (hover/definition/references/implementation/type_definition/document_symbols/diagnostics/rename/restart), registered in `index.ts`. Add new navigation ops as a new action here, not a new tool — one `action` enum is far cheaper in schema tokens than N separate tools with duplicated file/line/symbol params. `rename` is the only write action; it applies and saves immediately (no preview mode).
 - `feedback/*` — post-edit formatting, diagnostics, and auto-fix, registered through `registerFeedback(pi)`.
 
+## The repair follow-up outlives the turn
+
+`feedback/*` can send a repair follow-up after pi already fired `agent_settled`, so an extension that reports completion on that event reports it too early. `../shared/turn-gate.ts` closes the window: the pass claims the gate on the first tracked edit and releases it with `turnContinues` once it knows whether it sent the follow-up. The consumers are the desktop ping and tmux title in `../notifier.ts` and the subagent result file in `../subagent.ts`. New post-turn work that can start a turn must take a claim, and a new completion signal must wait on the gate.
+
+The gate talks over `pi.events` and not over module state. The loader builds a separate jiti module graph per extension (`moduleCache: false`), so two extensions that import the same file get two copies of its variables. The event bus is the one object they share.
+
 `exposeRegisteredToolsToEval(pi)` in `index.ts` must run before `pi.registerTool(lspTool)` so eval cells can call `tool.lsp({...})`. Do not register it through the feedback subsystem.
 
 Closing the socket must use `end()`, not `destroy()`: the msgpack decoder wrapped around it rejects with `ERR_STREAM_PREMATURE_CLOSE` on an abrupt teardown and nothing in the `neovim` package catches it, so a `destroy()` on the shutdown path takes the pi process down with an unhandled rejection. For the same reason `qall!` is sent with a bounded wait — it kills the channel mid-request, so its reply never arrives and a plain `await` hangs forever.
