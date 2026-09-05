@@ -8,10 +8,11 @@
 		"turndown": "^7.2.4"
 	},
 	"devDependencies": {
-		"@earendil-works/pi-agent-core": "^0.84.2",
-		"@earendil-works/pi-ai": "^0.84.2",
-		"@earendil-works/pi-coding-agent": "^0.84.2",
-		"@earendil-works/pi-tui": "^0.84.2",
+		"@earendil-works/pi-agent-core": "^0.85.0",
+		"@earendil-works/pi-ai": "^0.85.0",
+		"@earendil-works/pi-coding-agent": "^0.85.0",
+		"@earendil-works/pi-server": "^0.85.0",
+		"@earendil-works/pi-tui": "^0.85.0",
 		"@types/node": "^26.2.0",
 		"@types/turndown": "^5.0.6",
 		"tsx": "^4.23.12",

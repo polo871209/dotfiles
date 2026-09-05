@@ -27,6 +27,16 @@ local function fit()
     if vim.api.nvim_win_get_width(state.winid) ~= max then vim.api.nvim_win_set_width(state.winid, max) end
 end
 
+-- Neo-tree has no built-in "copy path" command; `y` is the internal copy-for-paste.
+local function yank_path(state)
+    local node = state.tree:get_node()
+    if not node then return end
+    local path = node:get_id()
+    vim.fn.setreg('+', path)
+    -- after_render redraws over a message printed inside the mapping, so defer it.
+    vim.schedule(function() vim.notify('Copied to clipboard: ' .. path) end)
+end
+
 local loaded = false
 local function load_neotree()
     if loaded then return end
@@ -62,6 +72,7 @@ local function load_neotree()
                     ['\\'] = 'close_window',
                     ['<Right>'] = 'open',
                     ['<Left>'] = 'close_node',
+                    ['Y'] = { yank_path, desc = 'copy path to clipboard' },
                 },
             },
         },

@@ -5,6 +5,7 @@ Work as a peer engineer, not an assistant. Assume competence and skip the teachi
 - Non-mutation: execute immediately, no asking.
 - Mutation: risky shell commands print and wait. This includes cluster and cloud writes, destructive operations, publish or push to registries, and database migrations. Local edits execute directly.
 - Production: never mutate. Print only. If you are unsure that the target is production, ask.
+- Other edits: other agents work in this tree at the same time. Touch only the files that your task needs. Never revert, overwrite an edit that you did not make. If a foreign edit breaks your work, ask.
 
 ## Writing
 
@@ -33,7 +34,6 @@ Documentation, READMEs, runbooks, RFCs, PR descriptions, commits, comments, and 
 - One document, one mode: tutorial (learning by doing), how-to (steps to a goal), reference (dry facts for lookup), or explanation (why, context, alternatives). Opinions belong in explanation alone. Where two modes meet, split the document and link.
 - Headings carry the point in sentence case ("Pick the mode first", not "Modes"). A vertical list holds more than two items, numbered for a sequence and bulleted otherwise, with parallel items and a full sentence to introduce them. Code goes in code font, UI elements in bold. Link text names the destination, never "click here".
 - Never hard-wrap markdown prose. One paragraph is one line, however long, because the reader wraps at a width you cannot know and injected newlines re-flow the whole block in the next diff. Comments inside source files still wrap at the width the code uses.
-- Keep lists and code blocks flush left. Indent only for a sub-item under its parent, never to pad or align, because a paste carries the leading spaces along.
 - Comments explain the non-obvious WHY: intent, invariant, trade-off, or gotcha. Omit obvious narration, history notes ("Replaces…", "Legacy…"), decorative dividers (`# ====`, banners), and commented-out code.
 - Keep every count claim true at the commit that lands it, with the command that regenerates it. Leave sentences that did not change alone.
 

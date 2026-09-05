@@ -38,13 +38,35 @@ export function registerSkillToggle(
     : cloneDir;
 
   // /reload re-runs this module with a fresh scope, and /<name> on|off itself
-  // triggers ctx.reload() — the flag must survive that, so it lives on
-  // globalThis instead of module state. Off on every fresh pi launch.
-  const flag = `__${name}SkillsEnabled`;
-  const isEnabled = (): boolean =>
-    (globalThis as Record<string, unknown>)[flag] === true;
+  // triggers ctx.reload(), so the flag cannot live in module state. It lives
+  // in the session as a custom entry: reload keeps the same SessionManager, so
+  // the entry survives, and so does a later /resume of the same session. A new
+  // session has no entry and therefore starts off.
+  //
+  // Custom entries never reach the LLM, so this costs no context.
+  const ENTRY_TYPE = "skill-pack-toggle";
+  interface ToggleEntry {
+    name: string;
+    enabled: boolean;
+  }
+
+  let enabled = false;
+  const isEnabled = (): boolean => enabled;
   const setEnabled = (v: boolean): void => {
-    (globalThis as Record<string, unknown>)[flag] = v;
+    enabled = v;
+    pi.appendEntry<ToggleEntry>(ENTRY_TYPE, { name, enabled: v });
+  };
+
+  // Last write wins. Read before resources_discover, which pi emits after
+  // session_start on both startup and reload.
+  const restoreEnabled = (entries: readonly { type: string }[]): void => {
+    for (const entry of entries) {
+      if (entry.type !== "custom") continue;
+      const custom = entry as { customType?: string; data?: unknown };
+      if (custom.customType !== ENTRY_TYPE) continue;
+      const data = custom.data as ToggleEntry | undefined;
+      if (data?.name === name) enabled = data.enabled === true;
+    }
   };
 
   const ensureClone = async (): Promise<void> => {
@@ -74,8 +96,9 @@ export function registerSkillToggle(
 
   // Publish on/off state through the built-in footer-status channel (reset
   // on every reload) instead of extensions reaching into each other's
-  // globalThis flags directly.
+  // internal state.
   pi.on("session_start", async (_event, ctx) => {
+    restoreEnabled(ctx.sessionManager.getEntries());
     ctx.ui.setStatus(name, isEnabled() ? `${name}:on` : undefined);
   });
 

@@ -8,6 +8,7 @@ import {
   DEFAULT_MAX_LINES,
   defineTool,
   truncateHead,
+  withFileMutationQueue,
   type AgentToolResult,
 } from "@earendil-works/pi-coding-agent";
 import { run } from "../shared/exec";
@@ -285,28 +286,35 @@ async function runRename(
   if (!params.new_name)
     return err('LSP error: action "rename" requires new_name');
   const file = toAbs(normalizeAtPath(params.file), ctx.cwd);
-  return withDriver<RenameResult>(
-    ctx,
-    "rename",
-    [file, params.line, params.symbol ?? "", params.new_name],
-    signal,
-    onUpdate,
-    (res, cwd) => {
-      const files = res.files ?? [];
-      if (files.length === 0) {
-        return { text: "Rename returned no edits", details: { count: 0 } };
-      }
-      const lines = [
-        `Renamed ${res.edit_count ?? 0} edit(s) across ${files.length} file(s):`,
-      ];
-      for (const f of files) {
-        lines.push(`  ${displayPath(f.file, cwd)}  (${f.edits} edit(s))`);
-      }
-      return {
-        text: cap(lines.join("\n")),
-        details: { count: res.edit_count ?? 0, files: files.length },
-      };
-    },
+  // Tool calls run in parallel, so a rename that writes N files can interleave
+  // with an `edit` on one of them and lose a change. Queue on the anchor file,
+  // the same per-file queue `edit` and `write` take. The call-site files are
+  // only known after the driver returns, so they stay unqueued: this narrows
+  // the race to the anchor rather than closing it.
+  return withFileMutationQueue(file, () =>
+    withDriver<RenameResult>(
+      ctx,
+      "rename",
+      [file, params.line, params.symbol ?? "", params.new_name],
+      signal,
+      onUpdate,
+      (res, cwd) => {
+        const files = res.files ?? [];
+        if (files.length === 0) {
+          return { text: "Rename returned no edits", details: { count: 0 } };
+        }
+        const lines = [
+          `Renamed ${res.edit_count ?? 0} edit(s) across ${files.length} file(s):`,
+        ];
+        for (const f of files) {
+          lines.push(`  ${displayPath(f.file, cwd)}  (${f.edits} edit(s))`);
+        }
+        return {
+          text: cap(lines.join("\n")),
+          details: { count: res.edit_count ?? 0, files: files.length },
+        };
+      },
+    ),
   );
 }
 

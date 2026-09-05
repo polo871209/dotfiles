@@ -461,9 +461,15 @@ function _G.PiLspShared.run_fast_lint(bufnr)
     end
     if #allowed == 0 then return end
     -- nvim/lua/lint_patch.lua defers per-linter fixups off startup, so they land
-    -- on first use. This path calls try_lint directly instead of going through
-    -- nvim/plugin/lint.lua, so it has to apply them itself.
-    pcall(function() require('lint_patch').apply(allowed) end)
+    -- on first use, and it also knows which linters cannot answer for a given
+    -- buffer. This path calls try_lint directly instead of going through
+    -- nvim/plugin/lint.lua, so it has to do both itself.
+    pcall(function()
+        local patch = require 'lint_patch'
+        allowed = patch.filter(allowed, bufnr)
+        patch.apply(allowed)
+    end)
+    if #allowed == 0 then return end
     vim.api.nvim_buf_call(bufnr, function()
         pcall(function() lint.try_lint(allowed) end)
     end)

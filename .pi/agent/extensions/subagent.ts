@@ -92,6 +92,10 @@ interface RunRecord {
   paneId?: string;
   controller: AbortController;
   progress: Progress;
+  // Resolves (never rejects) when the run reaches a terminal state. This is
+  // what subagent_manage (wait) awaits, so a parent that started background
+  // runs blocks exactly as long as they take instead of sleeping a guess.
+  settled?: Promise<void>;
 }
 const runsStore = (() => {
   const g = globalThis as unknown as {
@@ -112,19 +116,45 @@ function pruneRunsStore(): void {
   for (const r of finished) {
     if (runsStore.size <= MAX_TRACKED_RUNS) break;
     runsStore.delete(r.id);
-    resultStore.delete(r.id); // captured results die with their run record
+    // The captured result outlives its run record on purpose: it is persisted
+    // as a session entry, so dropping the in-memory copy only means the next
+    // session_start hydrates it back.
   }
 }
 
 // Structured results captured from a run's trailing ```result-json block,
 // keyed by the subagent's own target id ("sub-<agent>-<ts>-<rand>"), so the
 // parent can pull one field instead of re-reading the whole transcript.
+//
+// The map is the read cache. The durable copy is a custom session entry, which
+// costs no LLM context and survives both /reload and a later /resume in a new
+// process, where the tmux panes and their transcripts are long gone.
+const RESULT_ENTRY_TYPE = "subagent-result";
+interface ResultEntry {
+  id: string;
+  value: unknown;
+}
+
 const resultStore = (() => {
   const g = globalThis as unknown as {
     __piSubagentResults?: Map<string, unknown>;
   };
   return (g.__piSubagentResults ??= new Map());
 })();
+
+// Set by the extension factory. extractResultBlock is exported for tests and
+// has no pi handle of its own.
+let persistResult: ((id: string, value: unknown) => void) | undefined;
+
+function hydrateResultStore(entries: readonly { type: string }[]): void {
+  for (const entry of entries) {
+    if (entry.type !== "custom") continue;
+    const custom = entry as { customType?: string; data?: unknown };
+    if (custom.customType !== RESULT_ENTRY_TYPE) continue;
+    const data = custom.data as ResultEntry | undefined;
+    if (data?.id) resultStore.set(data.id, data.value);
+  }
+}
 
 // ```result-json fenced block a subagent ends its output with.
 // Optional convention: only stripped/cached when present and valid JSON.
@@ -148,6 +178,7 @@ export function extractResultBlock(
   }
   if (!hit) return { text, captured: false };
   resultStore.set(id, hit.value);
+  persistResult?.(id, hit.value);
   return { text: text.slice(0, hit.index).trimEnd(), captured: true };
 }
 
@@ -169,6 +200,9 @@ const UPDATE_INTERVAL_MS = 150;
 const TASK_PREVIEW_MAX = 140;
 const FORBIDDEN_TOOLS = new Set(["ask_user_question", "subagent"]);
 const DEFAULT_MAX_DURATION_MS = 3_600_000;
+// Runs already stop themselves at their own cap, so this only guards a wait
+// whose record somehow never settles.
+const DEFAULT_WAIT_TIMEOUT_MS = DEFAULT_MAX_DURATION_MS + 60_000;
 const TMUX_POLL_MS = 500;
 
 const execFileAsync = promisify(execFile);
@@ -583,19 +617,26 @@ const manageParams = () =>
     action: Type.Union(
       [
         Type.Literal("list"),
+        Type.Literal("wait"),
         Type.Literal("result"),
         Type.Literal("steer"),
         Type.Literal("stop"),
       ],
       {
         description:
-          "list: id, status, agent, duration for every tracked run. result: pull a finished run's result-json, or its transcript if it emitted none. steer: send follow-up text into the run. stop: abort the run.",
+          "list: id, status, agent, duration for every tracked run. wait: block until the given runs (or all running ones) finish, then report their status. result: pull a finished run's result-json, or its transcript if it emitted none. steer: send follow-up text into the run. stop: abort the run.",
       },
     ),
     id: Type.Optional(
       Type.String({
         description:
-          "Run id as printed by subagent or list. Required for result, steer, stop.",
+          "Run id as printed by subagent or list. Required for result, steer, stop. For wait, accepts a comma-separated list; omit to wait for every running run.",
+      }),
+    ),
+    timeoutSeconds: Type.Optional(
+      Type.Number({
+        description:
+          "wait only: give up after this many seconds and report what is still running. Default waits for the runs' own duration cap.",
       }),
     ),
     path: Type.Optional(
@@ -610,10 +651,11 @@ const manageParams = () =>
   });
 
 type ManageArgs = {
-  action: "list" | "result" | "steer" | "stop";
+  action: "list" | "wait" | "result" | "steer" | "stop";
   id?: string;
   path?: string;
   message?: string;
+  timeoutSeconds?: number;
 };
 
 const formatRunLine = (r: RunRecord): string => {
@@ -888,6 +930,12 @@ export default function (pi: ExtensionAPI) {
   }
   if (!tmuxActive()) return;
 
+  persistResult = (id, value) =>
+    pi.appendEntry<ResultEntry>(RESULT_ENTRY_TYPE, { id, value });
+  pi.on("session_start", async (_event, ctx) => {
+    hydrateResultStore(ctx.sessionManager.getEntries());
+  });
+
   const agents = loadAgents();
   if (agents.length === 0) return;
   const modelRouting = loadModelRouting();
@@ -907,6 +955,8 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool<typeof params, Progress | undefined>({
     name: "subagent",
     label: "Subagent",
+    promptSnippet:
+      "Delegate research, repository recon, or implementation to an isolated agent",
     description:
       `Delegate medium or large research, recon, or implementation work to an isolated agent. Independent calls may run in parallel.\n\n` +
       `Routes:\n${agentList}\n\n` +
@@ -991,19 +1041,24 @@ export default function (pi: ExtensionAPI) {
         record,
       );
 
-      if (args.background) {
-        // Fire-and-forget: runInTmux mutates `progress` (shared with the
-        // record already in runsStore) as it goes, so subagent_manage (list) sees
-        // live state without us awaiting here.
-        runPromise.catch((err) => {
+      // Single settle promise for both modes: runInTmux mutates `progress`
+      // (shared with the record already in runsStore) as it goes, so
+      // subagent_manage sees live state, and wait gets a handle that resolves
+      // the instant the run ends.
+      record.settled = runPromise.then(
+        () => undefined,
+        (err) => {
           progress.status = "failed";
           progress.error = String(err);
-        });
+        },
+      );
+
+      if (args.background) {
         return {
           content: [
             {
               type: "text",
-              text: `subagent '${agent.name}' running in background, id ${target}. No result is returned here; reach it through subagent_manage.`,
+              text: `subagent '${agent.name}' running in background, id ${target}. No result is returned here; reach it through subagent_manage (wait, then result).`,
             },
           ],
           details: { ...progress },
@@ -1017,13 +1072,20 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool<ReturnType<typeof manageParams>, undefined>({
     name: "subagent_manage",
     label: "Subagent Manage",
+    promptSnippet: "List, read, steer, or stop subagent runs",
     description:
       "Inspect or control subagent runs started this session.\n\n" +
-      "WRONG: call list repeatedly to watch a background run finish — each poll costs a turn and adds nothing.\n" +
-      "RIGHT: keep working, then call list once at the point the run's state gates your next step.",
+      "WRONG: call list repeatedly to watch a background run finish, or shell out to sleep — polling costs turns and sleeping wastes wall clock.\n" +
+      "RIGHT: keep working, then call wait once at the point the runs gate your next step. It returns the moment they finish.",
     parameters: manageParams(),
-    async execute(_toolCallId, rawParams) {
-      const { action, id, path: fieldPath, message } = rawParams as ManageArgs;
+    async execute(_toolCallId, rawParams, signal) {
+      const {
+        action,
+        id,
+        path: fieldPath,
+        message,
+        timeoutSeconds,
+      } = rawParams as ManageArgs;
 
       const fail = (text: string) => ({
         content: [{ type: "text" as const, text }],
@@ -1040,6 +1102,75 @@ export default function (pi: ExtensionAPI) {
             ? "No subagent runs tracked this session."
             : runs.map(formatRunLine).join("\n");
         return { content: [{ type: "text", text }], details: undefined };
+      }
+
+      if (action === "wait") {
+        const wanted = (id ?? "")
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const unknown = wanted.filter((runId) => !runsStore.has(runId));
+        if (unknown.length > 0) {
+          return fail(
+            `subagent_manage: no tracked run with id ${unknown.map((u) => `"${u}"`).join(", ")}`,
+          );
+        }
+        const records =
+          wanted.length > 0
+            ? wanted.map((runId) => runsStore.get(runId)!)
+            : [...runsStore.values()].filter(
+                (r) => r.progress.status === "running",
+              );
+        if (records.length === 0) {
+          return {
+            content: [{ type: "text", text: "No subagent runs to wait for." }],
+            details: undefined,
+          };
+        }
+
+        const timeoutMs =
+          timeoutSeconds && timeoutSeconds > 0
+            ? timeoutSeconds * 1000
+            : DEFAULT_WAIT_TIMEOUT_MS;
+        // Held in an object: TS narrows a plain `let` to its initializer and
+        // then rejects the comparisons below, since both writes are in callbacks.
+        const state: { outcome: "finished" | "timeout" | "aborted" } = {
+          outcome: "finished",
+        };
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const guard = new Promise<void>((resolve) => {
+          timer = setTimeout(() => {
+            state.outcome = "timeout";
+            resolve();
+          }, timeoutMs);
+          // The user pressing escape must end the wait, not the runs: they
+          // keep going in their panes and stay reachable by id.
+          signal?.addEventListener(
+            "abort",
+            () => {
+              state.outcome = "aborted";
+              resolve();
+            },
+            { once: true },
+          );
+        });
+        await Promise.race([
+          Promise.all(records.map((r) => r.settled ?? Promise.resolve())),
+          guard,
+        ]);
+        if (timer) clearTimeout(timer);
+
+        const lines = records.map(formatRunLine).join("\n");
+        const head =
+          state.outcome === "timeout"
+            ? `Wait timed out after ${formatDuration(timeoutMs)}. The runs below keep going.`
+            : state.outcome === "aborted"
+              ? "Wait cancelled. The runs below keep going."
+              : `All ${records.length} run${records.length === 1 ? "" : "s"} finished.`;
+        return {
+          content: [{ type: "text", text: `${head}\n${lines}` }],
+          details: undefined,
+        };
       }
 
       if (!id) {

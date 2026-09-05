@@ -398,6 +398,9 @@ export default function (pi: ExtensionAPI) {
   // Bumped per turn. A settle report captures it and drops itself when a new
   // turn began while it waited on the gate.
   let turnGeneration = 0;
+  // pi coalesces nested prompts into one span, so a bare flag is enough to
+  // tell a real close from a stray end event.
+  let blockedOnPrompt = false;
 
   pi.on("session_start", async (_event, ctx) => {
     projectName = path.basename(ctx.cwd ?? process.cwd());
@@ -407,12 +410,17 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("agent_start", async () => {
     turnGeneration++;
+    blockedOnPrompt = false;
     stopDonePoll();
     setWindowStatus("busy");
   });
 
-  pi.on("tool_execution_start", async (event) => {
-    if (event.toolName !== "ask_user_question") return;
+  // Fires for every blocking ctx.ui prompt, including /yeet's confirm. The
+  // gate is the turn, not the tool name: a dialog the user opened from a slash
+  // command while pi is idle needs no ping and no title change.
+  pi.on("ui_prompt_start", async (_event, ctx) => {
+    if (ctx.isIdle()) return;
+    blockedOnPrompt = true;
     setWindowStatus("blocked");
     // A subagent blocked on a question needs the parent to notice via
     // subagent.ts's pane-title poll, not a desktop ping nobody but the
@@ -422,22 +430,23 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  pi.on("tool_execution_end", async (event) => {
-    if (event.toolName === "ask_user_question") setWindowStatus("busy");
+  pi.on("ui_prompt_end", async () => {
+    if (!blockedOnPrompt) return;
+    blockedOnPrompt = false;
+    setWindowStatus("busy");
   });
 
   // agent_settled, not agent_end: agent_end also fires mid auto-retry /
   // auto-compact / queued follow-ups, causing premature "done" + pings.
   pi.on("agent_settled", async () => {
     const gen = turnGeneration;
-    // Detached: pi waits for this handler, and the gate waits for seconds.
-    // The status stays "busy" meanwhile, which is what a pending repair is.
+    // pi settles before lsp/feedback decides whether to send a repair
+    // follow-up, so an unguarded "done" here lands a second before the agent
+    // resumes on its own. Detached because pi waits for this handler and the
+    // gate waits for seconds; the status stays "busy" meanwhile, which is
+    // what a pending repair is.
     void (async () => {
-      // pi settles before lsp/feedback decides whether to send a repair
-      // follow-up, so an unguarded "done" here lands a second before the
-      // agent resumes on its own.
       const { turnContinues } = await settleGate.wait();
-      // The follow-up turn owns the report now.
       if (turnContinues || gen !== turnGeneration) return;
       if (IS_SUBAGENT) {
         // subagent.ts polls this window name to know when the pane is done;

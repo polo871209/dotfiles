@@ -109,6 +109,7 @@ local function lint_buf(on_save)
     -- lsp-feedback loop drives diagnostics on its own cadence). Otherwise
     -- skip slow (network) linters.
     if not (on_save and not vim.g.pi_agent) then names = vim.tbl_filter(function(n) return not SLOW_LINTERS[n] end, names) end
+    names = require('lint_patch').filter(names, 0)
     if #names == 0 then return end
     require('lint_patch').apply(names)
     lint.try_lint(names)

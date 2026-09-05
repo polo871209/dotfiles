@@ -1,26 +1,33 @@
 {
-  "lastChangelogVersion": "0.85.0",
   "defaultProvider": "anthropic",
   "defaultModel": "claude-opus-5",
   "defaultThinkingLevel": "high",
-  "hideThinkingBlock": true,
+
   "theme": "catppuccin-mocha",
-  "quietStartup": true,
-  "outputPad": 0,
   "tuiMode": "fullscreen",
   "fullscreenScrollbar": "hidden",
+  "outputPad": 0,
+  "hideThinkingBlock": true,
+  "markdown": {
+    "codeBlockIndent": ""
+  },
+
+  "quietStartup": true,
+  "collapseChangelog": true,
+  "lastChangelogVersion": "0.85.1",
   "showCacheMissNotices": false,
-  "steeringMode": "all",
+  "warnings": {
+    "anthropicExtraUsage": false
+  },
+
   "compaction": {
     "reserveTokens": 730000
   },
   "branchSummary": {
-    "reserveTokens": 500000
+    "skipPrompt": true
   },
-  "warnings": {
-    "anthropicExtraUsage": false
-  },
-  "packages": [],
+
   "defaultProjectTrust": "always",
-  "enableInstallTelemetry": false
+  "enableInstallTelemetry": false,
+  "packages": []
 }

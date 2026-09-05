@@ -163,10 +163,14 @@ describe("public eval tool", () => {
   function makeTool() {
     const registered: any[] = [];
     const handlers = new Map<string, (...args: any[]) => unknown>();
+    const flags = new Map<string, unknown>();
     const fakePi = {
       registerTool: (definition: unknown) => registered.push(definition),
       on: (event: string, handler: (...args: any[]) => unknown) =>
         handlers.set(event, handler),
+      registerFlag: (name: string, options: { default?: unknown }) =>
+        flags.set(name, options.default),
+      getFlag: (name: string) => flags.get(name),
     };
     EvalExtension(fakePi as never);
     const shutdown = () => handlers.get("session_shutdown")?.();

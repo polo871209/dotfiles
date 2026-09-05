@@ -25,6 +25,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { collectTextMessages } from "./shared/message";
 import {
+  registerSideModelFlag,
   sideChannelComplete,
   sideChannelWithLoader,
   type SideChannelOpts,
@@ -94,6 +95,8 @@ function buildCall(ctx: ExtensionContext): {
 }
 
 export default function (pi: ExtensionAPI) {
+  // Sole owner of --side-model for the whole harness. See shared/llm.ts.
+  registerSideModelFlag(pi);
   // Per-session-file guard so we don't fire concurrent renames.
   const inFlight = new Set<string>();
   // Sessions we've already renamed in this process; avoid clobbering a
