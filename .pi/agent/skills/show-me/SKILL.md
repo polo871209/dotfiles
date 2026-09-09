@@ -56,6 +56,25 @@ sequenceDiagram
     Daemon-->>UI: stream result
 ```
 
+### Make the diagram fit before you send it
+
+The TUI draws the diagram as box art. It drops back to the raw Mermaid source, with no warning, when the art is wider than the message area. A wide sequence diagram is the usual cause, because the width is about `(participants - 1) * (longest label + 2) + 6`. Six participants with 36-character labels need 194 columns.
+
+The renderer also drops back to source for a diagram type it does not draw. It draws `flowchart` and `graph` (including `subgraph`), `sequenceDiagram`, `stateDiagram`, `classDiagram`, and `erDiagram`. Nothing else.
+
+Run the checker on every Mermaid block before you put it in an answer:
+
+```bash
+cat > /tmp/show-me.mmd <<'EOF'
+<diagram source>
+EOF
+node ~/.pi/agent/skills/show-me/mermaid-fit.mjs /tmp/show-me.mmd
+```
+
+The last line is the verdict: `OK width=N limit=L`, `TOO WIDE width=N limit=L`, or `FAIL <cause>`. Exit code 0 means that the TUI draws it. The limit comes from the tmux pane width, and `--width N` overrides it.
+
+On `TOO WIDE`, cut participants, shorten labels, or switch to `flowchart TD`, which is far narrower than a sequence diagram of the same content. On `FAIL`, fix the syntax or pick a supported type. Send the block only after the checker passes.
+
 Keep Mermaid labels free of HTML. The renderer prints `<br/>` literally inside the box instead of breaking the line, so write two `Note over` lines or shorten the label.
 
 - Use `diff` when the point is what changes and the surrounding shape already exists. Match the diff shape to the topic.

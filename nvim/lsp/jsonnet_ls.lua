@@ -1,5 +1,7 @@
 return {
     cmd = { 'jsonnet-language-server', '-t' },
     filetypes = { 'jsonnet', 'libsonnet' },
-    root_markers = { '.git' },
+    -- jsonnetfile.json marks the jsonnet-bundler project whose vendor/ tree
+    -- holds the imports.
+    root_markers = { 'jsonnetfile.json', '.git' },
 }

@@ -14,7 +14,7 @@ Three consequences constrain any change here:
 - Nothing in the daemon may be assumed private. Buffers, `_G.PiLsp`, and language servers outlive the session that created them and are shared with peers, so lua state has to be keyed by file, not by session, and `loadLuaOnce` decides freshness from the daemon's own epoch plus a source hash rather than any local counter.
 - Concurrent clients are real. `PiDaemon.guard` (daemon.lua) admits one driver call at a time and _bounces_ the rest with `{ __pi_busy = true }` for the client to retry; it must never wait, because a driver call's `vim.wait` pumps the loop and would run the waiter inside the holder's frame, which deadlocks both. Route every new entry point into the daemon through `callLua`/`callDriver`/`loadLuaOnce` so it inherits the guard.
 
-Resource ceilings live at the two ends: `driver.lua`'s `M.gc` (LRU buffer cap, then stop servers left with no live buffer) runs from the daemon sweep, and `nvim/lsp/vtsls.lua` drops `enableProjectDiagnostics` under `vim.g.pi_agent`. `PI_LSP_IDLE_MS`, `PI_LSP_SWEEP_MS`, `PI_LSP_MAX_BUFS`, and `PI_LSP_BUF_IDLE_MS` override the defaults, which is also how to test the reapers without waiting minutes.
+Resource ceilings live at the two ends: `driver.lua`'s `M.gc` (LRU buffer cap, then stop servers left with no live buffer) runs from the daemon sweep, and the server configs in `nvim/lsp/` drop workspace-wide analysis under `vim.g.pi_agent` (vtsls `enableProjectDiagnostics`, pyrefly `diagnosticMode`). `PI_LSP_IDLE_MS`, `PI_LSP_SWEEP_MS`, `PI_LSP_MAX_BUFS`, and `PI_LSP_BUF_IDLE_MS` override the defaults, which is also how to test the reapers without waiting minutes.
 
 Keep its two halves separate:
 

@@ -42,8 +42,8 @@
 //
 // Deliberately out of scope, don't re-add without a real need: multi-provider
 // search, curator/summary-review UI, non-YouTube video/PDF extraction, any
-// config file. If a future provider is genuinely free/zero-config like Exa, add it
-// as an alternative in exaSearch's caller, not a whole fallback chain. Also
+// config file. Exa and DuckDuckGo are the two keyless surfaces that exist, and
+// runSearch already chains them; a keyed provider stays out. Also
 // skipped: upstream's inline image fetch (new dep, no demonstrated need) and
 // its `mode: "answer"` page-QA (an LLM call for something a plain fetch +
 // read already covers). Upstream's domainFilter/recencyFilter aren't
@@ -114,6 +114,24 @@ const UNSUPPORTED_CONTENT_TYPES = new Set([
 ]);
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+// Per-mode, because one hardcoded text/html value made mode:"raw" against
+// api.github.com fail with HTTP 415. Both keep a */* tail so a server that
+// negotiates strictly still answers.
+const ACCEPT_HTML = "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8";
+const ACCEPT_RAW = "application/json,text/plain;q=0.9,*/*;q=0.8";
+
+const DUCKDUCKGO_URL = "https://html.duckduckgo.com/html/";
+const SEARCH_RETRY_DELAY_MS = 500;
+
+// Bounded so a long session cannot pin many large documents in memory. The
+// TTL keeps a paged read consistent without serving yesterday's page.
+const EXTRACT_CACHE_TTL_MS = 5 * 60_000;
+const EXTRACT_CACHE_MAX_ENTRIES = 16;
+const EXTRACT_CACHE_MAX_CHARS = 2_000_000;
+
+const GH_TIMEOUT_MS = 20_000;
+const MAX_ISSUE_COMMENTS = 30;
+const MAX_ISSUE_COMMENT_CHARS = 4_000;
 
 // Per-process dir: a shared machine-global path would let this session's
 // shutdown rmSync clones another concurrent pi session is still reading.
@@ -183,13 +201,19 @@ const YOUTUBE_HOSTS = new Set([
 const YOUTUBE_PATH_PREFIXES = ["shorts", "embed", "live", "v"];
 const YOUTUBE_ID = /^[A-Za-z0-9_-]{11}$/;
 const YT_DLP_TIMEOUT_MS = 90_000;
-// Matches en, en-US, en-orig — auto-captions use suffixed codes.
-const YT_PREFERRED_SUB_LANGS = "en.*";
+// Explicit codes, not the regex "en.*": that also matched auto-translations
+// such as en-de-DE, so yt-dlp downloaded a pile of tracks per video and hit
+// YouTube's rate limit sooner. Auto-captions use the -orig suffix.
+const YT_PREFERRED_SUB_LANGS = "en-orig,en,en-US,en-GB";
 
 const turndown = new TurndownService({
   headingStyle: "atx",
   codeBlockStyle: "fenced",
 });
+// This markdown is read by a model, never rendered. Default escaping rewrites
+// PI_CODING_AGENT_DIR as PI\_CODING\_AGENT\_DIR, so an identifier copied out
+// of a page carries backslashes into the next command.
+turndown.escape = (text: string) => text;
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -220,6 +244,38 @@ function withTimeout(signal: AbortSignal | undefined): AbortSignal {
   return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
+// Expands an IPv6 literal into its 8 groups, including the "::" run and a
+// trailing dotted-quad. Needed because a textual prefix test cannot see
+// through normalization: Node rewrites ::ffff:127.0.0.1 as ::ffff:7f00:1.
+function parseIPv6Groups(addr: string): number[] | null {
+  const bare = addr.split("%")[0];
+  const halves = bare.split("::");
+  if (halves.length > 2) return null;
+
+  const parseHalf = (part: string): number[] | null => {
+    if (!part) return [];
+    const groups: number[] = [];
+    for (const piece of part.split(":")) {
+      if (net.isIPv4(piece)) {
+        const [a, b, c, d] = piece.split(".").map(Number);
+        groups.push((a << 8) | b, (c << 8) | d);
+        continue;
+      }
+      if (!/^[0-9a-f]{1,4}$/i.test(piece)) return null;
+      groups.push(parseInt(piece, 16));
+    }
+    return groups;
+  };
+
+  const head = parseHalf(halves[0]);
+  const tail = halves.length === 2 ? parseHalf(halves[1]) : [];
+  if (!head || !tail) return null;
+  if (halves.length === 1) return head.length === 8 ? head : null;
+  const fill = 8 - head.length - tail.length;
+  if (fill < 1) return null;
+  return [...head, ...Array<number>(fill).fill(0), ...tail];
+}
+
 // Blocks requests into the local machine / private network so a malicious
 // page or search result can't trick the agent into hitting internal services.
 function isPrivateAddress(addr: string): boolean {
@@ -232,14 +288,19 @@ function isPrivateAddress(addr: string): boolean {
     if (a === 100 && b >= 64 && b <= 127) return true;
     return false;
   }
-  const lower = addr.toLowerCase();
-  return (
-    lower === "::1" ||
-    lower.startsWith("fe80:") ||
-    lower.startsWith("fc") ||
-    lower.startsWith("fd") ||
-    lower.startsWith("::ffff:127.")
-  );
+
+  const groups = parseIPv6Groups(addr.toLowerCase());
+  if (!groups) return false;
+  const mapped =
+    groups.slice(0, 5).every((g) => g === 0) && groups[5] === 0xffff;
+  if (mapped) {
+    const [g6, g7] = groups.slice(6);
+    return isPrivateAddress(`${g6 >> 8}.${g6 & 0xff}.${g7 >> 8}.${g7 & 0xff}`);
+  }
+  if (groups.every((g, i) => (i === 7 ? g <= 1 : g === 0))) return true;
+  if ((groups[0] & 0xfe00) === 0xfc00) return true;
+  if ((groups[0] & 0xffc0) === 0xfe80) return true;
+  return false;
 }
 
 async function assertSafeUrl(rawUrl: string): Promise<URL> {
@@ -261,23 +322,24 @@ async function assertSafeUrl(rawUrl: string): Promise<URL> {
   return url;
 }
 
+// Returns the final URL as well, because relative links in the body must be
+// resolved against the page that actually served them, not the requested URL.
 async function fetchSafely(
   rawUrl: string,
   signal?: AbortSignal,
-): Promise<Response> {
+  accept: string = ACCEPT_HTML,
+): Promise<{ res: Response; finalUrl: string }> {
   let current = await assertSafeUrl(rawUrl);
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects++) {
     const res = await fetch(current, {
-      headers: {
-        "User-Agent": USER_AGENT,
-        Accept: "text/html,application/xhtml+xml",
-      },
+      headers: { "User-Agent": USER_AGENT, Accept: accept },
       redirect: "manual",
       signal: withTimeout(signal),
     });
-    if (!REDIRECT_STATUSES.has(res.status)) return res;
+    if (!REDIRECT_STATUSES.has(res.status))
+      return { res, finalUrl: current.toString() };
     const location = res.headers.get("location");
-    if (!location) return res;
+    if (!location) return { res, finalUrl: current.toString() };
     if (redirects === MAX_REDIRECTS)
       throw new Error(`Too many redirects fetching ${current.toString()}`);
     current = await assertSafeUrl(new URL(location, current).toString());
@@ -289,6 +351,12 @@ interface SearchResult {
   title: string;
   url: string;
   content: string;
+}
+
+class RetryableSearchError extends Error {}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // Exa's public MCP endpoint (https://mcp.exa.ai/mcp) needs no API key or
@@ -321,10 +389,12 @@ async function exaSearch(
     }),
     signal: withTimeout(signal),
   });
-  if (!res.ok)
-    throw new Error(
-      `Exa search error ${res.status}: ${(await res.text()).slice(0, 300)}`,
-    );
+  if (!res.ok) {
+    const detail = `Exa search error ${res.status}: ${(await res.text()).slice(0, 300)}`;
+    throw res.status === 429 || res.status >= 500
+      ? new RetryableSearchError(detail)
+      : new Error(detail);
+  }
 
   const body = await res.text();
   let payload: {
@@ -378,6 +448,106 @@ async function exaSearch(
   if (results.length === 0)
     throw new Error("Exa search returned no parseable results");
   return results;
+}
+
+// DuckDuckGo's HTML endpoint is the only other keyless search surface, so it
+// covers an Exa outage or rate limit. Snippets are one or two sentences, much
+// thinner than Exa's page text, which is why it stays a fallback.
+async function duckDuckGoSearch(
+  query: string,
+  numResults: number,
+  signal?: AbortSignal,
+): Promise<SearchResult[]> {
+  const url = new URL(DUCKDUCKGO_URL);
+  url.searchParams.set("q", query);
+  const res = await fetch(url, {
+    headers: { "User-Agent": USER_AGENT, Accept: "text/html" },
+    signal: withTimeout(signal),
+  });
+  if (!res.ok)
+    throw new Error(
+      `DuckDuckGo search error ${res.status}: ${(await res.text()).slice(0, 200)}`,
+    );
+
+  const { document } = parseHTML(
+    await readBoundedText(res, MAX_RESPONSE_BYTES),
+  );
+  const results: SearchResult[] = [];
+  for (const container of document.querySelectorAll(".result")) {
+    if (container.classList.contains("result--ad")) continue;
+    const anchor = container.querySelector(".result__a");
+    const title = anchor?.textContent?.trim() ?? "";
+    const href = anchor?.getAttribute("href")?.trim();
+    if (!title || !href) continue;
+    // Result links are redirector URLs carrying the real target in ?uddg=.
+    let target: string;
+    try {
+      const link = new URL(href, DUCKDUCKGO_URL);
+      const destination = new URL(link.searchParams.get("uddg") ?? link.href);
+      if (destination.protocol !== "http:" && destination.protocol !== "https:")
+        continue;
+      target = destination.href;
+    } catch {
+      continue;
+    }
+    results.push({
+      title,
+      url: target,
+      content:
+        container.querySelector(".result__snippet")?.textContent?.trim() ?? "",
+    });
+    if (results.length >= numResults) break;
+  }
+  if (results.length === 0)
+    throw new Error("DuckDuckGo returned no parseable results");
+  return results;
+}
+
+function isTransient(err: unknown): boolean {
+  if (err instanceof RetryableSearchError) return true;
+  const message = errMsg(err).toLowerCase();
+  return (
+    message.includes("fetch failed") ||
+    message.includes("terminated") ||
+    message.includes("timeouterror") ||
+    message.includes("socket")
+  );
+}
+
+// One retry absorbs a rate limit or a dropped socket, then DuckDuckGo covers a
+// full Exa outage. A caller abort ends the attempt chain immediately.
+async function runSearch(
+  query: string,
+  numResults: number,
+  signal?: AbortSignal,
+): Promise<{ results: SearchResult[]; provider: string }> {
+  let firstError: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return {
+        results: await exaSearch(query, numResults, signal),
+        provider: "exa",
+      };
+    } catch (err) {
+      firstError ??= err;
+      if (signal?.aborted) throw err;
+      if (attempt === 0 && isTransient(err)) {
+        await sleep(SEARCH_RETRY_DELAY_MS + Math.floor(Math.random() * 250));
+        continue;
+      }
+      break;
+    }
+  }
+  try {
+    return {
+      results: await duckDuckGoSearch(query, numResults, signal),
+      provider: "duckduckgo",
+    };
+  } catch (fallbackError) {
+    throw new Error(
+      `${errMsg(firstError)}; duckduckgo fallback: ${errMsg(fallbackError)}`,
+    );
+  }
 }
 
 // Reads the body incrementally so a chunked/compressed response with no (or
@@ -454,16 +624,53 @@ function withContinuationFooter(
     offset,
   );
   if (!truncated) return text;
-  return `${text}\n\n[showing chars ${offset}-${nextOffset} of ${totalChars} total — call fetch_content again with { url: "${url}", offset: ${nextOffset} } to continue]`;
+  return `${text}\n\n[chars ${offset}-${nextOffset} of ${totalChars}. To continue: fetch_content({ url: "${url}", offset: ${nextOffset} })]`;
+}
+
+// Readability keeps hrefs exactly as written, and linkedom gives the document
+// no base URI, so "/docs/guide" would reach the model unfetchable. Rewriting
+// against the final URL keeps every link usable in a follow-up call.
+function absolutizeUrls(document: Document, baseUrl: string): void {
+  const rewrite = (selector: string, attribute: string) => {
+    for (const element of document.querySelectorAll(selector)) {
+      const value = element.getAttribute(attribute);
+      if (!value || /^(data|javascript|mailto|tel):/i.test(value)) continue;
+      try {
+        element.setAttribute(attribute, new URL(value, baseUrl).toString());
+      } catch {}
+    }
+  };
+  rewrite("a[href]", "href");
+  rewrite("img[src]", "src");
+}
+
+// Readability returns null on pages with no article shape (dashboards, docs
+// shells, app pages). Their text is still worth reading, so drop the chrome
+// and convert what is left rather than failing the whole call.
+function extractFallbackContent(document: Document): string {
+  for (const element of document.querySelectorAll(
+    "script, style, noscript, svg, iframe, form, nav, header, footer, aside",
+  )) {
+    element.remove();
+  }
+  const body = document.querySelector("main") ?? document.body;
+  if (!body) return "";
+  return turndown
+    .turndown(body.innerHTML ?? "")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 async function fetchReadable(
   url: string,
   signal?: AbortSignal,
   mode: "readable" | "raw" = "readable",
-  offset = 0,
 ): Promise<{ title: string; content: string }> {
-  const res = await fetchSafely(url, signal);
+  const { res, finalUrl } = await fetchSafely(
+    url,
+    signal,
+    mode === "raw" ? ACCEPT_RAW : ACCEPT_HTML,
+  );
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
 
   const contentLength = res.headers.get("content-length");
@@ -484,18 +691,27 @@ async function fetchReadable(
 
   const text = await readBoundedText(res, MAX_RESPONSE_BYTES);
   if (mode === "raw" || !contentType.includes("html")) {
-    return { title: url, content: withContinuationFooter(text, offset, url) };
+    return { title: url, content: text };
   }
 
   const { document } = parseHTML(text);
+  absolutizeUrls(document as unknown as Document, finalUrl);
+  const documentTitle =
+    document.querySelector("title")?.textContent?.trim() ?? "";
+  // Readability mutates the document it parses, so the fallback works on a
+  // second parse of the original HTML.
   const article = new Readability(document as unknown as Document).parse();
-  if (!article) throw new Error("Could not extract readable content from page");
+  const markdown = article ? turndown.turndown(article.content ?? "") : "";
+  if (markdown.trim()) {
+    return { title: article?.title || documentTitle || url, content: markdown };
+  }
 
-  const markdown = turndown.turndown(article.content ?? "");
-  return {
-    title: article.title || url,
-    content: withContinuationFooter(markdown, offset, url),
-  };
+  const { document: raw } = parseHTML(text);
+  absolutizeUrls(raw as unknown as Document, finalUrl);
+  const fallback = extractFallbackContent(raw as unknown as Document);
+  if (!fallback)
+    throw new Error("Could not extract readable content from page");
+  return { title: documentTitle || url, content: fallback };
 }
 
 // Returns the video id for URLs that carry captions, null for channel/
@@ -696,10 +912,8 @@ function readVideoMetadata(dir: string): Record<string, unknown> {
 }
 
 async function fetchYouTubeTranscript(
-  url: string,
   videoId: string,
   signal?: AbortSignal,
-  offset = 0,
 ): Promise<{ title: string; content: string }> {
   const dir = mkdtempSync(join(tmpdir(), "pi-youtube-"));
   try {
@@ -739,14 +953,7 @@ async function fetchYouTubeTranscript(
       .filter(Boolean)
       .join("\n");
 
-    return {
-      title,
-      content: withContinuationFooter(
-        `${header}\n\n${transcript}`,
-        offset,
-        url,
-      ),
-    };
+    return { title, content: `${header}\n\n${transcript}` };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -992,6 +1199,112 @@ function describeGithubPath(root: string, info: GitHubUrlInfo): string {
   return lines.join("\n");
 }
 
+interface GitHubIssueRef {
+  owner: string;
+  repo: string;
+  number: string;
+}
+
+function parseGitHubIssueUrl(rawUrl: string): GitHubIssueRef | null {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return null;
+  }
+  if (url.hostname.toLowerCase() !== "github.com") return null;
+  const segments = url.pathname.split("/").filter(Boolean);
+  if (segments.length < 4) return null;
+  const [owner, repo, kind, number] = segments;
+  if (kind !== "issues" && kind !== "pull") return null;
+  if (!/^\d+$/.test(number)) return null;
+  return { owner, repo: repo.replace(/\.git$/, ""), number };
+}
+
+// The rendered issue page passes through Readability as the opening post
+// alone, without state, labels, or comments, and the answer usually sits in a
+// comment. The REST issues endpoint serves pull requests too.
+async function fetchGitHubIssue(
+  ref: GitHubIssueRef,
+  signal?: AbortSignal,
+): Promise<{ title: string; content: string }> {
+  const base = `repos/${ref.owner}/${ref.repo}/issues/${ref.number}`;
+  const { stdout } = await execCapture(
+    "gh",
+    ["api", base],
+    GH_TIMEOUT_MS,
+    signal,
+  );
+  const issue = JSON.parse(stdout) as {
+    number: number;
+    title: string;
+    state: string;
+    state_reason?: string | null;
+    user?: { login?: string };
+    labels?: Array<{ name?: string }>;
+    created_at?: string;
+    comments?: number;
+    body?: string | null;
+    pull_request?: unknown;
+  };
+
+  const kind = issue.pull_request ? "Pull request" : "Issue";
+  const labels = (issue.labels ?? [])
+    .map((l) => l.name)
+    .filter(Boolean)
+    .join(", ");
+  const lines = [
+    `${kind} ${ref.owner}/${ref.repo}#${issue.number}: ${issue.title}`,
+    `State: ${issue.state}${issue.state_reason ? ` (${issue.state_reason})` : ""}`,
+    `Author: ${issue.user?.login ?? "unknown"}`,
+    labels ? `Labels: ${labels}` : null,
+    issue.created_at ? `Opened: ${issue.created_at}` : null,
+    "",
+    issue.body?.trim() || "(no description)",
+  ].filter((l) => l !== null);
+
+  if ((issue.comments ?? 0) > 0) {
+    const { stdout: commentsJson } = await execCapture(
+      "gh",
+      ["api", `${base}/comments?per_page=${MAX_ISSUE_COMMENTS}`],
+      GH_TIMEOUT_MS,
+      signal,
+    );
+    const comments = JSON.parse(commentsJson) as Array<{
+      user?: { login?: string };
+      created_at?: string;
+      body?: string | null;
+    }>;
+    for (const comment of comments) {
+      const body = (comment.body ?? "").trim();
+      lines.push(
+        "",
+        `## Comment by ${comment.user?.login ?? "unknown"}${comment.created_at ? ` (${comment.created_at})` : ""}`,
+        body.length > MAX_ISSUE_COMMENT_CHARS
+          ? `${body.slice(0, MAX_ISSUE_COMMENT_CHARS)}\n[comment truncated]`
+          : body || "(empty)",
+      );
+    }
+    if ((issue.comments ?? 0) > comments.length) {
+      lines.push(
+        "",
+        `[${issue.comments} comments total, showing first ${comments.length}]`,
+      );
+    }
+  }
+
+  if (issue.pull_request) {
+    lines.push(
+      "",
+      `[Use github_pr for diffs, checks, and review threads: { pr: ${issue.number}, repo: "${ref.owner}/${ref.repo}" }]`,
+    );
+  }
+  return {
+    title: `${ref.owner}/${ref.repo}#${issue.number}: ${issue.title}`,
+    content: lines.join("\n"),
+  };
+}
+
 // GitHub URLs get cloned locally instead of scraped; everything else goes
 // through fetchReadable. Clone failures (private repo, no git, offline) fall
 // back to the normal HTML fetch so the tool still returns something.
@@ -999,12 +1312,11 @@ async function fetchOne(
   url: string,
   signal?: AbortSignal,
   mode: "readable" | "raw" = "readable",
-  offset = 0,
 ): Promise<{ title: string; content: string }> {
   const videoId = parseYouTubeVideoId(url);
   if (videoId) {
     try {
-      return await fetchYouTubeTranscript(url, videoId, signal, offset);
+      return await fetchYouTubeTranscript(videoId, signal);
     } catch (err) {
       // Missing binary is an environment problem, not a "no captions" answer:
       // fall back to the page HTML so the call still returns something.
@@ -1013,7 +1325,16 @@ async function fetchOne(
     }
   }
 
-  const gh = parseGitHubUrl(url);
+  const issueRef = mode === "raw" ? null : parseGitHubIssueUrl(url);
+  if (issueRef) {
+    try {
+      return await fetchGitHubIssue(issueRef, signal);
+    } catch {
+      // gh missing, unauthenticated, or private repo: scrape the page instead.
+    }
+  }
+
+  const gh = mode === "raw" ? null : parseGitHubUrl(url);
   if (gh && !gh.refIsFullSha) {
     try {
       const root = await cloneGitHubRepo(gh.owner, gh.repo, gh.ref, signal);
@@ -1027,7 +1348,44 @@ async function fetchOne(
       // fall through to HTML fetch below
     }
   }
-  return fetchReadable(url, signal, mode, offset);
+  return fetchReadable(url, signal, mode);
+}
+
+interface CachedExtraction {
+  title: string;
+  content: string;
+  storedAt: number;
+}
+
+const extractCache = new Map<string, CachedExtraction>();
+
+// A paged read used to refetch and reconvert the whole document per { offset }
+// call, which also let the page change between pages. Extraction now happens
+// once and later offsets slice the stored text.
+async function fetchOneCached(
+  url: string,
+  signal?: AbortSignal,
+  mode: "readable" | "raw" = "readable",
+): Promise<{ title: string; content: string }> {
+  const key = `${mode}:${url}`;
+  const hit = extractCache.get(key);
+  if (hit && Date.now() - hit.storedAt < EXTRACT_CACHE_TTL_MS) {
+    extractCache.delete(key);
+    extractCache.set(key, hit);
+    return { title: hit.title, content: hit.content };
+  }
+  extractCache.delete(key);
+
+  const extracted = await fetchOne(url, signal, mode);
+  if (extracted.content.length <= EXTRACT_CACHE_MAX_CHARS) {
+    extractCache.set(key, { ...extracted, storedAt: Date.now() });
+    while (extractCache.size > EXTRACT_CACHE_MAX_ENTRIES) {
+      const oldest = extractCache.keys().next().value;
+      if (oldest === undefined) break;
+      extractCache.delete(oldest);
+    }
+  }
+  return extracted;
 }
 
 const nonEmptyText = Type.String({ minLength: 1 });
@@ -1054,7 +1412,7 @@ export const searchParameters = Type.Intersect([
 ]);
 const fetchUrls = Type.Array(nonEmptyText, {
   minItems: 1,
-  description: "URLs to fetch.",
+  description: "URLs to fetch in one call.",
 });
 export const fetchParameters = Type.Intersect([
   Type.Union([
@@ -1071,8 +1429,12 @@ export const fetchParameters = Type.Intersect([
     mode: Type.Optional(
       Type.Union([Type.Literal("readable"), Type.Literal("raw")], {
         default: "readable",
+        description:
+          'Use "raw" for the unprocessed body when the target is JSON or the extraction looks wrong.',
       }),
     ),
+    // No description: a truncated page teaches offset in its own footer, at
+    // the one moment the agent needs it, for zero standing prompt cost.
     offset: Type.Optional(Type.Number({ minimum: 0, default: 0 })),
   }),
 ]);
@@ -1092,8 +1454,8 @@ export default function (pi: ExtensionAPI) {
     name: "web_search",
     label: "Web Search",
     description:
-      "Search the web. Use query for direct lookup or varied queries for broad research; returns title, URL, snippets, and explicit zero-result states.",
-    promptSnippet: "Direct lookup: query. Broad research: varied queries.",
+      "Search the web. Each result is a title, a URL, and a snippet, so fetch a result when the snippet does not settle the question.",
+    promptSnippet: "Search the web for external facts",
     renderResult(result, _options, theme: Theme) {
       const d = result.details as
         | { queries?: string[]; totalResults?: number }
@@ -1136,18 +1498,30 @@ export default function (pi: ExtensionAPI) {
 
       const queryResults = await mapLimit(queryList, 4, async (query) => {
         try {
+          const { results, provider } = await runSearch(
+            query,
+            numResults,
+            signal,
+          );
+          return { query, results, provider, error: null as string | null };
+        } catch (err) {
           return {
             query,
-            results: await exaSearch(query, numResults, signal),
-            error: null as string | null,
+            results: [] as SearchResult[],
+            provider: "none",
+            error: errMsg(err),
           };
-        } catch (err) {
-          return { query, results: [] as SearchResult[], error: errMsg(err) };
         }
       });
 
       let output = "";
       let totalResults = 0;
+      const fellBack = queryResults.some((r) => r.provider === "duckduckgo");
+      // Fallback snippets are one sentence, so a thin result would otherwise
+      // read as a thin web and stop the research early.
+      if (fellBack)
+        output +=
+          "Note: fallback search for at least one query. Snippets are shorter than usual, so fetch a result before concluding.\n\n";
       for (const { query, results, error } of queryResults) {
         if (queryList.length > 1) output += `## Query: "${query}"\n\n`;
         if (error) {
@@ -1177,7 +1551,11 @@ export default function (pi: ExtensionAPI) {
               `0 results across ${queryList.length} quer${queryList.length === 1 ? "y" : "ies"}.`,
           },
         ],
-        details: { queries: queryList, totalResults },
+        details: {
+          queries: queryList,
+          totalResults,
+          providers: [...new Set(queryResults.map((r) => r.provider))],
+        },
       };
     },
   });
@@ -1186,9 +1564,8 @@ export default function (pi: ExtensionAPI) {
     name: "fetch_content",
     label: "Fetch Content",
     description:
-      'Fetch a URL as readable markdown. GitHub links return a local clone path to read further; YouTube video links return the transcript as one timestamp-free paragraph; mode "raw" returns unprocessed text for JSON or debugging.',
-    promptSnippet:
-      "Fetch a page, GitHub link, or YouTube transcript; use offset to resume truncated content.",
+      "Fetch web content as markdown. A GitHub code link returns a local path to read files from. A GitHub issue or pull link returns the thread with its comments. A video link returns the transcript. For PR diffs, checks, or review threads, use github_pr instead.",
+    promptSnippet: "Read a web page, GitHub link, or video transcript",
     renderResult(result, _options, theme: Theme) {
       const d = result.details as { urls?: string[]; ok?: number } | undefined;
       return new Text(
@@ -1227,8 +1604,13 @@ export default function (pi: ExtensionAPI) {
 
       const results = await mapLimit(urlList, 3, async (url) => {
         try {
-          const { title, content } = await fetchOne(url, signal, mode, offset);
-          return { url, title, content, error: null as string | null };
+          const { title, content } = await fetchOneCached(url, signal, mode);
+          return {
+            url,
+            title,
+            content: withContinuationFooter(content, offset, url),
+            error: null as string | null,
+          };
         } catch (err) {
           return { url, title: "", content: "", error: errMsg(err) };
         }

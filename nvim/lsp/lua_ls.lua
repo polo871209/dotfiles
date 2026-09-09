@@ -1,7 +1,14 @@
 return {
     cmd = { 'lua-language-server' },
     filetypes = { 'lua' },
-    root_markers = { { '.luarc.json', '.luarc.jsonc' }, '.git' },
+    -- Second rank: a directory that carries lint or format configuration is a
+    -- Lua project even without a .luarc.json, and rooting there keeps a
+    -- vendored plugin from being analyzed as part of the outer repository.
+    root_markers = {
+        { '.luarc.json', '.luarc.jsonc' },
+        { '.luacheckrc', '.stylua.toml', 'stylua.toml' },
+        '.git',
+    },
     on_init = function(client)
         -- Skip config overrides when a .luarc.json exists in the workspace
         if client.workspace_folders then

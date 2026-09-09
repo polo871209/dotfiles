@@ -1,7 +1,11 @@
 return {
     cmd = { 'zls' },
-    filetypes = { 'zig', 'zir' },
-    root_markers = { 'build.zig', 'build.zig.zon', '.git' },
+    -- .zon files also detect as `zig`, and nothing detects as `zir`, so `zig`
+    -- alone covers everything zls answers for.
+    filetypes = { 'zig' },
+    -- zls.json holds per-project server settings and outranks the build files
+    -- next to it.
+    root_markers = { 'zls.json', { 'build.zig', 'build.zig.zon' }, '.git' },
     settings = {
         zls = {
             -- Full semantic diagnostics (cross-file type errors, undefined
