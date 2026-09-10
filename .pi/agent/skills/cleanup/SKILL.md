@@ -38,26 +38,16 @@ Completion: every proposed deletion has evidence that it is unreachable, unrefer
 
 ## Comment rules
 
-A comment's primary reader today is an agent, not a human, so judge every comment as agent-facing prose: invoke the `writing-for-agents` skill before ruling on any of them. Two of its rules decide most cases: the **no-op test** (a comment that changes no reader's behavior is dead weight, even when true) and the **scar tissue** exception (a comment that reads as redundant often exists because a model already failed that way once, so inferable is not sufficient to delete).
+The `Comments` section of the system prompt holds the delete-and-keep rules, including the no-op test and the scar-tissue exception. Apply it as written. A comment's primary reader today is an agent, not a human, so judge every comment as agent-facing prose and invoke the `writing-for-agents` skill before a hard call.
 
-Delete a comment when any condition applies:
+Four rulings belong to cleanup alone:
 
-- Decorative divider, banner, box, or visual filler.
-- Restates the next line or narrates obvious control flow.
-- Records history instead of current intent.
-- Comments out code without a concrete TODO or explanation.
-- Contradicts the code it describes.
+- Shorten a comment that carries real WHY but spends more words than the WHY needs.
+- Delete a comment that contradicts the code it describes.
+- Delete a commented-out block unless it carries a concrete TODO or an explanation.
+- Keep public API documentation and generated-file markers, even when they repeat the code.
 
-Keep or shorten comments that carry:
-
-- Non-obvious intent, trade-off, invariant, gotcha, or issue link.
-- Public API documentation.
-- License or copyright text.
-- Generated-file markers, formatter controls, linter directives, type suppressions, or other tool instructions.
-- A concrete TODO that still applies.
-- Scar tissue: a caveat that reads as obvious but plausibly exists because someone already got it wrong.
-
-Rewrite only to preserve the same meaning more concisely.
+Rewrite only to say the same thing in fewer words. Never add a comment during cleanup.
 
 ## Dead-code rules
 

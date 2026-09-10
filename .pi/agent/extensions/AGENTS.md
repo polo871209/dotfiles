@@ -23,7 +23,7 @@ Before changing Pi-native behavior, read directly relevant documentation in the 
 - **`web-search.ts`** — searches or fetches one or many web targets for external research, returning GitHub links as local files or comment threads, and videos as transcripts.
 - **`eval/`** — runs persistent Python for iterative computation and bulk aggregation.
 - **`lsp/`** — provides symbol navigation and deterministic post-edit diagnostics and fixes for code work.
-- **`github-pr.ts`** — fetches concise PR metadata, failures, review threads, diffs, or a single section, for PR analysis.
+- **`github-pr.ts`** — fetches concise PR metadata, failures, review threads, diffs, or a single section for PR analysis, and resolves all open review threads once the fixes land.
 - **`subagent.ts`** — delegates medium or large research, repository recon, or implementation while supporting background control and compact structured results.
 - **`quiet-run.ts`** — runs a long or noisy shell command with its output kept in a log file, returning only the verdict and the requested slice.
 - **`ask/`** — presents structured choices when a request needs clarification.

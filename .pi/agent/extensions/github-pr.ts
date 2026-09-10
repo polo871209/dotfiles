@@ -76,6 +76,7 @@ function parsePr(pr: string): { number: number; repo?: string } | null {
 }
 
 type Thread = {
+  id: string;
   isResolved: boolean;
   isOutdated: boolean;
   path: string;
@@ -93,15 +94,136 @@ query($owner:String!,$repo:String!,$number:Int!){
     pullRequest(number:$number){
       comments(first:100){ totalCount nodes{ author{login __typename} body } }
       reviewThreads(first:100){ totalCount nodes{
-        isResolved isOutdated path line
+        id isResolved isOutdated path line
         comments(first:30){ nodes{ author{login} body } }
       } }
     }
   }
 }`;
 
+const RESOLVE_MUTATION = `
+mutation($id:ID!){
+  resolveReviewThread(input:{threadId:$id}){ thread{ id isResolved } }
+}`;
+
+// One in-flight mutation per thread would serialize badly on a big review;
+// more than a handful trips GitHub's abuse detection.
+const RESOLVE_CONCURRENCY = 4;
+
 function fmt(n: number): string {
   return n.toLocaleString("en-US");
+}
+
+type ToolResult = {
+  content: { type: "text"; text: string }[];
+  details: { summary: string };
+  error?: string;
+};
+
+function fail(msg: string): ToolResult {
+  return {
+    content: [{ type: "text" as const, text: msg }],
+    details: { summary: msg },
+    error: msg,
+  };
+}
+
+// Mark every unresolved review thread as resolved, with no reply comment.
+async function resolveThreads(
+  owner: string,
+  repo: string,
+  num: number,
+  signal?: AbortSignal,
+): Promise<ToolResult> {
+  if (!owner || !repo) {
+    return fail("github_pr: resolve needs owner/repo — pass `repo`.");
+  }
+  const gql = await run(
+    "gh",
+    [
+      "api",
+      "graphql",
+      "-f",
+      `query=${GRAPHQL}`,
+      "-F",
+      `owner=${owner}`,
+      "-F",
+      `repo=${repo}`,
+      "-F",
+      `number=${num}`,
+    ],
+    signal,
+  );
+  if (gql.code !== 0) {
+    return fail(
+      `github_pr: could not list review threads: ${gql.stderr.trim().split("\n")[0]}`,
+    );
+  }
+
+  let threads: Thread[];
+  try {
+    const data = JSON.parse(gql.stdout) as {
+      data: {
+        repository: {
+          pullRequest: { reviewThreads: { nodes: Thread[] } };
+        };
+      };
+    };
+    threads = data.data.repository.pullRequest.reviewThreads.nodes.filter(
+      (t) => !t.isResolved,
+    );
+  } catch {
+    return fail("github_pr: could not parse review threads");
+  }
+
+  if (!threads.length) {
+    const msg = `PR #${num}: no unresolved review threads`;
+    return {
+      content: [{ type: "text" as const, text: msg }],
+      details: { summary: msg },
+    };
+  }
+
+  const done: string[] = [];
+  const failed: string[] = [];
+  for (let i = 0; i < threads.length; i += RESOLVE_CONCURRENCY) {
+    const batch = threads.slice(i, i + RESOLVE_CONCURRENCY);
+    const results = await Promise.all(
+      batch.map((t) =>
+        run(
+          "gh",
+          [
+            "api",
+            "graphql",
+            "-f",
+            `query=${RESOLVE_MUTATION}`,
+            "-f",
+            `id=${t.id}`,
+          ],
+          signal,
+        ),
+      ),
+    );
+    results.forEach((r, j) => {
+      const t = batch[j];
+      const loc = `${t.path}${t.line ? `:${t.line}` : ""}`;
+      if (r.code === 0) done.push(loc);
+      else failed.push(`${loc} (${r.stderr.trim().split("\n")[0]})`);
+    });
+  }
+
+  const out = [
+    `# PR #${num}: resolved ${done.length}/${threads.length} thread(s)`,
+  ];
+  for (const loc of done) out.push(`- ✅ \`${loc}\``);
+  for (const f of failed) out.push(`- ⚠️ ${f}`);
+  const summary =
+    `PR #${num} · resolved ${done.length} thread(s)` +
+    (failed.length ? ` · ${failed.length} failed` : "");
+  return {
+    content: [{ type: "text" as const, text: out.join("\n") }],
+    details: { summary },
+  };
 }
 
 const params = Type.Object({
@@ -142,6 +264,12 @@ const params = Type.Object({
       },
     ),
   ),
+  action: Type.Optional(
+    Type.Union([Type.Literal("report"), Type.Literal("resolve")], {
+      description:
+        "report (default) returns the PR as markdown. resolve marks every unresolved review thread as resolved on GitHub, without a reply. It writes to the PR, so run it only after the fixes land.",
+    }),
+  ),
 });
 
 export default function (pi: ExtensionAPI) {
@@ -158,7 +286,7 @@ export default function (pi: ExtensionAPI) {
       return new Text(theme.fg("dim", `  ${s}`), 0, 0);
     },
     description:
-      "Fetch a GitHub PR (URL or number) as signal-only markdown: metadata, description, changed files, failing checks, and unresolved review threads. Use instead of `gh pr view`. Pass `select` to fetch just one section.",
+      "Fetch a GitHub PR (URL or number) as signal-only markdown: metadata, description, changed files, failing checks, and unresolved review threads. Use instead of `gh pr view`. Pass `select` to fetch just one section, or `action: resolve` to resolve every open review thread after a fix.",
     parameters: params,
     async execute(_id, raw, signal, _onUpdate, _ctx) {
       const a = raw as {
@@ -168,6 +296,7 @@ export default function (pi: ExtensionAPI) {
         includeBots?: boolean;
         includeResolved?: boolean;
         select?: "files" | "checks" | "comments" | "diff";
+        action?: "report" | "resolve";
       };
       const parsed = parsePr(a.pr);
       if (!parsed) {
@@ -211,6 +340,10 @@ export default function (pi: ExtensionAPI) {
         if (r.code === 0 && r.stdout.includes("/")) {
           [glOwner, glRepo] = r.stdout.trim().split("/");
         }
+      }
+
+      if (a.action === "resolve") {
+        return resolveThreads(glOwner, glRepo, num, signal);
       }
 
       const [meta, diff, gql] = await Promise.all([
