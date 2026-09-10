@@ -10,6 +10,8 @@
 - History: [Atuin](https://docs.atuin.sh/cli/)
 - Browser: [Zen](https://zen-browser.app/)
 
+Everything else lives in the [Brewfile](Brewfile) and [mise config](mise/config.toml).
+
 ## Mac Quick Setup
 
 ### Init

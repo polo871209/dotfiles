@@ -1,0 +1,47 @@
+{
+  "$schema" : "schema.json",
+  "animationsEnabled" : false,
+  "appExceptions" : [
+    {
+      "bundleID" : "com.apple.finder",
+      "hide" : "whenNoWindows",
+      "ignore" : "never"
+    },
+    {
+      "bundleID" : "net.whatsapp.WhatsApp",
+      "hide" : "dontHide",
+      "ignore" : "never"
+    },
+    {
+      "bundleID" : "me.paolino.fastpotify",
+      "hide" : "dontHide",
+      "ignore" : "never"
+    }
+  ],
+  "boldSelectedLabel" : false,
+  "displayMode" : "activeWindow",
+  "experimentalInstantSpaceSwitch" : true,
+  "experimentalLivePreviews" : true,
+  "fontFace" : "system",
+  "fuzzySearchEnabled" : false,
+  "gridMaxColumns" : 4,
+  "hideFromScreenSharing" : true,
+  "hideMenuBarIcon" : true,
+  "instantSpaceSwitch" : true,
+  "layoutMode" : "windowPreview",
+  "listWidthPercent" : 40,
+  "livePreviews" : true,
+  "nextScopedShortcutID" : 0,
+  "panelAppearance" : "dark",
+  "panelCornerRadius" : 40,
+  "scopedShortcutList" : [
+
+  ],
+  "showApplicationNames" : true,
+  "showHiddenApps" : false,
+  "showMinimizedWindows" : false,
+  "showWindowlessApps" : false,
+  "showWindowStatusIcons" : false,
+  "showWindowTitleLabel" : true,
+  "tabDrillEnabled" : false
+}
