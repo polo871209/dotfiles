@@ -9,12 +9,12 @@
     },
     {
       "bundleID" : "net.whatsapp.WhatsApp",
-      "hide" : "dontHide",
+      "hide" : "always",
       "ignore" : "never"
     },
     {
       "bundleID" : "me.paolino.fastpotify",
-      "hide" : "dontHide",
+      "hide" : "always",
       "ignore" : "never"
     }
   ],
