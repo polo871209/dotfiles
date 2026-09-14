@@ -21,7 +21,7 @@
   },
 
   "compaction": {
-    "reserveTokens": 730000
+    "reserveTokens": 700000
   },
   "branchSummary": {
     "skipPrompt": true

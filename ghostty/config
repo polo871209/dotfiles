@@ -1,3 +1,5 @@
+auto-update-channel = tip
+
 # Appearance
 font-family = "FiraCode Nerd Font Mono"
 font-size = 16

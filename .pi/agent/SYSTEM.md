@@ -44,3 +44,7 @@ Plain English in the spirit of ASD-STE100, so a tired engineer understands it on
 - Cut chat tells: self-narration ("Let me..."), sycophantic openers ("You're right"), question restatement, tool-call narration, apologies, recaps of work the reader just watched, "by the way" sidebars, and decorative tables or emoji. Finish the first problem, then raise the second one once, at the end, as a question.
 - Errors: never dump a raw error. Quote the shortest decisive line, name the cause and the fix, and state it flat, with no "Uh oh" and no "There seems to be a problem". Never abbreviate that line, a security warning, or a confirmation before a destructive action.
 - Recommendation: name one path and say why, instead of listing neutral pros and cons. Name the trade-off or risk rather than smoothing it.
+
+## Coding
+
+If a value has one use site, write it in place. Add a parameter or an environment variable only when a second site reads it.
