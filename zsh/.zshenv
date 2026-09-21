@@ -24,6 +24,11 @@ export DOCKER_DEFAULT_PLATFORM=linux/amd64
 # GitHub
 export GITHUB_TOKEN="$(gh auth token 2>/dev/null)"
 
+# Secrets live in the login keychain, never in this repo. Add one with:
+#   security add-generic-password -a "$USER" -s <service> -U -w
+# An empty value is fine: web-search's rerank treats it as "not configured".
+export TYPESAFE_API_KEY="$(security find-generic-password -s typesafe-api-key -w 2>/dev/null)"
+
 # Misc
 export OBSIDIAN_VAULT="$HOME/vaults/obsidian"
 export HOMEBREW_NO_ENV_HINTS=1

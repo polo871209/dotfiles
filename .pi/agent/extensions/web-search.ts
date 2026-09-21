@@ -11,12 +11,32 @@
 // package (SHA-pinned so the links stay valid regardless of upstream changes:
 // github.com/nicobailon/pi-web-access/blob/7bdc30a65cf77273eb9c0034647b373bda4060d7/<file>):
 //
-// - Search backend: Exa's public MCP endpoint (mcp.exa.ai), a JSON-RPC POST
-//   over plain HTTP — no API key, no MCP client wiring needed. This was the
-//   *only* zero-config path in the old package's provider fallback chain (see
-//   exa.ts's searchWithExaMcp/callExaMcp/parseMcpResults). Every other
-//   provider needs a paid key this machine doesn't have, so the whole
-//   fallback chain was dropped rather than ported.
+// - Search backends, in the order runSearch walks them, all keyless: Exa's
+//   public MCP endpoint (mcp.exa.ai) twice, once for its advanced tool and
+//   once for its basic one, then Parallel's public MCP endpoint
+//   (search.parallel.ai/mcp), then DuckDuckGo's HTML page. Each is a
+//   JSON-RPC POST over plain HTTP, no MCP client wiring needed. Every keyed
+//   provider in the old package's chain (Brave, Tavily, Perplexity, Kagi,
+//   Serper, …) stays out: this machine has none of those keys.
+//   Measured 2026-01 over 3 queries, median snippet per result: Exa ~4000
+//   chars, Parallel 1500, DuckDuckGo 150-300. That is the ordering rationale.
+//   Exa is also the least reliable of the three (a 20s timeout on one query),
+//   which is why the chain exists.
+// - Relevance rerank (rerankResults): optional, off unless TYPESAFE_API_KEY
+//   is set, and fail-open in every failure mode. See the function comment.
+//   All four providers rank by their own notion of a match, which is not the
+//   same as answering the question the agent asked. It also trims: measured
+//   2026-01 over 4 queries, pages that answered the query scored 0.54-0.98
+//   and the rest 0.12-0.33, so RERANK_FLOOR sits in that gap and a thin
+//   topic returns 3 results instead of 10. Before moving the floor, log the
+//   nouls scoreCandidates returns for a handful of real queries and look for
+//   the gap.
+// - Cross-query dedup (dedupKey): a multi-query call otherwise prints the
+//   same page once per query that found it.
+// - Search backend history: Exa MCP was the *only* zero-config path in the
+//   old package's chain (see exa.ts's searchWithExaMcp/callExaMcp/
+//   parseMcpResults); DuckDuckGo and Parallel MCP are re-derived here, not
+//   ported.
 // - Content extraction: @mozilla/readability + linkedom (parse) + turndown
 //   (HTML->markdown), same 3 libs and same pipeline as extract.ts's
 //   extractContent, minus its RSC/PDF/video/GitHub-HTML branches.
@@ -40,16 +60,19 @@
 //   yields nothing through Readability, so fetch_content routes video URLs
 //   here and returns one timestamp-free paragraph.
 //
-// Deliberately out of scope, don't re-add without a real need: multi-provider
-// search, curator/summary-review UI, non-YouTube video/PDF extraction, any
-// config file. Exa and DuckDuckGo are the two keyless surfaces that exist, and
-// runSearch already chains them; a keyed provider stays out. Also
-// skipped: upstream's inline image fetch (new dep, no demonstrated need) and
-// its `mode: "answer"` page-QA (an LLM call for something a plain fetch +
-// read already covers). Upstream's domainFilter/recencyFilter aren't
-// portable here either — mcp.exa.ai's public keyless surface exposes only
-// `web_search_exa`/`web_fetch_exa` (verified live), no advanced/filtered
-// variant; that needs a paid Exa key upstream requires for the same feature.
+// Deliberately out of scope, don't re-add without a real need: any keyed
+// search provider, curator/summary-review UI, non-YouTube video/PDF
+// extraction, any config file. Also skipped: upstream's inline image fetch
+// (new dep, no demonstrated need) and its `mode: "answer"` page-QA (an LLM
+// call for something a plain fetch + read already covers).
+//
+// Available but not wired up: `web_search_advanced_exa` also takes
+// includeDomains/excludeDomains, startPublishedDate/endPublishedDate,
+// category, and additionalQueries (read its live schema with a tools/list
+// call against mcp.exa.ai/mcp?tools=web_search_advanced_exa). Those would
+// need new tool parameters and a degraded form for the other three
+// providers, which only accept `site:` text. Add them when a search actually
+// needs a filter, not before.
 //
 // Ported from upstream since (SHA-pinned as above): fetch_content's
 // offset-based continuation with clean line-boundary truncation instead of a
@@ -98,6 +121,22 @@ import {
 } from "node:path";
 
 const EXA_MCP_URL = "https://mcp.exa.ai/mcp";
+const PARALLEL_MCP_URL = "https://search.parallel.ai/mcp";
+// Per-result text budget. The model sees 400 characters of it; the rest
+// exists so the rerank below judges a real passage, not a headline.
+const EXA_TEXT_CHARS = 1_500;
+const TYPESAFE_URL = "https://api.typesafe.ai/v1/systemone";
+const TYPESAFE_MODEL = "jev-latest";
+// Shorter than REQUEST_TIMEOUT_MS: reranking is an optional improvement on a
+// result set we already hold, so it must never dominate search latency.
+const RERANK_TIMEOUT_MS = 8_000;
+const RERANK_SNIPPET_CHARS = 600;
+const RERANK_MAX_CANDIDATES = 10;
+// Below this probability the page does not answer the query, and printing it
+// costs context for nothing. Keep the top few regardless: a whole shortlist
+// scoring low means the judgment is weak, not that the web is empty.
+const RERANK_FLOOR = 0.35;
+const RERANK_MIN_KEEP = 3;
 const REQUEST_TIMEOUT_MS = 20_000;
 const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 const MAX_CONTENT_CHARS = 15_000;
@@ -359,14 +398,17 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Exa's public MCP endpoint (https://mcp.exa.ai/mcp) needs no API key or
-// account — it's a JSON-RPC tool call over plain HTTP, no MCP client needed.
-async function exaSearch(
-  query: string,
-  numResults: number,
+// One JSON-RPC tools/call over plain HTTP against a public MCP endpoint: no
+// API key, no account, no MCP client library. Returns the tool's text content,
+// which every server here fills with its own JSON or text payload.
+async function callMcpTool(
+  endpoint: string,
+  label: string,
+  name: string,
+  args: Record<string, unknown>,
   signal?: AbortSignal,
-): Promise<SearchResult[]> {
-  const res = await fetch(EXA_MCP_URL, {
+): Promise<string> {
+  const res = await fetch(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -376,21 +418,12 @@ async function exaSearch(
       jsonrpc: "2.0",
       id: 1,
       method: "tools/call",
-      params: {
-        name: "web_search_exa",
-        arguments: {
-          query,
-          numResults,
-          livecrawl: "fallback",
-          type: "auto",
-          contextMaxCharacters: 2000,
-        },
-      },
+      params: { name, arguments: args },
     }),
     signal: withTimeout(signal),
   });
   if (!res.ok) {
-    const detail = `Exa search error ${res.status}: ${(await res.text()).slice(0, 300)}`;
+    const detail = `${label} search error ${res.status}: ${(await res.text()).slice(0, 300)}`;
     throw res.status === 429 || res.status >= 500
       ? new RetryableSearchError(detail)
       : new Error(detail);
@@ -404,6 +437,7 @@ async function exaSearch(
     };
     error?: { message?: string };
   } | null = null;
+  // One endpoint answers as plain JSON or as SSE, so try event lines first.
   for (const line of body.split("\n")) {
     if (!line.startsWith("data:")) continue;
     try {
@@ -419,13 +453,88 @@ async function exaSearch(
       payload = JSON.parse(body);
     } catch {}
   }
-  if (!payload) throw new Error("Exa search returned an empty response");
+  if (!payload) throw new Error(`${label} search returned an empty response`);
   if (payload.error)
-    throw new Error(`Exa search error: ${payload.error.message ?? "unknown"}`);
+    throw new Error(
+      `${label} search error: ${payload.error.message ?? "unknown"}`,
+    );
   const text = payload.result?.content?.find(
     (c) => c.type === "text" && c.text,
   )?.text;
-  if (!text) throw new Error("Exa search returned no content");
+  if (!text) throw new Error(`${label} search returned no content`);
+  return text;
+}
+
+// Exa's public MCP endpoint exposes the advanced tool only when the query
+// string asks for it (verified live via tools/list). It is worth asking for:
+// it answers with structured JSON instead of a `Title:`/`URL:` text blob, and
+// it takes textMaxCharacters plus highlights, so each result arrives with the
+// passages that matched rather than the top of the page.
+async function exaAdvancedSearch(
+  query: string,
+  numResults: number,
+  signal?: AbortSignal,
+): Promise<SearchResult[]> {
+  const text = await callMcpTool(
+    `${EXA_MCP_URL}?tools=web_search_advanced_exa`,
+    "Exa",
+    "web_search_advanced_exa",
+    {
+      query,
+      numResults,
+      type: "auto",
+      textMaxCharacters: EXA_TEXT_CHARS,
+      enableHighlights: true,
+      highlightsNumSentences: 2,
+    },
+    signal,
+  );
+  const payload = JSON.parse(text) as {
+    results?: Array<{
+      url?: string;
+      title?: string;
+      text?: string;
+      highlights?: string[];
+    }>;
+  };
+  const results = (payload.results ?? [])
+    .map((r): SearchResult => {
+      const highlights = Array.isArray(r.highlights)
+        ? r.highlights.join(" … ")
+        : "";
+      return {
+        title: r.title?.trim() ?? "",
+        url: r.url?.trim() ?? "",
+        // Highlights first: they are the query-matched sentences, while text
+        // is just the head of the page. textMaxCharacters caps `text` alone,
+        // so cap the pair here too.
+        content: [highlights, r.text?.trim()]
+          .filter(Boolean)
+          .join("\n")
+          .trim()
+          .slice(0, EXA_TEXT_CHARS),
+      };
+    })
+    .filter((r) => r.url);
+  if (results.length === 0)
+    throw new Error("Exa search returned no parseable results");
+  return results;
+}
+
+// The basic tool, kept as the first fallback: it is the one Exa has always
+// exposed on the keyless endpoint, and its text format needs its own parser.
+async function exaBasicSearch(
+  query: string,
+  numResults: number,
+  signal?: AbortSignal,
+): Promise<SearchResult[]> {
+  const text = await callMcpTool(
+    EXA_MCP_URL,
+    "Exa",
+    "web_search_exa",
+    { query, numResults },
+    signal,
+  );
 
   const blocks = text.split(/(?=^Title: )/m).filter((b) => b.trim());
   const results = blocks
@@ -441,12 +550,52 @@ async function exaSearch(
         if (hlMatch?.index != null)
           content = block.slice(hlMatch.index + hlMatch[0].length);
       }
-      content = content.replace(/\n---\s*$/, "").trim();
+      content = content
+        .replace(/\n---\s*$/, "")
+        .trim()
+        .slice(0, EXA_TEXT_CHARS);
       return { title, url, content };
     })
     .filter((r) => r.url);
   if (results.length === 0)
     throw new Error("Exa search returned no parseable results");
+  return results;
+}
+
+// Parallel's public MCP endpoint (https://search.parallel.ai/mcp) is the
+// second keyless surface with real page excerpts — verified live with no
+// Authorization header. It sits between Exa and DuckDuckGo because its
+// excerpts are far richer than a DuckDuckGo snippet.
+async function parallelSearch(
+  query: string,
+  numResults: number,
+  signal?: AbortSignal,
+): Promise<SearchResult[]> {
+  const text = await callMcpTool(
+    PARALLEL_MCP_URL,
+    "Parallel",
+    "web_search",
+    { objective: query, search_queries: [query] },
+    signal,
+  );
+  const payload = JSON.parse(text) as {
+    results?: Array<{ url?: string; title?: string; excerpts?: string[] }>;
+  };
+  const results = (payload.results ?? [])
+    .map((r): SearchResult => {
+      const excerpts = Array.isArray(r.excerpts) ? r.excerpts : [];
+      return {
+        title: r.title?.trim() ?? "",
+        url: r.url?.trim() ?? "",
+        // Excerpts run to thousands of characters each and the whole response
+        // can pass 40KB; cap per result rather than hand that to the model.
+        content: excerpts.join("\n").trim().slice(0, EXA_TEXT_CHARS),
+      };
+    })
+    .filter((r) => r.url)
+    .slice(0, numResults);
+  if (results.length === 0)
+    throw new Error("Parallel search returned no parseable results");
   return results;
 }
 
@@ -503,6 +652,47 @@ async function duckDuckGoSearch(
   return results;
 }
 
+// Dedup identity, not a fetchable URL: scheme, host case, a leading www., a
+// trailing slash, the fragment, and campaign parameters all name the same
+// page. `page` and `query` stay apart because a query string either selects
+// content (/search?q=x) or is a referral tag (/post?curius=1940), and only
+// the caller can weigh that.
+function dedupKey(raw: string): { page: string; query: string } {
+  try {
+    const url = new URL(raw);
+    for (const key of [...url.searchParams.keys()]) {
+      if (/^(utm_|gclid|fbclid|mc_|ref$|source$)/i.test(key))
+        url.searchParams.delete(key);
+    }
+    const path = url.pathname.replace(/\/+$/, "");
+    return {
+      page: `${url.hostname.replace(/^www\./i, "").toLowerCase()}${path}`,
+      query: url.search,
+    };
+  } catch {
+    return { page: raw, query: "" };
+  }
+}
+
+function dedupResults(
+  results: SearchResult[],
+  seen = new Map<string, Set<string>>(),
+): SearchResult[] {
+  return results.filter((r) => {
+    const { page, query } = dedupKey(r.url);
+    const queries = seen.get(page);
+    if (!queries) {
+      seen.set(page, new Set([query]));
+      return true;
+    }
+    if (queries.has(query)) return false;
+    // One side is the plain page, so the other side's parameters are decoration.
+    if (query === "" || queries.has("")) return false;
+    queries.add(query);
+    return true;
+  });
+}
+
 function isTransient(err: unknown): boolean {
   if (err instanceof RetryableSearchError) return true;
   const message = errMsg(err).toLowerCase();
@@ -514,40 +704,140 @@ function isTransient(err: unknown): boolean {
   );
 }
 
-// One retry absorbs a rate limit or a dropped socket, then DuckDuckGo covers a
-// full Exa outage. A caller abort ends the attempt chain immediately.
+// Providers in descending snippet quality, all keyless. One retry absorbs a
+// rate limit or a dropped socket on the first provider; after that the chain
+// walks down rather than hammering a provider that is down. A caller abort
+// ends the chain immediately.
+const SEARCH_PROVIDERS: Array<{
+  name: string;
+  run: (
+    query: string,
+    numResults: number,
+    signal?: AbortSignal,
+  ) => Promise<SearchResult[]>;
+}> = [
+  { name: "exa", run: exaAdvancedSearch },
+  { name: "exa-basic", run: exaBasicSearch },
+  { name: "parallel", run: parallelSearch },
+  { name: "duckduckgo", run: duckDuckGoSearch },
+];
+
 async function runSearch(
   query: string,
   numResults: number,
   signal?: AbortSignal,
 ): Promise<{ results: SearchResult[]; provider: string }> {
-  let firstError: unknown;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    try {
-      return {
-        results: await exaSearch(query, numResults, signal),
-        provider: "exa",
-      };
-    } catch (err) {
-      firstError ??= err;
-      if (signal?.aborted) throw err;
-      if (attempt === 0 && isTransient(err)) {
-        await sleep(SEARCH_RETRY_DELAY_MS + Math.floor(Math.random() * 250));
-        continue;
+  const failures: string[] = [];
+  for (const [index, provider] of SEARCH_PROVIDERS.entries()) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return {
+          results: await provider.run(query, numResults, signal),
+          provider: provider.name,
+        };
+      } catch (err) {
+        if (signal?.aborted) throw err;
+        if (index === 0 && attempt === 0 && isTransient(err)) {
+          await sleep(SEARCH_RETRY_DELAY_MS + Math.floor(Math.random() * 250));
+          continue;
+        }
+        failures.push(`${provider.name}: ${errMsg(err)}`);
+        break;
       }
-      break;
     }
   }
-  try {
-    return {
-      results: await duckDuckGoSearch(query, numResults, signal),
-      provider: "duckduckgo",
+  throw new Error(failures.join("; "));
+}
+
+// Optional relevance scoring through TypeSafe's System One endpoint: one
+// request carrying every candidate, one Noul per candidate. Every provider
+// ranks by its own notion of a match, which answers "contains these words"
+// rather than "answers this question", so the useful page often sits at rank
+// 4 while the model reads rank 1.
+//
+// Returns null on every failure (no key, an error status, a timeout, an
+// unparseable body) so the caller keeps the provider's order.
+async function scoreCandidates(
+  query: string,
+  candidates: SearchResult[],
+  signal?: AbortSignal,
+): Promise<Array<number | null> | null> {
+  const apiKey = process.env.TYPESAFE_API_KEY?.trim();
+  if (!apiKey) return null;
+
+  const questions: Record<string, unknown> = {};
+  candidates.forEach((_, i) => {
+    questions[`c${i}`] = {
+      type: "noul",
+      instructions: `Does the search result at \`candidates[${i}]\` answer \`query\`?`,
+      criteria: {
+        true: "The page is about the query's subject and its text carries the specific facts, documentation, or code the query asks for.",
+        false:
+          "The page only shares keywords with the query, covers a different subject or version, or is a listing, index, or advertisement with no substance on the query.",
+      },
     };
-  } catch (fallbackError) {
-    throw new Error(
-      `${errMsg(firstError)}; duckduckgo fallback: ${errMsg(fallbackError)}`,
-    );
+  });
+
+  try {
+    const timeout = AbortSignal.timeout(RERANK_TIMEOUT_MS);
+    const res = await fetch(TYPESAFE_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: TYPESAFE_MODEL,
+        state: {
+          query,
+          candidates: candidates.map((r) => ({
+            title: r.title,
+            url: r.url,
+            text: r.content.slice(0, RERANK_SNIPPET_CHARS),
+          })),
+        },
+        questions,
+      }),
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+    });
+    if (!res.ok) return null;
+    const payload = (await res.json()) as {
+      answers?: Record<string, { noul?: number }>;
+    };
+    if (!payload.answers) return null;
+    const scores = candidates.map((_, i) => {
+      const noul = payload.answers?.[`c${i}`]?.noul;
+      return typeof noul === "number" ? noul : null;
+    });
+    // A partial answer set is still useful, but only if something came back.
+    return scores.some((s) => s !== null) ? scores : null;
+  } catch {
+    return null;
   }
+}
+
+// Sorts by relevance, most relevant first, and drops the tail that does not
+// answer the query. Callers print this order as-is. Every unscored path
+// returns the input untouched.
+async function rerankResults(
+  query: string,
+  results: SearchResult[],
+  signal?: AbortSignal,
+): Promise<SearchResult[]> {
+  if (results.length < 2) return results;
+  const candidates = results.slice(0, RERANK_MAX_CANDIDATES);
+  const scores = await scoreCandidates(query, candidates, signal);
+  if (!scores) return results;
+
+  const scored = candidates
+    .map((result, i) => ({ result, i, noul: scores[i] }))
+    .sort((a, b) => (b.noul ?? 0) - (a.noul ?? 0) || a.i - b.i); // ties keep provider order
+  const kept = scored.filter(
+    (s, rank) => rank < RERANK_MIN_KEEP || (s.noul ?? 0) >= RERANK_FLOOR,
+  );
+  // Anything past RERANK_MAX_CANDIDATES went unscored, so it cannot earn a
+  // place next to results that did.
+  return kept.map((s) => s.result);
 }
 
 // Reads the body incrementally so a chunked/compressed response with no (or
@@ -1406,7 +1696,13 @@ export const searchParameters = Type.Intersect([
   ]),
   Type.Object({
     numResults: Type.Optional(
-      Type.Number({ minimum: 1, maximum: 10, default: 5 }),
+      Type.Number({
+        minimum: 1,
+        maximum: 10,
+        default: 5,
+        description:
+          "Keep the default of 5 unless the task needs breadth; results that do not answer the query are dropped either way.",
+      }),
     ),
   }),
 ]);
@@ -1453,8 +1749,8 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "web_search",
     label: "Web Search",
-    description:
-      "Search the web. Each result is a title, a URL, and a snippet, so fetch a result when the snippet does not settle the question.",
+    // Without the year, a "latest" query returns the year the weights end.
+    description: `Search the web. Each result is a title, a URL, and a snippet, so fetch a result when the snippet does not settle the question. The current year is ${new Date().getFullYear()}; put it in the query when recency matters.`,
     promptSnippet: "Search the web for external facts",
     renderResult(result, _options, theme: Theme) {
       const d = result.details as
@@ -1496,14 +1792,31 @@ export default function (pi: ExtensionAPI) {
         10,
       );
 
+      // Over-fetch only when a rerank can use the extra candidates: the win
+      // is a better page promoted into the kept slice, not a longer list.
+      const canRerank = !!process.env.TYPESAFE_API_KEY?.trim();
+      const fetchCount = canRerank
+        ? Math.min(numResults * 2, RERANK_MAX_CANDIDATES)
+        : numResults;
+
       const queryResults = await mapLimit(queryList, 4, async (query) => {
         try {
           const { results, provider } = await runSearch(
             query,
-            numResults,
+            fetchCount,
             signal,
           );
-          return { query, results, provider, error: null as string | null };
+          // Dedup before the rerank: a duplicate would otherwise take one of
+          // the kept slots and then be dropped at print time.
+          const ranked = (
+            await rerankResults(query, dedupResults(results), signal)
+          ).slice(0, numResults);
+          return {
+            query,
+            results: ranked,
+            provider,
+            error: null as string | null,
+          };
         } catch (err) {
           return {
             query,
@@ -1522,12 +1835,15 @@ export default function (pi: ExtensionAPI) {
       if (fellBack)
         output +=
           "Note: fallback search for at least one query. Snippets are shorter than usual, so fetch a result before concluding.\n\n";
-      for (const { query, results, error } of queryResults) {
+      // Shared across queries: two queries reaching one page bill it twice.
+      const seen = new Map<string, Set<string>>();
+      for (const { query, results: raw, error } of queryResults) {
         if (queryList.length > 1) output += `## Query: "${query}"\n\n`;
         if (error) {
           output += `0 results (error: ${error})\n\n`;
           continue;
         }
+        const results = dedupResults(raw, seen);
         totalResults += results.length;
         if (results.length === 0) {
           output += "0 results.\n\n";
