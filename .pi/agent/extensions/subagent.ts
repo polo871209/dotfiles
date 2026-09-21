@@ -7,13 +7,12 @@
 // Agents live in pi's standard agents dir (`~/.pi/agent/agents/*.md`) as
 // markdown with YAML frontmatter:
 //   ---
-//   name: scout
+//   name: researcher
 //   description: ...
 //   tools: read, grep, find, ls       # optional --tools allowlist
-//   thinking: low                      # optional
-//   maxDuration: 600                   # optional, seconds (wall-clock cap)
+//   hidden: true                       # optional, invocable but not listed
 //   ---
-//   <system prompt body>
+//   <body, appended to the child's own system prompt>
 //
 // Status comes from notifier.ts, which sets the child pane's tmux pane title
 // to reflect busy/ask/done — polled here instead of a parsed JSON event stream.
@@ -22,8 +21,9 @@
 // the TUI and scrollback-bounded, the file is neither.
 //
 // Context isolation: the only thing suppressed is --no-session (parent
-// conversation history doesn't carry over). AGENTS.md/CLAUDE.md discovery,
-// skills, and prompt templates all load same as any session — folder-
+// conversation history doesn't carry over). SYSTEM.md, AGENTS.md/CLAUDE.md
+// discovery, skills, and prompt templates all load same as any session
+// (the agent body arrives through --append-system-prompt) — folder-
 // context.ts and subagent.ts still early-exit under PI_IS_SUBAGENT so a
 // subagent can't inject extra ancestor AGENTS.md beyond normal discovery or
 // spawn its own subagents. Beyond that, whatever the task string doesn't
@@ -59,14 +59,16 @@ interface AgentConfig {
   description: string;
   hidden: boolean;
   tools: string[];
-  maxDurationMs?: number;
-  systemPrompt: string;
+  appendPrompt: string;
 }
 
-// provider name -> model to use for every subagent when the parent session
-// is on that provider (e.g. codex parent -> luna subagents, anthropic parent
-// -> sonnet subagents). Same rule for all agents, no per-agent exceptions.
-type ModelRoutingConfig = Record<string, string>;
+// Parent provider -> model every subagent of that session runs on. Same rule
+// for all agents, no per-agent exceptions; unmapped providers inherit the
+// parent's own model.
+const MODEL_BY_PARENT_PROVIDER: Record<string, string> = {
+  anthropic: "anthropic/claude-sonnet-5",
+  "openai-codex": "openai-codex/gpt-5.6-luna",
+};
 
 const SUBAGENT_THINKING = "high";
 
@@ -142,8 +144,7 @@ const resultStore = (() => {
   return (g.__piSubagentResults ??= new Map());
 })();
 
-// Set by the extension factory. extractResultBlock is exported for tests and
-// has no pi handle of its own.
+// Set by the extension factory; extractResultBlock has no pi handle of its own.
 let persistResult: ((id: string, value: unknown) => void) | undefined;
 
 function hydrateResultStore(entries: readonly { type: string }[]): void {
@@ -193,8 +194,6 @@ function getByPath(obj: unknown, path: string | undefined): unknown {
 }
 
 const AGENTS_DIR = path.join(getAgentDir(), "agents");
-const MODEL_MAP_PATH = path.join(AGENTS_DIR, "model-map.json");
-const SYSTEM_PROMPT_PATH = path.join(getAgentDir(), "SYSTEM.md");
 const MAX_OUTPUT_BYTES = 32 * 1024;
 const UPDATE_INTERVAL_MS = 150;
 const TASK_PREVIEW_MAX = 140;
@@ -374,12 +373,6 @@ function expandToolPatterns(patterns: string[], allNames: string[]): string[] {
 
 function loadAgents(): AgentConfig[] {
   if (!fs.existsSync(AGENTS_DIR)) return [];
-  let sharedPreamble = "";
-  try {
-    sharedPreamble = fs.readFileSync(SYSTEM_PROMPT_PATH, "utf-8").trim();
-  } catch {
-    /* no shared SYSTEM.md — agents fall back to their own body only */
-  }
   const out: AgentConfig[] = [];
   for (const entry of fs.readdirSync(AGENTS_DIR)) {
     if (!entry.endsWith(".md")) continue;
@@ -404,35 +397,15 @@ function loadAgents(): AgentConfig[] {
       .split(",")
       .map((t) => t.trim())
       .filter((t) => t.length > 0);
-    const secsToMs = (v: string | boolean | undefined): number | undefined => {
-      const n = Number(typeof v === "string" ? v : undefined);
-      return Number.isFinite(n) && n > 0 ? n * 1000 : undefined;
-    };
     out.push({
       name: frontmatter.name,
       description: frontmatter.description,
       hidden: frontmatter.hidden === true,
       tools,
-      maxDurationMs: secsToMs(frontmatter.maxDuration),
-      // Same base system prompt as the main session (SYSTEM.md), with the
-      // agent's own .md content appended — so every subagent shares the same
-      // ground rules and only differs by its own file's addition.
-      systemPrompt: `${sharedPreamble}\n\n${body.trim()}`,
+      appendPrompt: body.trim(),
     });
   }
   return out;
-}
-
-function loadModelRouting(): ModelRoutingConfig {
-  try {
-    return JSON.parse(
-      fs.readFileSync(MODEL_MAP_PATH, "utf-8"),
-    ) as ModelRoutingConfig;
-  } catch {
-    // Missing/malformed map must not break extension load; agents then
-    // simply inherit the parent model.
-    return {};
-  }
 }
 
 const formatDuration = (ms: number): string => {
@@ -509,20 +482,14 @@ const buildParams = (agents: AgentConfig[]) =>
           ),
     task: Type.String({
       description:
-        "Self-contained brief: scope, paths, constraints, completion criteria, verification, and expected report. " +
-        "No session history carries over — state everything task-specific it needs to know.",
+        "Self-contained brief: scope, paths, constraints, completion criteria, and expected report. " +
+        "No session history carries over.",
     }),
-    model: Type.Optional(
-      Type.String({
-        description:
-          "Provider/model override; default routes on the parent provider, then falls back to the parent model.",
-      }),
-    ),
     background: Type.Optional(
       Type.Boolean({
         default: false,
         description:
-          "Return a run id instead of the result, for work that runs alongside yours. Default false returns the full result directly and is right unless you have other work meanwhile.",
+          "Return a run id instead of the result, for work that runs alongside yours. Default false blocks and returns the result.",
       }),
     ),
   });
@@ -530,7 +497,6 @@ const buildParams = (agents: AgentConfig[]) =>
 type SubagentArgs = {
   agent: string;
   task: string;
-  model?: string;
   background?: boolean;
 };
 
@@ -612,25 +578,26 @@ const initialProgress = (
 // top-level union as `anyOf`, so any near-miss argument comes back as a
 // per-branch error dump the model then burns turns retrying. Flat schema plus
 // runtime field checks give one actionable error line instead.
+const MANAGE_ACTIONS = [
+  "wait",
+  "result",
+  "steer",
+  "stop",
+] as const satisfies readonly ManageAction[];
+
 const manageParams = () =>
   Type.Object({
     action: Type.Union(
-      [
-        Type.Literal("list"),
-        Type.Literal("wait"),
-        Type.Literal("result"),
-        Type.Literal("steer"),
-        Type.Literal("stop"),
-      ],
+      MANAGE_ACTIONS.map((a) => Type.Literal(a)),
       {
         description:
-          "list: id, status, agent, duration for every tracked run. wait: block until the given runs (or all running ones) finish, then report their status. result: pull a finished run's result-json, or its transcript if it emitted none. steer: send follow-up text into the run. stop: abort the run.",
+          "wait: block until the given runs (or all running ones) finish, then return each one's output. This is the only call a background run needs. result: re-read a finished run's output later. steer: send follow-up text into the run. stop: abort the run.",
       },
     ),
     id: Type.Optional(
       Type.String({
         description:
-          "Run id as printed by subagent or list. Required for result, steer, stop. For wait, accepts a comma-separated list; omit to wait for every running run.",
+          "Run id as printed by the subagent call. Required for result, steer, stop. wait and result take a comma-separated list; for wait, omit it to cover every running run.",
       }),
     ),
     timeoutSeconds: Type.Optional(
@@ -642,7 +609,7 @@ const manageParams = () =>
     path: Type.Optional(
       Type.String({
         description:
-          'result only: dot path into captured JSON, e.g. "findings.0.path"; omit for the whole object.',
+          'result only: dot path into captured result-json, e.g. "findings.0.path"; omit for the whole object.',
       }),
     ),
     message: Type.Optional(
@@ -650,8 +617,27 @@ const manageParams = () =>
     ),
   });
 
+// Actions models invent for this tool, taken from real transcripts: each one
+// means "show me what it said" or "kill it", so routing beats an error turn.
+const ACTION_ALIASES: Record<string, ManageAction> = {
+  // "Is it done yet" is answered by blocking until it is, output included.
+  list: "wait",
+  status: "wait",
+  transcript: "result",
+  output: "result",
+  log: "result",
+  logs: "result",
+  tail: "result",
+  peek: "result",
+  view: "result",
+  kill: "stop",
+  message: "steer",
+};
+
+type ManageAction = "wait" | "result" | "steer" | "stop";
+
 type ManageArgs = {
-  action: "list" | "wait" | "result" | "steer" | "stop";
+  action: ManageAction;
   id?: string;
   path?: string;
   message?: string;
@@ -666,6 +652,25 @@ const formatRunLine = (r: RunRecord): string => {
   const msg = p.status === "running" ? p.lastMessage : (p.error ?? "");
   return `${r.id}  [${p.status}]  ${p.agent}  ${dur}${msg ? `  — ${msg}` : ""}`;
 };
+
+// Captured result-json when the run emitted one, else the transcript. Shared
+// by wait and result, so a wait needs no follow-up call.
+const runPayload = (
+  id: string,
+  transcript: string,
+  fieldPath?: string,
+): string => {
+  if (resultStore.has(id)) {
+    return headTruncate(
+      JSON.stringify(getByPath(resultStore.get(id), fieldPath), null, 2),
+      MAX_OUTPUT_BYTES,
+    );
+  }
+  return transcript || "(no output)";
+};
+
+const transcriptOf = (r: RunRecord): string =>
+  r.progress.output || r.progress.error || "";
 
 function toolsFlagValue(
   agent: AgentConfig,
@@ -700,14 +705,14 @@ async function runInTmux(
   details: Progress;
   error?: string;
 }> {
-  const sysFile = path.join(os.tmpdir(), `pi-subagent-sys-${target}.txt`);
+  const promptFile = path.join(os.tmpdir(), `pi-subagent-sys-${target}.txt`);
   const taskFile = path.join(os.tmpdir(), `pi-subagent-task-${target}.txt`);
   const resultFile = path.join(os.tmpdir(), `pi-subagent-result-${target}.txt`);
-  // 0600: task/system text can carry repo paths and secrets, tmpdir is shared.
-  fs.writeFileSync(sysFile, agent.systemPrompt, { mode: 0o600 });
+  // 0600: task/prompt text can carry repo paths and secrets, tmpdir is shared.
+  fs.writeFileSync(promptFile, agent.appendPrompt, { mode: 0o600 });
   fs.writeFileSync(taskFile, task, { mode: 0o600 });
   const cleanupFiles = () => {
-    for (const f of [sysFile, taskFile, resultFile, `${resultFile}.tmp`]) {
+    for (const f of [promptFile, taskFile, resultFile, `${resultFile}.tmp`]) {
       try {
         fs.unlinkSync(f);
       } catch {
@@ -722,7 +727,9 @@ async function runInTmux(
     `PI_SUBAGENT_RESULT_FILE='${resultFile}'`,
     "pi",
     "--no-session",
-    `--system-prompt "$(cat '${sysFile}')"`,
+    // Append, not --system-prompt: the flag reads the file itself, and the
+    // child keeps whichever SYSTEM.md pi discovers for this cwd.
+    `--append-system-prompt '${promptFile}'`,
   ];
   if (toolsFlag) parts.push(`--tools ${toolsFlag}`);
   parts.push(`--exclude-tools ${[...FORBIDDEN_TOOLS].join(",")}`);
@@ -762,7 +769,6 @@ async function runInTmux(
   if (signal?.aborted) onAbort();
   else signal?.addEventListener("abort", onAbort, { once: true });
 
-  const maxMs = agent.maxDurationMs ?? DEFAULT_MAX_DURATION_MS;
   let finalStatus: "idle" | "blocked" | "timeout" | "aborted" = "idle";
 
   while (true) {
@@ -770,7 +776,7 @@ async function runInTmux(
       finalStatus = "aborted";
       break;
     }
-    if (Date.now() - progress.startedAt > maxMs) {
+    if (Date.now() - progress.startedAt > DEFAULT_MAX_DURATION_MS) {
       finalStatus = "timeout";
       break;
     }
@@ -823,7 +829,7 @@ async function runInTmux(
     progress.status = "failed";
     progress.error =
       finalStatus === "timeout"
-        ? `timed out after ${formatDuration(maxMs)} (wall clock)`
+        ? `timed out after ${formatDuration(DEFAULT_MAX_DURATION_MS)} (wall clock)`
         : "aborted by parent";
     return {
       content: [
@@ -855,7 +861,7 @@ async function runInTmux(
   const extracted = extractResultBlock(rawOutput, target);
   let finalText = headTruncate(extracted.text, MAX_OUTPUT_BYTES);
   if (extracted.captured) {
-    finalText += `\n\n[structured result captured — id: ${target}. Use subagent_manage (action: result) to pull a field instead of re-reading this transcript.]`;
+    finalText += `\n\n[result-json cached as ${target}; reachable later with subagent_manage (action: result).]`;
   }
 
   if (finalStatus === "blocked") {
@@ -938,7 +944,6 @@ export default function (pi: ExtensionAPI) {
 
   const agents = loadAgents();
   if (agents.length === 0) return;
-  const modelRouting = loadModelRouting();
   const byName = new Map(agents.map((a) => [a.name, a]));
   // Hidden agents stay invocable (they're in the param enum) but pay no
   // per-turn description cost — a skill that knows the name invokes them.
@@ -956,11 +961,11 @@ export default function (pi: ExtensionAPI) {
     name: "subagent",
     label: "Subagent",
     promptSnippet:
-      "Delegate research, repository recon, or implementation to an isolated agent",
+      "Delegate work that needs its own context to an isolated agent",
     description:
-      `Delegate medium or large research, recon, or implementation work to an isolated agent. Independent calls may run in parallel.\n\n` +
+      `Delegate work that needs a context of its own to an isolated agent. Do the rest in the main thread. Independent calls run in parallel.\n\n` +
       `Routes:\n${agentList}\n\n` +
-      "For a compact hand-back, tell the subagent in the task to end with a fenced ```result-json ... ``` block, then pull fields with subagent_manage (action: result) instead of re-reading the transcript.",
+      "For a compact hand-back, tell the subagent to end with a fenced ```result-json ... ``` block: a background run's wait returns it, and subagent_manage (action: result, path) pulls one field.",
     parameters: params,
     renderShell: "self",
 
@@ -990,12 +995,8 @@ export default function (pi: ExtensionAPI) {
       const parentModel = ctx.model
         ? `${ctx.model.provider}/${ctx.model.id}`
         : undefined;
-      // Same rule for every agent: route to the model-map entry for the
-      // parent's provider (codex parent -> luna, anthropic parent -> sonnet),
-      // falling back to the parent's own model if unmapped.
       const model =
-        args.model ??
-        (ctx.model && modelRouting[ctx.model.provider]) ??
+        (ctx.model && MODEL_BY_PARENT_PROVIDER[ctx.model.provider]) ??
         parentModel;
       const thinking = SUBAGENT_THINKING;
 
@@ -1058,7 +1059,7 @@ export default function (pi: ExtensionAPI) {
           content: [
             {
               type: "text",
-              text: `subagent '${agent.name}' running in background, id ${target}. No result is returned here; reach it through subagent_manage (wait, then result).`,
+              text: `subagent '${agent.name}' running in background, id ${target}. Carry on with other work, then make one subagent_manage (action: wait) call: it blocks until the run ends and returns its output.`,
             },
           ],
           details: { ...progress },
@@ -1072,15 +1073,15 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool<ReturnType<typeof manageParams>, undefined>({
     name: "subagent_manage",
     label: "Subagent Manage",
-    promptSnippet: "List, read, steer, or stop subagent runs",
+    promptSnippet: "Wait for, read, steer, or stop subagent runs",
     description:
-      "Inspect or control subagent runs started this session.\n\n" +
-      "WRONG: call list repeatedly to watch a background run finish, or shell out to sleep — polling costs turns and sleeping wastes wall clock.\n" +
-      "RIGHT: keep working, then call wait once at the point the runs gate your next step. It returns the moment they finish.",
+      "Inspect or control background subagent runs started this session. A foreground run already returned its output, so it needs no call here.\n\n" +
+      "WRONG: sleep in a shell, or call result after a wait — each spends a turn on information you already have.\n" +
+      "RIGHT: keep working, then one wait call at the point the runs gate your next step. It returns their output the moment they finish.",
     parameters: manageParams(),
     async execute(_toolCallId, rawParams, signal) {
       const {
-        action,
+        action: rawAction,
         id,
         path: fieldPath,
         message,
@@ -1093,15 +1094,12 @@ export default function (pi: ExtensionAPI) {
         error: text,
       });
 
-      if (action === "list") {
-        const runs = [...runsStore.values()].sort(
-          (a, b) => b.progress.startedAt - a.progress.startedAt,
+      const action =
+        ACTION_ALIASES[String(rawAction).toLowerCase()] ?? rawAction;
+      if (!MANAGE_ACTIONS.includes(action)) {
+        return fail(
+          `subagent_manage: unknown action '${String(rawAction)}'. Valid: ${MANAGE_ACTIONS.join(", ")}.`,
         );
-        const text =
-          runs.length === 0
-            ? "No subagent runs tracked this session."
-            : runs.map(formatRunLine).join("\n");
-        return { content: [{ type: "text", text }], details: undefined };
       }
 
       if (action === "wait") {
@@ -1160,55 +1158,61 @@ export default function (pi: ExtensionAPI) {
         ]);
         if (timer) clearTimeout(timer);
 
-        const lines = records.map(formatRunLine).join("\n");
+        // Output inline, per run: a result call after this one would fetch
+        // what the parent already paid to wait for.
+        const blocks = records.map((r) =>
+          r.progress.status === "running"
+            ? formatRunLine(r)
+            : `${formatRunLine(r)}\n${runPayload(r.id, transcriptOf(r))}`,
+        );
         const head =
           state.outcome === "timeout"
             ? `Wait timed out after ${formatDuration(timeoutMs)}. The runs below keep going.`
             : state.outcome === "aborted"
               ? "Wait cancelled. The runs below keep going."
-              : `All ${records.length} run${records.length === 1 ? "" : "s"} finished.`;
+              : `All ${records.length} run${records.length === 1 ? "" : "s"} finished; output below.`;
         return {
-          content: [{ type: "text", text: `${head}\n${lines}` }],
+          content: [
+            { type: "text", text: `${head}\n\n${blocks.join("\n\n")}` },
+          ],
           details: undefined,
         };
       }
 
       if (!id) {
         return fail(
-          `subagent_manage: 'id' is required for action '${action}'. Call action 'list' to get run ids.`,
+          `subagent_manage: 'id' is required for action '${action}'. The id was printed by the subagent call that started the run.`,
         );
       }
 
       if (action === "result") {
-        if (resultStore.has(id)) {
-          const value = getByPath(resultStore.get(id), fieldPath);
-          return {
-            content: [{ type: "text", text: JSON.stringify(value, null, 2) }],
-            details: undefined,
-          };
-        }
-        // Transcript fallback: a background run's output is otherwise
-        // unreachable (list shows status only), so a missing or malformed
-        // result-json block would silently discard the whole run.
-        const run = runsStore.get(id);
-        if (!run) {
-          return fail(`subagent_manage: no tracked run with id "${id}"`);
-        }
-        if (run.progress.status === "running") {
-          return fail(
-            `subagent_manage: run "${id}" is still running; no result yet.`,
+        const wanted = id
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const blocks: string[] = [];
+        for (const runId of wanted) {
+          const run = runsStore.get(runId);
+          if (!run) {
+            if (resultStore.has(runId)) {
+              // Result outlived its run record (pruned, or hydrated from an
+              // earlier session), so the id still answers.
+              blocks.push(`${runId}\n${runPayload(runId, "", fieldPath)}`);
+              continue;
+            }
+            return fail(`subagent_manage: no tracked run with id "${runId}"`);
+          }
+          if (run.progress.status === "running") {
+            return fail(
+              `subagent_manage: run "${runId}" is still running. Call action 'wait' instead: it blocks and returns the output.`,
+            );
+          }
+          blocks.push(
+            `${formatRunLine(run)}\n${runPayload(run.id, transcriptOf(run), fieldPath)}`,
           );
         }
-        const text = run.progress.output || run.progress.error || "";
         return {
-          content: [
-            {
-              type: "text",
-              text: text
-                ? `[no result-json block; returning transcript]\n${text}`
-                : `subagent_manage: run "${id}" produced no output.`,
-            },
-          ],
+          content: [{ type: "text", text: blocks.join("\n\n") }],
           details: undefined,
         };
       }

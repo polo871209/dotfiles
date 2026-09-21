@@ -2,7 +2,6 @@
   "defaultProvider": "anthropic",
   "defaultModel": "claude-opus-5",
   "defaultThinkingLevel": "high",
-
   "theme": "catppuccin-mocha",
   "tuiMode": "fullscreen",
   "fullscreenScrollbar": "hidden",
@@ -11,22 +10,19 @@
   "markdown": {
     "codeBlockIndent": ""
   },
-
   "quietStartup": true,
   "collapseChangelog": true,
-  "lastChangelogVersion": "0.85.1",
+  "lastChangelogVersion": "0.86.1",
   "showCacheMissNotices": false,
   "warnings": {
     "anthropicExtraUsage": false
   },
-
   "compaction": {
     "reserveTokens": 700000
   },
   "branchSummary": {
     "skipPrompt": true
   },
-
   "defaultProjectTrust": "always",
   "enableInstallTelemetry": false,
   "packages": []
