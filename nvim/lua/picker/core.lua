@@ -35,6 +35,12 @@ local LIVE_LIMIT = 10000
 ---@param lines string[]
 local function set_lines(buf, lines)
     if not vim.api.nvim_buf_is_valid(buf) then return end
+    -- readfile() turns every NUL byte into \n inside a line, and a caller's
+    -- text can hold one too; nvim_buf_set_lines rejects both. Substitute in
+    -- place rather than split, so line numbers still match the file.
+    for i, line in ipairs(lines) do
+        if line:find('\n', 1, true) then lines[i] = (line:gsub('\n', '^@')) end
+    end
     vim.bo[buf].modifiable = true
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
     vim.bo[buf].modifiable = false
