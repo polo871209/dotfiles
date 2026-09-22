@@ -92,6 +92,13 @@ local function pull_diagnostics(bufnr) _G.PiLspShared.pull_diagnostics(bufnr) en
 
 -- A repeated path would otherwise open/format/pull-diagnostics twice and
 -- double-count that file's diagnostics in the result.
+-- Stamp the buffer for PiDaemon.gc. Without it the inline lane had no
+-- eviction at all: every file the agent ever edited stayed loaded and pinned
+-- its language server until the daemon died.
+local function touch(bufnr)
+    if _G.PiDaemon and _G.PiDaemon.touch then _G.PiDaemon.touch(bufnr) end
+end
+
 local function dedupe_files(files)
     local seen = {}
     local out = {}
@@ -116,6 +123,7 @@ function M.format(files, timeout_ms)
         if type(file) == 'string' and vim.uv.fs_stat(file) then
             vim.cmd('silent! edit ' .. vim.fn.fnameescape(file))
             local bufnr = vim.api.nvim_get_current_buf()
+            touch(bufnr)
             pcall(function() vim.cmd 'filetype detect' end)
             if try_format(bufnr, timeout_ms) then
                 pcall(function()
@@ -138,6 +146,7 @@ function M.run(files)
             local function remaining() return math.max(0, PER_FILE_BUDGET_MS - (vim.uv.now() - file_started)) end
             vim.cmd('silent! edit ' .. vim.fn.fnameescape(file))
             local bufnr = vim.api.nvim_get_current_buf()
+            touch(bufnr)
             table.insert(bufs, bufnr)
 
             pcall(function() vim.cmd 'filetype detect' end)

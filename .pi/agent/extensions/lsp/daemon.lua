@@ -34,6 +34,11 @@ local IDLE_EXIT_MS = tonumber(vim.env.PI_LSP_IDLE_MS) or (10 * 60 * 1000)
 -- mid-call), not as a peer still working — otherwise one bad call wedges the
 -- daemon for every process on the machine.
 local GUARD_STALE_MS = 90 * 1000
+-- Buffer ceiling. Each loaded buffer pins its language server, and one vtsls
+-- tree is three to five node processes, so a project the agent left an hour ago must
+-- release its servers. Sized to keep a working set of files hot.
+local MAX_BUFS = tonumber(vim.env.PI_LSP_MAX_BUFS) or 40
+local BUF_IDLE_MS = tonumber(vim.env.PI_LSP_BUF_IDLE_MS) or (30 * 60 * 1000)
 
 local busy = false
 local busy_since = 0
@@ -105,6 +110,58 @@ function D.info()
     }
 end
 
+-- bufnr → loop time of last use. Lives here, not in driver.lua or
+-- feedback.lua, because those chunks are re-executed into the running daemon
+-- on every edit (loadLuaOnce) and a chunk-local table would come back empty,
+-- orphaning every buffer opened before the reload. Buffers the gc finds
+-- without a stamp are adopted at first sight so they still age out.
+local last_used = {}
+
+function D.touch(bufnr) last_used[bufnr] = vim.uv.now() end
+
+local function live_buf_count(client)
+    local n = 0
+    for bufnr in pairs(client.attached_buffers or {}) do
+        if vim.api.nvim_buf_is_valid(bufnr) and vim.api.nvim_buf_is_loaded(bufnr) then n = n + 1 end
+    end
+    return n
+end
+
+-- Called from the sweep, never mid-request (guard holds while a driver call
+-- runs), so dropping a buffer here can't pull one out from under an in-flight
+-- query. Walks nvim_list_bufs, not a module cache, so a buffer opened by any
+-- lane or any driver version is reaped. Detaching the last buffer is not
+-- enough on its own to reclaim a server, hence the explicit stop.
+function D.gc()
+    local now = vim.uv.now()
+    local live = {}
+    for _, b in ipairs(vim.api.nvim_list_bufs()) do
+        if vim.api.nvim_buf_is_loaded(b) and vim.api.nvim_buf_get_name(b) ~= '' then
+            if not last_used[b] then last_used[b] = now end
+            table.insert(live, { buf = b, used = last_used[b] })
+        end
+    end
+    for b in pairs(last_used) do
+        if not vim.api.nvim_buf_is_valid(b) then last_used[b] = nil end
+    end
+    table.sort(live, function(a, z) return a.used > z.used end)
+    local evicted = 0
+    for i, entry in ipairs(live) do
+        if i > MAX_BUFS or (now - entry.used) > BUF_IDLE_MS then
+            last_used[entry.buf] = nil
+            if pcall(vim.api.nvim_buf_delete, entry.buf, { force = true }) then evicted = evicted + 1 end
+        end
+    end
+    local stopped = 0
+    for _, c in ipairs(vim.lsp.get_clients()) do
+        if live_buf_count(c) == 0 then
+            pcall(c.stop, c, false)
+            stopped = stopped + 1
+        end
+    end
+    return { evicted = evicted, stopped = stopped, live = #live - evicted }
+end
+
 -- Without the sweep there is no idle exit and no gc, so a daemon that can't
 -- get a timer is worse than no daemon: fail loudly at startup instead of
 -- running as an immortal one.
@@ -118,7 +175,7 @@ sweep:start(SWEEP_MS, SWEEP_MS, function()
         if connected then last_client_at = vim.uv.now() end
         if busy then return end
         if connected then
-            if _G.PiLsp and _G.PiLsp.gc then pcall(_G.PiLsp.gc) end
+            pcall(D.gc)
         elseif vim.uv.now() - last_client_at > IDLE_EXIT_MS then
             vim.cmd 'qall!'
         end

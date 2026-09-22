@@ -12,7 +12,7 @@
   },
   "quietStartup": true,
   "collapseChangelog": true,
-  "lastChangelogVersion": "0.86.1",
+  "lastChangelogVersion": "0.87.0",
   "showCacheMissNotices": false,
   "warnings": {
     "anthropicExtraUsage": false

@@ -33,7 +33,7 @@ const YEET_MSG_TYPE = "yeet-marker";
 const YEET_WIDGET_KEY = "yeet-progress";
 
 const YEET_PRIMARY_MODEL_PROVIDER = "anthropic";
-const YEET_PRIMARY_MODEL_ID = "claude-sonnet-4-6";
+const YEET_PRIMARY_MODEL_ID = "claude-sonnet-5";
 const YEET_FALLBACK_MODEL_PROVIDER = "openai-codex";
 const YEET_FALLBACK_MODEL_ID = "gpt-5.5";
 const YEET_THINKING_ENABLED = false;
