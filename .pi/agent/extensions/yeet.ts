@@ -12,19 +12,22 @@ import { barWidget } from "./shared/widget";
 
 const MSG_PROMPT = `
 ## Input authority
-Write a Conventional Commits message for the diff. Keep it terse and exact: no fluff, why over what. The diff is the only source of truth for WHAT changed; base the subject and body entirely on it. A user hint may ONLY disambiguate WHY, such as choosing a scope or explaining non-obvious rationale in the body. It must not introduce, emphasize, or replace a change absent from the diff.
+Write a Conventional Commits message for the diff. Keep it terse and exact: no fluff, why over what. The diff is the only source of truth for WHAT changed; base the subject and body entirely on it. The user hint, when present, arrives as a \`User hint:\` line and carries intent: it can pick which change leads, set the scope, or give non-obvious rationale for the body. Obey it for emphasis, but never let it add, rename, or overstate a change the diff does not contain. If the hint points at something absent from the diff, ignore that part and write the message from the diff alone.
+
+## Rank the changes first
+Before writing, decide which single change a reader cares about. A user hint that names a priority wins: the change it points to is top-ranked, even when another hunk looks larger. Otherwise rank hunks by impact: behavior change beats new capability beats refactor beats rename, formatting, comment, import, version bump, or generated file. Diff size and file order do not decide rank; a one-line behavior change outranks a 300-line mechanical edit. The top-ranked change owns the subject, and the rest stay out of the message unless they break something.
 
 ## Subject
-Format: \`<type>(<scope>)!: <subject>\` where type ∈ {feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert}; scope is optional; \`!\` means a breaking change. Use imperative mood (\`add\`, \`fix\` — not \`added\`, \`adds\`), lowercase, ≤50 chars when possible (hard cap 72), no trailing period, and do not restate a file name already named by the scope.
+Format: \`<type>(<scope>): <subject>\` where type ∈ {feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert}; scope is optional. Never write the \`!\` breaking-change marker. State the top-ranked change, never a side detail and never a vague umbrella such as \`update files\` or \`various fixes\`. Use imperative mood (\`add\`, \`fix\` — not \`added\`, \`adds\`), lowercase, ≤50 chars when possible (hard cap 72), no trailing period, and do not restate a file name already named by the scope.
 
 ## Body
-Skip when the subject is self-explanatory. Otherwise explain only non-obvious WHY, breaking changes, security fixes, data migrations, or reverts; these ALWAYS get a body, never subject-only. Put one blank line after the subject, wrap at 72 chars, use \`-\` rather than \`*\`, and allow multiple paragraphs.
+Default to no body. Write one only for non-obvious WHY, a security fix, a data migration, or a revert; those cases ALWAYS get a body. Hard cap: 3 bullets, each one line under 72 chars. Never restate the subject, never list files or functions the diff already shows, never narrate what the code does, and never mention side changes that the reader can skip. If a bullet only repeats the code, delete it. Put one blank line after the subject and use \`-\` rather than \`*\`.
 
 ## Footers
-Put optional footers one blank line after the body. Use \`Token: value\` or \`Token #value\`; replace spaces with \`-\` in tokens (for example \`Reviewed-by\`, \`Refs: #123\`, \`Closes #42\`), except \`BREAKING CHANGE\`, which stays uppercase with a space. Match recent commit subjects' established type/scope vocabulary and phrasing; reuse an existing scope for the same area.
+Put optional footers one blank line after the body. Use \`Token: value\` or \`Token #value\`; replace spaces with \`-\` in tokens (for example \`Reviewed-by\`, \`Refs: #123\`, \`Closes #42\`). Never write a \`BREAKING CHANGE\` footer. Match recent commit subjects' established type/scope vocabulary and phrasing; reuse an existing scope for the same area.
 
 ## Forbidden output
-Do not write a preamble, restated instructions, reasoning, or analysis before the message. Do not write \`this commit\`, \`I\`, \`we\`, \`now\`, \`currently\`, \`as requested by\`, emoji, or AI attribution. Do not begin with \"Looking at the diff, I need to understand...\". Do not use fences.
+Do not mark the commit as breaking in any form: no \`!\` before the colon, no \`BREAKING CHANGE\` footer, and no \`breaking\` wording in the subject. An incompatible change is still written as a plain \`feat\`, \`fix\`, or \`refactor\`; the body explains the impact. Do not write a preamble, restated instructions, reasoning, or analysis before the message. Do not write \`this commit\`, \`I\`, \`we\`, \`now\`, \`currently\`, \`as requested by\`, emoji, or AI attribution. Do not begin with \"Looking at the diff, I need to understand...\". Do not use fences.
 
 ## Completion/output condition
 Return the raw commit message itself, starting with the Conventional Commits subject and containing no surrounding commentary.`;
@@ -308,7 +311,8 @@ export default function (pi: ExtensionAPI) {
   };
 
   pi.registerCommand("yeet", {
-    description: "Stage, commit, and push current repo changes",
+    description:
+      "Stage, commit, and push current repo changes; args are a hint for the commit message",
     handler: runYeet,
   });
 

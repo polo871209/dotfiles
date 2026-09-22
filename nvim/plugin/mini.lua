@@ -52,4 +52,7 @@ starter.setup {
     items = { starter.sections.recent_files(3, true) },
     header = header_art,
     footer = '',
+    -- No typed query: letters keep their normal and custom mappings instead of
+    -- failing with "results into no active items". Pick with j/k and <CR>.
+    query_updaters = '',
 }
