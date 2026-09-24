@@ -1,23 +1,12 @@
 // web-search — minimal web research: search the web and read a page's content.
 //
-// Replaces npm:pi-web-access (github.com/nicobailon/pi-web-access), which was
-// too heavy for what's actually used here: 7-provider fallback chains (Brave,
-// Tavily, Parallel, Perplexity, OpenAI, Gemini API/Web) when this machine has
-// zero of those API keys configured, plus a browser curator UI, YouTube/video/
-// PDF extraction, and a summary-review workflow. None of it was in use. This
-// file keeps only the two tools that were: web_search and fetch_content.
-//
-// Design decisions, and where each was ported/simplified from in the old
-// package (SHA-pinned so the links stay valid regardless of upstream changes:
-// github.com/nicobailon/pi-web-access/blob/7bdc30a65cf77273eb9c0034647b373bda4060d7/<file>):
-//
 // - Search backends, in the order runSearch walks them, all keyless: Exa's
 //   public MCP endpoint (mcp.exa.ai) twice, once for its advanced tool and
 //   once for its basic one, then Parallel's public MCP endpoint
 //   (search.parallel.ai/mcp), then DuckDuckGo's HTML page. Each is a
-//   JSON-RPC POST over plain HTTP, no MCP client wiring needed. Every keyed
-//   provider in the old package's chain (Brave, Tavily, Perplexity, Kagi,
-//   Serper, …) stays out: this machine has none of those keys.
+//   JSON-RPC POST over plain HTTP, no MCP client wiring needed. Keyed
+//   providers (Brave, Tavily, Perplexity, Kagi, Serper) stay out: this
+//   machine has none of those keys.
 //   Measured 2026-01 over 3 queries, median snippet per result: Exa ~4000
 //   chars, Parallel 1500, DuckDuckGo 150-300. That is the ordering rationale.
 //   Exa is also the least reliable of the three (a 20s timeout on one query),
@@ -29,42 +18,24 @@
 //   2026-01 over 4 queries, pages that answered the query scored 0.54-0.98
 //   and the rest 0.12-0.33, so RERANK_FLOOR sits in that gap and a thin
 //   topic returns 3 results instead of 10. Before moving the floor, log the
-//   nouls scoreCandidates returns for a handful of real queries and look for
-//   the gap.
+//   scores scoreCandidates returns for a handful of real queries and look
+//   for the gap.
 // - Cross-query dedup (dedupKey): a multi-query call otherwise prints the
 //   same page once per query that found it.
-// - Search backend history: Exa MCP was the *only* zero-config path in the
-//   old package's chain (see exa.ts's searchWithExaMcp/callExaMcp/
-//   parseMcpResults); DuckDuckGo and Parallel MCP are re-derived here, not
-//   ported.
-// - Content extraction: @mozilla/readability + linkedom (parse) + turndown
-//   (HTML->markdown), same 3 libs and same pipeline as extract.ts's
-//   extractContent, minus its RSC/PDF/video/GitHub-HTML branches.
-// - SSRF guard (assertSafeUrl/fetchSafely): trimmed rewrite of
-//   ssrf-protection.ts's validateRemoteUrl/fetchRemoteUrl — blocks
-//   localhost/private-IP targets and re-validates each redirect hop. Dropped:
-//   configurable CIDR allowlist (ssrf.allowRanges), custom DNS lookup seam.
-// - GitHub clone-instead-of-scrape (parseGitHubUrl/cloneGitHubRepo/
-//   describeGithubPath): simplified rewrite of github-extract.ts's
-//   extractGitHub. Same core idea (shallow `git clone`, tree/README for repo
-//   root, dir listing or file content for blob/tree paths, local path handed
-//   back for local inspection). Deliberately dropped: `gh` CLI integration (plain
-//   `git clone` over https covers public repos), GitHub API fallback for
-//   oversized/private repos or 40-char-SHA refs (those just fall through to
-//   the normal HTML fetch instead), and the ~/.pi/web-search.json config
-//   knobs for clone path/timeout/size limit (hardcoded constants instead).
-//
-// - YouTube transcripts (parseYouTubeVideoId/fetchYouTubeTranscript): not a
-//   port — upstream used a Python youtube-transcript-api sidecar, this asks
-//   `yt-dlp` (installed via mise) for the caption track alone. A watch page
-//   yields nothing through Readability, so fetch_content routes video URLs
-//   here and returns one timestamp-free paragraph.
+// - SSRF guard (assertSafeUrl/fetchSafely): blocks localhost and private-IP
+//   targets and re-validates each redirect hop.
+// - GitHub URLs are shallow-cloned instead of scraped, and the local path is
+//   handed back. git's credential prompt is disabled so a private or
+//   mistyped repo can't hang the process on stdin. Private repos, oversized
+//   repos and 40-char-SHA refs fall through to the normal HTML fetch.
+// - YouTube URLs go to `yt-dlp` (installed via mise) for the caption track,
+//   because a watch page yields nothing through Readability.
+// - fetchReadable rejects binary content-types up front instead of dumping
+//   raw bytes through res.text() into the model.
 //
 // Deliberately out of scope, don't re-add without a real need: any keyed
-// search provider, curator/summary-review UI, non-YouTube video/PDF
-// extraction, any config file. Also skipped: upstream's inline image fetch
-// (new dep, no demonstrated need) and its `mode: "answer"` page-QA (an LLM
-// call for something a plain fetch + read already covers).
+// search provider, non-YouTube video or PDF extraction, inline image fetch,
+// LLM page-QA, and any config file.
 //
 // Available but not wired up: `web_search_advanced_exa` also takes
 // includeDomains/excludeDomains, startPublishedDate/endPublishedDate,
@@ -73,21 +44,6 @@
 // need new tool parameters and a degraded form for the other three
 // providers, which only accept `site:` text. Add them when a search actually
 // needs a filter, not before.
-//
-// Ported from upstream since (SHA-pinned as above): fetch_content's
-// offset-based continuation with clean line-boundary truncation instead of a
-// hard char cut (extract.ts's line-boundary slicing), streamed response-size
-// enforcement instead of trusting Content-Length alone, `mode: "raw"` to
-// bypass Readability for JSON/debugging (all three from the 0.16.0-0.18.0
-// fetch-content work), and disabling git's interactive credential prompt
-// during GitHub clones so a private/mistyped repo can't hang the process
-// waiting on stdin (from the unreleased PR #193 fix).
-//
-// mapLimit() bounds concurrency for multi-query/multi-url calls (4 searches,
-// 3 fetches in flight) instead of unbounded Promise.all — same reasoning as
-// extract.ts's pLimit(3), reimplemented without the dependency. fetchReadable
-// rejects binary content-types (image/audio/video/font, pdf/zip/octet-stream)
-// up front instead of dumping raw bytes through res.text() into the model.
 
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";

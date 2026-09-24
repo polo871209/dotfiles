@@ -12,12 +12,11 @@
 //
 // Stateless: the rename call is NOT added to session history (mirrors
 // btw.ts). Each session is renamed at most once unless the user clears
-// the name with `/rename -`.
+// the name with `/rename -`. Set a name by hand with pi's built-in `/name`.
 //
 // Usage:
-//   /rename                 regenerate the name now, whatever the turn count
-//   /rename auth refactor   set the name by hand
-//   /rename -               clear the name and re-arm the automatic rename
+//   /rename     regenerate the name now, whatever the turn count
+//   /rename -   clear the name and re-arm the automatic rename
 
 import type {
   ExtensionAPI,
@@ -25,20 +24,17 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { collectTextMessages } from "./shared/message";
 import {
-  registerSideModelFlag,
   sideChannelComplete,
   sideChannelWithLoader,
   type SideChannelOpts,
 } from "./shared/llm";
 
 // ---- config ----
-// Naming a session is cheap classification work, so pin it to Haiku with no
-// extended thinking instead of burning the session model. The call falls back
-// to PI_SIDE_MODEL and then the session model when this model is missing or
-// has no auth. Edit these two lines to move the work to another model.
+// Naming a session is cheap classification work, so pin it to Haiku instead
+// of burning the session model. The call falls back to the session model when
+// Haiku is missing or has no auth.
 const NAME_PROVIDER = "anthropic";
 const NAME_MODEL = "claude-haiku-4-5";
-const NAME_THINKING = false;
 
 const THRESHOLD = 3; // strictly more than this many user turns
 const MAX_NAME_LEN = 60;
@@ -88,15 +84,12 @@ function buildCall(ctx: ExtensionContext): {
       join: " ",
       model:
         model && ctx.modelRegistry.hasConfiguredAuth(model) ? model : undefined,
-      thinkingEnabled: NAME_THINKING,
     },
     userTurns,
   };
 }
 
 export default function (pi: ExtensionAPI) {
-  // Sole owner of --side-model for the whole harness. See shared/llm.ts.
-  registerSideModelFlag(pi);
   // Per-session-file guard so we don't fire concurrent renames.
   const inFlight = new Set<string>();
   // Sessions we've already renamed in this process; avoid clobbering a
@@ -143,7 +136,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerCommand("rename", {
     description:
-      "Rename the session (no args: regenerate, '-': clear and re-arm auto)",
+      "Regenerate the session name ('-': clear it and re-arm the automatic rename)",
     handler: async (args, ctx) => {
       const arg = (args ?? "").trim();
       const sessionFile = ctx.sessionManager.getSessionFile();
@@ -157,16 +150,11 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      // Manual name wins over the automatic one for the rest of the process.
       if (arg) {
-        const name = normalizeName(arg);
-        if (!name) {
-          ctx.ui.notify("Name is empty after normalization", "warning");
-          return;
-        }
-        pi.setSessionName(name);
-        if (sessionFile) done.add(sessionFile);
-        ctx.ui.notify(`Session named: ${name}`, "info");
+        ctx.ui.notify(
+          "/rename takes no name. Use /name <name> to set one.",
+          "warning",
+        );
         return;
       }
 

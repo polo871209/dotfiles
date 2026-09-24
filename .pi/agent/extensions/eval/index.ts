@@ -17,11 +17,8 @@ import {
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
-import {
-  Type,
-  type Static,
-  type TextContent,
-} from "@earendil-works/pi-ai/compat";
+import type { TextContent, Usage } from "@earendil-works/pi-ai";
+import { Type, type Static } from "typebox";
 import {
   registerBridgeSession,
   setBridgeSignal,
@@ -77,6 +74,27 @@ interface SessionState {
   cwd: string;
   builtins: Record<string, AgentTool<any>> | null;
   ctx: ExtensionContext | null;
+  // Tokens spent by `completion` calls during the current execute, reported
+  // on the tool result so session totals include them.
+  usage: Usage | null;
+}
+
+function addUsage(total: Usage | null, next: Usage): Usage {
+  if (!total) return structuredClone(next);
+  return {
+    input: total.input + next.input,
+    output: total.output + next.output,
+    cacheRead: total.cacheRead + next.cacheRead,
+    cacheWrite: total.cacheWrite + next.cacheWrite,
+    totalTokens: total.totalTokens + next.totalTokens,
+    cost: {
+      input: total.cost.input + next.cost.input,
+      output: total.cost.output + next.cost.output,
+      cacheRead: total.cost.cacheRead + next.cost.cacheRead,
+      cacheWrite: total.cost.cacheWrite + next.cost.cacheWrite,
+      total: total.cost.total + next.cost.total,
+    },
+  };
 }
 
 interface ExecutionDetails {
@@ -182,6 +200,7 @@ function bridgeHandler(state: SessionState): BridgeHandler {
           throw new Error(
             `completion failed: ${result.error ?? result.reason}`,
           );
+        state.usage = addUsage(state.usage, result.usage);
         if (schema) {
           try {
             return JSON.parse(extractJsonText(result.text));
@@ -349,6 +368,7 @@ export default function (pi: ExtensionAPI) {
     cwd: "",
     builtins: null,
     ctx: null,
+    usage: null,
   };
   let cleaned = false;
 
@@ -385,6 +405,7 @@ export default function (pi: ExtensionAPI) {
       }
       state.cwd = ctx.cwd;
       state.ctx = ctx;
+      state.usage = null;
       const reg = await ensureBridge(state);
       setBridgeSignal(reg.session, signal);
       const results: CellResult[] = [];
@@ -470,7 +491,11 @@ export default function (pi: ExtensionAPI) {
           }
         }
       }
-      return { content, details: details(results, params.cells.length) };
+      return {
+        content,
+        details: details(results, params.cells.length),
+        ...(state.usage ? { usage: state.usage } : {}),
+      };
     },
   });
 }

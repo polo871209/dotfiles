@@ -32,7 +32,6 @@
 import { execFile } from "node:child_process";
 import { collectTextMessages, extractText } from "./shared/message";
 import { parseStatusTitle } from "./shared/status";
-import { createSettleGate } from "./shared/turn-gate";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -896,36 +895,27 @@ async function runInTmux(
 // named via PI_SUBAGENT_RESULT_FILE. tmp+rename so the parent's existence
 // poll never reads a partial write.
 //
-// The file is the parent's primary completion signal, so it must not appear
-// while a post-turn pass (lsp/feedback) is about to start a repair turn: the
-// parent would take an answer the child then keeps editing. The settle gate
-// holds the write back until the child is really finished.
+// The file is the parent's primary completion signal, so it waits for
+// agent_settled: lsp/feedback's repair turn runs before that event, and an
+// earlier write hands the parent an answer the child then keeps editing.
 function registerChildResultMirror(pi: ExtensionAPI): void {
   const file = process.env.PI_SUBAGENT_RESULT_FILE;
   if (!file) return;
-  const settleGate = createSettleGate(pi);
   pi.on("agent_settled", async (_event, ctx) => {
-    // Detached: pi waits for this handler, and the gate waits for seconds.
-    void (async () => {
-      const { turnContinues } = await settleGate.wait();
-      if (turnContinues) return;
-      try {
-        const { messages } = collectTextMessages(
-          ctx.sessionManager.getBranch(),
-        );
-        for (let i = messages.length - 1; i >= 0; i--) {
-          const m = messages[i]!;
-          if (m.role !== "assistant") continue;
-          const text = extractText(m.content).trim();
-          if (!text) continue;
-          fs.writeFileSync(`${file}.tmp`, text, { mode: 0o600 });
-          fs.renameSync(`${file}.tmp`, file);
-          break;
-        }
-      } catch {
-        /* parent falls back to pane capture */
+    try {
+      const { messages } = collectTextMessages(ctx.sessionManager.getBranch());
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const m = messages[i]!;
+        if (m.role !== "assistant") continue;
+        const text = extractText(m.content).trim();
+        if (!text) continue;
+        fs.writeFileSync(`${file}.tmp`, text, { mode: 0o600 });
+        fs.renameSync(`${file}.tmp`, file);
+        break;
       }
-    })();
+    } catch {
+      /* parent falls back to pane capture */
+    }
   });
 }
 

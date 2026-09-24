@@ -50,10 +50,6 @@ export const runDriver = async (
   files: string[],
   cwd: string,
   signal: AbortSignal | undefined,
-  // Re-checked when the queued lua call actually starts: PiFeedback.run
-  // writes files (code-actions), and a stale background run must not reach
-  // that after a new turn began.
-  preflight?: () => boolean,
 ): Promise<DriverResult | null> => {
   try {
     await ensureFeedbackLoaded(cwd);
@@ -69,7 +65,6 @@ export const runDriver = async (
       combined,
       undefined,
       "main",
-      preflight,
     );
   } catch (e) {
     logDriver(`run failed: ${e instanceof Error ? e.message : String(e)}`);

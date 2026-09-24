@@ -417,10 +417,6 @@ export const callLua = async <T = unknown>(
   signal: AbortSignal | undefined,
   onProgress?: ProgressFn,
   lane: Lane = "main",
-  // Checked when the queued task starts; returning false skips the lua call
-  // (used by the feedback pipeline so a stale run can't reach nvim's
-  // file-writing stages after a new turn began).
-  preflight?: () => boolean,
 ): Promise<T> => {
   const { client } = await getSession(lane, cwd, onProgress);
   const combined = signal
@@ -429,10 +425,8 @@ export const callLua = async <T = unknown>(
   if (combined.aborted) throw new Error("aborted");
   const exec = enqueue(lane, () => {
     // Re-check when the queued task actually starts — it may have waited
-    // behind a long run, during which the caller aborted, the lane dropped,
-    // or the work went stale.
+    // behind a long run, during which the caller aborted or the lane dropped.
     if (combined.aborted) throw new Error("aborted");
-    if (preflight && !preflight()) throw new Error("stale");
     return callGuarded<T>(client, code, args, () => combined.aborted);
   });
   // Abort just stops awaiting: lua already running can't be cancelled and

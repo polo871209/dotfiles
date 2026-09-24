@@ -8,17 +8,29 @@
 // is the convention this harness follows. Each content identity is loaded
 // once per session; changed files are reinjected with explicit supersession.
 //
-// Injection uses Pi's context event so instructions reach the next provider
-// call in the same turn without becoming ordinary conversation history.
+// Injection returns a hidden custom message from turn_end. Pi persists it
+// right after the turn's tool results, so it reaches the next provider call in
+// the same run and every call after it. The context event is no substitute:
+// its changes apply to one request only, and the instructions vanished after
+// that request.
 
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 
 const CONTEXT_FILE = "AGENTS.md";
 const TARGET_TOOLS = new Set(["read", "edit", "write", "grep", "find", "ls"]);
 const PREVIEW_CHARS = 12_000;
+const MESSAGE_TYPE = "folder-context";
+
+interface InjectedDetails {
+  path: string;
+  identity: string;
+}
 
 // Resolve symlinks so the same file reached through different path spellings
 // (e.g. `~/.pi/agent` symlinked elsewhere) dedupes correctly. Falls back to
@@ -57,23 +69,38 @@ export default function (pi: ExtensionAPI) {
   // Canonical candidate path → content identity. A changed file is reinjected
   // so edits to repository instructions supersede the earlier snapshot.
   const injected = new Map<string, string>();
-  const pending: string[] = [];
+  // Files pi itself put in the system prompt, seeded per prompt.
+  const inSystemPrompt = new Map<string, string>();
+  const pending: { text: string; details: InjectedDetails }[] = [];
 
-  pi.on("session_start", () => {
+  // Rebuild from what the model can still see: a compaction summarizes the
+  // messages away, and /tree can move to a branch that never had them.
+  const syncFromContext = (ctx: ExtensionContext): void => {
     injected.clear();
-    pending.length = 0;
-  });
+    for (const m of ctx.sessionManager.buildSessionProjection().messages) {
+      if (m.role !== "custom" || m.customType !== MESSAGE_TYPE) continue;
+      const d = m.details as InjectedDetails | undefined;
+      if (d?.path && d.identity) injected.set(d.path, d.identity);
+    }
+  };
 
-  pi.on("context", (event) => {
+  pi.on("session_start", (_event, ctx) => {
+    pending.length = 0;
+    syncFromContext(ctx);
+  });
+  pi.on("session_compact", (_event, ctx) => syncFromContext(ctx));
+  pi.on("session_tree", (_event, ctx) => syncFromContext(ctx));
+
+  pi.on("turn_end", (event) => {
     if (pending.length === 0) return;
-    const messages = pending.splice(0).map((content) => ({
-      role: "custom" as const,
-      customType: "folder-context",
-      content,
+    const drafts = pending.splice(0).map(({ text, details }) => ({
+      type: "custom_message" as const,
+      customType: MESSAGE_TYPE,
+      content: text,
       display: false,
-      timestamp: Date.now(),
+      details,
     }));
-    return { messages: [...event.messages, ...messages] };
+    return { entries: [...event.entries, ...drafts] };
   });
 
   // Seed `injected` with whatever pi already put in the system prompt for
@@ -90,8 +117,9 @@ export default function (pi: ExtensionAPI) {
   // different (symlinked) path string. Without realpath, the two spellings
   // of the same file never compare equal and the dedup silently no-ops.
   pi.on("before_agent_start", (event) => {
+    inSystemPrompt.clear();
     for (const cf of event.systemPromptOptions.contextFiles ?? []) {
-      injected.set(canonical(cf.path), contentIdentity(cf.content));
+      inSystemPrompt.set(canonical(cf.path), contentIdentity(cf.content));
     }
   });
 
@@ -135,12 +163,14 @@ export default function (pi: ExtensionAPI) {
       try {
         const content = readFileSync(rawCandidate, "utf-8");
         const identity = contentIdentity(content);
+        if (inSystemPrompt.get(candidate) === identity) continue;
         const previous = injected.get(candidate);
         if (previous === identity) continue;
         injected.set(candidate, identity);
-        pending.push(
-          frameContext(rawCandidate, content, previous !== undefined),
-        );
+        pending.push({
+          text: frameContext(rawCandidate, content, previous !== undefined),
+          details: { path: candidate, identity },
+        });
       } catch {
         // allow retry on next call
       }

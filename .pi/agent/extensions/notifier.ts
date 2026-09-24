@@ -13,7 +13,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { exec, execFile } from "node:child_process";
 import { APP_TITLE, statusTitle, type AgentStatus } from "./shared/status";
-import { createSettleGate } from "./shared/turn-gate";
 import { writeFileSync } from "node:fs";
 import * as path from "node:path";
 
@@ -393,10 +392,8 @@ const notify = async (projectName: string, message: string): Promise<void> => {
 
 export default function (pi: ExtensionAPI) {
   let projectName = path.basename(process.cwd());
-  // Created here, in the factory, so the subscription exists before any turn.
-  const settleGate = createSettleGate(pi);
-  // Bumped per turn. A settle report captures it and drops itself when a new
-  // turn began while it waited on the gate.
+  // Bumped per run. A settle report captures it and drops itself when a new
+  // run began while it waited on the focus check.
   let turnGeneration = 0;
   // pi coalesces nested prompts into one span, so a bare flag is enough to
   // tell a real close from a stray end event.
@@ -438,23 +435,21 @@ export default function (pi: ExtensionAPI) {
 
   // agent_settled, not agent_end: agent_end also fires mid auto-retry /
   // auto-compact / queued follow-ups, causing premature "done" + pings.
+  // lsp/feedback's repair turn runs before settle, so settled is final.
   pi.on("agent_settled", async () => {
     const gen = turnGeneration;
-    // pi settles before lsp/feedback decides whether to send a repair
-    // follow-up, so an unguarded "done" here lands a second before the agent
-    // resumes on its own. Detached because pi waits for this handler and the
-    // gate waits for seconds; the status stays "busy" meanwhile, which is
-    // what a pending repair is.
+    // Detached because pi waits for this handler and the focus check spawns
+    // osascript.
     void (async () => {
-      const { turnContinues } = await settleGate.wait();
-      if (turnContinues || gen !== turnGeneration) return;
       if (IS_SUBAGENT) {
         // subagent.ts polls this window name to know when the pane is done;
         // no notification/sound for a background turn nobody is watching.
         setWindowStatus("done");
         return;
       }
-      if (await isTerminalFocused()) {
+      const focused = await isTerminalFocused();
+      if (gen !== turnGeneration) return;
+      if (focused) {
         setWindowStatus("idle");
       } else {
         setWindowStatus("done");

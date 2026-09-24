@@ -1,7 +1,7 @@
-// Customizes pi TUI: input text color, slim footer, strips a container
-// margin artifact, renders the autocomplete dropdown as a floating overlay
-// above the editor — the dropdown covers the conversation lines underneath
-// instead of pushing the editor up or reserving a permanent gap.
+// Customizes pi TUI: input text color, slim footer, and the autocomplete
+// dropdown as a floating overlay above the editor. The dropdown covers the
+// conversation lines underneath instead of pushing the editor up or
+// reserving a permanent gap.
 import {
   CustomEditor,
   type ExtensionAPI,
@@ -10,8 +10,6 @@ import {
 import type { Theme as PiTheme } from "@earendil-works/pi-coding-agent";
 import {
   Editor,
-  TuiAltScreen,
-  TuiMainScreen,
   type Component,
   type EditorTheme,
   type OverlayHandle,
@@ -20,44 +18,6 @@ import {
   truncateToWidth,
   visibleWidth,
 } from "@earendil-works/pi-tui";
-
-// pi's own message containers render with a 1-column left margin (a real
-// space character in the terminal grid, not screen padding), so selecting
-// text out of the pane always drags that space along. Footer/divider lines
-// span full width with no margin and are untouched since they don't start
-// with one. Strip right after any leading ANSI color codes so colored lines
-// still get the same trim. Also skip OSC sequences (e.g. the OSC 133 zone
-// markers pi prepends to an assistant message's last line) — otherwise that
-// line keeps its margin and shifts 1 column right while streaming.
-const LEADING_MARGIN =
-  /^((?:\x1b\[[0-9;]*m|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\))*) /;
-const stripLeadingMargin = (lines: string[]): string[] =>
-  lines.map((l) => l.replace(LEADING_MARGIN, "$1"));
-
-// Patch render on both concrete screen classes (regular and fullscreen) to
-// strip the leading margin from every rendered line. Re-installable across
-// /reload the same way pi's own patches are: walk past wrapper layers from
-// previous module loads to the true original before wrapping again.
-const MARGIN_TAG = "__marginStripped";
-const installMarginStripPatch = (klass: {
-  prototype: { render(width: number): string[] };
-}) => {
-  const proto = klass.prototype as unknown as {
-    render(width: number): string[];
-  };
-  let origRender = proto.render as unknown as {
-    (width: number): string[];
-    [MARGIN_TAG]?: { orig: (width: number) => string[] };
-  };
-  while (origRender[MARGIN_TAG]) {
-    origRender = origRender[MARGIN_TAG].orig as typeof origRender;
-  }
-  const wrapper = function (this: typeof proto, width: number): string[] {
-    return stripLeadingMargin(origRender.call(this, width));
-  } as unknown as typeof origRender;
-  wrapper[MARGIN_TAG] = { orig: origRender };
-  proto.render = wrapper;
-};
 
 const SGR_RESET = "\x1b[0m";
 // Matches only actual decoration lines (a solid horizontal rule, or a
@@ -307,7 +267,8 @@ class ThemedEditor extends CustomEditor {
     keybindings: KeybindingsManager,
     private readonly getTheme: () => PiTheme,
   ) {
-    super(tui, editorTheme, keybindings);
+    // Same as pi's default editor, which draws working status in its border.
+    super(tui, editorTheme, keybindings, { embedWorkingStatus: true });
   }
 
   render(width: number): string[] {
@@ -350,8 +311,10 @@ const installWorking = (pi: ExtensionAPI) => {
     });
   });
 
+  // One timer per run: agent_start fires again for each retry, compaction
+  // resume and lsp repair turn, and agent_settled fires once at the end.
   pi.on("agent_start", async (_event, ctx) => {
-    stop();
+    if (timer) return;
     const started = Date.now();
     const tick = () => {
       const s = Math.round((Date.now() - started) / 1000);
@@ -366,7 +329,7 @@ const installWorking = (pi: ExtensionAPI) => {
     timer.unref?.();
   });
 
-  pi.on("agent_end", async (_event, ctx) => {
+  pi.on("agent_settled", async (_event, ctx) => {
     stop();
     ctx.ui.setWorkingMessage();
   });
@@ -488,8 +451,6 @@ const installFooter = (pi: ExtensionAPI) => {
   });
 };
 
-installMarginStripPatch(TuiMainScreen);
-installMarginStripPatch(TuiAltScreen);
 installAutocompleteAbovePatch();
 
 export default function (pi: ExtensionAPI) {

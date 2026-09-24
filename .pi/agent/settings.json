@@ -18,7 +18,14 @@
     "anthropicExtraUsage": false
   },
   "compaction": {
-    "reserveTokens": 700000
+    "modelOverrides": {
+      "anthropic/claude-opus-5-5": {
+        "reserveTokens": 700000
+      },
+      "anthropic/claude-sonnet-5": {
+        "reserveTokens": 700000
+      }
+    }
   },
   "branchSummary": {
     "skipPrompt": true

@@ -25,6 +25,6 @@ Keep its two halves separate:
 
 Closing the socket must use `end()`, not `destroy()`: the msgpack decoder wrapped around it rejects with `ERR_STREAM_PREMATURE_CLOSE` on an abrupt teardown and nothing in the `neovim` package catches it, so a `destroy()` on the shutdown path takes the pi process down with an unhandled rejection. For the same reason `qall!` is sent with a bounded wait — it kills the channel mid-request, so its reply never arrives and a plain `await` hangs forever.
 
-## The repair follow-up outlives the turn
+## The repair turn runs before settle
 
-`feedback/*` can send a repair follow-up after pi already fired `agent_settled`, so an extension that reports completion on that event reports it too early. `../shared/turn-gate.ts` closes the window: the pass claims the gate on the first tracked edit and releases it with `turnContinues` once it knows whether it sent the follow-up. The consumers are the desktop ping and tmux title in `../notifier.ts` and the subagent result file in `../subagent.ts`. New post-turn work that can start a turn must take a claim, and a new completion signal must wait on the gate.
+`feedback/*` runs its batched pass in `agent_before_settle` and returns the diagnostics with `continue: true`, so the repair turn stays inside the same agent run. `agent_settled` fires only after the last repair turn. A completion signal, such as the desktop ping and tmux title in `../notifier.ts` or the subagent result file in `../subagent.ts`, must listen on `agent_settled`, never on `agent_end`, because `agent_end` fires before each repair turn. New post-turn work that can start a turn must use `agent_before_settle` the same way, not `pi.sendMessage` from `agent_settled`.

@@ -39,7 +39,6 @@ const YEET_PRIMARY_MODEL_PROVIDER = "anthropic";
 const YEET_PRIMARY_MODEL_ID = "claude-sonnet-5";
 const YEET_FALLBACK_MODEL_PROVIDER = "openai-codex";
 const YEET_FALLBACK_MODEL_ID = "gpt-5.5";
-const YEET_THINKING_ENABLED = false;
 
 export default function (pi: ExtensionAPI) {
   pi.on("before_agent_start", async (_event, ctx) => {
@@ -215,7 +214,6 @@ export default function (pi: ExtensionAPI) {
     const message = await sideChannelWithLoader(ctx, `yeet → ${yeetModel.id}`, {
       systemPrompt: MSG_PROMPT,
       model: yeetModel,
-      thinkingEnabled: YEET_THINKING_ENABLED,
       messages: [
         {
           role: "user",

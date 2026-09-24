@@ -18,8 +18,7 @@ import { collectTextMessages } from "./shared/message";
 import { sideChannelWithLoader } from "./shared/llm";
 import { barWidget } from "./shared/widget";
 
-// Minimal caveman-mode system prompt. No edit/tool restrictions needed —
-// `complete()` is called with no `tools`, so the model has no edit ability.
+// No edit or tool restrictions needed: the side call sends no tools.
 const SIDE_PROMPT =
   "Caveman mode. One short sentence. No preamble. No suggestions. Plain text.";
 
