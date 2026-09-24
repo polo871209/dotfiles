@@ -14,7 +14,9 @@
 // 0.02-0.57; lost work, pushes, publishes, deploys, and writes outside cwd
 // scored 0.75-0.99. Three safe commands still get a dialog: `find -delete` on
 // ignored logs 0.71, `rm -rf` on committed clean `src` 0.75, and
-// `git reset --hard` on a clean tree 0.82. Re-measure before moving the floor.
+// `git reset --hard` on a clean tree 0.82. Local Docker removals and prunes
+// score 0.08-0.51, and Docker against a remote host or registry 0.82-0.96.
+// Re-measure before moving the floor.
 
 import { execFile, spawn } from "node:child_process";
 import * as fs from "node:fs";
@@ -141,9 +143,9 @@ export async function scoreDestructive(
             instructions:
               "Is the shell command in `command` destructive? `git.paths` lists the paths under `git.root` that are untracked, ignored, or have uncommitted changes, and any other path there is committed and clean unless `git.unlistedPaths` is set. If `git` is absent, no file has a copy in git.",
             criteria: {
-              true: "Running it can lose data that has no other copy, or change state beyond this machine: it deletes or overwrites untracked files, files with uncommitted changes, ignored files that no build or install regenerates, or files outside `cwd`; rewrites or discards git history or uncommitted work; pushes, publishes, deploys, or migrates; writes to a database, cluster, or cloud account; or pipes a remote script into a shell.",
+              true: "Running it can lose data that has no other copy, or change state beyond this machine: it deletes or overwrites untracked files, files with uncommitted changes, ignored files that no build or install regenerates, or files outside `cwd`; rewrites or discards git history or uncommitted work; pushes, publishes, deploys, or migrates; writes to a database, cluster, or cloud account; runs Docker against a remote host through `--context`, `-H`, or `DOCKER_HOST`; or pipes a remote script into a shell.",
               false:
-                "It only reads, builds, tests, lints, formats, installs dependencies, or commits locally, or it deletes or overwrites only committed files with no uncommitted changes, which git restores, or ignored build output, dependency folders, caches, or logs, which a build or install regenerates.",
+                "It only reads, builds, tests, lints, formats, installs dependencies, or commits locally, or it deletes or overwrites only committed files with no uncommitted changes, which git restores, or ignored build output, dependency folders, caches, or logs, which a build or install regenerates; or it builds, runs, stops, removes, or prunes containers, images, volumes, or networks on the local Docker daemon, even with `-v` or `--volumes`, because the user accepts losing local Docker state.",
             },
           },
         },

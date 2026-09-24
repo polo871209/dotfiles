@@ -27,6 +27,7 @@ Before changing Pi-native behavior, read directly relevant documentation in the 
 - **`subagent.ts`** — delegates external research, read-only recon of the local repo, or a read-only parallel review to an isolated agent, with background control and compact structured results.
 - **`quiet-run.ts`** — runs shell commands by default, with output kept in a log file, returning only the verdict and the requested slice, and holds a destructive command until the user approves it.
 - **`ask/`** — presents structured choices when a request needs clarification.
+- **`browser-task/`** — runs one narrow goal in a real web page in the user's Chrome and returns the actions taken and the final page text.
 
 ### Cleaner context
 
@@ -59,6 +60,7 @@ extensions/
 ├── node_modules → ../npm/node_modules
 ├── *.ts          single-file extensions
 ├── ask/          ask_user_question dialog
+├── browser-task/ jev-ultrafast browser goals
 ├── eval/         persistent Python
 ├── lsp/          navigation and post-edit feedback
 └── shared/       shared extension utilities

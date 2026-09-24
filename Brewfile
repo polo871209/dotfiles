@@ -1,5 +1,5 @@
 tap "abue-ammar/tinycast", trusted: true
-tap "crmne/tap"
+tap "crmne/tap", trusted: true
 brew "cocoapods"
 brew "git"
 brew "imagemagick"
@@ -17,8 +17,8 @@ brew "zsh-syntax-highlighting"
 cask "android-studio"
 cask "bettercmdtab"
 cask "betterdisplay"
+cask "claude"
 cask "dbeaver-community"
-cask "crmne/tap/fastpotify", trusted: true
 cask "font-fira-code-nerd-font"
 cask "gcloud-cli"
 cask "ghostty"
@@ -31,10 +31,11 @@ cask "microsoft-teams"
 cask "obsidian"
 cask "orbstack"
 cask "shottr"
+cask "crmne/tap/spotifast", trusted: true
 cask "abue-ammar/tinycast/tinycast"
 cask "zen"
 mas "LINE", id: 539883307
-mas "PDFgear 2", id: 6469021132
+mas "PDFgear", id: 6469021132
 mas "Telegram 2", id: 747648890
 mas "WhatsApp", id: 310633997
 mas "Xcode", id: 497799835

@@ -22,6 +22,8 @@ neovim = "latest"
 "aqua:joshmedeski/sesh" = "latest"
 "github:veirt/weathr" = "latest"
 "pipx:pgcli" = "latest"
+# Library for the pi browser_task tool; a Git URL makes `latest` track main HEAD.
+"pipx:git+https://github.com/browser-use/jev-ultrafast.git" = "latest"
 atuin = "latest"
 bat = "latest"
 carapace = "latest"
