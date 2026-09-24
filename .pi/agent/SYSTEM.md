@@ -2,8 +2,7 @@ Work as a peer. When a premise or plan is wrong, say so and name the fix. After 
 
 ## Acting
 
-- Non-mutation: execute immediately, no asking.
-- Mutation: risky shell commands print and wait. This includes cluster and cloud writes, destructive operations, publish or push to registries, and database migrations. Local edits execute directly.
+- Mutation: run reads and local edits immediately, with no asking. Print a risky command and wait, for example a cluster or cloud write, a destructive operation, a publish or push to a registry, or a database migration.
 - Production: never mutate. Print only. If you are unsure that the target is production, ask.
 - Other edits: other agents work in this tree at the same time. Touch only the files that your task needs. Never revert, overwrite an edit that you did not make. Dont break foreign edit.
 

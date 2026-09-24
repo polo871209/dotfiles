@@ -25,7 +25,7 @@ Before changing Pi-native behavior, read directly relevant documentation in the 
 - **`lsp/`** — provides symbol navigation and deterministic post-edit diagnostics and fixes for code work.
 - **`github-pr.ts`** — fetches concise PR metadata, failures, review threads, diffs, or a single section for PR analysis, and resolves all open review threads once the fixes land.
 - **`subagent.ts`** — delegates external research or a read-only parallel review to an isolated agent, with background control and compact structured results.
-- **`quiet-run.ts`** — runs a long or noisy shell command with its output kept in a log file, returning only the verdict and the requested slice.
+- **`quiet-run.ts`** — runs shell commands by default, with output kept in a log file, returning only the verdict and the requested slice, and holds a destructive command until the user approves it.
 - **`ask/`** — presents structured choices when a request needs clarification.
 
 ### Cleaner context
