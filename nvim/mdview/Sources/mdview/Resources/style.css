@@ -1,0 +1,35 @@
+/* Overrides on top of vendor/github-markdown.css, which owns typography, spacing, and colors. */
+
+/* Layout from the github-markdown-css README. */
+body.markdown-body {
+    box-sizing: border-box;
+    min-width: 200px;
+    max-width: 980px;
+    margin: 0 auto;
+    padding: 32px 45px 64px;
+}
+
+/* GitHub shrinks code to 85%, which reads too small. SF Mono at full size reads larger than SF Pro, so code sits 1px under its surrounding text. */
+.markdown-body code,
+.markdown-body tt,
+.markdown-body samp,
+.markdown-body pre {
+    font-size: calc(1em - 1px);
+}
+
+.markdown-body .mermaid {
+    display: flex;
+    justify-content: center;
+    margin-bottom: var(--base-size-16);
+    overflow: auto;
+}
+
+.markdown-body .mermaid.error {
+    display: block;
+    padding: var(--base-size-16);
+    border-radius: 6px;
+    background: var(--bgColor-muted);
+    color: var(--fgColor-danger);
+    font-family: var(--fontStack-monospace);
+    white-space: pre-wrap;
+}

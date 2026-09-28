@@ -33,13 +33,10 @@ vim.ui.select = function(items, opts, on_choice) require('picker').select(items,
 
 require('quicker').setup {}
 
-local render_markdown_loaded = false
-
 vim.api.nvim_create_autocmd('FileType', {
     pattern = 'markdown',
+    once = true,
     callback = function()
-        if render_markdown_loaded then return end
-        render_markdown_loaded = true
         vim.pack.add { 'https://github.com/MeanderingProgrammer/render-markdown.nvim' }
         -- Off by default: completes callout and checkbox markup via blink.
         require('render-markdown').setup {

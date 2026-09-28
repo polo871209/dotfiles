@@ -1,0 +1,26 @@
+# Pinned browser assets. Bump a version here, then run `just mdview`.
+highlight := "11.12.0"
+mermaid := "12.0.0"
+github_css := "5.9.0"
+slugger := "2.0.0"
+
+vendor := "Sources/mdview/Resources/vendor"
+cdn := "https://cdn.jsdelivr.net/npm"
+
+# Download the assets and build the release binary that nvim runs
+build: vendor
+    swift build -c release
+
+# Download the pinned assets into the git-ignored vendor directory
+vendor:
+    mkdir -p {{ vendor }}
+    curl -fsSLo {{ vendor }}/highlight.min.js {{ cdn }}/@highlightjs/cdn-assets@{{ highlight }}/highlight.min.js
+    curl -fsSLo {{ vendor }}/github.min.css {{ cdn }}/@highlightjs/cdn-assets@{{ highlight }}/styles/github.min.css
+    curl -fsSLo {{ vendor }}/github-dark.min.css {{ cdn }}/@highlightjs/cdn-assets@{{ highlight }}/styles/github-dark.min.css
+    curl -fsSLo {{ vendor }}/mermaid.min.js {{ cdn }}/mermaid@{{ mermaid }}/dist/mermaid.min.js
+    curl -fsSLo {{ vendor }}/github-markdown.css {{ cdn }}/github-markdown-css@{{ github_css }}/github-markdown.css
+    curl -fsSLo {{ vendor }}/github-slugger.js {{ cdn }}/github-slugger@{{ slugger }}/+esm
+
+# Run the Swift tests
+test: vendor
+    swift test

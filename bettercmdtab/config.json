@@ -11,11 +11,6 @@
       "bundleID" : "net.whatsapp.WhatsApp",
       "hide" : "always",
       "ignore" : "never"
-    },
-    {
-      "bundleID" : "me.paolino.fastpotify",
-      "hide" : "always",
-      "ignore" : "never"
     }
   ],
   "boldSelectedLabel" : false,

@@ -1,0 +1,19 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!-- Markdown keeps raw HTML, so no inline script and no fetch may run. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src mdview:; style-src mdview: 'unsafe-inline'; img-src mdview: https: data:; font-src mdview: data:">
+<!-- app.js moves this to the markdown file's directory so relative images resolve. -->
+<base href="mdview://app/">
+<!-- highlight.js first: github-markdown.css must win on code padding and background. -->
+<link rel="stylesheet" href="mdview://app/vendor/github.min.css" media="(prefers-color-scheme: light)">
+<link rel="stylesheet" href="mdview://app/vendor/github-dark.min.css" media="(prefers-color-scheme: dark)">
+<link rel="stylesheet" href="mdview://app/vendor/github-markdown.css">
+<link rel="stylesheet" href="mdview://app/style.css">
+<script defer src="mdview://app/vendor/highlight.min.js"></script>
+<script type="module" src="mdview://app/app.js"></script>
+</head>
+<!-- The body carries .markdown-body so its background also paints the whole window. -->
+<body id="content" class="markdown-body"></body>
+</html>
