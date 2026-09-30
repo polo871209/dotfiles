@@ -1,0 +1,13 @@
+[experimental]
+native_describe = true
+
+# Matches nvim: catppuccin-mocha on the terminal background.
+[skin]
+name = "catppuccin-mocha"
+background = false
+
+[views."v1/pods"]
+columns = [
+  { name = "%CPU/R", metric = "cpu-request-utilization" },
+  { name = "%MEM/R", metric = "memory-request-utilization" },
+]

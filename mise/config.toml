@@ -51,10 +51,10 @@ lazygit = "latest"
 apko = "latest"
 cloudflared = "latest"
 cloud-sql-proxy = "2"
-k9s = "latest"
 kubectx = "latest"
 kubectl = "latest"
 kubens = "latest"
+sofka = "latest"
 
 # LSPs
 "aqua:grafana/jsonnet-language-server" = "latest"
