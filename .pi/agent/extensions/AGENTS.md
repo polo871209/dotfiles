@@ -40,9 +40,9 @@ Report a tool failure with a throw or `isError: true`. Pi ignores an `error` fie
 ### Workflow shortcuts
 
 - **`go.ts`** — resumes an interrupted or stalled agent turn.
-- **`yeet.ts`** — validates, generates Conventional Commits with Sonnet 5 or GPT-5.5 fallback, and pushes current changes with progress.
+- **`yeet.ts`** — validates, generates Conventional Commits with Sonnet 5.5, and pushes current changes with progress.
 - **`copy.ts`** — copies a selected code block or the session transcript.
-- **`usage.ts`** — reports Claude Pro/Max and Codex/ChatGPT subscription usage and quota reset times on request.
+- **`usage.ts`** — reports Claude Pro/Max subscription usage and quota reset times on request.
 - **`auto-rename.ts`** — gives established sessions descriptive names.
 
 ### Outside-pi surface

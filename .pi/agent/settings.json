@@ -22,7 +22,7 @@
       "anthropic/claude-opus-5-5": {
         "reserveTokens": 650000
       },
-      "anthropic/claude-sonnet-5": {
+      "anthropic/claude-sonnet-5-5": {
         "reserveTokens": 650000
       }
     }

@@ -11,8 +11,6 @@ go = "latest"
 node = "latest"
 python = "latest"
 ruff = "latest"
-# Only the cargo: sofka fork build below needs it.
-rust = "stable"
 tree-sitter = "latest"
 uv = "latest"
 zig = "latest"
@@ -56,9 +54,8 @@ cloud-sql-proxy = "2"
 kubectx = "latest"
 kubectl = "latest"
 kubens = "latest"
-# Personal fork, built from source. mise installs a branch once, so run `mise install -f` after the fork moves.
-# Git CLI fetch, because git/config rewrites https://github.com/ to SSH and cargo's own SSH client cannot use the agent.
-"cargo:https://github.com/polo871209/sofka" = { version = "branch:polo", install_env = { CARGO_NET_GIT_FETCH_WITH_CLI = "true" } }
+# Personal fork. Each release overwrites the `latest` tag, so mise sees no new version. Run `mise install -f github:polo871209/sofka` to pick up a new build.
+"github:polo871209/sofka" = "latest"
 
 # LSPs
 "aqua:grafana/jsonnet-language-server" = "latest"

@@ -66,8 +66,7 @@ interface AgentConfig {
 // for all agents, no per-agent exceptions; unmapped providers inherit the
 // parent's own model.
 const MODEL_BY_PARENT_PROVIDER: Record<string, string> = {
-  anthropic: "anthropic/claude-sonnet-5",
-  "openai-codex": "openai-codex/gpt-5.6-luna",
+  anthropic: "anthropic/claude-sonnet-5-5",
 };
 
 const SUBAGENT_THINKING = "high";

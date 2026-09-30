@@ -35,10 +35,6 @@ Return the raw commit message itself, starting with the Conventional Commits sub
 const YEET_MSG_TYPE = "yeet-marker";
 const YEET_WIDGET_KEY = "yeet-progress";
 
-const YEET_PRIMARY_MODEL_PROVIDER = "anthropic";
-const YEET_PRIMARY_MODEL_ID = "claude-sonnet-5";
-const YEET_FALLBACK_MODEL_PROVIDER = "openai-codex";
-const YEET_FALLBACK_MODEL_ID = "gpt-5.5";
 
 export default function (pi: ExtensionAPI) {
   pi.on("before_agent_start", async (_event, ctx) => {
@@ -65,21 +61,8 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.notify("/yeet requires interactive mode", "error");
       return;
     }
-    const primaryModel = ctx.modelRegistry.find(
-      YEET_PRIMARY_MODEL_PROVIDER,
-      YEET_PRIMARY_MODEL_ID,
-    );
-    const fallbackModel = ctx.modelRegistry.find(
-      YEET_FALLBACK_MODEL_PROVIDER,
-      YEET_FALLBACK_MODEL_ID,
-    );
-    const yeetModel =
-      primaryModel && ctx.modelRegistry.hasConfiguredAuth(primaryModel)
-        ? primaryModel
-        : fallbackModel && ctx.modelRegistry.hasConfiguredAuth(fallbackModel)
-          ? fallbackModel
-          : undefined;
-    if (!yeetModel) {
+    const yeetModel = ctx.modelRegistry.find("anthropic", "claude-sonnet-5-5");
+    if (!yeetModel || !ctx.modelRegistry.hasConfiguredAuth(yeetModel)) {
       ctx.ui.notify("/yeet: no configured commit-message model", "error");
       return;
     }
