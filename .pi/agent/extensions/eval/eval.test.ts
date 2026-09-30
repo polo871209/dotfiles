@@ -9,14 +9,9 @@ import {
   type BridgeRegistration,
 } from "./bridge.ts";
 import EvalExtension from "./index.ts";
-import {
-  exposeRegisteredToolsToEval,
-  evalBridgeTools,
-} from "../shared/bridge-tools.ts";
 import { PyKernel } from "./py-kernel.ts";
 
 const registrations: BridgeRegistration[] = [];
-const fakeRegistryNames = new Set<string>();
 const extensionCleanups = new Set<() => unknown>();
 
 async function register(handler: Parameters<typeof registerBridgeSession>[0]) {
@@ -29,9 +24,6 @@ afterEach(() => {
   for (const cleanup of extensionCleanups) cleanup();
   extensionCleanups.clear();
   for (const reg of registrations.splice(0)) reg.unregister();
-  const registry = evalBridgeTools() as Map<string, unknown>;
-  for (const name of fakeRegistryNames) registry.delete(name);
-  fakeRegistryNames.clear();
 });
 
 const doubleHandler = async (name: string, args: unknown) => {
@@ -142,23 +134,6 @@ describe("bridge", () => {
   });
 });
 
-describe("bridge-tools registry", () => {
-  it("captures tools registered through a wrapped ExtensionAPI", () => {
-    const registered: unknown[] = [];
-    const fakePi = {
-      registerTool: (def: unknown) => registered.push(def),
-    };
-    exposeRegisteredToolsToEval(fakePi as never);
-    (fakePi.registerTool as (def: unknown) => void)({
-      name: "fake_bridged_tool",
-      execute: async () => ({ content: [] }),
-    });
-    assert.equal(registered.length, 1);
-    assert.ok(evalBridgeTools().has("fake_bridged_tool"));
-    fakeRegistryNames.add("fake_bridged_tool");
-  });
-});
-
 describe("public eval tool", () => {
   function makeTool() {
     const registered: any[] = [];
@@ -201,6 +176,41 @@ describe("public eval tool", () => {
           : cellSchema.properties[field];
       assert.equal(typeof schemaField.description, "string");
     }
+    shutdown();
+  });
+
+  it("lists structured results and cell-only tools in the loadout description", () => {
+    const { definition, shutdown } = makeTool();
+    const bash = {
+      name: "bash",
+      description: "shell",
+      outputSchema: {
+        type: "object",
+        required: ["output", "exit_code"],
+        properties: {
+          output: { type: "string" },
+          exit_code: { type: "number" },
+          full_output_path: { type: "string" },
+        },
+      },
+    };
+    const read = { name: "read", description: "read" };
+    const mcp = {
+      name: "mcp__jira__search",
+      description: "Search Jira.\nMore.",
+    };
+    const text = definition.prepareLoadout({
+      declared: [bash, read, definition],
+      callable: [bash, read, definition, mcp],
+    }).descriptions.eval as string;
+    assert.ok(text.startsWith(definition.description));
+    assert.match(
+      text,
+      /- `bash` -> \{output: str, exit_code: number, full_output_path\?: str\}/,
+    );
+    assert.doesNotMatch(text, /`read` ->|`eval` ->/);
+    assert.match(text, /- `mcp__jira__search`: Search Jira\.\n?/);
+    assert.doesNotMatch(text, /More\./);
     shutdown();
   });
 
@@ -303,6 +313,67 @@ describe("public eval tool", () => {
       ctx,
     );
     assert.match(after.content[0].text, /=> false/);
+    shutdown();
+  });
+
+  it("calls session tools through ctx.executeTool with codemode result semantics", async () => {
+    const { definition, shutdown } = makeTool();
+    const calls: Array<{ name: string; args: unknown }> = [];
+    const text = (t: string) => [{ type: "text", text: t }];
+    const toolCtx = {
+      cwd: process.cwd(),
+      tools: [
+        { name: "eval", description: "self", parameters: {} },
+        {
+          name: "bash",
+          description: "shell",
+          parameters: {},
+          outputSchema: { type: "object" },
+        },
+        { name: "echo", description: "echo", parameters: {} },
+      ],
+      executeTool: async (name: string, args: any) => {
+        calls.push({ name, args });
+        if (name === "bash") {
+          return {
+            isError: true,
+            result: {
+              content: text("exit 3"),
+              structuredContent: { output: "x", exit_code: 3 },
+            },
+          };
+        }
+        if (args.fail)
+          return { isError: true, result: { content: text("nope") } };
+        return { isError: false, result: { content: text(`echo:${args.v}`) } };
+      },
+    } as never;
+    const result = await definition.execute(
+      "public-nested",
+      {
+        cells: [
+          { code: "tool.bash({'command': 'false'})['exit_code']" },
+          { code: "tool.echo(v=1)" },
+          {
+            code: "r = parallel([('echo', {'v': 2}), ('echo', {'fail': True}), ('echo', {'v': 3})])\n[x if isinstance(x, str) else type(x).__name__ + ':' + str(x) for x in r]",
+          },
+          {
+            code: "names = tool.list(); ('eval' in names, 'echo' in names, 'grep' in names)",
+          },
+          { code: "tool.describe(name='echo')['output_schema']" },
+        ],
+      },
+      undefined,
+      undefined,
+      toolCtx,
+    );
+    const out = result.content[0].text;
+    assert.match(out, /\[1\][\s\S]*=> 3/);
+    assert.match(out, /=> echo:1/);
+    assert.match(out, /"echo:2",\s*"RuntimeError:nope",\s*"echo:3"/);
+    assert.match(out, /false,\s*true,\s*true/);
+    assert.match(out, /"type": "string"/);
+    assert.equal(calls.filter((c) => c.name === "echo").length, 4);
     shutdown();
   });
 });

@@ -52,7 +52,6 @@ import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
 import TurndownService from "turndown";
 import { lookup as dnsLookup } from "node:dns/promises";
-import { exposeRegisteredToolsToEval } from "./shared/bridge-tools";
 import net from "node:net";
 import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -1692,7 +1691,6 @@ export const fetchParameters = Type.Intersect([
 ]);
 
 export default function (pi: ExtensionAPI) {
-  exposeRegisteredToolsToEval(pi);
   pi.on("session_shutdown", () => {
     for (const promise of cloneCache.values()) {
       promise
@@ -1722,6 +1720,21 @@ export default function (pi: ExtensionAPI) {
       );
     },
     parameters: searchParameters,
+    outputSchema: Type.Object({
+      queries: Type.Array(
+        Type.Object({
+          query: Type.String(),
+          results: Type.Array(
+            Type.Object({
+              title: Type.String(),
+              url: Type.String(),
+              content: Type.String(),
+            }),
+          ),
+          error: Type.Union([Type.String(), Type.Null()]),
+        }),
+      ),
+    }),
     async execute(_callId, params, signal) {
       const queryList = (
         Array.isArray(params.queries)
@@ -1741,6 +1754,7 @@ export default function (pi: ExtensionAPI) {
             },
           ],
           details: {},
+          isError: true,
         };
       }
       const numResults = Math.min(
@@ -1793,13 +1807,28 @@ export default function (pi: ExtensionAPI) {
           "Note: fallback search for at least one query. Snippets are shorter than usual, so fetch a result before concluding.\n\n";
       // Shared across queries: two queries reaching one page bill it twice.
       const seen = new Map<string, Set<string>>();
+      const structured: {
+        query: string;
+        results: { title: string; url: string; content: string }[];
+        error: string | null;
+      }[] = [];
       for (const { query, results: raw, error } of queryResults) {
         if (queryList.length > 1) output += `## Query: "${query}"\n\n`;
         if (error) {
+          structured.push({ query, results: [], error });
           output += `0 results (error: ${error})\n\n`;
           continue;
         }
         const results = dedupResults(raw, seen);
+        structured.push({
+          query,
+          results: results.map(({ title, url, content }) => ({
+            title,
+            url,
+            content,
+          })),
+          error: null,
+        });
         totalResults += results.length;
         if (results.length === 0) {
           output += "0 results.\n\n";
@@ -1828,6 +1857,8 @@ export default function (pi: ExtensionAPI) {
           totalResults,
           providers: [...new Set(queryResults.map((r) => r.provider))],
         },
+        structuredContent: { queries: structured },
+        ...(queryResults.every((r) => r.error) ? { isError: true } : {}),
       };
     },
   });
@@ -1850,6 +1881,16 @@ export default function (pi: ExtensionAPI) {
       );
     },
     parameters: fetchParameters,
+    outputSchema: Type.Object({
+      pages: Type.Array(
+        Type.Object({
+          url: Type.String(),
+          title: Type.String(),
+          content: Type.String({ description: "Markdown, or a local path" }),
+          error: Type.Union([Type.String(), Type.Null()]),
+        }),
+      ),
+    }),
     async execute(_callId, params, signal) {
       const urlList = (
         Array.isArray(params.urls)
@@ -1869,6 +1910,7 @@ export default function (pi: ExtensionAPI) {
             },
           ],
           details: {},
+          isError: true,
         };
       }
       const mode = params.mode === "raw" ? "raw" : "readable";
@@ -1899,6 +1941,8 @@ export default function (pi: ExtensionAPI) {
       return {
         content: [{ type: "text", text: output }],
         details: { urls: urlList, ok: results.filter((r) => !r.error).length },
+        structuredContent: { pages: results },
+        ...(results.every((r) => r.error) ? { isError: true } : {}),
       };
     },
   });

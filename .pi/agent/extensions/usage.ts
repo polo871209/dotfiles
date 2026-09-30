@@ -8,6 +8,7 @@ import {
   readStoredCredential,
   type ExtensionAPI,
   type ExtensionContext,
+  type Theme,
 } from "@earendil-works/pi-coding-agent";
 
 // Both endpoints accept only OAuth tokens. The registry returns the stored
@@ -49,19 +50,21 @@ interface ClaudeUsageResponse {
 }
 
 const BAR_WIDTH = 20;
-const BAR_FG = "\x1b[38;2;137;180;250m"; // catppuccin-mocha "blue" (#89b4fa)
-const RESET_SGR = "\x1b[0m";
-
-function bar(pct: number): string {
+function bar(pct: number, theme: Theme): string {
   const filled = Math.round(
     (Math.min(100, Math.max(0, pct)) / 100) * BAR_WIDTH,
   );
   return (
-    BAR_FG + "█".repeat(filled) + RESET_SGR + "░".repeat(BAR_WIDTH - filled)
+    theme.fg("accent", "█".repeat(filled)) + "░".repeat(BAR_WIDTH - filled)
   );
 }
 
-function fmtLine(name: string, pct: number, resetsAt: Date | string): string {
+function fmtLine(
+  name: string,
+  pct: number,
+  resetsAt: Date | string,
+  theme: Theme,
+): string {
   const resetStr =
     resetsAt instanceof Date
       ? Number.isNaN(resetsAt.getTime())
@@ -69,7 +72,7 @@ function fmtLine(name: string, pct: number, resetsAt: Date | string): string {
         : resetsAt.toLocaleString()
       : resetsAt;
   const pctStr = `${pct.toFixed(0)}%`.padStart(4);
-  return `${name}\n${bar(pct)} ${pctStr} used  (resets ${resetStr})`;
+  return `${name}\n${bar(pct, theme)} ${pctStr} used  (resets ${resetStr})`;
 }
 
 async function claudeUsageLines(ctx: ExtensionContext): Promise<string[]> {
@@ -96,7 +99,9 @@ async function claudeUsageLines(ctx: ExtensionContext): Promise<string[]> {
 
   const data = (await res.json()) as ClaudeUsageResponse;
   const bucket = (name: string, b: ClaudeBucket | null | undefined) =>
-    b ? fmtLine(name, b.utilization, new Date(b.resets_at)) : undefined;
+    b
+      ? fmtLine(name, b.utilization, new Date(b.resets_at), ctx.ui.theme)
+      : undefined;
   const lines = [
     bucket("5h session", data.five_hour),
     bucket("7d all-models", data.seven_day),
@@ -152,7 +157,9 @@ async function codexUsageLines(ctx: ExtensionContext): Promise<string[]> {
 
   const data = (await res.json()) as CodexUsageResponse;
   const window = (name: string, w: CodexRateLimitWindow | null | undefined) =>
-    w ? fmtLine(name, w.used_percent, new Date(w.reset_at * 1000)) : undefined;
+    w
+      ? fmtLine(name, w.used_percent, new Date(w.reset_at * 1000), ctx.ui.theme)
+      : undefined;
 
   const lines = [
     window("primary", data.rate_limit?.primary_window),

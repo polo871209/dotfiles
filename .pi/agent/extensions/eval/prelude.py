@@ -138,6 +138,29 @@ def tree(path=".", max_depth=3, show_hidden=False):
     return tool.tree({"path": path, "max_depth": max_depth, "show_hidden": show_hidden})
 
 
+def parallel(calls, max_workers=8):
+    """Run `(name, args)` tool calls concurrently, like Promise.allSettled.
+
+    Returns results in input order. A failed call yields its exception object
+    instead of raising, so one failure does not discard the other results.
+    """
+    from concurrent.futures import ThreadPoolExecutor as _Pool
+
+    calls = list(calls)
+    if not calls:
+        return []
+
+    def _one(call):
+        name, args = call
+        try:
+            return tool[name](args)
+        except Exception as exc:  # noqa: BLE001 -- returned to the caller, not swallowed
+            return exc
+
+    with _Pool(max_workers=max(1, min(max_workers, len(calls)))) as pool:
+        return list(pool.map(_one, calls))
+
+
 def env(key=None, value=None):
     """Get/set env vars in this kernel's process.
 

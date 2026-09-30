@@ -25,7 +25,6 @@ import { promisify, stripVTControlCharacters } from "node:util";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { exposeRegisteredToolsToEval } from "./shared/bridge-tools";
 
 const SUCCESS_TAIL = 10;
 const FAILURE_TAIL = 30;
@@ -164,8 +163,6 @@ export async function scoreDestructive(
 }
 
 export default function (pi: ExtensionAPI) {
-  exposeRegisteredToolsToEval(pi);
-
   pi.registerTool({
     name: "quiet_run",
     label: "Quiet Run",
@@ -192,6 +189,16 @@ export default function (pi: ExtensionAPI) {
           description:
             "Case-insensitive regex, e.g. 'error|failed'. Returns the last `tail` matching lines instead of the tail.",
         }),
+      ),
+    }),
+    outputSchema: Type.Object({
+      verdict: Type.String({ description: "exit=N, timeout, aborted, or killed" }),
+      exit_code: Type.Union([Type.Number(), Type.Null()]),
+      duration_ms: Type.Number(),
+      lines: Type.Number({ description: "Total output lines" }),
+      output: Type.String({ description: "The tail or filter matches shown" }),
+      log_path: Type.Optional(
+        Type.String({ description: "Full log, when output was left out" }),
       ),
     }),
     // TUI only. The command already sits in context as the call's arguments.
@@ -390,9 +397,19 @@ export default function (pi: ExtensionAPI) {
         ...(hidden ? [`log ${path.relative(cwd, logPath)}`] : []),
       ].join(" · ");
       const text = [head, ...body].join("\n");
-      // Throwing is how pi marks a result failed, same as the bash tool.
-      if (failed) throw new Error(text);
-      return { content: [{ type: "text", text }], details: {} };
+      return {
+        content: [{ type: "text", text }],
+        details: {},
+        structuredContent: {
+          verdict,
+          exit_code: spawnError || timedOut || killSignal ? null : code,
+          duration_ms: Date.now() - startedAt,
+          lines: lineCount,
+          output: body.join("\n"),
+          ...(hidden ? { log_path: logPath } : {}),
+        },
+        ...(failed ? { isError: true } : {}),
+      };
     },
   });
 }

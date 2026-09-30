@@ -15,7 +15,6 @@ import {
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { run } from "./shared/exec";
-import { exposeRegisteredToolsToEval } from "./shared/bridge-tools";
 
 const MAX_DIFF_BYTES = 48 * 1024;
 const MAX_BODY_BYTES = 6 * 1024;
@@ -117,14 +116,14 @@ function fmt(n: number): string {
 type ToolResult = {
   content: { type: "text"; text: string }[];
   details: { summary: string };
-  error?: string;
+  isError?: boolean;
 };
 
 function fail(msg: string): ToolResult {
   return {
     content: [{ type: "text" as const, text: msg }],
     details: { summary: msg },
-    error: msg,
+    isError: true,
   };
 }
 
@@ -273,7 +272,6 @@ const params = Type.Object({
 });
 
 export default function (pi: ExtensionAPI) {
-  exposeRegisteredToolsToEval(pi);
   pi.registerTool<typeof params, { summary: string }>({
     name: "github_pr",
     label: "GitHub PR",
@@ -304,7 +302,7 @@ export default function (pi: ExtensionAPI) {
         return {
           content: [{ type: "text" as const, text: msg }],
           details: { summary: msg },
-          error: msg,
+          isError: true,
         };
       }
       const repo = a.repo ?? parsed.repo;
@@ -384,7 +382,7 @@ export default function (pi: ExtensionAPI) {
         return {
           content: [{ type: "text" as const, text: msg }],
           details: { summary: msg },
-          error: msg,
+          isError: true,
         };
       }
 

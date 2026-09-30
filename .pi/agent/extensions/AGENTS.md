@@ -16,12 +16,14 @@ Personal agent harness built on [pi](https://github.com/earendil-works/pi): more
 
 Before changing Pi-native behavior, read directly relevant documentation in the installed `@earendil-works/pi-coding-agent` package and its explicitly required prerequisites. Stop once the relevant API and constraints are covered.
 
+Report a tool failure with a throw or `isError: true`. Pi ignores an `error` field on the result and shows the call as a success. A tool whose result is data declares `outputSchema` and returns `structuredContent`, because `eval` cells and codemode scripts receive that value instead of the text.
+
 ## What it adds to vanilla pi
 
 ### Bigger toolbox for the model
 
 - **`web-search.ts`** — searches or fetches one or many web targets for external research, ranking results most relevant first and dropping the ones that do not answer the query, returning GitHub links as local files or comment threads, and videos as transcripts.
-- **`eval/`** — runs persistent Python for iterative computation and bulk aggregation.
+- **`eval/`** — runs persistent Python for iterative computation, bulk aggregation, and batched or parallel tool calls.
 - **`lsp/`** — provides symbol navigation and deterministic post-edit diagnostics and fixes for code work.
 - **`github-pr.ts`** — fetches concise PR metadata, failures, review threads, diffs, or a single section for PR analysis, and resolves all open review threads once the fixes land.
 - **`subagent.ts`** — delegates external research, read-only recon of the local repo, or a read-only parallel review to an isolated agent, with background control and compact structured results.

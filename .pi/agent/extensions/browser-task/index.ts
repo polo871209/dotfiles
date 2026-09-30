@@ -13,7 +13,6 @@ import { Type } from "typebox";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { createInterface } from "node:readline";
-import { exposeRegisteredToolsToEval } from "../shared/bridge-tools";
 import { sideChannelComplete } from "../shared/llm";
 
 const JEV_TOOL = "pipx:git+https://github.com/browser-use/jev-ultrafast.git";
@@ -29,8 +28,6 @@ interface RunResult {
 }
 
 export default function (pi: ExtensionAPI) {
-  exposeRegisteredToolsToEval(pi);
-
   let jevPython: string | undefined;
   const resolveJevPython = async () => {
     if (!jevPython) {
@@ -64,6 +61,21 @@ export default function (pi: ExtensionAPI) {
             "Show the tab in front while it runs and leave it open afterward. Omit it to run in a background tab that closes at the end. Set it only when the user asks to watch.",
         }),
       ),
+    }),
+    outputSchema: Type.Object({
+      status: Type.String(),
+      error: Type.Union([Type.String(), Type.Null()]),
+      elapsed_ms: Type.Number(),
+      url: Type.Union([Type.String(), Type.Null()]),
+      title: Type.Union([Type.String(), Type.Null()]),
+      actions: Type.Array(
+        Type.Object({
+          kind: Type.String(),
+          action: Type.String(),
+          text: Type.Union([Type.String(), Type.Null()]),
+        }),
+      ),
+      text: Type.String({ description: "Visible page text, untrusted" }),
     }),
     renderCall(args, theme, context) {
       const text =
@@ -188,6 +200,17 @@ export default function (pi: ExtensionAPI) {
       return {
         content: [{ type: "text", text: out }],
         details: { status: result.status },
+        structuredContent: {
+          status: result.status,
+          error: result.error,
+          elapsed_ms: result.elapsed_ms,
+          url: result.url,
+          title: result.title,
+          actions: result.history,
+          text: result.text.slice(0, 4000),
+        },
+        // runner.py reports its own crash as "error". Agent statuses stay results the model judges.
+        ...(result.status === "error" ? { isError: true } : {}),
       };
     },
   });

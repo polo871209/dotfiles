@@ -4,19 +4,21 @@ import * as path from "node:path";
 import {
   DEFAULT_MAX_BYTES,
   DEFAULT_MAX_LINES,
-  createBashTool,
-  createEditTool,
   createFindTool,
   createGrepTool,
   createLsTool,
   createReadTool,
-  createWriteTool,
   formatSize,
   truncateTail,
   type ExtensionAPI,
   type ExtensionContext,
+  type ExtensionToolContext,
 } from "@earendil-works/pi-coding-agent";
-import type { AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
+import type {
+  AgentTool,
+  AgentToolCallOutcome,
+  AgentToolResult,
+} from "@earendil-works/pi-agent-core";
 import type { TextContent, Usage } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
 import {
@@ -28,7 +30,6 @@ import {
 import { PyKernel } from "./py-kernel.ts";
 import type { CellResult } from "./types.ts";
 import { sideChannelComplete } from "../shared/llm.ts";
-import { evalBridgeTools } from "../shared/bridge-tools.ts";
 
 const Cell = Type.Object(
   {
@@ -72,8 +73,8 @@ interface SessionState {
   py: PyKernel | null;
   registration: BridgeRegistration | null;
   cwd: string;
-  builtins: Record<string, AgentTool<any>> | null;
-  ctx: ExtensionContext | null;
+  fallbacks: Record<string, AgentTool<any>> | null;
+  ctx: ExtensionToolContext | null;
   // Tokens spent by `completion` calls during the current execute, reported
   // on the tool result so session totals include them.
   usage: Usage | null;
@@ -143,40 +144,56 @@ function resolveCompletionModel(ctx: ExtensionContext, spec: unknown) {
   return model;
 }
 
+function callableTools(state: SessionState) {
+  return (state.ctx?.tools ?? []).filter((tool) => tool.name !== "eval");
+}
+
 function bridgeHandler(state: SessionState): BridgeHandler {
   return async (name, args, signal) => {
-    const builtins = ensureBuiltins(state);
-    if (builtins[name]) {
-      const t = builtins[name]!;
-      const result = await t.execute(
-        `eval-bridge-${randomUUID()}`,
-        args as Static<typeof t.parameters>,
-        signal,
-      );
-      return flattenToolResult(result);
+    switch (name) {
+      case "list":
+        return [
+          ...new Set([
+            ...callableTools(state).map((tool) => tool.name),
+            ...Object.keys(ensureFallbacks(state)),
+            "tree",
+            "completion",
+            "list",
+            "describe",
+          ]),
+        ].sort();
+      case "describe": {
+        const tool =
+          callableTools(state).find((t) => t.name === args.name) ??
+          ensureFallbacks(state)[String(args.name)];
+        if (!tool) throw new Error(`unknown tool: ${String(args.name)}`);
+        return {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters,
+          output_schema: tool.outputSchema ?? {
+            type: "string",
+          },
+        };
+      }
     }
-    const ext = evalBridgeTools().get(name);
-    if (ext) {
-      if (!state.ctx)
-        throw new Error(`tool.${name} unavailable: no active tool context`);
-      const result = await ext.execute(
+    const tool = callableTools(state).find((t) => t.name === name);
+    if (tool && state.ctx?.executeTool) {
+      // Runs through pi's validation, tool_call hooks, and permission checks, like a model call.
+      const outcome = await state.ctx.executeTool(name, args, { signal });
+      return toPythonValue(name, tool.outputSchema, outcome);
+    }
+    // Inactive read-only built-ins stay reachable. They bypass tool_call hooks.
+    const fallback = ensureFallbacks(state)[name];
+    if (fallback) {
+      const result = await fallback.execute(
         `eval-bridge-${randomUUID()}`,
-        args,
+        args as Static<typeof fallback.parameters>,
         signal,
-        undefined,
-        state.ctx,
       );
       return flattenToolResult(result);
     }
     switch (name) {
-      case "list":
-        return [
-          ...Object.keys(ensureBuiltins(state)),
-          ...evalBridgeTools().keys(),
-          "tree",
-          "completion",
-          "list",
-        ].sort();
       case "completion": {
         if (!state.ctx)
           throw new Error("completion unavailable: no active tool context");
@@ -251,28 +268,43 @@ function bridgeHandler(state: SessionState): BridgeHandler {
   };
 }
 
-function ensureBuiltins(state: SessionState): Record<string, AgentTool<any>> {
-  if (state.builtins) return state.builtins;
+function ensureFallbacks(state: SessionState): Record<string, AgentTool<any>> {
+  if (state.fallbacks) return state.fallbacks;
   const tools = [
     createReadTool(state.cwd),
-    createWriteTool(state.cwd),
-    createEditTool(state.cwd),
-    createBashTool(state.cwd),
     createGrepTool(state.cwd),
     createFindTool(state.cwd),
     createLsTool(state.cwd),
   ] as unknown as AgentTool<any>[];
-  state.builtins = Object.fromEntries(tools.map((tool) => [tool.name, tool]));
-  return state.builtins;
+  state.fallbacks = Object.fromEntries(tools.map((tool) => [tool.name, tool]));
+  return state.fallbacks;
 }
 
-function flattenToolResult(result: AgentToolResult<unknown>): unknown {
-  const text = result.content
+function textOf(result: AgentToolResult<unknown>): string {
+  return result.content
     .filter((c): c is TextContent => c.type === "text")
     .map((c) => c.text)
     .join("");
+}
+
+function flattenToolResult(result: AgentToolResult<unknown>): unknown {
+  const text = textOf(result);
   const images = result.content.filter((c) => c.type === "image");
   return images.length === 0 ? text : { text, images };
+}
+
+// Codemode's contract: schema tools return structuredContent even on error, so `tool.bash` keeps exit_code.
+function toPythonValue(
+  name: string,
+  outputSchema: unknown,
+  outcome: AgentToolCallOutcome,
+): unknown {
+  const { result } = outcome;
+  if (outputSchema && result.structuredContent !== undefined) {
+    return result.structuredContent;
+  }
+  if (outcome.isError) throw new Error(textOf(result) || `tool.${name} failed`);
+  return flattenToolResult(result);
 }
 
 async function ensureBridge(state: SessionState): Promise<BridgeRegistration> {
@@ -344,6 +376,86 @@ function boundOutput(summary: string, body: string): string {
   return parts.join("\n\n");
 }
 
+const DESCRIPTION = `Run persistent Python for iterative computation and orchestrating tool calls.
+- Cells run in order in one CPython process. Variables, imports, and loaded data persist across cells and calls until a cell sets \`reset\`.
+- A cell's last expression is its value. \`print()\` output and \`display(value)\` also reach the result.
+- The kernel has full file system, network, and subprocess access. It is not a sandbox.
+- Call a tool with \`tool.<name>(args_dict)\` or \`tool.<name>(key=value)\`. Calls block until the tool finishes.
+- A tool listed under "Tool results" returns a dict. Any other tool returns its text as one string.
+- A failed, blocked, or invalid tool call raises RuntimeError with the tool's error text. \`tool.bash\` returns \`exit_code\` instead of raising on a non-zero exit.
+- Tool calls are real and have side effects. A cell that fails partway does not undo earlier calls.
+- The first failed cell stops the remaining cells. A cell times out after \`timeout\` seconds.
+- Output keeps the last 2000 lines or 50KB. Keep raw data in variables and return a compact aggregate, or write it to a file.
+
+Helpers:
+- \`parallel(calls: list[tuple[str, dict]], max_workers=8) -> list\`: runs tool calls concurrently and returns results in input order, with the exception object in the slot of a failed call.
+- \`tool.list() -> list[str]\`: callable tool names.
+- \`tool.describe(name=...) -> dict\`: one tool's description, input schema, and output schema.
+- \`read(path, offset=None, limit=None)\`, \`write(path, content)\`, \`tree(path=".", max_depth=3, show_hidden=False)\`: shorthands for file work.
+- \`env(key=None, value=None)\`: reads or sets environment variables of this kernel only.
+- \`completion(prompt, model="default", system=None, schema=None)\`: one stateless model call. With a JSON Schema \`schema\`, returns parsed JSON.
+- \`install(*pkgs, upgrade=False)\`: installs Python packages that persist across sessions.`;
+
+// Compact Python-style type of a JSON Schema, deep enough for tool results.
+function schemaType(schema: unknown, depth = 0): string {
+  const s = (schema ?? {}) as Record<string, any>;
+  if ("const" in s) return JSON.stringify(s.const);
+  if (Array.isArray(s.enum))
+    return s.enum.map((v: unknown) => JSON.stringify(v)).join(" | ");
+  if (Array.isArray(s.anyOf ?? s.oneOf)) {
+    return (s.anyOf ?? s.oneOf)
+      .map((x: unknown) => schemaType(x, depth))
+      .join(" | ");
+  }
+  const type = Array.isArray(s.type) ? s.type.join(" | ") : s.type;
+  if (type === "array") return `list[${schemaType(s.items, depth + 1)}]`;
+  if (type === "object" || s.properties) {
+    if (!s.properties || depth > 2) return "dict";
+    const required = new Set<string>(s.required ?? []);
+    const fields = Object.entries(s.properties).map(
+      ([key, value]) =>
+        `${key}${required.has(key) ? "" : "?"}: ${schemaType(value, depth + 1)}`,
+    );
+    return `{${fields.join(", ")}}`;
+  }
+  return (
+    (
+      {
+        string: "str",
+        number: "number",
+        integer: "int",
+        boolean: "bool",
+        null: "None",
+      } as Record<string, string>
+    )[type] ?? "any"
+  );
+}
+
+function describeCallable(
+  declared: readonly AgentTool<any>[],
+  callable: readonly AgentTool<any>[],
+): string {
+  const tools = callable.filter((tool) => tool.name !== "eval");
+  const structured = tools.filter((tool) => tool.outputSchema);
+  const declaredNames = new Set(declared.map((tool) => tool.name));
+  const hidden = tools.filter((tool) => !declaredNames.has(tool.name));
+  const sections = [DESCRIPTION];
+  if (structured.length > 0) {
+    sections.push(
+      `Tool results:\n${structured.map((tool) => `- \`${tool.name}\` -> ${schemaType(tool.outputSchema)}`).join("\n")}`,
+    );
+  }
+  if (hidden.length > 0) {
+    // Not declared to the model, so this line is the only place it learns they exist.
+    sections.push(
+      `Callable from cells only (\`tool.describe\` shows the schema):\n${hidden
+        .map((tool) => `- \`${tool.name}\`: ${tool.description.split("\n")[0]}`)
+        .join("\n")}`,
+    );
+  }
+  return sections.join("\n\n");
+}
+
 function details(
   results: CellResult[],
   total: number,
@@ -366,7 +478,7 @@ export default function (pi: ExtensionAPI) {
     py: null,
     registration: null,
     cwd: "",
-    builtins: null,
+    fallbacks: null,
     ctx: null,
     usage: null,
   };
@@ -379,7 +491,7 @@ export default function (pi: ExtensionAPI) {
     state.py = null;
     state.registration?.unregister();
     state.registration = null;
-    state.builtins = null;
+    state.fallbacks = null;
     state.ctx = null;
   };
 
@@ -387,10 +499,19 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "eval",
     label: "Eval",
-    description:
-      "Run persistent Python for iterative computation and bulk tool aggregation. Use `bash` or `read` for one-off work. State persists across cells and calls. Use `tool.<name>(args)` inside cells for bulk tool work; discover names with `tool.list()`. Keep raw responses in the kernel and return a compact aggregate. Helpers: `read`, `write`, `tree`, `env`, `completion`, and `install`; installed packages persist across Pi sessions. Large output is truncated; return a smaller aggregate or write it to a file.",
+    description: DESCRIPTION,
     promptSnippet:
-      "eval: persistent Python for iterative computation and bulk aggregation; use bash/read for one-off work, discover bridged tools with `tool.list()`, and return a compact aggregate.",
+      "Run persistent Python that keeps state between calls and calls other tools (loops, parallel(), filtering large results, data work)",
+    promptGuidelines: [
+      "Use eval to batch or chain several tool calls, to filter large tool output down to what you need, or to iterate on data across calls, instead of issuing many individual tool calls. Batch independent calls in one cell with parallel([...]). Use bash or read directly for a single one-off call.",
+    ],
+    // Scripts must not start other scripts, and codemode must not list eval.
+    exposure: "model-only",
+    prepareLoadout: (loadout) => ({
+      descriptions: {
+        eval: describeCallable(loadout.declared, loadout.callable),
+      },
+    }),
     parameters: EvalParams,
     executionMode: "sequential",
     async execute(_callId, params: EvalParamsT, signal, onUpdate, ctx) {
@@ -401,7 +522,7 @@ export default function (pi: ExtensionAPI) {
         state.py = null;
         state.registration?.unregister();
         state.registration = null;
-        state.builtins = null;
+        state.fallbacks = null;
       }
       state.cwd = ctx.cwd;
       state.ctx = ctx;

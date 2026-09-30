@@ -62,25 +62,33 @@ export function registerAskUserQuestionTool(pi: ExtensionAPI): void {
     description: DESCRIPTION,
     promptSnippet: "Structured choice dialog",
     parameters: QuestionParamsSchema,
+    // Only the model may ask the user.
+    exposure: "model-only",
 
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const raw = params as unknown as QuestionParams;
       if (!ctx.hasUI)
-        return buildToolResult(ERROR_NO_UI, {
-          answers: [],
-          cancelled: true,
-          error: "no_ui",
-        });
+        return {
+          ...buildToolResult(ERROR_NO_UI, {
+            answers: [],
+            cancelled: true,
+            error: "no_ui",
+          }),
+          isError: true,
+        };
 
       const typed = clampParams(raw);
 
       const validation = validateQuestionnaire(typed);
       if (!validation.ok) {
-        return buildToolResult(validation.message, {
-          answers: [],
-          cancelled: true,
-          error: validation.error,
-        });
+        return {
+          ...buildToolResult(validation.message, {
+            answers: [],
+            cancelled: true,
+            error: validation.error,
+          }),
+          isError: true,
+        };
       }
 
       const itemsByTab: WrappingSelectItem[][] = typed.questions.map((q) =>

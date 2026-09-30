@@ -134,6 +134,7 @@ interface LspParams {
 const err = (text: string): AgentToolResult<unknown> => ({
   content: [{ type: "text", text }],
   details: { success: false },
+  isError: true,
 });
 
 const cap = (text: string): string => {

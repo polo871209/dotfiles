@@ -5,6 +5,7 @@ Work as a peer. When a premise or plan is wrong, say so and name the fix. After 
 - Mutation: run reads and local edits immediately, with no asking. Print a risky command and wait, for example a cluster or cloud write, a destructive operation, a publish or push to a registry, or a database migration.
 - Production: never mutate. Print only. If you are unsure that the target is production, ask.
 - Other edits: other agents work in this tree at the same time. Touch only the files that your task needs. Never revert, overwrite an edit that you did not make. Dont break foreign edit.
+- Git: Don't run `git commit` or `git push` if not ask.
 
 ## Writing
 

@@ -36,15 +36,14 @@ const colorInputLine = (line: string, theme: PiTheme) => {
 // editor. The editor never reserves space for it, so the input box
 // never shifts vertically. The overlay covers conversation lines
 // underneath when open and the lines are restored when it closes.
-// Slightly lighter than gruvbox dark bg (#282828) so the overlay block
-// reads as a panel without harsh contrast.
-const OVERLAY_BG = "\x1b[48;2;60;56;54m"; // #3c3836
+// Fallback for editors other than ThemedEditor, which supplies the theme's userMessageBg.
+const OVERLAY_BG = "\x1b[48;2;60;56;54m";
 
-const wrapWithBg = (line: string, width: number): string => {
+const wrapWithBg = (line: string, width: number, bg: string): string => {
   // Reapply bg after each inner reset so nested ANSI codes don't strip it.
-  const re = line.replaceAll(SGR_RESET, `${SGR_RESET}${OVERLAY_BG}`);
+  const re = line.replaceAll(SGR_RESET, `${SGR_RESET}${bg}`);
   const filler = " ".repeat(Math.max(0, width - visibleWidth(line)));
-  return `${OVERLAY_BG}${re}${filler}${SGR_RESET}`;
+  return `${bg}${re}${filler}${SGR_RESET}`;
 };
 
 // Structural view of pi-tui's SelectList. `renderItem` and
@@ -81,6 +80,7 @@ interface EditorWithOverlay {
   autocompleteMaxVisible?: number;
   focused?: boolean;
   tui: TUI;
+  getTheme?: () => PiTheme;
   __overlay?: {
     handle: OverlayHandle | null;
     comp: DropdownOverlay;
@@ -107,7 +107,11 @@ class DropdownOverlay implements Component {
     // and clears it on cancel, so a snapshot is one frame stale.
     if (!isAutocompleteOpen(this.editor)) return [];
     const list = this.editor.autocompleteList as SelectListLike;
-    return this.renderList(list, width).map((line) => wrapWithBg(line, width));
+    const bg =
+      this.editor.getTheme?.().getBgAnsi("userMessageBg") ?? OVERLAY_BG;
+    return this.renderList(list, width).map((line) =>
+      wrapWithBg(line, width, bg),
+    );
   }
 
   // Stock SelectList keeps the selected row pinned to the middle of the
@@ -265,7 +269,7 @@ class ThemedEditor extends CustomEditor {
     tui: TUI,
     editorTheme: EditorTheme,
     keybindings: KeybindingsManager,
-    private readonly getTheme: () => PiTheme,
+    readonly getTheme: () => PiTheme,
   ) {
     // Same as pi's default editor, which draws working status in its border.
     super(tui, editorTheme, keybindings, { embedWorkingStatus: true });

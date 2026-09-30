@@ -51,7 +51,8 @@ import {
   Text,
   visibleWidth,
 } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
+import type { JsonValue } from "@earendil-works/pi-ai";
+import { Type, type Static } from "typebox";
 
 interface AgentConfig {
   name: string;
@@ -190,6 +191,36 @@ function getByPath(obj: unknown, path: string | undefined): unknown {
     cur = (cur as Record<string, unknown>)[key];
   }
   return cur;
+}
+
+const RunValueSchema = Type.Object({
+  id: Type.String(),
+  agent: Type.String(),
+  status: Type.Union([
+    Type.Literal("running"),
+    Type.Literal("done"),
+    Type.Literal("failed"),
+  ]),
+  output: Type.String(),
+  result: Type.Optional(
+    Type.Unknown({ description: "Parsed result-json block, when present" }),
+  ),
+  error: Type.Optional(Type.String()),
+});
+
+function runValue(p: Progress): Static<typeof RunValueSchema> & JsonValue {
+  const id = p.id ?? "";
+  return {
+    id,
+    agent: p.agent,
+    status: p.status,
+    output: p.output,
+    // Stored values come from JSON.parse.
+    ...(resultStore.has(id)
+      ? { result: resultStore.get(id) as JsonValue }
+      : {}),
+    ...(p.error ? { error: p.error } : {}),
+  };
 }
 
 const AGENTS_DIR = path.join(getAgentDir(), "agents");
@@ -702,7 +733,7 @@ async function runInTmux(
 ): Promise<{
   content: { type: "text"; text: string }[];
   details: Progress;
-  error?: string;
+  isError?: boolean;
 }> {
   const promptFile = path.join(os.tmpdir(), `pi-subagent-sys-${target}.txt`);
   const taskFile = path.join(os.tmpdir(), `pi-subagent-task-${target}.txt`);
@@ -753,7 +784,7 @@ async function runInTmux(
         },
       ],
       details: { ...progress },
-      error: `Subagent ${agent.name}: tmux split-window failed`,
+      isError: true,
     };
   }
   // Best effort: name the pane after the subagent for readability before
@@ -835,7 +866,7 @@ async function runInTmux(
         { type: "text", text: `subagent '${agent.name}' ${progress.error}` },
       ],
       details: { ...progress },
-      error: `Subagent ${agent.name}: ${progress.error}`,
+      isError: true,
     };
   }
 
@@ -877,7 +908,7 @@ async function runInTmux(
         },
       ],
       details: { ...progress },
-      error: `Subagent ${agent.name}: blocked, see pane ${paneId}`,
+      isError: true,
     };
   }
 
@@ -957,6 +988,7 @@ export default function (pi: ExtensionAPI) {
       `Routes:\n${agentList}\n\n` +
       "For a compact hand-back, tell the subagent to end with a fenced ```result-json ... ``` block: a background run's wait returns it, and subagent_manage (action: result, path) pulls one field.",
     parameters: params,
+    outputSchema: RunValueSchema,
     renderShell: "self",
 
     renderCall(args, theme) {
@@ -979,6 +1011,7 @@ export default function (pi: ExtensionAPI) {
         return {
           content: [{ type: "text", text: `Unknown agent: ${args.agent}` }],
           details: undefined,
+          isError: true,
         };
       }
 
@@ -1053,10 +1086,11 @@ export default function (pi: ExtensionAPI) {
             },
           ],
           details: { ...progress },
+          structuredContent: runValue(progress),
         };
       }
 
-      return await runPromise;
+      return { ...(await runPromise), structuredContent: runValue(progress) };
     },
   });
 
@@ -1081,7 +1115,7 @@ export default function (pi: ExtensionAPI) {
       const fail = (text: string) => ({
         content: [{ type: "text" as const, text }],
         details: undefined,
-        error: text,
+        isError: true,
       });
 
       const action =

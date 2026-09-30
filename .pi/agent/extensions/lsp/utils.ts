@@ -64,6 +64,7 @@ export async function withDriver<R extends DriverErr>(
     return {
       content: [{ type: "text", text: `${errorPrefix}: ${reason}` }],
       details: { success: false },
+      isError: true,
     };
   }
   if (!res.ok) {
@@ -72,6 +73,7 @@ export async function withDriver<R extends DriverErr>(
         { type: "text", text: `${errorPrefix}: ${res.error ?? "unknown"}` },
       ],
       details: { success: false },
+      isError: true,
     };
   }
   const out = render(res, ctx.cwd);

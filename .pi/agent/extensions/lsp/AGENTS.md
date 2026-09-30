@@ -21,8 +21,6 @@ Keep its two halves separate:
 - `tool.ts` — single consolidated `lsp` tool with an `action` enum (hover/definition/references/implementation/type_definition/document_symbols/diagnostics/rename/restart), registered in `index.ts`. Add new navigation ops as a new action here, not a new tool — one `action` enum is far cheaper in schema tokens than N separate tools with duplicated file/line/symbol params. `rename` is the only write action; it applies and saves immediately (no preview mode).
 - `feedback/*` — post-edit formatting, diagnostics, and auto-fix, registered through `registerFeedback(pi)`.
 
-`exposeRegisteredToolsToEval(pi)` in `index.ts` must run before `pi.registerTool(lspTool)` so eval cells can call `tool.lsp({...})`. Do not register it through the feedback subsystem.
-
 Closing the socket must use `end()`, not `destroy()`: the msgpack decoder wrapped around it rejects with `ERR_STREAM_PREMATURE_CLOSE` on an abrupt teardown and nothing in the `neovim` package catches it, so a `destroy()` on the shutdown path takes the pi process down with an unhandled rejection. For the same reason `qall!` is sent with a bounded wait — it kills the channel mid-request, so its reply never arrives and a plain `await` hangs forever.
 
 ## The repair turn runs before settle

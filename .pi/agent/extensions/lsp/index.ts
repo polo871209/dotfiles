@@ -10,7 +10,6 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { callDriver, daemonInfo, disconnectNvim, restartDaemons } from "./nvim";
-import { exposeRegisteredToolsToEval } from "../shared/bridge-tools";
 import { registerFeedback } from "./feedback";
 import { lspTool } from "./tool";
 import { displayPath } from "./utils";
@@ -22,7 +21,6 @@ interface StatusResult {
 }
 
 export default function (pi: ExtensionAPI) {
-  exposeRegisteredToolsToEval(pi);
   pi.registerTool(lspTool);
 
   registerFeedback(pi);
