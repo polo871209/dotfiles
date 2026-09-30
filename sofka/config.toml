@@ -6,6 +6,20 @@ native_describe = true
 name = "catppuccin-mocha"
 background = false
 
+# Release L from the built-in VictoriaLogs view for the cloud-logs plugin below.
+[keys.table]
+provider_logs = []
+
+[[plugins]]
+key = "L"
+name = "cloud-logs"
+palette = "cloud-logs"
+shell = true
+command = '"${XDG_CONFIG_HOME:-$HOME/.config}/sofka/cloud-logs.sh" "$@"'
+args = ["$CONTEXT", "$CLUSTER", "$RESOURCE", "$NAMESPACE", "$NAME"]
+mutating = false
+output = "background"
+
 [views."v1/pods"]
 columns = [
   { name = "%CPU/R", metric = "cpu-request-utilization" },
