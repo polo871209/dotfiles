@@ -3,19 +3,18 @@
 // picks each operation and element; TYPE_TEXT values come from pi's own model
 // auth over runner.py's stdin, so only TYPESAFE_API_KEY is needed.
 //
-// jev-ultrafast is installed by mise (mise/config.toml), which owns its
-// version. runner.py replaces jev_ultrafast.agent.field_text and fails loudly
-// if upstream renames it.
+// jev-ultrafast is a uv tool, not a mise tool. The repo has no tags, so mise
+// cannot list its versions and warns on every `mise up`. runner.py replaces
+// jev_ultrafast.agent.field_text and fails loudly if upstream renames it.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { sideChannelComplete } from "../shared/llm";
-
-const JEV_TOOL = "pipx:git+https://github.com/browser-use/jev-ultrafast.git";
 
 interface RunResult {
   status: string;
@@ -31,13 +30,19 @@ export default function (pi: ExtensionAPI) {
   let jevPython: string | undefined;
   const resolveJevPython = async () => {
     if (!jevPython) {
-      const r = await pi.exec("mise", ["where", JEV_TOOL]);
-      if (r.code !== 0) {
+      const r = await pi.exec("uv", ["tool", "dir"]);
+      const python = path.join(
+        r.stdout.trim(),
+        "jev-ultrafast",
+        "bin",
+        "python",
+      );
+      if (r.code !== 0 || !existsSync(python)) {
         throw new Error(
-          `browser_task: mise has no ${JEV_TOOL}. Run \`mise install\`.`,
+          `browser_task: jev-ultrafast is not installed. Run \`uv tool install git+https://github.com/browser-use/jev-ultrafast.git\`.`,
         );
       }
-      jevPython = path.join(r.stdout.trim(), "jev-ultrafast", "bin", "python");
+      jevPython = python;
     }
     return jevPython;
   };

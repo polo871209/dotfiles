@@ -21,7 +21,7 @@ def emit(**message):
 # SIGTERM from an abort becomes SystemExit, so Agent.__exit__ still closes the tab.
 signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
 
-# jev_ultrafast exists only in the mise-installed env whose python index.ts starts.
+# jev_ultrafast exists only in the uv tool env whose python index.ts starts.
 import browser_harness.macos as bh_macos  # pyrefly: ignore[missing-import]
 import jev_ultrafast.agent as jev_agent  # pyrefly: ignore[missing-import]
 from browser_harness.helpers import cdp  # pyrefly: ignore[missing-import]

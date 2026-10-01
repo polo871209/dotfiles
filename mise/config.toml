@@ -22,8 +22,6 @@ neovim = "latest"
 "aqua:joshmedeski/sesh" = "latest"
 "github:veirt/weathr" = "latest"
 "pipx:pgcli" = "latest"
-# Library for the pi browser_task tool; a Git URL makes `latest` track main HEAD.
-"pipx:git+https://github.com/browser-use/jev-ultrafast.git" = "latest"
 atuin = "latest"
 bat = "latest"
 carapace = "latest"
@@ -48,14 +46,13 @@ lazygit = "latest"
 
 # Kubernetes / cloud / containers
 "aqua:docker/cli" = "latest"
+"github:polo871209/sofka" = "latest"
 apko = "latest"
 cloudflared = "latest"
 cloud-sql-proxy = "2"
 kubectx = "latest"
 kubectl = "latest"
 kubens = "latest"
-# Personal fork. Each release overwrites the `latest` tag, so mise sees no new version. Run `mise install -f github:polo871209/sofka` to pick up a new build.
-"github:polo871209/sofka" = "latest"
 
 # LSPs
 "aqua:grafana/jsonnet-language-server" = "latest"

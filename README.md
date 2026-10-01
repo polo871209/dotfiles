@@ -23,6 +23,7 @@ cat ~/dotfiles/dot_zshenv >| ~/.zshenv
 brew bundle install
 just link
 mise install
+uv tool install git+https://github.com/browser-use/jev-ultrafast.git
 touch ~/.hushlogin
 ./zen-browser/install.sh
 ```
