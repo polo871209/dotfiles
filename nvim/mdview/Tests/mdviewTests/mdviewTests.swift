@@ -25,6 +25,28 @@ import Testing
     }
 }
 
+@MainActor @Suite struct FileWatcherTests {
+    @Test(.timeLimit(.minutes(1))) func reportsInPlaceAndAtomicWrites() async throws {
+        let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appending(path: "a.md")
+        try "one".write(to: file, atomically: false, encoding: .utf8)
+        let (stream, continuation) = AsyncStream.makeStream(of: String.self)
+        let watcher = FileWatcher(path: file.path) { continuation.yield($0) }
+        var texts = stream.makeAsyncIterator()
+
+        // Same content first: it must not report, so the next value is "two".
+        try "one".write(to: file, atomically: false, encoding: .utf8)
+        try await Task.sleep(for: .milliseconds(200))
+        try "two".write(to: file, atomically: false, encoding: .utf8)
+        #expect(await texts.next() == "two")
+        try "three".write(to: file, atomically: true, encoding: .utf8)
+        #expect(await texts.next() == "three")
+        withExtendedLifetime(watcher) {}
+    }
+}
+
 @Suite struct AssetsTests {
     @Test func servesBundledFiles() {
         #expect(Assets.resolve(URL(string: "mdview://app/app.js")!) != nil)

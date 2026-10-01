@@ -16,9 +16,9 @@ just mdview test   # Swift tests for the parser options and the asset routes
 The nvim side is two files: `nvim/lua/mdview.lua` starts the process and streams the buffer, and `nvim/after/ftplugin/markdown.lua` sets the keymap. The viewer side is this directory.
 
 - `Sources/mdview/Protocol.swift` holds the JSON lines that pass between nvim and the viewer. Change both ends together.
-- `Sources/mdview/Viewer.swift` owns the panel, the `WebPage`, and link handling. `main.swift` sets up the app, the keys, and the stdin reader.
+- `Sources/mdview/Viewer.swift` owns the panel, the `WebPage`, and link handling. `main.swift` sets up the app, the keys, and the stdin reader. `FileWatcher.swift` re-renders the page when the file content changes on disk, for example after an agent edit.
 - `Sources/mdview/Markdown.swift` calls cmark-gfm. `Assets.swift` serves `mdview://app/` from `Resources/` and `mdview://file/` from disk, for images only.
-- `Sources/mdview/Resources/app.js` post-processes the HTML the way GitHub does (alerts, task lists, heading ids), draws code and diagrams, and keeps the Back and Forward history.
+- `Sources/mdview/Resources/app.js` post-processes the HTML the way GitHub does (alerts, task lists, heading ids), draws code and diagrams, builds the table of contents, and keeps the Back and Forward history.
 - `Sources/mdview/Resources/style.css` holds only the overrides on top of `github-markdown.css`.
 
 ## Change a dependency

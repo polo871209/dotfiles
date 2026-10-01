@@ -4,14 +4,43 @@ import WebKit
 
 private let index = URL(string: "mdview://app/index.html")!
 
+/// The find bar state. main.swift opens it with Cmd-F, and the bar closes itself with Esc or its Done button.
+@Observable @MainActor
+final class Find {
+    var shown = false
+}
+
+private struct Root: View {
+    let page: WebPage
+    @Bindable var find: Find
+
+    var body: some View {
+        WebView(page)
+            .webViewMagnificationGestures(.enabled)
+            // Two-finger swipe walks the same history as Cmd-[ and Cmd-].
+            .webViewBackForwardNavigationGestures(.enabled)
+            .findNavigator(isPresented: $find.shown)
+            // The web view takes every click, so this invisible strip is the only place to drag the window.
+            // It goes before ignoresSafeArea, or it sits under the hidden title bar and covers the TOC button.
+            .overlay(alignment: .top) {
+                Color.clear.frame(height: 24).contentShape(.rect).gesture(WindowDragGesture())
+            }
+            .ignoresSafeArea()
+    }
+}
+
 @MainActor
 final class Viewer: NSObject, NSWindowDelegate {
     private let page: WebPage
-    private let panel: NSPanel
+    private let panel: Panel
     /// Starts at launch, so the web process boots while nvim's first message is still in flight.
     private let loaded: Task<Void, any Error>
     private var pending: Message?
     private var busy = false
+    /// The newest message, from nvim or from disk.
+    private var latest: Message?
+    private var watcher: FileWatcher?
+    let find = Find()
 
     override init() {
         var config = WebPage.Configuration()
@@ -26,7 +55,7 @@ final class Viewer: NSObject, NSWindowDelegate {
         }
 
         // Non-activating so the terminal keeps keyboard focus while nvim streams edits.
-        panel = NSPanel(
+        panel = Panel(
             contentRect: NSRect(x: 0, y: 0, width: 780, height: 920),
             // .titled keeps rounded corners, shadow, and key focus. The bar itself is hidden below.
             styleMask: [.titled, .closable, .resizable, .fullSizeContentView, .nonactivatingPanel],
@@ -43,16 +72,7 @@ final class Viewer: NSObject, NSWindowDelegate {
         for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
             panel.standardWindowButton(button)?.isHidden = true
         }
-        let content = WebView(page)
-            .webViewMagnificationGestures(.enabled)
-            // Two-finger swipe walks the same history as Cmd-[ and Cmd-].
-            .webViewBackForwardNavigationGestures(.enabled)
-            .ignoresSafeArea()
-            // The web view takes every click, so this invisible strip is the only place to drag the window.
-            .overlay(alignment: .top) {
-                Color.clear.frame(height: 24).contentShape(.rect).gesture(WindowDragGesture())
-            }
-        panel.contentView = NSHostingView(rootView: content)
+        panel.contentView = NSHostingView(rootView: Root(page: page, find: find))
         panel.center()
         panel.setFrameAutosaveName("mdview")
     }
@@ -66,6 +86,10 @@ final class Viewer: NSObject, NSWindowDelegate {
 
     /// Keeps only the newest message, so a burst of keystrokes costs one render.
     func show(_ message: Message) {
+        latest = message
+        if watcher?.path != message.path {
+            watcher = FileWatcher(path: message.path) { [weak self] text in self?.reload(text) }
+        }
         pending = message
         guard !busy else { return }
         busy = true
@@ -76,6 +100,17 @@ final class Viewer: NSObject, NSWindowDelegate {
             }
             busy = false
         }
+    }
+
+    /// An agent or another editor changed the file behind nvim. Disk content shows until the next nvim edit.
+    private func reload(_ disk: String) {
+        guard let latest else { return }
+        // nvim sends the lines joined by \n, with no final newline. "\r\n" is one Character, so replace it first.
+        var text = disk.replacing("\r\n", with: "\n")
+        if text.hasSuffix("\n") { text.removeLast() }
+        // A :w in nvim writes the text that is already on screen.
+        guard text != latest.text else { return }
+        show(Message(path: latest.path, text: text, line: latest.line))
     }
 
     private func render(_ message: Message) async {
@@ -112,6 +147,14 @@ final class Viewer: NSObject, NSWindowDelegate {
 
     private func report(_ error: any Error) {
         FileHandle.standardError.write(Data("mdview: \(error)\n".utf8))
+    }
+}
+
+/// WebKit drops the click that makes a window key, so the first click on a button or link did nothing.
+private final class Panel: NSPanel {
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown, !isKeyWindow { makeKey() }
+        super.sendEvent(event)
     }
 }
 

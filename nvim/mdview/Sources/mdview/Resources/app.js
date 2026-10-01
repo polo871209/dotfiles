@@ -145,6 +145,74 @@ function anchors() {
     for (const h of content.querySelectorAll("h1, h2, h3, h4, h5, h6")) h.id = slugger.slug(h.textContent);
 }
 
+const toc = document.getElementById("toc");
+const tocToggle = document.getElementById("toc-toggle");
+let tocHeadings = [];
+let tocKey = "";
+
+// Lists h1 to h3. Live typing rebuilds the list only when a heading changes, so the list keeps its scroll position.
+function buildToc() {
+    tocHeadings = [...content.querySelectorAll("h1, h2, h3")].filter((h) => h.id);
+    document.body.classList.toggle("has-toc", tocHeadings.length > 1);
+    const key = tocHeadings.map((h) => `${h.tagName}${h.id}\0${h.textContent}`).join("\n");
+    if (key !== tocKey) {
+        tocKey = key;
+        const top = Math.min(...tocHeadings.map((h) => Number(h.tagName[1])));
+        toc.replaceChildren(
+            ...tocHeadings.map((h) => {
+                const a = document.createElement("a");
+                a.href = `#${encodeURIComponent(h.id)}`;
+                a.textContent = a.title = h.textContent.trim();
+                a.dataset.depth = Number(h.tagName[1]) - top;
+                return a;
+            }),
+        );
+    }
+    spy();
+}
+
+// Marks the section being read: the last heading within 64px of the window top, or the last heading at the page end.
+// A TOC click puts its heading 24px from the top (scroll-margin-top in style.css), so the clicked entry lights up.
+function spy() {
+    const limit = 64;
+    let lo = 0;
+    let hi = tocHeadings.length;
+    while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (tocHeadings[mid].getBoundingClientRect().top > limit) hi = mid;
+        else lo = mid + 1;
+    }
+    if (innerHeight + scrollY >= document.documentElement.scrollHeight - 2) lo = tocHeadings.length;
+    const active = toc.children[lo - 1];
+    for (const a of toc.querySelectorAll(".active")) if (a !== active) a.classList.remove("active");
+    if (!active || active.classList.contains("active")) return;
+    active.classList.add("active");
+    // Scrolls the list by hand, because scrollIntoView can also scroll the page.
+    if (active.offsetTop < toc.scrollTop || active.offsetTop + active.offsetHeight > toc.scrollTop + toc.clientHeight)
+        toc.scrollTop = active.offsetTop - toc.clientHeight / 2;
+}
+
+let spyFrame;
+for (const event of ["scroll", "resize"])
+    addEventListener(event, () => {
+        cancelAnimationFrame(spyFrame);
+        spyFrame = requestAnimationFrame(spy);
+    });
+
+// WebKit can refuse storage to a custom scheme. The state then lasts only until the window closes.
+function collapseToc(collapsed) {
+    document.body.classList.toggle("toc-collapsed", collapsed);
+    tocToggle.setAttribute("aria-expanded", String(!collapsed));
+    try {
+        localStorage.setItem("tocCollapsed", collapsed ? "1" : "");
+    } catch {}
+}
+
+try {
+    collapseToc(localStorage.getItem("tocCollapsed") === "1");
+} catch {}
+tocToggle.addEventListener("click", () => collapseToc(!document.body.classList.contains("toc-collapsed")));
+
 // Scrolls only when the block under the nvim cursor is off screen, so reading position survives edits elsewhere.
 function reveal(line) {
     let target;
@@ -217,6 +285,7 @@ window.mdview = {
         alerts();
         taskLists();
         anchors();
+        buildToc();
         const drawing = drawDiagrams(previous);
         if (switched) scrollTo(0, 0);
         const place = () => {
@@ -226,6 +295,7 @@ window.mdview = {
         place();
         await drawing;
         place();
+        spy();
     },
 };
 

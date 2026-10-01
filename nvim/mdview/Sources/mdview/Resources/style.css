@@ -9,6 +9,120 @@ body.markdown-body {
     padding: 32px 45px 64px;
 }
 
+/* The body's first child is now the sidebar, so github-markdown.css no longer trims the document's own edges. */
+#content > :first-child {
+    margin-top: 0 !important;
+}
+
+#content > :last-child {
+    margin-bottom: 0 !important;
+}
+
+/* Keeps a heading that a TOC click scrolls to clear of the invisible drag strip. */
+#content :is(h1, h2, h3, h4, h5, h6) {
+    scroll-margin-top: 24px;
+}
+
+/* app.js adds .has-toc when the file has two or more headings, and .toc-collapsed from the toggle button. */
+#sidebar {
+    display: none;
+}
+
+body.markdown-body.has-toc {
+    display: grid;
+    grid-template-columns: 180px minmax(0, 1fr);
+    column-gap: 24px;
+    max-width: calc(980px + 204px);
+    padding-left: 12px;
+}
+
+body.markdown-body.has-toc.toc-collapsed {
+    grid-template-columns: 28px minmax(0, 1fr);
+    max-width: calc(980px + 52px);
+}
+
+/* github-markdown.css adds clearfix pseudo-elements, and in a grid each one takes a cell. */
+body.has-toc::before,
+body.has-toc::after {
+    display: none;
+}
+
+.has-toc #sidebar {
+    display: flex;
+    flex-direction: column;
+    position: sticky;
+    top: 32px;
+    align-self: start;
+    max-height: calc(100vh - 64px);
+}
+
+#toc-toggle {
+    display: flex;
+    align-self: flex-start;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 6px;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    color: var(--fgColor-muted);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.toc-collapsed #toc-toggle span {
+    display: none;
+}
+
+#toc-toggle:hover {
+    background: var(--bgColor-neutral-muted);
+    color: var(--fgColor-default);
+}
+
+#toc {
+    min-height: 0;
+    margin-top: 8px;
+    overflow-y: auto;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.toc-collapsed #toc {
+    display: none;
+}
+
+#toc a {
+    display: block;
+    padding: 3px 8px;
+    border-left: 2px solid transparent;
+    color: var(--fgColor-muted);
+    text-decoration: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+#toc a[data-depth="1"] {
+    padding-left: 20px;
+}
+
+#toc a[data-depth="2"] {
+    padding-left: 32px;
+}
+
+#toc a:hover {
+    color: var(--fgColor-default);
+}
+
+#toc a.active {
+    border-left-color: var(--borderColor-accent-emphasis);
+    color: var(--fgColor-default);
+    font-weight: 600;
+}
+
 /* GitHub shrinks code to 85%, which reads too small. SF Mono at full size reads larger than SF Pro, so code sits 1px under its surrounding text. */
 .markdown-body code,
 .markdown-body tt,
