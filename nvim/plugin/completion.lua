@@ -30,7 +30,11 @@ vim.api.nvim_create_autocmd('InsertEnter', {
             },
 
             sources = {
-                default = { 'path', 'buffer', 'lsp' },
+                -- zsh's edit-command-line buffer sets b:shell_cmdline (see zsh/.zshrc).
+                default = function()
+                    if vim.b.shell_cmdline == 1 then return { 'shell_path', 'buffer', 'lsp' } end
+                    return { 'path', 'buffer', 'lsp' }
+                end,
                 providers = {
                     path = {
                         score_offset = 100,
@@ -39,6 +43,12 @@ vim.api.nvim_create_autocmd('InsertEnter', {
                             trailing_slash = false,
                             label_trailing_slash = false,
                         },
+                    },
+                    shell_path = {
+                        name = 'Path',
+                        module = 'shell_path',
+                        score_offset = 100,
+                        max_items = 5,
                     },
                     buffer = {
                         score_offset = 75,

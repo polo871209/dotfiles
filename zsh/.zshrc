@@ -84,7 +84,7 @@ zle -N zle-line-init
 # v to edit the command line in editor
 autoload -Uz edit-command-line
 zle -N edit-command-line
-zstyle ':zle:edit-command-line' editor nvim -c 'set filetype=bash'
+zstyle ':zle:edit-command-line' editor nvim -c 'set filetype=bash' -c 'let b:shell_cmdline = 1'
 bindkey -M vicmd 'v' edit-command-line
 
 # Aliases
