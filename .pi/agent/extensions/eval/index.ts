@@ -13,6 +13,7 @@ import {
   type ExtensionAPI,
   type ExtensionContext,
   type ExtensionToolContext,
+  type ToolLoadout,
 } from "@earendil-works/pi-coding-agent";
 import type {
   AgentTool,
@@ -29,7 +30,7 @@ import {
 } from "./bridge.ts";
 import { PyKernel } from "./py-kernel.ts";
 import type { CellResult } from "./types.ts";
-import { sideChannelComplete } from "../shared/llm.ts";
+import { addUsage, sideChannelComplete } from "../shared/llm.ts";
 
 const Cell = Type.Object(
   {
@@ -78,24 +79,6 @@ interface SessionState {
   // Tokens spent by `completion` calls during the current execute, reported
   // on the tool result so session totals include them.
   usage: Usage | null;
-}
-
-function addUsage(total: Usage | null, next: Usage): Usage {
-  if (!total) return structuredClone(next);
-  return {
-    input: total.input + next.input,
-    output: total.output + next.output,
-    cacheRead: total.cacheRead + next.cacheRead,
-    cacheWrite: total.cacheWrite + next.cacheWrite,
-    totalTokens: total.totalTokens + next.totalTokens,
-    cost: {
-      input: total.cost.input + next.cost.input,
-      output: total.cost.output + next.cost.output,
-      cacheRead: total.cost.cacheRead + next.cost.cacheRead,
-      cacheWrite: total.cost.cacheWrite + next.cost.cacheWrite,
-      total: total.cost.total + next.cost.total,
-    },
-  };
 }
 
 interface ExecutionDetails {
@@ -284,7 +267,7 @@ function textOf(result: AgentToolResult<unknown>): string {
   return result.content
     .filter((c): c is TextContent => c.type === "text")
     .map((c) => c.text)
-    .join("");
+    .join("\n");
 }
 
 function flattenToolResult(result: AgentToolResult<unknown>): unknown {
@@ -431,11 +414,14 @@ function schemaType(schema: unknown, depth = 0): string {
   );
 }
 
-function describeCallable(
-  declared: readonly AgentTool<any>[],
-  callable: readonly AgentTool<any>[],
-): string {
-  const tools = callable.filter((tool) => tool.name !== "eval");
+function describeCallable(loadout: ToolLoadout): string {
+  const { declared, callable } = loadout;
+  // Deferred tools (for example MCP tools) are found by search, like in
+  // codemode, so listing them here would grow without bound.
+  const tools = callable.filter(
+    (tool) =>
+      tool.name !== "eval" && loadout.getExposure(tool.name) !== "deferred",
+  );
   const structured = tools.filter((tool) => tool.outputSchema);
   const declaredNames = new Set(declared.map((tool) => tool.name));
   const hidden = tools.filter((tool) => !declaredNames.has(tool.name));
@@ -509,7 +495,7 @@ export default function (pi: ExtensionAPI) {
     exposure: "model-only",
     prepareLoadout: (loadout) => ({
       descriptions: {
-        eval: describeCallable(loadout.declared, loadout.callable),
+        eval: describeCallable(loadout),
       },
     }),
     parameters: EvalParams,
@@ -595,7 +581,6 @@ export default function (pi: ExtensionAPI) {
               : `Cell ${failedCell + 1} failed. ${results.length}/${params.cells.length} cells ran.`;
       const body = results.map((r, i) => formatResult(r, i)).join("\n\n");
       const text = boundOutput(summary, body);
-      if (failedCell !== undefined) throw new Error(text);
 
       const content: (
         | { type: "text"; text: string }
@@ -612,10 +597,12 @@ export default function (pi: ExtensionAPI) {
           }
         }
       }
+      // isError instead of a throw: a thrown error drops details and usage.
       return {
         content,
         details: details(results, params.cells.length),
         ...(state.usage ? { usage: state.usage } : {}),
+        ...(failedCell !== undefined ? { isError: true } : {}),
       };
     },
   });

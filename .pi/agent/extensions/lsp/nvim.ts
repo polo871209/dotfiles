@@ -99,19 +99,20 @@ const socketPath = (lane: Lane) => path.join(RUNTIME_DIR, `${lane}.sock`);
 const lockPath = (lane: Lane) => path.join(RUNTIME_DIR, `${lane}.lock`);
 
 // Detach our end of the socket on abrupt host death (unhandled throw) so the
-// daemon's client count drops and its idle timer can start. Guarded on
-// globalThis: hot reload builds a fresh module graph and would otherwise stack
-// a listener per reload.
-if (!(globalThis as Record<string, unknown>).__piLspExitHook) {
-  (globalThis as Record<string, unknown>).__piLspExitHook = true;
+// daemon's client count drops and its idle timer can start. Hot reload builds a
+// fresh module graph: install one listener, and point it at the newest
+// module's sessions each load.
+const exitHook = globalThis as { __piLspDisconnect?: () => void };
+if (!exitHook.__piLspDisconnect) {
   process.on("exit", () => {
     try {
-      disconnectNvim();
+      exitHook.__piLspDisconnect?.();
     } catch {
       /* ignore */
     }
   });
 }
+exitHook.__piLspDisconnect = () => disconnectNvim();
 
 const connect = (lane: Lane): Promise<net.Socket | null> =>
   new Promise((resolve) => {

@@ -91,8 +91,8 @@ const GRAPHQL = `
 query($owner:String!,$repo:String!,$number:Int!){
   repository(owner:$owner,name:$repo){
     pullRequest(number:$number){
-      comments(first:100){ totalCount nodes{ author{login __typename} body } }
-      reviewThreads(first:100){ totalCount nodes{
+      comments(last:100){ totalCount nodes{ author{login __typename} body } }
+      reviewThreads(last:100){ totalCount nodes{
         id isResolved isOutdated path line
         comments(first:30){ nodes{ author{login} body } }
       } }
@@ -286,7 +286,7 @@ export default function (pi: ExtensionAPI) {
     description:
       "Fetch a GitHub PR (URL or number) as signal-only markdown: metadata, description, changed files, failing checks, and unresolved review threads. Use instead of `gh pr view`. Pass `select` to fetch just one section, or `action: resolve` to resolve every open review thread after a fix.",
     parameters: params,
-    async execute(_id, raw, signal, _onUpdate, _ctx) {
+    async execute(_id, raw, signal, _onUpdate, ctx) {
       const a = raw as {
         pr: string;
         repo?: string;
@@ -317,7 +317,7 @@ export default function (pi: ExtensionAPI) {
         "number,title,state,isDraft,baseRefName,headRefName,author,body,labels,additions,deletions,changedFiles,url,mergeable,reviewDecision,files,statusCheckRollup";
 
       // gh graphql needs explicit owner/repo. If only a bare number was given
-      // (no URL, no --repo), resolve the cwd's repo.
+      // (no URL, no --repo), resolve the session cwd's repo.
       let glOwner = "";
       let glRepo = "";
       if (ownerRepo.includes("/")) {
@@ -334,6 +334,7 @@ export default function (pi: ExtensionAPI) {
             '.owner.login+"/"+.name',
           ],
           signal,
+          ctx.cwd,
         );
         if (r.code === 0 && r.stdout.includes("/")) {
           [glOwner, glRepo] = r.stdout.trim().split("/");
@@ -349,9 +350,10 @@ export default function (pi: ExtensionAPI) {
           "gh",
           ["pr", "view", String(num), ...repoArgs, "--json", metaFields],
           signal,
+          ctx.cwd,
         ),
         wantDiff
-          ? run("gh", ["pr", "diff", String(num), ...repoArgs], signal)
+          ? run("gh", ["pr", "diff", String(num), ...repoArgs], signal, ctx.cwd)
           : Promise.resolve({ stdout: "", stderr: "", code: 0 }),
         glOwner && glRepo
           ? run(
@@ -369,6 +371,7 @@ export default function (pi: ExtensionAPI) {
                 `number=${num}`,
               ],
               signal,
+              ctx.cwd,
             )
           : Promise.resolve({
               stdout: "",

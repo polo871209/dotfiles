@@ -1,10 +1,12 @@
 // Customizes pi TUI: input text color, slim footer, and the autocomplete
 // dropdown as a floating overlay above the editor. The dropdown covers the
 // conversation lines underneath instead of pushing the editor up or
-// reserving a permanent gap.
+// reserving a permanent gap. Everything hangs off ThemedEditor, the editor
+// pi installs through setEditorComponent, so stock editors stay untouched.
 import {
   CustomEditor,
   type ExtensionAPI,
+  type ExtensionContext,
   type KeybindingsManager,
 } from "@earendil-works/pi-coding-agent";
 import type { Theme as PiTheme } from "@earendil-works/pi-coding-agent";
@@ -15,6 +17,8 @@ import {
   type OverlayHandle,
   type OverlayOptions,
   type TUI,
+  type TuiMouseEvent,
+  type TuiMouseEventResult,
   truncateToWidth,
   visibleWidth,
 } from "@earendil-works/pi-tui";
@@ -72,6 +76,9 @@ interface SelectListLike {
     primaryColumnWidth: number,
   ): string;
   getPrimaryColumnWidth?(): number;
+  handleMouse?(event: TuiMouseEvent): TuiMouseEventResult | undefined;
+  setSelectedIndex?(index: number): void;
+  onSelect?: (item: SelectItemLike) => void;
 }
 
 interface EditorWithOverlay {
@@ -170,6 +177,24 @@ class DropdownOverlay implements Component {
     return lines;
   }
 
+  // Fullscreen mode routes the mouse to the overlay under the pointer. Without
+  // this, a wheel or click on the dropdown does nothing.
+  handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+    if (!isAutocompleteOpen(this.editor)) return undefined;
+    const list = this.editor.autocompleteList as SelectListLike;
+    if (event.type === "wheel") return list.handleMouse?.(event);
+    if (event.button !== "left") return undefined;
+    if (event.type !== "press" && event.type !== "click") return undefined;
+    const items = list.filteredItems;
+    const top = this.viewport?.list === list ? this.viewport.top : 0;
+    const index = top + event.y;
+    const item = items?.[index];
+    if (!item || event.y >= (list.maxVisible ?? 0)) return { handled: true };
+    list.setSelectedIndex?.(index);
+    if (event.type === "click") list.onSelect?.(item);
+    return { handled: true };
+  }
+
   invalidate() {}
 }
 
@@ -223,45 +248,16 @@ const syncOverlay = (editor: EditorWithOverlay, editorHeight: number) => {
   }
 };
 
+// Builds before this one wrapped Editor.prototype.render. Restore the
+// original so a /reload in a long-lived pi does not draw the dropdown twice.
 const AC_TAG = "__acOverlay";
-const installAutocompleteAbovePatch = () => {
+const removeLegacyPrototypePatch = () => {
   const proto = Editor.prototype as unknown as {
-    render(width: number): string[];
-    autocompleteState?: unknown;
-    autocompleteList?: SelectListLike;
+    render: { [AC_TAG]?: { orig: unknown } };
   };
-
-  // Re-installable across /reload (same pattern as the bottom-pin patch):
-  // unwrap to the true original, then wrap with this module's live closures.
-  let origRender = proto.render as unknown as {
-    (width: number): string[];
-    [AC_TAG]?: { orig: (width: number) => string[] };
-  };
-  while (origRender[AC_TAG]) {
-    origRender = origRender[AC_TAG].orig as typeof origRender;
-  }
-
-  const wrapper = function (this: typeof proto, width: number): string[] {
-    // Always strip the inline dropdown from the editor's own render so
-    // the editor occupies the same rows whether autocomplete is active
-    // or not.
-    const state = this.autocompleteState;
-    const list = this.autocompleteList;
-    let lines: string[];
-    if (state && list) {
-      this.autocompleteState = undefined;
-      lines = origRender.call(this, width);
-      this.autocompleteState = state;
-    } else {
-      lines = origRender.call(this, width);
-    }
-
-    syncOverlay(this as unknown as EditorWithOverlay, lines.length);
-
-    return lines;
-  } as unknown as typeof origRender;
-  wrapper[AC_TAG] = { orig: origRender };
-  proto.render = wrapper;
+  let render = proto.render;
+  while (render[AC_TAG]) render = render[AC_TAG].orig as typeof render;
+  proto.render = render;
 };
 
 class ThemedEditor extends CustomEditor {
@@ -277,12 +273,30 @@ class ThemedEditor extends CustomEditor {
 
   render(width: number): string[] {
     const theme = this.getTheme();
-    return super.render(width).map((line) => colorInputLine(line, theme));
+    // Strip the inline dropdown so the editor occupies the same rows whether
+    // autocomplete is open or not. The overlay draws the list instead.
+    // autocompleteState is private in pi-tui, hence the cast.
+    const self = this as unknown as EditorWithOverlay;
+    const state = self.autocompleteState;
+    let lines: string[];
+    if (state && self.autocompleteList) {
+      self.autocompleteState = undefined;
+      try {
+        lines = super.render(width);
+      } finally {
+        self.autocompleteState = state;
+      }
+    } else {
+      lines = super.render(width);
+    }
+    syncOverlay(self, lines.length);
+    return lines.map((line) => colorInputLine(line, theme));
   }
 }
 
 const installInputColor = (pi: ExtensionAPI) => {
   pi.on("session_start", async (_event, ctx) => {
+    if (ctx.mode !== "tui") return;
     ctx.ui.setEditorComponent(
       (tui, editorTheme, keybindings) =>
         new ThemedEditor(tui, editorTheme, keybindings, () => ctx.ui.theme),
@@ -301,8 +315,9 @@ const installWorking = (pi: ExtensionAPI) => {
     }
   };
 
-  pi.on("session_start", async (_event, ctx) => {
-    stop();
+  // Frames are pre-colored strings, so agent_start rebuilds them to follow a
+  // theme change.
+  const applyIndicator = (ctx: ExtensionContext) => {
     const t = ctx.ui.theme;
     ctx.ui.setWorkingIndicator({
       frames: [
@@ -313,12 +328,18 @@ const installWorking = (pi: ExtensionAPI) => {
       ],
       intervalMs: 150,
     });
+  };
+
+  pi.on("session_start", async (_event, ctx) => {
+    stop();
+    if (ctx.mode === "tui") applyIndicator(ctx);
   });
 
   // One timer per run: agent_start fires again for each retry, compaction
   // resume and lsp repair turn, and agent_settled fires once at the end.
   pi.on("agent_start", async (_event, ctx) => {
-    if (timer) return;
+    if (ctx.mode !== "tui" || timer) return;
+    applyIndicator(ctx);
     const started = Date.now();
     const tick = () => {
       const s = Math.round((Date.now() - started) / 1000);
@@ -344,6 +365,7 @@ const installWorking = (pi: ExtensionAPI) => {
 // Tool outputs start collapsed; ctrl+o still expands on demand.
 const installCollapsedTools = (pi: ExtensionAPI) => {
   pi.on("session_start", async (_event, ctx) => {
+    if (ctx.mode !== "tui") return;
     ctx.ui.setToolsExpanded(false);
   });
 };
@@ -357,10 +379,11 @@ const formatTokenCount = (n: number): string => {
 
 const installFooter = (pi: ExtensionAPI) => {
   pi.on("session_start", async (_event, ctx) => {
+    if (ctx.mode !== "tui") return;
     ctx.ui.setFooter((_tui, theme, footerData) => ({
       invalidate() {},
       render(width: number): string[] {
-        let pwd = process.cwd();
+        let pwd = ctx.cwd;
         const home = process.env.HOME || process.env.USERPROFILE;
         if (home && pwd.startsWith(home)) pwd = `~${pwd.slice(home.length)}`;
         const branch = footerData.getGitBranch();
@@ -455,7 +478,7 @@ const installFooter = (pi: ExtensionAPI) => {
   });
 };
 
-installAutocompleteAbovePatch();
+removeLegacyPrototypePatch();
 
 export default function (pi: ExtensionAPI) {
   installInputColor(pi);

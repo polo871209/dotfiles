@@ -18,7 +18,8 @@
 // to reflect busy/ask/done — polled here instead of a parsed JSON event stream.
 // Completion and final output come from a result file the child side of this
 // same extension writes on agent_settled: pane capture is width-wrapped by
-// the TUI and scrollback-bounded, the file is neither.
+// the TUI and, in fullscreen mode, holds only the visible screen. The file
+// has neither problem.
 //
 // Context isolation: the only thing suppressed is --no-session (parent
 // conversation history doesn't carry over). SYSTEM.md, AGENTS.md/CLAUDE.md
@@ -29,7 +30,7 @@
 // spawn its own subagents. Beyond that, whatever the task string doesn't
 // say, the subagent doesn't know — write tasks self-contained.
 
-import { execFile } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { collectTextMessages, extractText } from "./shared/message";
 import { parseStatusTitle } from "./shared/status";
 import * as fs from "node:fs";
@@ -207,7 +208,10 @@ const RunValueSchema = Type.Object({
   error: Type.Optional(Type.String()),
 });
 
-function runValue(p: Progress): Static<typeof RunValueSchema> & JsonValue {
+function runValue(
+  p: Progress,
+  fieldPath?: string,
+): Static<typeof RunValueSchema> & JsonValue {
   const id = p.id ?? "";
   return {
     id,
@@ -216,11 +220,27 @@ function runValue(p: Progress): Static<typeof RunValueSchema> & JsonValue {
     output: p.output,
     // Stored values come from JSON.parse.
     ...(resultStore.has(id)
-      ? { result: resultStore.get(id) as JsonValue }
+      ? { result: getByPath(resultStore.get(id), fieldPath) as JsonValue }
       : {}),
     ...(p.error ? { error: p.error } : {}),
   };
 }
+
+const ManageValueSchema = Type.Object({
+  outcome: Type.Optional(
+    Type.Union(
+      [
+        Type.Literal("finished"),
+        Type.Literal("timeout"),
+        Type.Literal("aborted"),
+      ],
+      { description: "wait only" },
+    ),
+  ),
+  runs: Type.Array(RunValueSchema),
+});
+const manageValue = (v: Static<typeof ManageValueSchema>): JsonValue =>
+  v as JsonValue;
 
 const AGENTS_DIR = path.join(getAgentDir(), "agents");
 const MAX_OUTPUT_BYTES = 32 * 1024;
@@ -729,6 +749,7 @@ async function runInTmux(
   signal: AbortSignal | undefined,
   target: string,
   record: RunRecord,
+  trusted: boolean,
 ): Promise<{
   content: { type: "text"; text: string }[];
   details: Progress;
@@ -760,6 +781,9 @@ async function runInTmux(
     // child keeps whichever SYSTEM.md pi discovers for this cwd.
     `--append-system-prompt '${promptFile}'`,
   ];
+  // The child must not stop at a project-trust prompt nobody sees, so it
+  // inherits the parent's decision.
+  parts.push(trusted ? "--approve" : "--no-approve");
   if (toolsFlag) parts.push(`--tools ${toolsFlag}`);
   parts.push(`--exclude-tools ${[...FORBIDDEN_TOOLS].join(",")}`);
   if (model) parts.push(`--model '${model.replaceAll("'", "'\\''")}'`);
@@ -870,8 +894,9 @@ async function runInTmux(
   }
 
   // Prefer the child-written result file: the final assistant message,
-  // verbatim. Pane capture is the fallback (blocked runs, file write failed)
-  // and is width-wrapped — JSON inside it may not parse.
+  // verbatim. Pane capture is the fallback (blocked runs, file write failed):
+  // it is width-wrapped, so JSON inside may not parse, and in fullscreen mode
+  // it holds only the visible screen.
   let rawOutput = "";
   if (finalStatus === "idle") {
     try {
@@ -958,8 +983,30 @@ export default function (pi: ExtensionAPI) {
 
   persistResult = (id, value) =>
     pi.appendEntry<ResultEntry>(RESULT_ENTRY_TYPE, { id, value });
-  pi.on("session_start", async (_event, ctx) => {
-    hydrateResultStore(ctx.sessionManager.getEntries());
+  pi.on("session_start", async (event, ctx) => {
+    // The store is process-wide, so a switch to another session drops the
+    // previous session's results. getBranch() skips results recorded on a
+    // branch that /tree left.
+    if (event.reason !== "startup" && event.reason !== "reload")
+      resultStore.clear();
+    hydrateResultStore(ctx.sessionManager.getBranch());
+  });
+  // On quit, a running child can no longer report back: stop it and close its
+  // pane. Sync calls, because the process exits right after this handler.
+  pi.on("session_shutdown", (event) => {
+    if (event.reason !== "quit") return;
+    for (const record of runsStore.values()) {
+      if (record.progress.status !== "running") continue;
+      record.controller.abort();
+      if (!record.paneId) continue;
+      try {
+        execFileSync("tmux", ["kill-pane", "-t", record.paneId], {
+          timeout: 2_000,
+        });
+      } catch {
+        /* pane already gone */
+      }
+    }
   });
 
   const agents = loadAgents();
@@ -996,11 +1043,17 @@ export default function (pi: ExtensionAPI) {
 
     renderResult(result, options, theme) {
       const p = result.details;
-      const w = (process.stdout.columns ?? 100) - 2;
       if (!p) {
         return new Text(theme.fg("dim", "  …"), 0, 0);
       }
-      return renderProgressComponent(p, theme, w, options.expanded);
+      // Lay out at the width pi renders with, not the terminal width.
+      return {
+        render: (width: number) =>
+          renderProgressComponent(p, theme, width - 2, options.expanded).render(
+            width,
+          ),
+        invalidate: () => {},
+      };
     },
 
     async execute(_toolCallId, rawParams, signal, onUpdate, ctx) {
@@ -1062,6 +1115,7 @@ export default function (pi: ExtensionAPI) {
         controller.signal,
         target,
         record,
+        ctx.isProjectTrusted(),
       );
 
       // Single settle promise for both modes: runInTmux mutates `progress`
@@ -1102,6 +1156,7 @@ export default function (pi: ExtensionAPI) {
       "WRONG: sleep in a shell, or call result after a wait — each spends a turn on information you already have.\n" +
       "RIGHT: keep working, then one wait call at the point the runs gate your next step. It returns their output the moment they finish.",
     parameters: manageParams(),
+    outputSchema: ManageValueSchema,
     async execute(_toolCallId, rawParams, signal) {
       const {
         action: rawAction,
@@ -1146,6 +1201,7 @@ export default function (pi: ExtensionAPI) {
           return {
             content: [{ type: "text", text: "No subagent runs to wait for." }],
             details: undefined,
+            structuredContent: manageValue({ outcome: "finished", runs: [] }),
           };
         }
 
@@ -1199,6 +1255,10 @@ export default function (pi: ExtensionAPI) {
             { type: "text", text: `${head}\n\n${blocks.join("\n\n")}` },
           ],
           details: undefined,
+          structuredContent: manageValue({
+            outcome: state.outcome,
+            runs: records.map((r) => runValue(r.progress)),
+          }),
         };
       }
 
@@ -1214,6 +1274,7 @@ export default function (pi: ExtensionAPI) {
           .map((s) => s.trim())
           .filter(Boolean);
         const blocks: string[] = [];
+        const values: Static<typeof RunValueSchema>[] = [];
         for (const runId of wanted) {
           const run = runsStore.get(runId);
           if (!run) {
@@ -1221,6 +1282,13 @@ export default function (pi: ExtensionAPI) {
               // Result outlived its run record (pruned, or hydrated from an
               // earlier session), so the id still answers.
               blocks.push(`${runId}\n${runPayload(runId, "", fieldPath)}`);
+              values.push({
+                id: runId,
+                agent: "",
+                status: "done",
+                output: "",
+                result: getByPath(resultStore.get(runId), fieldPath),
+              });
               continue;
             }
             return fail(`subagent_manage: no tracked run with id "${runId}"`);
@@ -1233,10 +1301,12 @@ export default function (pi: ExtensionAPI) {
           blocks.push(
             `${formatRunLine(run)}\n${runPayload(run.id, transcriptOf(run), fieldPath)}`,
           );
+          values.push(runValue(run.progress, fieldPath));
         }
         return {
           content: [{ type: "text", text: blocks.join("\n\n") }],
           details: undefined,
+          structuredContent: manageValue({ runs: values }),
         };
       }
 
@@ -1255,6 +1325,7 @@ export default function (pi: ExtensionAPI) {
             },
           ],
           details: undefined,
+          structuredContent: manageValue({ runs: [runValue(record.progress)] }),
         };
       }
       // steer
@@ -1268,7 +1339,29 @@ export default function (pi: ExtensionAPI) {
           "subagent_manage: 'message' is required for action 'steer'.",
         );
       }
-      await tmuxRun(["send-keys", "-t", record.paneId, "-l", message]);
+      // The child's editor would run a leading / as a command and ! as bash.
+      if (/^\s*[/!]/.test(message)) {
+        return fail(
+          "subagent_manage: a steer message must not start with '/' or '!'. Rephrase it as plain text.",
+        );
+      }
+      // Bracketed paste keeps newlines as text. Typed with send-keys, the
+      // first newline would submit a partial message.
+      const buffer = `pi-steer-${id}`;
+      const pasted =
+        (await tmuxRun(["set-buffer", "-b", buffer, "--", message])) &&
+        (await tmuxRun([
+          "paste-buffer",
+          "-p",
+          "-d",
+          "-b",
+          buffer,
+          "-t",
+          record.paneId,
+        ]));
+      if (!pasted) {
+        return fail(`subagent_manage: tmux could not paste into run "${id}".`);
+      }
       await tmuxRun(["send-keys", "-t", record.paneId, "Enter"]);
       return {
         content: [
@@ -1278,6 +1371,7 @@ export default function (pi: ExtensionAPI) {
           },
         ],
         details: undefined,
+        structuredContent: manageValue({ runs: [runValue(record.progress)] }),
       };
     },
   });

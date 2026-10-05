@@ -9,10 +9,20 @@ import { join } from "node:path";
 
 const git = (args: string[], cwd?: string): Promise<string> =>
   new Promise((resolve, reject) => {
-    execFile("git", args, { cwd, timeout: 120_000 }, (err, stdout, stderr) => {
-      if (err) reject(new Error(stderr.trim() || err.message));
-      else resolve(stdout.trim());
-    });
+    // No credential prompt: git would draw it on /dev/tty, over the TUI.
+    execFile(
+      "git",
+      args,
+      {
+        cwd,
+        timeout: 120_000,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+      },
+      (err, stdout, stderr) => {
+        if (err) reject(new Error(stderr.trim() || err.message));
+        else resolve(stdout.trim());
+      },
+    );
   });
 
 export interface SkillToggleConfig {
@@ -97,13 +107,18 @@ export function registerSkillToggle(
   // Publish on/off state through the built-in footer-status channel (reset
   // on every reload) instead of extensions reaching into each other's
   // internal state.
+  // getBranch(): a toggle recorded on a branch that /tree left does not count.
   pi.on("session_start", async (_event, ctx) => {
-    restoreEnabled(ctx.sessionManager.getEntries());
+    restoreEnabled(ctx.sessionManager.getBranch());
     ctx.ui.setStatus(name, isEnabled() ? `${name}:on` : undefined);
   });
 
   pi.registerCommand(name, {
     description: `Flip ${label} on/off (off by default); /${name} update to sync the clone`,
+    getArgumentCompletions: (prefix) =>
+      "update".startsWith(prefix.trim())
+        ? [{ value: "update", label: "update", description: "Sync the clone" }]
+        : null,
     handler: async (args, ctx) => {
       const arg = args.trim().toLowerCase();
 

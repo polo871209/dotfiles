@@ -1638,66 +1638,62 @@ const searchQueries = Type.Array(nonEmptyText, {
   minItems: 1,
   description: "Varied queries for broad research.",
 });
-export const searchParameters = Type.Intersect([
-  Type.Union([
-    Type.Object({
-      query: nonEmptyText,
-      queries: Type.Optional(searchQueries),
+// Root must be a plain Type.Object: pi-ai sends Anthropic only the root
+// `properties`, so an Intersect or Union root reaches the model as `{}`.
+// execute() enforces "query or queries".
+export const searchParameters = Type.Object({
+  query: Type.Optional(nonEmptyText),
+  queries: Type.Optional(searchQueries),
+  numResults: Type.Optional(
+    Type.Number({
+      minimum: 1,
+      maximum: 10,
+      default: 5,
+      description:
+        "Keep the default of 5 unless the task needs breadth; results that do not answer the query are dropped either way.",
     }),
-    Type.Object({
-      query: Type.Optional(Type.String()),
-      queries: searchQueries,
-    }),
-  ]),
-  Type.Object({
-    numResults: Type.Optional(
-      Type.Number({
-        minimum: 1,
-        maximum: 10,
-        default: 5,
-        description:
-          "Keep the default of 5 unless the task needs breadth; results that do not answer the query are dropped either way.",
-      }),
-    ),
-  }),
-]);
+  ),
+});
 const fetchUrls = Type.Array(nonEmptyText, {
   minItems: 1,
   description: "URLs to fetch in one call.",
 });
-export const fetchParameters = Type.Intersect([
-  Type.Union([
-    Type.Object({
-      url: nonEmptyText,
-      urls: Type.Optional(fetchUrls),
+// Plain Type.Object root for the same reason as searchParameters.
+export const fetchParameters = Type.Object({
+  url: Type.Optional(nonEmptyText),
+  urls: Type.Optional(fetchUrls),
+  mode: Type.Optional(
+    Type.Union([Type.Literal("readable"), Type.Literal("raw")], {
+      default: "readable",
+      description:
+        'Use "raw" for the unprocessed body when the target is JSON or the extraction looks wrong.',
     }),
-    Type.Object({
-      url: Type.Optional(Type.String()),
-      urls: fetchUrls,
-    }),
-  ]),
-  Type.Object({
-    mode: Type.Optional(
-      Type.Union([Type.Literal("readable"), Type.Literal("raw")], {
-        default: "readable",
-        description:
-          'Use "raw" for the unprocessed body when the target is JSON or the extraction looks wrong.',
-      }),
-    ),
-    // No description: a truncated page teaches offset in its own footer, at
-    // the one moment the agent needs it, for zero standing prompt cost.
-    offset: Type.Optional(Type.Number({ minimum: 0, default: 0 })),
-  }),
-]);
+  ),
+  // No description: a truncated page teaches offset in its own footer, at
+  // the one moment the agent needs it, for zero standing prompt cost.
+  offset: Type.Optional(Type.Number({ minimum: 0, default: 0 })),
+});
+
+// The one-line summaries hide content, so a failed call shows its first error
+// line instead of "0 results".
+function errorLine(
+  name: string,
+  result: { content: Array<{ type: string; text?: string }> },
+  theme: Theme,
+): Text {
+  const text = result.content.find((c) => c.type === "text")?.text ?? "";
+  const line =
+    text.split("\n").find((l) => /error/i.test(l)) ?? text.split("\n")[0];
+  return new Text(theme.fg("error", `  ${name} — ${line ?? "failed"}`), 0, 0);
+}
 
 export default function (pi: ExtensionAPI) {
-  pi.on("session_shutdown", () => {
-    for (const promise of cloneCache.values()) {
-      promise
-        .then((dir) => rmSync(dir, { recursive: true, force: true }))
-        .catch(() => {});
-    }
+  // Keep clones across /reload and session switches: earlier tool results
+  // still point at those paths. Drop the whole per-process tree on quit.
+  pi.on("session_shutdown", (event) => {
+    if (event.reason !== "quit") return;
     cloneCache.clear();
+    rmSync(GITHUB_CLONE_DIR, { recursive: true, force: true });
   });
 
   pi.registerTool({
@@ -1706,7 +1702,9 @@ export default function (pi: ExtensionAPI) {
     // Without the year, a "latest" query returns the year the weights end.
     description: `Search the web. Each result is a title, a URL, and a snippet, so fetch a result when the snippet does not settle the question. The current year is ${new Date().getFullYear()}; put it in the query when recency matters.`,
     promptSnippet: "Search the web for external facts",
-    renderResult(result, _options, theme: Theme) {
+    annotations: { readOnlyHint: true, openWorldHint: true },
+    renderResult(result, _options, theme: Theme, context) {
+      if (context.isError) return errorLine("web_search", result, theme);
       const d = result.details as
         | { queries?: string[]; totalResults?: number }
         | undefined;
@@ -1869,7 +1867,9 @@ export default function (pi: ExtensionAPI) {
     description:
       "Fetch web content as markdown. A GitHub code link returns a local path to read files from. A GitHub issue or pull link returns the thread with its comments. A video link returns the transcript. For PR diffs, checks, or review threads, use github_pr instead.",
     promptSnippet: "Read a web page, GitHub link, or video transcript",
-    renderResult(result, _options, theme: Theme) {
+    annotations: { readOnlyHint: true, openWorldHint: true },
+    renderResult(result, _options, theme: Theme, context) {
+      if (context.isError) return errorLine("fetch_content", result, theme);
       const d = result.details as { urls?: string[]; ok?: number } | undefined;
       return new Text(
         theme.fg(

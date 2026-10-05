@@ -14,7 +14,8 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { createInterface } from "node:readline";
-import { sideChannelComplete } from "../shared/llm";
+import type { Usage } from "@earendil-works/pi-ai";
+import { addUsage, sideChannelComplete } from "../shared/llm";
 
 interface RunResult {
   status: string;
@@ -67,6 +68,8 @@ export default function (pi: ExtensionAPI) {
         }),
       ),
     }),
+    // One Chrome profile: parallel goals would fight over focus and tabs.
+    executionMode: "sequential",
     outputSchema: Type.Object({
       status: Type.String(),
       error: Type.Union([Type.String(), Type.Null()]),
@@ -123,9 +126,14 @@ export default function (pi: ExtensionAPI) {
       };
       signal?.addEventListener("abort", stop, { once: true });
       // Chrome approval prompts and slow pages both count; MAX_STEPS caps actions.
-      const timer = setTimeout(stop, 300_000);
+      let timedOut = false;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        stop();
+      }, 300_000);
 
       let result: RunResult | undefined;
+      let usage: Usage | null = null;
       let steps = 0;
       const lines = createInterface({ input: child.stdout });
       for await (const line of lines) {
@@ -167,6 +175,7 @@ export default function (pi: ExtensionAPI) {
                 signal,
               })
             : { ok: false as const, reason: "no-model", error: undefined };
+          if (r.ok) usage = addUsage(usage, r.usage);
           child.stdin.write(
             JSON.stringify(
               r.ok
@@ -186,8 +195,13 @@ export default function (pi: ExtensionAPI) {
       signal?.removeEventListener("abort", stop);
 
       if (!result) {
+        const why = timedOut
+          ? "timed out after 300 s"
+          : signal?.aborted
+            ? "was aborted"
+            : "exited without a result";
         throw new Error(
-          `browser_task: runner exited without a result.\n${stderr.trim().split("\n").slice(-10).join("\n")}`,
+          `browser_task: runner ${why}.\n${stderr.trim().split("\n").slice(-10).join("\n")}`,
         );
       }
       const actions = result.history.map(
@@ -214,6 +228,7 @@ export default function (pi: ExtensionAPI) {
           actions: result.history,
           text: result.text.slice(0, 4000),
         },
+        ...(usage ? { usage } : {}),
         // runner.py reports its own crash as "error". Agent statuses stay results the model judges.
         ...(result.status === "error" ? { isError: true } : {}),
       };

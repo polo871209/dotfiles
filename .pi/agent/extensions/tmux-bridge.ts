@@ -50,9 +50,11 @@ function socketPathForPane(paneId: string): string {
 
 // Clients send absolute paths because their cwd need not match pi's; show the
 // short form when the file is under this session's cwd.
+// Set from the session context on start; process.cwd() can differ from it.
+let sessionCwd = process.cwd();
 function displayPath(filePath: string): string {
   if (!path.isAbsolute(filePath)) return filePath;
-  const rel = path.relative(process.cwd(), filePath);
+  const rel = path.relative(sessionCwd, filePath);
   return rel && !rel.startsWith("..") ? rel : filePath;
 }
 
@@ -111,10 +113,10 @@ function tabFidelityNote(content: string): string {
 }
 
 export default function (pi: ExtensionAPI) {
-  if (process.env.PI_IS_SUBAGENT) return; // subagents don't get their own bridge
+  if (process.env.PI_IS_SUBAGENT === "1") return; // subagents get no bridge
 
   // Transcript shows one dim line per snapshot; the numbered body is only a
-  // ctrl+r expand away, and always reaches the model regardless.
+  // ctrl+o expand away, and always reaches the model regardless.
   pi.registerMessageRenderer<SnapshotDetails>(
     SNAPSHOT_MESSAGE_TYPE,
     (message, { expanded, outputPad }, theme) => {
@@ -173,6 +175,9 @@ export default function (pi: ExtensionAPI) {
         // and only once they send it.
         if (!requested) {
           if (!currentCtx) return { ok: false, error: "no session context" };
+          // Print and JSON modes have no editor: pasteToEditor is a no-op.
+          if (!currentCtx.hasUI)
+            return { ok: false, error: "this pi has no editor to paste into" };
           currentCtx.ui.pasteToEditor(
             `${content}${tabFidelityNote(f.content)}\n`,
           );
@@ -191,17 +196,21 @@ export default function (pi: ExtensionAPI) {
         // assistant turn's tool calls, and steeringMode "one-at-a-time" (the
         // default) releases one queued snapshot per turn.
         pi.sendMessage<SnapshotDetails>(message, { deliverAs: requested });
+        // Idle, pi appends steer and followUp messages to the history without
+        // starting a turn, so they reach the model with the next prompt.
         return {
           ok: true,
           delivered:
-            requested === "nextTurn"
+            requested === "nextTurn" || idle
               ? `${where} attached to your next prompt`
               : `${where} ${requested === "steer" ? "steering the running turn" : "queued as follow-up"}`,
         };
       }
       const paste = payload.paste;
       if (typeof paste === "string") {
-        currentCtx?.ui.pasteToEditor(`${paste}\n`);
+        if (!currentCtx?.hasUI)
+          return { ok: false, error: "this pi has no editor to paste into" };
+        currentCtx.ui.pasteToEditor(`${paste}\n`);
         return { ok: true, delivered: "pasted into the editor" };
       }
       const text = payload.text;
@@ -234,6 +243,7 @@ export default function (pi: ExtensionAPI) {
   };
 
   const start = (ctx: ExtensionContext) => {
+    sessionCwd = ctx.cwd;
     if (server) {
       currentCtx = ctx;
       return; // already listening (e.g. /new re-firing session_start)

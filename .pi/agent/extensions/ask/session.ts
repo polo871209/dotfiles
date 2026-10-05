@@ -580,10 +580,6 @@ export function reduce(
 
 // Runtime host
 
-// Ctrl-E → cursor-line-end (pi-tui keybinding); used to park the inline cursor
-// at end after setValue rehydration.
-const CURSOR_END = "\x05";
-
 export interface QuestionnaireSessionConfig {
   tui: { terminal: { columns: number; rows: number }; requestRender(): void };
   theme: Theme;
@@ -680,8 +676,10 @@ export class QuestionnaireSession {
   private runEffect(effect: Effect): void {
     switch (effect.kind) {
       case "set_input_buffer":
-        this.inlineInput.setValue(effect.value);
-        this.inlineInput.handleInput(CURSOR_END);
+        // A bracketed paste into an empty Input parks the cursor after the
+        // text without depending on the user's cursor-line-end key.
+        this.inlineInput.setValue("");
+        this.inlineInput.handleInput(`\x1b[200~${effect.value}\x1b[201~`);
         return;
       case "clear_input_buffer":
         this.inlineInput.setValue("");

@@ -6,7 +6,10 @@
 //
 // registerFeedback(pi) is called from lsp/index.ts — this is part of the lsp
 // extension (shares its nvim), not a standalone one.
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  type ExtensionAPI,
+  withFileMutationQueue,
+} from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -20,7 +23,7 @@ import {
 import { changeNote } from "./diff";
 
 const MAX_REPAIR_FOLLOWUPS = 2;
-const TRACKED_TOOLS = new Set(["edit", "write", "str_replace", "create"]);
+const TRACKED_TOOLS = new Set(["edit", "write"]);
 
 const GIT_WALK_MAX_DEPTH = 8;
 const isRebasing = (cwd: string): boolean => {
@@ -100,12 +103,15 @@ export function registerFeedback(pi: ExtensionAPI): void {
   // Files edited since the last clean pass. Kept across repair turns so each
   // agent_before_settle re-checks the whole task, not only the last fix.
   const touched = new Set<string>();
+  // False once an edit lands, true once a diagnostics pass covers it. pi skips
+  // agent_before_settle after an abort, so unchecked edits must carry over.
+  let checked = true;
   let repairFollowups = 0;
-  let cwd = process.cwd();
 
   pi.on("session_start", async (_event, ctx) => {
-    cwd = ctx.cwd ?? process.cwd();
+    const cwd = ctx.cwd;
     touched.clear();
+    checked = true;
     repairFollowups = 0;
     // Warm nvim + feedback lua in the background so the first edit skips spawn
     // + init.lua + LSP-attach. Deferred a tick to keep the sync prefix (file
@@ -119,53 +125,69 @@ export function registerFeedback(pi: ExtensionAPI): void {
   });
 
   // Repair turns run inside the same agent run, so this fires only for a new
-  // user prompt.
+  // user prompt. Files already checked are dropped, so diagnostics the agent
+  // could not fix do not nag every later prompt.
   pi.on("before_agent_start", async () => {
-    touched.clear();
+    if (checked) touched.clear();
     repairFollowups = 0;
   });
 
   // Format one file in place, register it for the batched diagnostics pass, and
   // return a note describing the format delta (undefined if skipped/unchanged).
-  const processFile = async (abs: string): Promise<string | undefined> => {
+  // The queue is pi's own per-file lock for edit and write, so a parallel edit
+  // of the same file cannot land between our read, format, and re-read.
+  const processFile = async (
+    abs: string,
+    cwd: string,
+  ): Promise<string | undefined> => {
     if (!fs.existsSync(abs)) return;
     if (isScratchPath(abs)) return;
     if (isIgnoredPath(abs, cwd)) return;
     touched.add(abs);
-    try {
-      const before = fs.readFileSync(abs, "utf8");
-      if (Buffer.byteLength(before) > MAX_FILE_BYTES) return;
-      if (!(await formatFile(abs, cwd))) return;
-      const after = fs.readFileSync(abs, "utf8");
-      if (after === before) return;
-      return changeNote(before, after, displayPath(abs, cwd), "auto-formatted");
-    } catch {
-      return;
-    }
+    checked = false;
+    return withFileMutationQueue(abs, async () => {
+      try {
+        const before = fs.readFileSync(abs, "utf8");
+        if (Buffer.byteLength(before) > MAX_FILE_BYTES) return;
+        if (!(await formatFile(abs, cwd))) return;
+        const after = fs.readFileSync(abs, "utf8");
+        if (after === before) return;
+        return changeNote(
+          before,
+          after,
+          displayPath(abs, cwd),
+          "auto-formatted",
+        );
+      } catch {
+        return;
+      }
+    });
   };
 
   // Inline format-on-save: format each touched file and fold the deltas into
   // the agent's own tool result, keeping its view synced to disk (no re-read)
   // without a separate context entry. Deterministic diagnostics and safe LSP
   // actions run batched at agent_before_settle over the same `touched` set.
-  pi.on("tool_result", async (event) => {
+  pi.on("tool_result", async (event, ctx) => {
     if (event.isError) return;
 
     if (!TRACKED_TOOLS.has(event.toolName)) return;
     const p = extractPath(event.input);
     if (!p) return;
-    const note = await processFile(toAbs(p, cwd));
+    const note = await processFile(toAbs(p, ctx.cwd), ctx.cwd);
     if (note)
       return { content: [...event.content, { type: "text", text: note }] };
   });
 
   // Awaited by pi before it settles. After an abort or error, `touched` stays
-  // so the next completed run checks those files too.
+  // so the next completed run checks those files too. ctx.signal is undefined
+  // here (no agent run is active), so runDriver's own cap bounds the wait.
   pi.on("agent_before_settle", async (event, ctx) => {
     if (event.outcome !== "completed") return;
     if (touched.size === 0 || repairFollowups >= MAX_REPAIR_FOLLOWUPS) return;
-    const projectCwd = ctx.cwd ?? cwd;
+    const projectCwd = ctx.cwd;
     if (isRebasing(projectCwd)) return;
+    checked = true;
     const result = await runDriver(Array.from(touched), projectCwd, ctx.signal);
     if (!result) return;
     if (result.diagnostics.length === 0) {

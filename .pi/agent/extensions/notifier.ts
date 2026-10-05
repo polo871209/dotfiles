@@ -11,7 +11,7 @@
 // needs it to poll completion — but skip the desktop notification/sound,
 // which would otherwise fire once per subagent turn.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { exec, execFile } from "node:child_process";
+import { exec, execFile, execFileSync } from "node:child_process";
 import { APP_TITLE, statusTitle, type AgentStatus } from "./shared/status";
 import { writeFileSync } from "node:fs";
 import * as path from "node:path";
@@ -296,8 +296,8 @@ const sendGhostty = async (project: string, body: string): Promise<boolean> => {
       return true;
     }
 
-    // Own pane, visible. stdout works under pi's takeOverStdout (reroutes to
-    // fd2, same pty tmux reads, same as OSC 52).
+    // Own pane, visible. In interactive mode stdout is the pty tmux reads. Print
+    // and RPC modes reroute stdout to fd 2 (takeOverStdout), the same pty.
     await send((seq) => process.stdout.write(seq));
     return true;
   } catch {
@@ -459,7 +459,21 @@ export default function (pi: ExtensionAPI) {
     })();
   });
 
-  pi.on("session_shutdown", async () => {
+  // On quit, hand the window name back to tmux: rename-window turned off
+  // automatic-rename, so the tab would keep "π-<status>" after pi exits.
+  // Sync, because the process exits right after this handler.
+  pi.on("session_shutdown", async (event) => {
     stopDonePoll();
+    const pane = process.env.TMUX_PANE;
+    if (event.reason !== "quit" || !pane || IS_SUBAGENT) return;
+    try {
+      execFileSync(
+        "tmux",
+        ["set-window-option", "-t", pane, "automatic-rename", "on"],
+        { timeout: 2000 },
+      );
+    } catch {
+      /* tmux gone */
+    }
   });
 }

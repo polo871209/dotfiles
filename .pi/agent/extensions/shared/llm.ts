@@ -1,6 +1,5 @@
 // Side-channel LLM call: one request through the model registry that never
-// touches session history. Used by auto-rename, btw, yeet, and eval's
-// completion helper. No reasoning option is passed, so thinking stays off.
+// touches session history. No reasoning option is passed, so thinking stays off.
 import type { Api, Message, Model, Usage } from "@earendil-works/pi-ai";
 import {
   BorderedLoader,
@@ -22,12 +21,19 @@ export type SideChannelResult =
   | { ok: false; reason: "no-model" | "aborted" | "error"; error?: string };
 
 // Interactive variant: run the call behind a BorderedLoader (esc aborts),
-// notifying on failure. Returns null when aborted or failed.
+// notifying on failure. Returns null when aborted or failed. Outside the TUI,
+// ui.custom() returns undefined without running the factory, so call directly.
 export async function sideChannelWithLoader(
   ctx: ExtensionContext,
   label: string,
   opts: Omit<SideChannelOpts, "signal">,
 ): Promise<string | null> {
+  if (ctx.mode !== "tui") {
+    const r = await sideChannelComplete(ctx, opts);
+    if (r.ok) return r.text;
+    if (ctx.hasUI) ctx.ui.notify(`${label}: ${r.error ?? r.reason}`, "error");
+    return null;
+  }
   return ctx.ui.custom<string | null>((tui, theme, _kb, done) => {
     const loader = new BorderedLoader(tui, theme, label);
     loader.onAbort = () => done(null);
@@ -79,4 +85,30 @@ export async function sideChannelComplete(
       error: e instanceof Error ? e.message : String(e),
     };
   }
+}
+
+// Sum side-call usage so a tool can report it as result.usage, which pi adds
+// to the session cost.
+export function addUsage(total: Usage | null, next: Usage): Usage {
+  if (!total) return structuredClone(next);
+  const optional = (a?: number, b?: number) =>
+    a === undefined && b === undefined ? undefined : (a ?? 0) + (b ?? 0);
+  const cacheWrite1h = optional(total.cacheWrite1h, next.cacheWrite1h);
+  const reasoning = optional(total.reasoning, next.reasoning);
+  return {
+    input: total.input + next.input,
+    output: total.output + next.output,
+    cacheRead: total.cacheRead + next.cacheRead,
+    cacheWrite: total.cacheWrite + next.cacheWrite,
+    ...(cacheWrite1h === undefined ? {} : { cacheWrite1h }),
+    ...(reasoning === undefined ? {} : { reasoning }),
+    totalTokens: total.totalTokens + next.totalTokens,
+    cost: {
+      input: total.cost.input + next.cost.input,
+      output: total.cost.output + next.cost.output,
+      cacheRead: total.cost.cacheRead + next.cost.cacheRead,
+      cacheWrite: total.cost.cacheWrite + next.cost.cacheWrite,
+      total: total.cost.total + next.cost.total,
+    },
+  };
 }

@@ -119,10 +119,14 @@ export class PyKernel {
 
     this.#proc.stdin?.on("error", () => {});
     this.#proc.stdout?.resume();
+    // Cell output arrives on fd 3, so stderr carries only runner crashes. Keep
+    // its tail for the exit error: writing it to process.stderr garbles the TUI.
+    let stderrTail = "";
+    const crashNote = () => (stderrTail.trim() ? `\n${stderrTail.trim()}` : "");
     this.#proc.stderr?.setEncoding("utf-8");
-    this.#proc.stderr?.on("data", (s) =>
-      process.stderr.write(`[py-kernel] ${s}`),
-    );
+    this.#proc.stderr?.on("data", (s: string) => {
+      stderrTail = (stderrTail + s).slice(-2000);
+    });
 
     this.#ready = new Promise<void>((resolve, reject) => {
       this.#proc.once("spawn", resolve);
@@ -139,7 +143,7 @@ export class PyKernel {
         this.#closed = true;
         const reason = code === null ? `signal ${signal}` : `code ${code}`;
         for (const pending of this.#pending.values()) {
-          pending.result.error ??= `python kernel exited with ${reason} mid-run`;
+          pending.result.error ??= `python kernel exited with ${reason} mid-run${crashNote()}`;
           this.#finalize(pending);
         }
         this.#pending.clear();

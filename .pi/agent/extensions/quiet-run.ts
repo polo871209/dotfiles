@@ -162,6 +162,15 @@ export async function scoreDestructive(
   }
 }
 
+// pi shows one dialog at a time: a second confirm() replaces the first, whose
+// promise then never settles. Parallel quiet_run calls queue here instead.
+let dialogQueue: Promise<unknown> = Promise.resolve();
+function queueDialog<T>(open: () => Promise<T>): Promise<T> {
+  const next = dialogQueue.then(open, open);
+  dialogQueue = next.catch(() => {});
+  return next;
+}
+
 export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "quiet_run",
@@ -233,9 +242,12 @@ export default function (pi: ExtensionAPI) {
         const score = risk.toFixed(2);
         const approved =
           ctx.hasUI &&
-          (await ctx.ui.confirm(
-            `Destructive command (Jev ${score})`,
-            `${command}\n\ncwd: ${cwd}\n\nRun it?`,
+          (await queueDialog(() =>
+            ctx.ui.confirm(
+              `Destructive command (Jev ${score})`,
+              `${command}\n\ncwd: ${cwd}\n\nRun it?`,
+              { signal },
+            ),
           ));
         if (!approved) {
           const why = ctx.hasUI
@@ -271,7 +283,9 @@ export default function (pi: ExtensionAPI) {
       // Output is kept only as far as the result can show it, so a 500MB log
       // costs no memory and needs no read-back.
       const keep = params.tail ?? FAILURE_TAIL;
-      const ringSize = Math.max(keep, 12); // 12 = live TUI view
+      // pi previews the first 10 lines of a partial result: 1 header + 9.
+      const LIVE_LINES = 9;
+      const ringSize = Math.max(keep, LIVE_LINES);
       const ring: string[] = [];
       const hits: string[] = [];
       let hitCount = 0;
@@ -315,7 +329,7 @@ export default function (pi: ExtensionAPI) {
             content: [
               {
                 type: "text",
-                text: `${formatDuration(now - startedAt)} · ${lineCount} lines\n${ring.slice(-12).join("\n")}`,
+                text: `${formatDuration(now - startedAt)} · ${lineCount} lines\n${ring.slice(-LIVE_LINES).join("\n")}`,
               },
             ],
             details: {},

@@ -1,7 +1,10 @@
 // Shared helpers for extracting text from pi message content and walking
-// session branches. Used by extensions that build side-channel LLM payloads
-// (auto-rename, btw, copy, subagent, yeet, lsp-feedback).
+// session branches, mostly to build side-channel LLM payloads.
 import type { Message } from "@earendil-works/pi-ai";
+import {
+  convertToLlm,
+  type ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 
 // Pi messages carry content as either a plain string or an array of typed
 // parts. This pulls text-typed parts out and joins with newlines.
@@ -61,6 +64,20 @@ export function collectTextMessages(
   }
   if (maxMessages !== undefined && messages.length > maxMessages) {
     messages.splice(0, messages.length - maxMessages);
+    // Providers such as Anthropic reject a conversation that opens with an
+    // assistant turn, which the cut can produce.
+    while (messages[0]?.role === "assistant") messages.shift();
   }
   return { messages, userTurns };
+}
+
+// What the model sees now, shaped like getBranch() entries for
+// collectTextMessages: compaction summaries and context edits are applied,
+// and messages that compaction already summarized are gone.
+export function modelVisibleEntries(
+  sessionManager: ExtensionContext["sessionManager"],
+): Array<{ type: "message"; message: Message }> {
+  return convertToLlm(sessionManager.buildSessionProjection().messages).map(
+    (message) => ({ type: "message", message }),
+  );
 }

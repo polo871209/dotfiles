@@ -38,7 +38,8 @@ const NAME_MODEL = "claude-haiku-4-5";
 
 const THRESHOLD = 3; // strictly more than this many user turns
 const MAX_NAME_LEN = 60;
-const MAX_CONTEXT_MESSAGES = 12; // first few turns are enough to name a session
+const MAX_CONTEXT_MESSAGES = 12; // the latest 12 text messages name the task
+const RENAME_TIMEOUT_MS = 20_000;
 const SYSTEM_PROMPT =
   "You name chat sessions. Reply with ONLY a short title (max 6 words, " +
   "no quotes, no punctuation at end, no trailing period). Describe the " +
@@ -96,7 +97,7 @@ export default function (pi: ExtensionAPI) {
   // user-set name (also checked via getSessionName()).
   const done = new Set<string>();
 
-  const tryRename = async (ctx: Parameters<Parameters<typeof pi.on>[1]>[1]) => {
+  const tryRename = async (ctx: ExtensionContext) => {
     if (!ctx.model) return;
 
     const sessionFile = ctx.sessionManager.getSessionFile();
@@ -112,13 +113,18 @@ export default function (pi: ExtensionAPI) {
 
     inFlight.add(sessionFile);
     try {
-      const result = await sideChannelComplete(ctx, opts);
+      const result = await sideChannelComplete(ctx, {
+        ...opts,
+        signal: AbortSignal.timeout(RENAME_TIMEOUT_MS),
+      });
       // Background task: fail silently, never notify.
       if (!result.ok) return;
       const name = normalizeName(result.text);
       if (!name) return;
 
-      // Re-check: user may have set one while we were waiting.
+      // The user may have switched sessions or set a name while we waited.
+      // A stale ctx throws here, which the caller swallows.
+      if (ctx.sessionManager.getSessionFile() !== sessionFile) return;
       if (pi.getSessionName()) {
         done.add(sessionFile);
         return;
@@ -131,8 +137,13 @@ export default function (pi: ExtensionAPI) {
     }
   };
 
-  pi.on("agent_end", (_e, ctx) => tryRename(ctx));
-  pi.on("session_start", (_e, ctx) => tryRename(ctx));
+  // Never return the promise: pi awaits agent_end and session_start handlers,
+  // so the agent would stay busy, and startup would wait, for the name call.
+  const renameInBackground = (ctx: ExtensionContext) => {
+    void tryRename(ctx).catch(() => {});
+  };
+  pi.on("agent_end", (_e, ctx) => renameInBackground(ctx));
+  pi.on("session_start", (_e, ctx) => renameInBackground(ctx));
 
   pi.registerCommand("rename", {
     description:
@@ -176,11 +187,7 @@ export default function (pi: ExtensionAPI) {
       // No turn threshold here: the user asked for the rename explicitly.
       if (sessionFile) inFlight.add(sessionFile);
       try {
-        const text = ctx.hasUI
-          ? await sideChannelWithLoader(ctx, "Naming session", opts)
-          : await sideChannelComplete(ctx, opts).then((r) =>
-              r.ok ? r.text : null,
-            );
+        const text = await sideChannelWithLoader(ctx, "Naming session", opts);
         if (text === null) return;
         const name = normalizeName(text);
         if (!name) {

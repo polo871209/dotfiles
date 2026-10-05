@@ -17,7 +17,14 @@ async function oauthToken(
 ): Promise<{ token: string } | string> {
   const cred = readStoredCredential(provider);
   if (!cred || cred.type !== "oauth") return "not logged in";
-  const token = await ctx.modelRegistry.getApiKeyForProvider(provider);
+  // getProviderAuth, not getApiKeyForProvider: the latter swallows the
+  // refresh error that tells the user what to do.
+  let token: string | undefined;
+  try {
+    token = (await ctx.modelRegistry.getProviderAuth(provider))?.auth.apiKey;
+  } catch (e) {
+    return `token refresh failed: ${e instanceof Error ? e.message : String(e)}`;
+  }
   if (!token) return "token refresh failed";
   return { token };
 }
@@ -80,6 +87,7 @@ async function claudeUsageLines(ctx: ExtensionContext): Promise<string[]> {
         "anthropic-beta": "oauth-2025-04-20",
         "User-Agent": "pi-coding-agent-usage-ext/0.1",
       },
+      signal: AbortSignal.timeout(10_000),
     });
   } catch (e) {
     return [`request failed: ${e instanceof Error ? e.message : String(e)}`];
@@ -90,7 +98,12 @@ async function claudeUsageLines(ctx: ExtensionContext): Promise<string[]> {
     ];
   }
 
-  const data = (await res.json()) as ClaudeUsageResponse;
+  let data: ClaudeUsageResponse;
+  try {
+    data = (await res.json()) as ClaudeUsageResponse;
+  } catch {
+    return ["endpoint returned a body that is not JSON (undocumented API)"];
+  }
   const bucket = (name: string, b: ClaudeBucket | null | undefined) =>
     b
       ? fmtLine(name, b.utilization, new Date(b.resets_at), ctx.ui.theme)

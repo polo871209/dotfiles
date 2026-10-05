@@ -199,9 +199,15 @@ describe("public eval tool", () => {
       name: "mcp__jira__search",
       description: "Search Jira.\nMore.",
     };
+    const lazy = { name: "lazy_tool", description: "Deferred." };
+    const callable = [bash, read, definition, mcp, lazy];
     const text = definition.prepareLoadout({
       declared: [bash, read, definition],
-      callable: [bash, read, definition, mcp],
+      callable,
+      registered: callable,
+      getExposure: (name: string) =>
+        name === "lazy_tool" ? "deferred" : "direct",
+      getNamespace: () => undefined,
     }).descriptions.eval as string;
     assert.ok(text.startsWith(definition.description));
     assert.match(
@@ -211,6 +217,7 @@ describe("public eval tool", () => {
     assert.doesNotMatch(text, /`read` ->|`eval` ->/);
     assert.match(text, /- `mcp__jira__search`: Search Jira\.\n?/);
     assert.doesNotMatch(text, /More\./);
+    assert.doesNotMatch(text, /lazy_tool/);
     shutdown();
   });
 
@@ -270,16 +277,15 @@ describe("public eval tool", () => {
 
   it("respawns after a kernel crash", async () => {
     const { definition, shutdown } = makeTool();
-    await assert.rejects(
-      definition.execute(
-        "public-crash",
-        { cells: [{ code: "import os; os._exit(0)" }] },
-        undefined,
-        undefined,
-        ctx,
-      ),
-      /kernel exited/,
+    const crashed = await definition.execute(
+      "public-crash",
+      { cells: [{ code: "import os; os._exit(0)" }] },
+      undefined,
+      undefined,
+      ctx,
     );
+    assert.equal(crashed.isError, true);
+    assert.match(crashed.content[0].text, /kernel exited/);
     const recovered = await definition.execute(
       "public-crash-recovery",
       { cells: [{ code: "6 * 7" }] },
@@ -291,20 +297,20 @@ describe("public eval tool", () => {
     shutdown();
   });
 
-  it("throws cell errors and does not run subsequent cells", async () => {
+  it("reports cell errors as isError with details and skips later cells", async () => {
     const { definition, shutdown } = makeTool();
-    await assert.rejects(
-      definition.execute(
-        "public-error",
-        {
-          cells: [{ code: "raise ValueError('boom')" }, { code: "marker = 1" }],
-        },
-        undefined,
-        undefined,
-        ctx,
-      ),
-      /Cell 1 failed.*ValueError/s,
+    const failed = await definition.execute(
+      "public-error",
+      {
+        cells: [{ code: "raise ValueError('boom')" }, { code: "marker = 1" }],
+      },
+      undefined,
+      undefined,
+      ctx,
     );
+    assert.equal(failed.isError, true);
+    assert.match(failed.content[0].text, /Cell 1 failed.*ValueError/s);
+    assert.ok(failed.details);
     const after = await definition.execute(
       "public-error-check",
       { cells: [{ code: "'marker' in globals()" }] },

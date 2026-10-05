@@ -34,6 +34,7 @@ Return the raw commit message itself, starting with the Conventional Commits sub
 
 const YEET_MSG_TYPE = "yeet-marker";
 const YEET_WIDGET_KEY = "yeet-progress";
+const PUSH_TIMEOUT_MS = 120_000;
 
 
 export default function (pi: ExtensionAPI) {
@@ -57,7 +58,7 @@ export default function (pi: ExtensionAPI) {
     args: string,
     ctx: ExtensionContext,
   ): Promise<void> => {
-    if (!ctx.hasUI) {
+    if (ctx.mode !== "tui") {
       ctx.ui.notify("/yeet requires interactive mode", "error");
       return;
     }
@@ -97,26 +98,33 @@ export default function (pi: ExtensionAPI) {
     const EXCLUDE = IGNORED_PATHS.map((p) => `:(exclude,top)${p}`);
 
     // Force no ANSI color in diffs regardless of user gitconfig.
-    const git = async (...gargs: string[]) => {
+    const gitWith = async (timeout: number | undefined, gargs: string[]) => {
       const r = await pi.exec("git", ["-c", "color.ui=never", ...gargs], {
         cwd,
+        timeout,
       });
       return {
-        ok: r.code === 0,
+        // pi.exec reports a signal-killed child (timeout) as code 0.
+        ok: r.code === 0 && !r.killed,
         out: r.stdout.trim(),
         err: r.stderr.trim(),
         stdout: r.stdout,
-        stderr: r.stderr,
+        stderr: r.stderr || (r.killed ? `timed out after ${timeout}ms` : ""),
       };
     };
+    const git = (...gargs: string[]) => gitWith(undefined, gargs);
+    // A push waiting on an unreachable remote or a credential prompt would
+    // hang the command, and pi has no way to cancel it.
+    const gitPush = (...gargs: string[]) =>
+      gitWith(PUSH_TIMEOUT_MS, ["push", ...gargs]);
 
     if (!(await git("rev-parse", "--git-dir")).ok) {
       ctx.ui.notify("/yeet: not a git repository", "error");
       return;
     }
 
-    // Don't stage yet — diff working tree vs HEAD so an LLM cancel doesn't
-    // leave the index dirty. Stage right before commit.
+    // Staging happens before the hook and the message call, so both see the
+    // exact index. A cancel after this point leaves the changes staged.
     const hasHead = (await git("rev-parse", "--verify", "HEAD")).ok;
     const wtStatus = (await git("status", "--porcelain", "--", ".", ...EXCLUDE))
       .out;
@@ -153,11 +161,14 @@ export default function (pi: ExtensionAPI) {
         .filter(Boolean)
         .join("\n");
       ctx.ui.notify("/yeet: pre-commit failed (see history)", "error");
-      pi.sendMessage({
-        customType: YEET_MSG_TYPE,
-        content: `pre-commit failed:\n${detail || "(no output)"}`,
-        display: true,
-      });
+      pi.sendMessage(
+        {
+          customType: YEET_MSG_TYPE,
+          content: `pre-commit failed:\n${detail || "(no output)"}`,
+          display: true,
+        },
+        { triggerTurn: false },
+      );
       return;
     }
 
@@ -252,11 +263,14 @@ export default function (pi: ExtensionAPI) {
         .filter(Boolean)
         .join("\n");
       ctx.ui.notify("/yeet: commit failed (see history)", "error");
-      pi.sendMessage({
-        customType: YEET_MSG_TYPE,
-        content: `commit failed:\n${detail || "(no output)"}`,
-        display: true,
-      });
+      pi.sendMessage(
+        {
+          customType: YEET_MSG_TYPE,
+          content: `commit failed:\n${detail || "(no output)"}`,
+          display: true,
+        },
+        { triggerTurn: false },
+      );
       return;
     }
     const sha = (await git("rev-parse", "--short", "HEAD")).out;
@@ -264,9 +278,9 @@ export default function (pi: ExtensionAPI) {
 
     // 3) Push. New branches have no upstream yet — retry with --set-upstream.
     showProgress(4);
-    let push = await git("push");
+    let push = await gitPush();
     if (!push.ok && /no upstream branch|--set-upstream/i.test(push.stderr)) {
-      push = await git("push", "-u", "origin", "HEAD");
+      push = await gitPush("-u", "origin", "HEAD");
     }
     const pushNote = push.ok
       ? "pushed"
@@ -284,11 +298,16 @@ export default function (pi: ExtensionAPI) {
     }
 
     // 4) Leave a small marker in history (one line; sent to LLM next turn).
-    pi.sendMessage({
-      customType: YEET_MSG_TYPE,
-      content: `${sha} ${subject} (${pushNote})`,
-      display: true,
-    });
+    // triggerTurn false: if the agent is running, the marker waits for the
+    // turn to end instead of steering it.
+    pi.sendMessage(
+      {
+        customType: YEET_MSG_TYPE,
+        content: `${sha} ${subject} (${pushNote})`,
+        display: true,
+      },
+      { triggerTurn: false },
+    );
   };
 
   pi.registerCommand("yeet", {

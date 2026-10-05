@@ -465,23 +465,63 @@ export const lspTool = defineTool({
       Type.String({ description: "New name; required for action=rename." }),
     ),
   }),
+  // Every action reports through `text`. The counts let eval and codemode
+  // scripts branch without parsing prose.
+  outputSchema: Type.Object({
+    success: Type.Boolean(),
+    text: Type.String({ description: "The result as the model sees it" }),
+    count: Type.Optional(
+      Type.Number({
+        description: "Locations, symbols, rename edits, or diagnostics",
+      }),
+    ),
+    errors: Type.Optional(Type.Number()),
+    warns: Type.Optional(Type.Number()),
+    files: Type.Optional(Type.Number({ description: "Files a rename touched" })),
+    truncated: Type.Optional(Type.Boolean()),
+  }),
   async execute(_id, params, signal, onUpdate, ctx) {
-    const p = params as LspParams;
-    if (p.action === "restart") {
-      return runRestart(ctx, signal, onUpdate);
-    }
-    if (p.action === "rename") {
-      return runRename(p, ctx, signal, onUpdate);
-    }
-    if ((ANCHOR_ACTIONS as readonly string[]).includes(p.action)) {
-      return runAnchor(p.action as AnchorAction, p, ctx, signal, onUpdate);
-    }
-    if (p.action === "document_symbols") {
-      return runDocumentSymbols(p, ctx, signal, onUpdate);
-    }
-    if (p.action === "diagnostics") {
-      return runDiagnostics(p, ctx, signal, onUpdate);
-    }
-    return err(`LSP error: unknown action "${p.action}"`);
+    const result = await dispatch(params as LspParams, ctx, signal, onUpdate);
+    const details = (result.details ?? {}) as Record<string, unknown>;
+    const pick = (key: string) =>
+      details[key] === undefined ? {} : { [key]: details[key] };
+    const first = result.content[0];
+    return {
+      ...result,
+      structuredContent: {
+        success: details.success !== false && !result.isError,
+        text: first?.type === "text" ? first.text : "",
+        ...pick("count"),
+        ...pick("errors"),
+        ...pick("warns"),
+        ...pick("files"),
+        ...pick("truncated"),
+      },
+    };
   },
 });
+
+async function dispatch(
+  p: LspParams,
+  ctx: Parameters<Parameters<typeof defineTool>[0]["execute"]>[4],
+  signal: AbortSignal | undefined,
+  onUpdate: Parameters<Parameters<typeof defineTool>[0]["execute"]>[3],
+): Promise<AgentToolResult<unknown>> {
+  if (p.action === "restart") {
+    return runRestart(ctx, signal, onUpdate);
+  }
+  if (p.action === "rename") {
+    return runRename(p, ctx, signal, onUpdate);
+  }
+  if ((ANCHOR_ACTIONS as readonly string[]).includes(p.action)) {
+    return runAnchor(p.action as AnchorAction, p, ctx, signal, onUpdate);
+  }
+  if (p.action === "document_symbols") {
+    return runDocumentSymbols(p, ctx, signal, onUpdate);
+  }
+  if (p.action === "diagnostics") {
+    return runDiagnostics(p, ctx, signal, onUpdate);
+  }
+  return err(`LSP error: unknown action "${p.action}"`);
+}
+

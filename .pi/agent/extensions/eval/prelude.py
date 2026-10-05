@@ -179,7 +179,7 @@ def env(key=None, value=None):
 def completion(prompt, model="default", system=None, schema=None):
     """Oneshot, stateless model call: no conversation history, no tools.
 
-    model: "default" (session model / PI_SIDE_MODEL) or "provider/id".
+    model: "default" (the session model) or "provider/id".
     schema: JSON-Schema dict -> instructs structured output, parsed to a
     dict/list when the response parses as JSON, else returned as text.
     """

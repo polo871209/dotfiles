@@ -41,8 +41,14 @@ export const ensureFeedbackLoaded = async (
 // with headroom so the hard cap fires only on a wedged nvim.
 const PER_FILE_BUDGET_MS = 5_500;
 const BASE_TIMEOUT_MS = 3_000;
+// Esc cannot cancel the turn-end pass (pi passes no signal there), so cap the
+// whole pass: a large batch loses its feedback instead of stalling the agent.
+const MAX_PASS_MS = 30_000;
 const nvimCallTimeoutMs = (fileCount: number): number =>
-  BASE_TIMEOUT_MS + Math.max(1, fileCount) * PER_FILE_BUDGET_MS;
+  Math.min(
+    BASE_TIMEOUT_MS + Math.max(1, fileCount) * PER_FILE_BUDGET_MS,
+    MAX_PASS_MS,
+  );
 export const MAX_FILE_BYTES = 64 * 1024;
 
 // Full pass: format + safe code-actions + diagnostics. Used at turn end.

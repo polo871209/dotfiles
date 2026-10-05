@@ -14,7 +14,7 @@
 // Inspired by Claude Code's /btw command.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
-import { collectTextMessages } from "./shared/message";
+import { collectTextMessages, modelVisibleEntries } from "./shared/message";
 import { sideChannelWithLoader } from "./shared/llm";
 import { barWidget } from "./shared/widget";
 
@@ -59,7 +59,7 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify("/btw <question> — usage", "warning");
         return;
       }
-      if (!ctx.hasUI) {
+      if (ctx.mode !== "tui") {
         ctx.ui.notify("/btw requires interactive mode", "error");
         return;
       }
@@ -68,10 +68,10 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      // Build context from current branch — user/assistant text only;
-      // drop tool calls/results to keep payload small. Cap last 20 turns.
+      // Same history the model sees, text only: no tool calls or results, to
+      // keep the payload small. Cap at the last 20 messages.
       const { messages } = collectTextMessages(
-        ctx.sessionManager.getBranch(),
+        modelVisibleEntries(ctx.sessionManager),
         20,
       );
 

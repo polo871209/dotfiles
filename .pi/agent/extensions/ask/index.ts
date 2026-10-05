@@ -64,10 +64,13 @@ export function registerAskUserQuestionTool(pi: ExtensionAPI): void {
     parameters: QuestionParamsSchema,
     // Only the model may ask the user.
     exposure: "model-only",
+    // pi shows one custom dialog at a time, so two asks in one turn must queue.
+    executionMode: "sequential",
 
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const raw = params as unknown as QuestionParams;
-      if (!ctx.hasUI)
+      // RPC reports hasUI but its ui.custom() returns undefined at once.
+      if (ctx.mode !== "tui")
         return {
           ...buildToolResult(ERROR_NO_UI, {
             answers: [],
