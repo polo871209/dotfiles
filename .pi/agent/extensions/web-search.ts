@@ -1,42 +1,3 @@
-// web-search — minimal web research: search the web and read a page's content.
-//
-// - Search backends, in runSearch order, all keyless: Exa's public MCP
-//   endpoint (mcp.exa.ai) twice (advanced tool, then basic tool), Parallel's
-//   (search.parallel.ai/mcp), then DuckDuckGo's HTML page. The MCP calls are
-//   plain-HTTP JSON-RPC POSTs, no MCP client. Keyed providers stay out
-//   because this machine has none of those keys.
-//   Order rationale, measured 2026-01 over 3 queries, median snippet per
-//   result: Exa ~4000 chars, Parallel 1500, DuckDuckGo 150-300. Exa is also
-//   the least reliable (a 20s timeout on one query), hence the chain.
-// - Relevance rerank (rerankResults): off unless TYPESAFE_API_KEY is set, and
-//   fail-open in every failure mode. It also trims. Measured 2026-01 over 4
-//   queries, pages that answered scored 0.54-0.98 and the rest 0.12-0.33, so
-//   RERANK_FLOOR sits in that gap and a thin topic returns 3 results, not 10.
-//   Before moving the floor, log scoreCandidates scores for real queries.
-// - Cross-query dedup (dedupKey): a multi-query call otherwise prints the
-//   same page once per query that found it.
-// - SSRF guard (assertSafeUrl/fetchSafely): blocks localhost and private-IP
-//   targets and re-validates each redirect hop.
-// - GitHub URLs are shallow-cloned instead of scraped, and the local path is
-//   handed back. git's credential prompt is disabled so a private or
-//   mistyped repo can't hang the process on stdin. Private repos, oversized
-//   repos and 40-char-SHA refs fall through to the normal HTML fetch.
-// - YouTube URLs go to `yt-dlp` (installed via mise) for the caption track,
-//   because a watch page yields nothing through Readability.
-// - fetchReadable rejects binary content-types up front instead of dumping
-//   raw bytes through res.text() into the model.
-//
-// Deliberately out of scope, don't re-add without a real need: any keyed
-// search provider, non-YouTube video or PDF extraction, inline image fetch,
-// LLM page-QA, and any config file.
-//
-// Not wired up: `web_search_advanced_exa` also takes includeDomains,
-// excludeDomains, startPublishedDate, endPublishedDate, category, and
-// additionalQueries (live schema: tools/list against
-// mcp.exa.ai/mcp?tools=web_search_advanced_exa). They would need new tool
-// parameters and a degraded form for the other providers, which only accept
-// `site:` text. Add them when a search needs a filter.
-
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
@@ -69,19 +30,15 @@ import {
 
 const EXA_MCP_URL = "https://mcp.exa.ai/mcp";
 const PARALLEL_MCP_URL = "https://search.parallel.ai/mcp";
-// Per-result text budget. The model sees 400 characters of it; the rest
-// exists so the rerank below judges a real passage, not a headline.
 const EXA_TEXT_CHARS = 1_500;
 const TYPESAFE_URL = "https://api.typesafe.ai/v1/systemone";
 const TYPESAFE_MODEL = "jev-latest";
-// Shorter than REQUEST_TIMEOUT_MS: reranking is an optional improvement on a
-// result set we already hold, so it must never dominate search latency.
 const RERANK_TIMEOUT_MS = 8_000;
 const RERANK_SNIPPET_CHARS = 600;
 const RERANK_MAX_CANDIDATES = 10;
-// Below this probability the page does not answer the query, and printing it
-// costs context for nothing. Keep the top few regardless: a whole shortlist
-// scoring low means the judgment is weak, not that the web is empty.
+// Measured 2026-01 over 4 queries: pages that answered scored 0.54-0.98 and
+// the rest 0.12-0.33. Before moving the floor, log scoreCandidates scores for
+// real queries.
 const RERANK_FLOOR = 0.35;
 const RERANK_MIN_KEEP = 3;
 const REQUEST_TIMEOUT_MS = 20_000;
@@ -109,8 +66,6 @@ const ACCEPT_RAW = "application/json,text/plain;q=0.9,*/*;q=0.8";
 const DUCKDUCKGO_URL = "https://html.duckduckgo.com/html/";
 const SEARCH_RETRY_DELAY_MS = 500;
 
-// Bounded so a long session cannot pin many large documents in memory. The
-// TTL keeps a paged read consistent without serving yesterday's page.
 const EXTRACT_CACHE_TTL_MS = 5 * 60_000;
 const EXTRACT_CACHE_MAX_ENTRIES = 16;
 const EXTRACT_CACHE_MAX_CHARS = 2_000_000;
@@ -119,8 +74,6 @@ const GH_TIMEOUT_MS = 20_000;
 const MAX_ISSUE_COMMENTS = 30;
 const MAX_ISSUE_COMMENT_CHARS = 4_000;
 
-// Per-process dir: a shared machine-global path would let this session's
-// shutdown rmSync clones another concurrent pi session is still reading.
 const GITHUB_CLONE_DIR = join(tmpdir(), `pi-github-repos-${process.pid}`);
 const CLONE_TIMEOUT_MS = 30_000;
 const MAX_TREE_ENTRIES = 200;
@@ -187,25 +140,22 @@ const YOUTUBE_HOSTS = new Set([
 const YOUTUBE_PATH_PREFIXES = ["shorts", "embed", "live", "v"];
 const YOUTUBE_ID = /^[A-Za-z0-9_-]{11}$/;
 const YT_DLP_TIMEOUT_MS = 90_000;
-// Explicit codes, not the regex "en.*": that also matched auto-translations
-// such as en-de-DE, so yt-dlp downloaded a pile of tracks per video and hit
-// YouTube's rate limit sooner. Auto-captions use the -orig suffix.
 const YT_PREFERRED_SUB_LANGS = "en-orig,en,en-US,en-GB";
+
+function disableMarkdownEscaping(service: TurndownService): void {
+  service.escape = (text: string) => text;
+}
 
 const turndown = new TurndownService({
   headingStyle: "atx",
   codeBlockStyle: "fenced",
 });
-// This markdown is read by a model, never rendered. Default escaping rewrites
-// PI_CODING_AGENT_DIR as PI\_CODING\_AGENT\_DIR, so an identifier copied out
-// of a page carries backslashes into the next command.
-turndown.escape = (text: string) => text;
+disableMarkdownEscaping(turndown);
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-// Runs `fn` over `items` with at most `limit` in flight, preserving order.
 async function mapLimit<T, R>(
   items: T[],
   limit: number,
@@ -262,8 +212,6 @@ function parseIPv6Groups(addr: string): number[] | null {
   return [...head, ...Array<number>(fill).fill(0), ...tail];
 }
 
-// Blocks requests into the local machine / private network so a malicious
-// page or search result can't trick the agent into hitting internal services.
 function isPrivateAddress(addr: string): boolean {
   if (net.isIPv4(addr)) {
     const [a, b] = addr.split(".").map(Number);
@@ -308,8 +256,6 @@ async function assertSafeUrl(rawUrl: string): Promise<URL> {
   return url;
 }
 
-// Returns the final URL as well, because relative links in the body must be
-// resolved against the page that actually served them, not the requested URL.
 async function fetchSafely(
   rawUrl: string,
   signal?: AbortSignal,
@@ -345,9 +291,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// One JSON-RPC tools/call over plain HTTP against a public MCP endpoint: no
-// API key, no account, no MCP client library. Returns the tool's text content,
-// which every server here fills with its own JSON or text payload.
 async function callMcpTool(
   endpoint: string,
   label: string,
@@ -451,9 +394,6 @@ async function exaAdvancedSearch(
       return {
         title: r.title?.trim() ?? "",
         url: r.url?.trim() ?? "",
-        // Highlights first: they are the query-matched sentences, while text
-        // is just the head of the page. textMaxCharacters caps `text` alone,
-        // so cap the pair here too.
         content: [highlights, r.text?.trim()]
           .filter(Boolean)
           .join("\n")
@@ -467,8 +407,6 @@ async function exaAdvancedSearch(
   return results;
 }
 
-// The basic tool, kept as the first fallback: it is the one Exa has always
-// exposed on the keyless endpoint, and its text format needs its own parser.
 async function exaBasicSearch(
   query: string,
   numResults: number,
@@ -508,9 +446,6 @@ async function exaBasicSearch(
   return results;
 }
 
-// Parallel's public MCP endpoint (https://search.parallel.ai/mcp) is the
-// second keyless source of real page excerpts (verified live, no
-// Authorization header). It ranks above DuckDuckGo for richer excerpts.
 async function parallelSearch(
   query: string,
   numResults: number,
@@ -532,8 +467,6 @@ async function parallelSearch(
       return {
         title: r.title?.trim() ?? "",
         url: r.url?.trim() ?? "",
-        // Excerpts run to thousands of characters each and the whole response
-        // can pass 40KB; cap per result rather than hand that to the model.
         content: excerpts.join("\n").trim().slice(0, EXA_TEXT_CHARS),
       };
     })
@@ -544,9 +477,6 @@ async function parallelSearch(
   return results;
 }
 
-// DuckDuckGo's HTML endpoint is the only other keyless search surface, so it
-// covers an Exa outage or rate limit. Its one-or-two-sentence snippets are
-// why it stays a fallback.
 async function duckDuckGoSearch(
   query: string,
   numResults: number,
@@ -573,7 +503,6 @@ async function duckDuckGoSearch(
     const title = anchor?.textContent?.trim() ?? "";
     const href = anchor?.getAttribute("href")?.trim();
     if (!title || !href) continue;
-    // Result links are redirector URLs carrying the real target in ?uddg=.
     let target: string;
     try {
       const link = new URL(href, DUCKDUCKGO_URL);
@@ -597,11 +526,6 @@ async function duckDuckGoSearch(
   return results;
 }
 
-// Dedup identity, not a fetchable URL: scheme, host case, a leading www., a
-// trailing slash, the fragment, and campaign parameters all name the same
-// page. `page` and `query` stay apart because a query string either selects
-// content (/search?q=x) or is a referral tag (/post?curius=1940), and only
-// the caller can weigh that.
 function dedupKey(raw: string): { page: string; query: string } {
   try {
     const url = new URL(raw);
@@ -631,7 +555,6 @@ function dedupResults(
       return true;
     }
     if (queries.has(query)) return false;
-    // One side is the plain page, so the other side's parameters are decoration.
     if (query === "" || queries.has("")) return false;
     queries.add(query);
     return true;
@@ -649,10 +572,9 @@ function isTransient(err: unknown): boolean {
   );
 }
 
-// Providers in descending snippet quality, all keyless. One retry absorbs a
-// rate limit or a dropped socket on the first provider; after that the chain
-// walks down rather than hammering a provider that is down. A caller abort
-// ends the chain immediately.
+// Order measured 2026-01 over 3 queries, median snippet per result: Exa ~4000
+// chars, Parallel 1500, DuckDuckGo 150-300. Exa is also the least reliable (a
+// 20s timeout on one query), hence the chain.
 const SEARCH_PROVIDERS: Array<{
   name: string;
   run: (
@@ -694,13 +616,6 @@ async function runSearch(
   throw new Error(failures.join("; "));
 }
 
-// Optional relevance scoring through TypeSafe's System One endpoint: one
-// request carrying every candidate, one Noul per candidate. Providers rank by
-// "contains these words", not "answers this question", so the useful page
-// often sits at rank 4 while the model reads rank 1.
-//
-// Returns null on every failure (no key, an error status, a timeout, an
-// unparseable body) so the caller keeps the provider's order.
 async function scoreCandidates(
   query: string,
   candidates: SearchResult[],
@@ -753,16 +668,12 @@ async function scoreCandidates(
       const noul = payload.answers?.[`c${i}`]?.noul;
       return typeof noul === "number" ? noul : null;
     });
-    // A partial answer set is still useful, but only if something came back.
     return scores.some((s) => s !== null) ? scores : null;
   } catch {
     return null;
   }
 }
 
-// Sorts by relevance, most relevant first, and drops the tail that does not
-// answer the query. Callers print this order as-is. Every unscored path
-// returns the input untouched.
 async function rerankResults(
   query: string,
   results: SearchResult[],
@@ -775,18 +686,13 @@ async function rerankResults(
 
   const scored = candidates
     .map((result, i) => ({ result, i, noul: scores[i] }))
-    .sort((a, b) => (b.noul ?? 0) - (a.noul ?? 0) || a.i - b.i); // ties keep provider order
+    .sort((a, b) => (b.noul ?? 0) - (a.noul ?? 0) || a.i - b.i);
   const kept = scored.filter(
     (s, rank) => rank < RERANK_MIN_KEEP || (s.noul ?? 0) >= RERANK_FLOOR,
   );
-  // Anything past RERANK_MAX_CANDIDATES went unscored, so it cannot earn a
-  // place next to results that did.
   return kept.map((s) => s.result);
 }
 
-// Reads the body incrementally so a chunked/compressed response with no (or
-// a lying) Content-Length header can't be buffered unbounded before the
-// MAX_RESPONSE_BYTES check below ever runs.
 async function readBoundedText(
   res: Response,
   maxBytes: number,
@@ -815,9 +721,6 @@ async function readBoundedText(
   return out;
 }
 
-// Slices `content` to at most MAX_CONTENT_CHARS starting at `offset`, cutting
-// on the last newline in range instead of mid-line, and reports where a
-// follow-up fetch_content({ offset }) call should resume.
 function sliceWithContinuation(
   content: string,
   offset: number,
@@ -831,9 +734,6 @@ function sliceWithContinuation(
   const start = Math.min(Math.max(offset, 0), totalChars);
   let end = Math.min(start + MAX_CONTENT_CHARS, totalChars);
   if (end < totalChars) {
-    // Snap back only to a break near the window's end. A body that is one
-    // long paragraph (a YouTube transcript) has its last newline in the
-    // metadata header, and rewinding there would return almost nothing.
     const minBreak = start + Math.floor((end - start) * 0.9);
     const lastNewline = content.lastIndexOf("\n", end);
     const lastSpace = content.lastIndexOf(" ", end);
@@ -861,9 +761,6 @@ function withContinuationFooter(
   return `${text}\n\n[chars ${offset}-${nextOffset} of ${totalChars}. To continue: fetch_content({ url: "${url}", offset: ${nextOffset} })]`;
 }
 
-// Readability keeps hrefs exactly as written, and linkedom gives the document
-// no base URI, so "/docs/guide" would reach the model unfetchable. Rewriting
-// against the final URL keeps every link usable in a follow-up call.
 function absolutizeUrls(document: Document, baseUrl: string): void {
   const rewrite = (selector: string, attribute: string) => {
     for (const element of document.querySelectorAll(selector)) {
@@ -878,9 +775,6 @@ function absolutizeUrls(document: Document, baseUrl: string): void {
   rewrite("img[src]", "src");
 }
 
-// Readability returns null on pages with no article shape (dashboards, docs
-// shells, app pages). Their text is still worth reading, so drop the chrome
-// and convert what is left rather than failing the whole call.
 function extractFallbackContent(document: Document): string {
   for (const element of document.querySelectorAll(
     "script, style, noscript, svg, iframe, form, nav, header, footer, aside",
@@ -948,8 +842,6 @@ async function fetchReadable(
   return { title: documentTitle || url, content: fallback };
 }
 
-// Returns the video id for URLs that carry captions, null for channel/
-// playlist/search pages (those still go through the normal HTML fetch).
 function parseYouTubeVideoId(rawUrl: string): string | null {
   let url: URL;
   try {
@@ -987,8 +879,6 @@ function execCapture(
       { timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 },
       (err, stdout, stderr) => {
         if (err) {
-          // execFile's own message inlines the whole argv, which buries the
-          // one useful line ("Video unavailable", "Sign in to confirm"...).
           const detail = stderr
             .split(/\r?\n/)
             .map((l) => l.replace(/^ERROR:\s*/, "").trim())
@@ -1013,11 +903,6 @@ function execCapture(
   });
 }
 
-// VTT -> prose. Auto-captions repeat each line as the block scrolls, so
-// adjacent-line dedupe is required or every sentence lands twice. It is
-// adjacent-only so real repetition later in the video survives. Cue lines
-// break mid-sentence, so kept lines join into one paragraph, not ~40-char
-// lines that read as false structure.
 function vttToText(raw: string): string {
   const out: string[] = [];
   let previous = "";
@@ -1079,16 +964,10 @@ async function downloadSubtitleFile(
   const files = readdirSync(dir)
     .filter((f) => f.endsWith(".vtt"))
     .sort();
-  // Human-authored tracks land on the bare code (sub.en.vtt); auto-generated
-  // ones on suffixed variants (sub.en-orig.vtt), so prefer the shortest name.
   const best = files.sort((a, b) => a.length - b.length)[0];
   return best ? join(dir, best) : null;
 }
 
-// Second chance for videos captioned only in another language: list the
-// tracks instead of downloading all. The alphabetically first code would be an
-// auto-translation ("ab"), so prefer the `-orig` track (the spoken language),
-// then any human-authored track.
 async function fallbackSubLang(
   videoId: string,
   signal?: AbortSignal,
@@ -1258,7 +1137,6 @@ function pidAlive(pid: number): boolean {
   }
 }
 
-// Dedupes concurrent/repeat clones of the same repo+ref within this process.
 const cloneCache = new Map<string, Promise<string>>();
 
 function execGitClone(args: string[], signal?: AbortSignal): Promise<void> {
@@ -1268,8 +1146,6 @@ function execGitClone(args: string[], signal?: AbortSignal): Promise<void> {
       args,
       {
         timeout: CLONE_TIMEOUT_MS,
-        // A private/nonexistent repo would otherwise make git block waiting
-        // for a username/password on the controlling terminal.
         env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "echo" },
       },
       (err) => (err ? reject(err) : resolve()),
@@ -1283,8 +1159,6 @@ function execGitClone(args: string[], signal?: AbortSignal): Promise<void> {
   });
 }
 
-// Clones shallowly instead of scraping the rendered GitHub HTML page, so the
-// agent gets real files it can `read`/`bash` into rather than markup soup.
 async function cloneGitHubRepo(
   owner: string,
   repo: string,
@@ -1301,7 +1175,6 @@ async function cloneGitHubRepo(
     ref ? `${repo}@${ref}` : repo,
   );
   const promise = (async () => {
-    // A clone from before /reload: earlier tool results point at it.
     if (existsSync(join(localPath, ".git"))) return localPath;
     rmSync(localPath, { recursive: true, force: true });
     mkdirSync(dirname(localPath), { recursive: true });
@@ -1482,9 +1355,6 @@ function parseGitHubIssueUrl(rawUrl: string): GitHubIssueRef | null {
   return { owner, repo: repo.replace(/\.git$/, ""), number };
 }
 
-// The rendered issue page passes through Readability as the opening post
-// alone, without state, labels, or comments, and the answer usually sits in a
-// comment. The REST issues endpoint serves pull requests too.
 async function fetchGitHubIssue(
   ref: GitHubIssueRef,
   signal?: AbortSignal,
@@ -1566,9 +1436,6 @@ async function fetchGitHubIssue(
   };
 }
 
-// GitHub URLs get cloned locally instead of scraped; everything else goes
-// through fetchReadable. Clone failures (private repo, no git, offline) fall
-// back to the normal HTML fetch so the tool still returns something.
 async function fetchOne(
   url: string,
   signal?: AbortSignal,
@@ -1579,8 +1446,6 @@ async function fetchOne(
     try {
       return await fetchYouTubeTranscript(videoId, signal);
     } catch (err) {
-      // Missing binary is an environment problem, not a "no captions" answer:
-      // fall back to the page HTML so the call still returns something.
       if ((err as NodeJS.ErrnoException)?.code !== "ENOENT")
         throw new Error(`YouTube transcript failed: ${errMsg(err)}`);
     }
@@ -1620,8 +1485,6 @@ interface CachedExtraction {
 
 const extractCache = new Map<string, CachedExtraction>();
 
-// Extract once and slice the stored text for later offsets, so the page cannot
-// change between pages.
 async function fetchOneCached(
   url: string,
   signal?: AbortSignal,
@@ -1655,7 +1518,6 @@ const searchQueries = Type.Array(nonEmptyText, {
 });
 // Root must be a plain Type.Object: pi-ai sends Anthropic only the root
 // `properties`, so an Intersect or Union root reaches the model as `{}`.
-// execute() enforces "query or queries".
 const searchParameters = Type.Object({
   query: Type.Optional(nonEmptyText),
   queries: Type.Optional(searchQueries),
@@ -1673,7 +1535,6 @@ const fetchUrls = Type.Array(nonEmptyText, {
   minItems: 1,
   description: "URLs to fetch in one call.",
 });
-// Plain Type.Object root for the same reason as searchParameters.
 const fetchParameters = Type.Object({
   url: Type.Optional(nonEmptyText),
   urls: Type.Optional(fetchUrls),
@@ -1684,13 +1545,9 @@ const fetchParameters = Type.Object({
         'Use "raw" for the unprocessed body when the target is JSON or the extraction looks wrong.',
     }),
   ),
-  // No description: a truncated page teaches offset in its own footer, at
-  // the one moment the agent needs it, for zero standing prompt cost.
   offset: Type.Optional(Type.Number({ minimum: 0, default: 0 })),
 });
 
-// The one-line summaries hide content, so a failed call shows its first error
-// line instead of "0 results".
 function errorLine(
   name: string,
   result: { content: Array<{ type: string; text?: string }> },
@@ -1703,12 +1560,9 @@ function errorLine(
 }
 
 export default function (pi: ExtensionAPI) {
-  // A crashed pi never reaches the quit handler below, so its clones stay.
   pi.on("session_start", (event) => {
     if (event.reason === "startup") sweepDeadClones();
   });
-  // Keep clones across /reload and session switches: earlier tool results
-  // still point at those paths. Drop the whole per-process tree on quit.
   pi.on("session_shutdown", (event) => {
     if (event.reason !== "quit") return;
     cloneCache.clear();
@@ -1718,7 +1572,6 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "web_search",
     label: "Web Search",
-    // Without the year, a "latest" query returns the year the weights end.
     description: `Search the web. Each result is a title, a URL, and a snippet, so fetch a result when the snippet does not settle the question. The current year is ${new Date().getFullYear()}; put it in the query when recency matters.`,
     promptSnippet: "Search the web for external facts",
     annotations: { readOnlyHint: true, openWorldHint: true },
@@ -1779,8 +1632,6 @@ export default function (pi: ExtensionAPI) {
         10,
       );
 
-      // Over-fetch only when a rerank can use the extra candidates: the win
-      // is a better page promoted into the kept slice, not a longer list.
       const canRerank = !!process.env.TYPESAFE_API_KEY?.trim();
       const fetchCount = canRerank
         ? Math.min(numResults * 2, RERANK_MAX_CANDIDATES)
@@ -1793,8 +1644,6 @@ export default function (pi: ExtensionAPI) {
             fetchCount,
             signal,
           );
-          // Dedup before the rerank: a duplicate would otherwise take one of
-          // the kept slots and then be dropped at print time.
           const ranked = (
             await rerankResults(query, dedupResults(results), signal)
           ).slice(0, numResults);
@@ -1817,12 +1666,9 @@ export default function (pi: ExtensionAPI) {
       let output = "";
       let totalResults = 0;
       const fellBack = queryResults.some((r) => r.provider === "duckduckgo");
-      // Fallback snippets are one sentence, so a thin result would otherwise
-      // read as a thin web and stop the research early.
       if (fellBack)
         output +=
           "Note: fallback search for at least one query. Snippets are shorter than usual, so fetch a result before concluding.\n\n";
-      // Shared across queries: two queries reaching one page bill it twice.
       const seen = new Map<string, Set<string>>();
       const structured: {
         query: string;

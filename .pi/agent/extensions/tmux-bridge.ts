@@ -1,19 +1,4 @@
-// tmux-bridge — exposes a Unix socket so nvim (or anything else in the same
-// tmux session) can push structured messages into this running pi instance.
-//
-// Socket is keyed by this pi's own tmux pane, not the session: several pi
-// panes can be running in one session, each gets its own socket, and the
-// consumer (nvim/lua/pi.lua) discovers all of them and lets you pick which
-// agent to send to. Subagent panes (PI_IS_SUBAGENT) are excluded — they
-// never open a bridge socket.
-//
-// Socket path: <tmpdir>/pi-tmux-pane-<sanitized-pane-id>-<pid>.sock. The pid
-// keeps a crashed pi's leftover socket file from shadowing the live one, and
-// lets the client find bridges by globbing rather than by guessing which pane
-// runs pi (pi reports as "node", and its pane title is decoration that moves
-// with session state).
-//
-// Wire format: one JSON object per line, e.g.
+// Wire format for nvim/lua/pi.lua: one JSON object per line, e.g.
 //   {"text": "hello"}                     -- send immediately, triggers a turn
 //   {"paste": "some reference text"}      -- drop into pi's own input editor, no turn
 //   {"file": {"path": ..., "sline": ..., "eline": ..., "ft": ..., "content": ..., "total": ...}}
@@ -26,11 +11,6 @@
 // Each line is answered with one JSON line, {"ok":true,"delivered":<where>} or
 // {"ok":false,"error":...}, so the client can report what actually happened
 // instead of assuming a successful write means the message landed.
-//
-// "paste" and "file" land in pi's editor (ctx.ui.pasteToEditor), not as direct
-// messages, so the user finishes composing there with slash commands and pi's
-// completion, which an nvim prompt lacks. The editor collapses a bulky snapshot
-// to a placeholder, and the user can trim or drop it before sending.
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -46,8 +26,6 @@ function socketPathForPane(paneId: string): string {
   return path.join(os.tmpdir(), `pi-tmux-pane-${safe}-${process.pid}.sock`);
 }
 
-// A crashed pi in this pane never unlinks its socket, and clients glob every
-// socket of the pane.
 function removeDeadSockets(paneId: string): void {
   const prefix = path
     .basename(socketPathForPane(paneId))
@@ -65,22 +43,17 @@ function removeDeadSockets(paneId: string): void {
     if (pid !== process.pid) {
       try {
         process.kill(pid, 0);
-        continue; // a live pi in the same pane
+        continue;
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code === "EPERM") continue;
       }
     }
     try {
       fs.unlinkSync(path.join(os.tmpdir(), name));
-    } catch {
-      /* already gone */
-    }
+    } catch {}
   }
 }
 
-// Clients send absolute paths because their cwd need not match pi's; show the
-// short form when the file is under this session's cwd.
-// Set from the session context on start; process.cwd() can differ from it.
 let sessionCwd = process.cwd();
 function displayPath(filePath: string): string {
   if (!path.isAbsolute(filePath)) return filePath;
@@ -113,14 +86,9 @@ function formatFileSnapshot(f: FilePayload): string {
   const from = Math.max(Math.floor(f.sline), 1);
   const to = from + srcLines.length - 1;
   const total = f.total && Math.floor(f.total) >= to ? Math.floor(f.total) : to;
-  // Unpadded: a right-aligned number would put leading spaces in front of the
-  // first code line, which reads as indentation that isn't in the file.
   const numbered = srcLines
     .map((line, i) => `${from + i}${GUTTER_SEP}${line}`)
     .join("\n");
-  // Phrased like read's own "[Showing lines X-Y of N]" note. The edit tool
-  // already teaches oldText, so the only thing left to say is that the gutter
-  // isn't part of the file.
   return (
     `${displayPath(f.path)} lines ${from}-${to} of ${total}. The "<n>${GUTTER_SEP}" gutter is line numbers, not file content.\n` +
     `\`\`\`${f.ft ?? ""}\n${numbered}\n\`\`\``
@@ -145,8 +113,6 @@ function tabFidelityNote(content: string): string {
 export default function (pi: ExtensionAPI) {
   if (process.env.PI_IS_SUBAGENT === "1") return;
 
-  // Transcript shows one dim line per snapshot; the numbered body is only a
-  // ctrl+o expand away, and always reaches the model regardless.
   pi.registerMessageRenderer<SnapshotDetails>(
     SNAPSHOT_MESSAGE_TYPE,
     (message, { expanded, outputPad }, theme) => {
@@ -200,12 +166,8 @@ export default function (pi: ExtensionAPI) {
       if (f && typeof f.content === "string" && typeof f.path === "string") {
         const content = formatFileSnapshot(f);
         const where = displayPath(f.path);
-        // Default: the snapshot becomes literal editor text, so it reaches the
-        // model as part of the prompt the user is typing, after the question
-        // and only once they send it.
         if (!requested) {
           if (!currentCtx) return { ok: false, error: "no session context" };
-          // Print and JSON modes have no editor: pasteToEditor is a no-op.
           if (!currentCtx.hasUI)
             return { ok: false, error: "this pi has no editor to paste into" };
           currentCtx.ui.pasteToEditor(
@@ -219,14 +181,7 @@ export default function (pi: ExtensionAPI) {
           display: true,
           details: { path: f.path, sline: f.sline, eline: f.eline },
         };
-        // An explicit mode delivers without the user sending anything.
-        // Appending into a live request could split a tool_use from its
-        // tool_result, so "steer" lands after the current turn's tool calls,
-        // one queued snapshot per turn (steeringMode "one-at-a-time", the
-        // default).
         pi.sendMessage<SnapshotDetails>(message, { deliverAs: requested });
-        // Idle, pi appends steer and followUp messages to the history without
-        // starting a turn, so they reach the model with the next prompt.
         return {
           ok: true,
           delivered:
@@ -245,13 +200,10 @@ export default function (pi: ExtensionAPI) {
       const text = payload.text;
       if (!text || typeof text !== "string")
         return { ok: false, error: "no text, paste, or file in payload" };
-      // Idle, the message triggers its own turn and deliverAs is rejected.
       if (idle) {
         pi.sendUserMessage(text);
         return { ok: true, delivered: "sent, turn started" };
       }
-      // A user message must be answered, so "nextTurn" has no meaning here;
-      // the nearest delivery is once the current run finishes.
       const deliverAs =
         requested === "followUp" || requested === "nextTurn"
           ? "followUp"
@@ -275,12 +227,10 @@ export default function (pi: ExtensionAPI) {
     sessionCwd = ctx.cwd;
     if (server) {
       currentCtx = ctx;
-      return; // already listening (e.g. /new re-firing session_start)
+      return;
     }
     currentCtx = ctx;
     removeDeadSockets(paneId);
-    // A whole-file snapshot is a legitimate payload, so the cap only has to
-    // stop a runaway peer; the client refuses to send anywhere near it.
     const MAX_BUF = 2 * 1024 * 1024;
     server = net.createServer((socket: net.Socket) => {
       let buf = "";
@@ -307,9 +257,7 @@ export default function (pi: ExtensionAPI) {
           idx = buf.indexOf("\n");
         }
       });
-      socket.on("error", () => {
-        /* ignore peer disconnects */
-      });
+      socket.on("error", () => {});
     });
     server.on("error", (err: Error) => {
       ctx.ui?.notify?.(`tmux-bridge: ${err.message}`, "error");
@@ -317,9 +265,7 @@ export default function (pi: ExtensionAPI) {
     server.listen(sockPath, () => {
       try {
         fs.chmodSync(sockPath, 0o600);
-      } catch {
-        /* best effort */
-      }
+      } catch {}
     });
   };
 
@@ -329,9 +275,7 @@ export default function (pi: ExtensionAPI) {
     server = undefined;
     try {
       fs.unlinkSync(sockPath);
-    } catch {
-      /* ignore */
-    }
+    } catch {}
   };
 
   pi.on("session_start", async (_event: unknown, ctx: ExtensionContext) => {

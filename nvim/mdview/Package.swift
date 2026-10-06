@@ -6,8 +6,7 @@ let package = Package(
     // WebPage, WebView and URLSchemeHandler first ship in macOS 26.
     platforms: [.macOS(.v26)],
     dependencies: [
-        // swift-6.4.0-RELEASE. SwiftPM takes only semver tags, so pin the commit.
-        .package(url: "https://github.com/swiftlang/swift-cmark.git", revision: "924936d0427cb25a61169739a7660230bffa6ea6"),
+        .package(url: "https://github.com/swiftlang/swift-cmark.git", exact: "0.8.0"),
     ],
     targets: [
         .executableTarget(

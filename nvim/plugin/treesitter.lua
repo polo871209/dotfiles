@@ -1,4 +1,3 @@
--- Agent nvim skips cosmetic plugins.
 if vim.g.pi_agent then return end
 
 vim.pack.add { 'https://github.com/romus204/tree-sitter-manager.nvim' }

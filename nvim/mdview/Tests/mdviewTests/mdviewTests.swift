@@ -2,8 +2,6 @@ import Foundation
 import Testing
 @testable import mdview
 
-// These pin the security and scroll invariants that the page code relies on.
-
 @Suite struct MarkdownTests {
     @Test func tagsBlocksWithSourceLines() {
         #expect(Markdown.html("# Title\n\ntext\n").contains(#"<p data-sourcepos="3:1-3:4">"#))
@@ -36,7 +34,6 @@ import Testing
         let watcher = FileWatcher(path: file.path) { continuation.yield($0) }
         var texts = stream.makeAsyncIterator()
 
-        // Same content first: it must not report, so the next value is "two".
         try "one".write(to: file, atomically: false, encoding: .utf8)
         try await Task.sleep(for: .milliseconds(200))
         try "two".write(to: file, atomically: false, encoding: .utf8)
@@ -60,5 +57,18 @@ import Testing
         #expect(Assets.resolve(URL(string: "mdview://file/tmp/a.png")!) != nil)
         #expect(Assets.resolve(URL(string: "mdview://file/Users/me/.ssh/id_ed25519")!) == nil)
         #expect(Assets.resolve(URL(string: "mdview://file/Users/me/notes.md")!) == nil)
+    }
+
+    @Test func blocksScriptsFromRawHTML() throws {
+        let page = try String(contentsOf: #require(Assets.resolve(URL(string: "mdview://app/index.html")!)), encoding: .utf8)
+        let policy = try #require(page.firstMatch(of: /http-equiv="Content-Security-Policy" content="([^"]*)"/)).1
+        var directives: [Substring: [Substring]] = [:]
+        for directive in policy.split(separator: ";") {
+            let words = directive.split(separator: " ")
+            if let name = words.first { directives[name] = Array(words.dropFirst()) }
+        }
+        #expect(directives["default-src"] == ["'none'"])
+        #expect(directives["script-src"] == ["mdview:"])
+        #expect(directives["connect-src"] == nil)
     }
 }

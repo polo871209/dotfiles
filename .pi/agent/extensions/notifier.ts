@@ -1,13 +1,3 @@
-// notifier — desktop notification when pi finishes a turn, or blocks on
-// ask_user_question, and this tmux pane isn't focused. ghostty OSC 777 (via
-// tmux passthrough) where possible, else osascript. ghostty forces subtitle =
-// window title, so we set it to the project name -> "pi" / "<project>" /
-// "<message>".
-//
-// Also renames this pane's tmux window to show the agent's status (busy /
-// blocked / done / idle). Subagent panes (PI_IS_SUBAGENT=1) set their pane
-// title instead, which subagent.ts polls for completion, and skip the desktop
-// notification and sound.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { exec, execFile, execFileSync } from "node:child_process";
 import { APP_TITLE, statusTitle, type AgentStatus } from "./shared/status";
@@ -61,8 +51,6 @@ const getFrontmostPid = async (): Promise<number | null> => {
   }
 };
 
-// Cache ps output briefly so repeated focus checks don't re-scan the process
-// table every notification.
 let psCache: { at: number; parents: Map<number, number> } | null = null;
 const PS_TTL_MS = 2000;
 
@@ -78,9 +66,7 @@ const getParentMap = async (): Promise<Map<number, number>> => {
         parents.set(parseInt(parts[0], 10), parseInt(parts[1], 10));
       }
     }
-  } catch {
-    /* ignore */
-  }
+  } catch {}
   psCache = { at: now, parents };
   return parents;
 };
@@ -96,15 +82,10 @@ const getAncestorPids = async (startPid: number): Promise<Set<number>> => {
       if (ppid === undefined || ppid === pid) break;
       pid = ppid;
     }
-  } catch {
-    /* ignore */
-  }
+  } catch {}
   return ancestors;
 };
 
-// PIDs of every tmux client attached to *our* session. The same session can be
-// attached from multiple ghostty windows; any of them being frontmost counts as
-// focus, so we must check them all (picking a single client_pid misfires).
 const getOurSessionClientPids = async (): Promise<number[]> => {
   try {
     const pane = process.env.TMUX_PANE;
@@ -176,7 +157,6 @@ const shouldThrottle = (key: string): boolean => {
   const now = Date.now();
   if ((debounce.get(key) ?? 0) > now - 1000) return true;
   debounce.set(key, now);
-  // Prune entries older than 5s to keep the map bounded.
   if (debounce.size > 32) {
     for (const [k, t] of debounce) {
       if (now - t > 5000) debounce.delete(k);
@@ -207,8 +187,6 @@ const notifySeq = (title: string, body: string): string =>
 const titleSeq = (title: string): string =>
   wrapPassthrough(`${ESC}]0;${sanitizeOsc(title)}${BEL}`);
 
-// ghostty applies title changes async; wait so the banner subtitle isn't
-// stale. Only needed when the title actually changes.
 const GHOSTTY_TITLE_SETTLE_MS = 300;
 let lastGhosttyTitle: string | null = null;
 const delay = (ms: number): Promise<void> =>
@@ -233,11 +211,6 @@ const isPaneVisible = async (): Promise<boolean> => {
   }
 };
 
-// When pi's pane is hidden, find a visible pane to carry the passthrough.
-// Scoped to *our* session (-s): other sessions render in other ghostty
-// windows, so a cross-session carrier would show the banner (and clobber the
-// window title) on the wrong surface. null = our session not visible
-// anywhere (detached) — caller falls back to osascript.
 const getVisiblePaneTty = async (): Promise<string | null> => {
   const pane = process.env.TMUX_PANE;
   if (!pane) return null;
@@ -256,25 +229,17 @@ const getVisiblePaneTty = async (): Promise<string | null> => {
         return tty;
       }
     }
-  } catch {
-    /* ignore */
-  }
+  } catch {}
   return null;
 };
 
-// false = no ghostty target, caller should use osascript.
-//
-// ghostty forces the window title in as the banner subtitle (empty title falls
-// back to pwd, a space renders a blank line). Nothing else sets the OS window
-// title under tmux (set-titles off), so a stale title would show. Set it to the
-// project first, no restore needed. A hidden pane routes through a visible
-// pane's tty, because tmux drops passthrough from hidden panes.
-const sendGhostty = async (project: string, body: string): Promise<boolean> => {
+const trySendGhostty = async (
+  project: string,
+  body: string,
+): Promise<boolean> => {
   if (!isGhostty()) return false;
 
   try {
-    // Banner layout: line 1 = notify title (app), line 2 = window title
-    // (project), line 3 = body.
     const send = async (write: (seq: string) => void): Promise<void> => {
       if (lastGhosttyTitle !== project) {
         write(titleSeq(project));
@@ -310,27 +275,13 @@ const sendOsascript = async (title: string, message: string): Promise<void> => {
       ],
       3000,
     );
-  } catch {
-    /* ignore */
-  }
+  } catch {}
 };
 
 const playSound = (): void => {
   execFile("afplay", [SOUND_PATH], { timeout: 5000 }, () => {});
 };
 
-// Show the agent's status in this pane's tmux window name. Renaming also
-// disables tmux automatic-rename, which we want per window.
-//
-// A subagent pane shares its window with the parent pi (subagent.ts splits a
-// pane), so two writers would fight over one name. Subagent panes set the pane
-// title instead (`select-pane -T`), and subagent.ts polls it to detect turn
-// end.
-//
-// Calls can come back-to-back in one tick (busy -> blocked on
-// ask_user_question). execFile is async, so a later tmux process could finish
-// first and leave the stale status. Chain the calls so tmux applies them in
-// order.
 let windowStatusChain: Promise<void> = Promise.resolve();
 const setWindowStatus = (status: AgentStatus): void => {
   const pane = process.env.TMUX_PANE;
@@ -351,9 +302,6 @@ const setWindowStatus = (status: AgentStatus): void => {
   );
 };
 
-// "done" means the turn finished while you weren't looking. Poll for focus
-// returning to this pane and flip done -> idle so the tab distinguishes "just
-// finished" from "you've already seen it". Any new activity cancels the poll.
 let donePoll: ReturnType<typeof setInterval> | null = null;
 const stopDonePoll = (): void => {
   if (donePoll) {
@@ -375,9 +323,7 @@ const startDonePoll = (): void => {
 const notify = async (projectName: string, message: string): Promise<void> => {
   if (await isTerminalFocused()) return;
   if (shouldThrottle(`${projectName}\x00${message}`)) return;
-  // When ghostty is the focused app (e.g. another tmux window) it suppresses
-  // its own OSC banner — sound only. That's ghostty's design, not overridable.
-  if (!(await sendGhostty(projectName, message))) {
+  if (!(await trySendGhostty(projectName, message))) {
     await sendOsascript(`${APP_TITLE}-${projectName}`, message);
   }
   playSound();
@@ -385,11 +331,7 @@ const notify = async (projectName: string, message: string): Promise<void> => {
 
 export default function (pi: ExtensionAPI) {
   let projectName = path.basename(process.cwd());
-  // Bumped per run. A settle report captures it and drops itself when a new
-  // run began while it waited on the focus check.
   let turnGeneration = 0;
-  // pi coalesces nested prompts into one span, so a bare flag is enough to
-  // tell a real close from a stray end event.
   let blockedOnPrompt = false;
 
   pi.on("session_start", async (_event, ctx) => {
@@ -405,16 +347,10 @@ export default function (pi: ExtensionAPI) {
     setWindowStatus("busy");
   });
 
-  // Fires for every blocking ctx.ui prompt, including /yeet's confirm. The
-  // gate is the turn, not the tool name: a dialog the user opened from a slash
-  // command while pi is idle needs no ping and no title change.
   pi.on("ui_prompt_start", async (_event, ctx) => {
     if (ctx.isIdle()) return;
     blockedOnPrompt = true;
     setWindowStatus("blocked");
-    // A subagent blocked on a question needs the parent to notice via
-    // subagent.ts's pane-title poll, not a desktop ping nobody but the
-    // parent's own turn logic is meant to react to.
     if (!IS_SUBAGENT) {
       await notify(projectName, "waiting");
     }
@@ -426,17 +362,12 @@ export default function (pi: ExtensionAPI) {
     setWindowStatus("busy");
   });
 
-  // agent_settled, not agent_end: agent_end also fires mid auto-retry /
-  // auto-compact / queued follow-ups, causing premature "done" + pings.
-  // lsp/feedback's repair turn runs before settle, so settled is final.
   pi.on("agent_settled", async () => {
     const gen = turnGeneration;
     // Detached because pi waits for this handler and the focus check spawns
     // osascript.
     void (async () => {
       if (IS_SUBAGENT) {
-        // subagent.ts polls the pane title to know when the pane is done;
-        // no notification/sound for a background turn nobody is watching.
         setWindowStatus("done");
         return;
       }
@@ -465,8 +396,6 @@ export default function (pi: ExtensionAPI) {
         ["set-window-option", "-t", pane, "automatic-rename", "on"],
         { timeout: 2000 },
       );
-    } catch {
-      /* tmux gone */
-    }
+    } catch {}
   });
 }

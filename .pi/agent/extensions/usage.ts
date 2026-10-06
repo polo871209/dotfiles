@@ -1,7 +1,3 @@
-// /usage — show Claude Pro/Max subscription usage (5h/session + weekly quotas).
-//
-// The endpoint is undocumented. It reads the "anthropic" OAuth creds pi
-// already stores, not an API key.
 import {
   readStoredCredential,
   type ExtensionAPI,

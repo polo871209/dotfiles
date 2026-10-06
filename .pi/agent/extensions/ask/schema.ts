@@ -1,13 +1,3 @@
-// Tool-facing contract for ask_user_question: parameter schema, the row-intent
-// metadata table that drives sentinel rows, runtime validation, and the
-// LLM-facing answer envelope.
-//
-// IMPORTANT: the schema has NO `maxLength` on header/label and no
-// `minItems`/`maxItems` on questions/options. Any hard bound makes pi reject
-// the whole tool call before execute() runs, so the model must retry (the
-// "needs twice to trigger" bug). It once rejected a question with 1 authored
-// option. Limits are advisory in the descriptions and clamped in index.ts.
-
 import { type Static, Type } from "typebox";
 
 export const MAX_QUESTIONS = 4;
@@ -15,8 +5,6 @@ const MIN_OPTIONS = 2;
 export const MAX_OPTIONS = 4;
 export const MAX_HEADER_LENGTH = 16;
 export const MAX_LABEL_LENGTH = 60;
-
-// Row-intent metadata — single source of truth for the four row kinds.
 
 type RowKind = "option" | "other" | "chat" | "next";
 type SentinelKind = Exclude<RowKind, "option">;
@@ -26,15 +14,10 @@ interface RowIntentMeta {
   label: string;
   reserved: boolean;
   livesInMainList: boolean;
-  /** Focusing the row toggles state.inputMode (the inline free-text row). */
   activatesInputMode: boolean;
-  /** In multiSelect, Space / Enter-as-toggle is suppressed (the Next row). */
   blocksMultiToggle: boolean;
-  /** In multiSelect, Enter commits the question (the Next row). */
   autoSubmitsInMulti: boolean;
-  /** Appended by buildItems on single-select questions (the free-text "Other" row). */
   autoAppendOnSingleSelect: boolean;
-  /** Appended by buildItems on multi-select questions. */
   autoAppendOnMultiSelect: boolean;
 }
 
@@ -85,7 +68,6 @@ export function sentinelLabel(kind: SentinelKind): string {
   return ROW_INTENT_META[kind].label;
 }
 
-/** "Other" is model-conditioned (CC parity) and reserved on top of the runtime sentinels. */
 const RESERVED_LABELS = [
   "Other",
   ROW_INTENT_META.other.label,
@@ -95,7 +77,6 @@ const RESERVED_LABELS = [
 
 const RESERVED_LABEL_SET: ReadonlySet<string> = new Set(RESERVED_LABELS);
 
-/** Synthesize the sentinel rows appended to one question's option list. */
 export function sentinelsToAppend(question: QuestionData): SentinelKind[] {
   const out: SentinelKind[] = [];
   for (const k of SENTINEL_KINDS) {
@@ -109,8 +90,6 @@ export function sentinelsToAppend(question: QuestionData): SentinelKind[] {
   }
   return out;
 }
-
-// Parameter schema (no hard length caps — see file header).
 
 const OptionSchema = Type.Object({
   label: Type.String({
@@ -151,8 +130,6 @@ export const QuestionParamsSchema = Type.Object({
 export type QuestionData = Static<typeof QuestionSchema>;
 export type QuestionParams = Static<typeof QuestionParamsSchema>;
 
-// Answer model + result.
-
 export interface QuestionAnswer {
   questionIndex: number;
   question: string;
@@ -175,9 +152,6 @@ export interface QuestionnaireResult {
   cancelled: boolean;
   error?: QuestionnaireError;
 }
-
-// Validation. Length is NOT validated here (clamped in index.ts). Covers the
-// semantic guards only; no_ui stays inline at the call site.
 
 type ValidationResult =
   | { ok: true }
@@ -242,8 +216,6 @@ export function validateQuestionnaire(typed: QuestionParams): ValidationResult {
   return { ok: true };
 }
 
-// Answer formatting + LLM-facing envelope.
-
 const DECLINE_MESSAGE = "User declined to answer questions";
 const ENVELOPE_PREFIX = "User answered:";
 const CHAT_CONTINUATION_MESSAGE =
@@ -275,8 +247,6 @@ export function formatAnswerScalar(
 
 function buildAnswerSegment(a: QuestionAnswer, echoQuestion: boolean): string {
   const answer = formatAnswerScalar(a, "envelope");
-  // Single-question calls: the question is still fresh in the agent's context
-  // (it emitted the tool call this turn), so echoing it back is dead tokens.
   return echoQuestion ? `"${a.question}"="${answer}"` : answer;
 }
 

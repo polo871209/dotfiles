@@ -1,4 +1,3 @@
--- Agent nvim skips cosmetic plugins.
 if vim.g.pi_agent then return end
 
 -- https://emojicombos.com/one-piece
@@ -42,9 +41,6 @@ local icons = require 'mini.icons'
 icons.setup()
 icons.mock_nvim_web_devicons()
 
--- Unlike nvim-autopairs, mini.pairs leaves <CR> alone: pressing Enter between
--- a pair relies on the filetype's indentexpr instead of always opening an
--- indented blank line.
 require('mini.pairs').setup()
 
 local starter = require 'mini.starter'
@@ -52,7 +48,5 @@ starter.setup {
     items = { starter.sections.recent_files(3, true) },
     header = header_art,
     footer = '',
-    -- No typed query: letters keep their normal and custom mappings instead of
-    -- failing with "results into no active items". Pick with j/k and <CR>.
     query_updaters = '',
 }

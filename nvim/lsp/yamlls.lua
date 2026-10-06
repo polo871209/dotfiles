@@ -7,7 +7,7 @@ return {
             completion = true,
             hover = true,
             schemaStore = {
-                enable = false, -- Use SchemaStore.nvim instead
+                enable = false,
                 url = '',
             },
             format = {

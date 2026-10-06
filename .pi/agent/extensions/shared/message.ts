@@ -1,13 +1,9 @@
-// Shared helpers for extracting text from pi message content and walking
-// session branches, mostly to build side-channel LLM payloads.
 import type { Message } from "@earendil-works/pi-ai";
 import {
   convertToLlm,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 
-// Pi messages carry content as either a plain string or an array of typed
-// parts. This pulls text-typed parts out and joins with newlines.
 export function extractText(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
@@ -28,9 +24,6 @@ interface CollectedBranch {
   userTurns: number;
 }
 
-// Walk a session branch and return only text-only user/assistant messages,
-// preserving original message metadata (timestamp/api/provider/etc).
-// Cap to the last `maxMessages` entries when set.
 export function collectTextMessages(
   branch: readonly unknown[],
   maxMessages?: number,
@@ -71,9 +64,6 @@ export function collectTextMessages(
   return { messages, userTurns };
 }
 
-// What the model sees now, shaped like getBranch() entries for
-// collectTextMessages: compaction summaries and context edits are applied,
-// and messages that compaction already summarized are gone.
 export function modelVisibleEntries(
   sessionManager: ExtensionContext["sessionManager"],
 ): Array<{ type: "message"; message: Message }> {

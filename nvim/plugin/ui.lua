@@ -1,4 +1,3 @@
--- Agent nvim skips cosmetic plugins.
 if vim.g.pi_agent then return end
 
 vim.pack.add {
@@ -23,9 +22,6 @@ require('which-key').setup {
     },
 }
 
--- 'cmdheight' is 0, so both native prompts draw where there is no room for
--- them. Selection reuses the picker widget rather than a second list float.
--- Required lazily: most sessions never prompt.
 ---@diagnostic disable-next-line: duplicate-set-field
 vim.ui.input = function(opts, on_confirm) require('float').input(opts, on_confirm) end
 ---@diagnostic disable-next-line: duplicate-set-field
@@ -38,7 +34,6 @@ vim.api.nvim_create_autocmd('FileType', {
     once = true,
     callback = function()
         vim.pack.add { 'https://github.com/MeanderingProgrammer/render-markdown.nvim' }
-        -- Off by default: completes callout and checkbox markup via blink.
         require('render-markdown').setup {
             completions = { blink = { enabled = true } },
         }

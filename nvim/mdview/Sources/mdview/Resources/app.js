@@ -4,7 +4,6 @@ const content = document.getElementById("content");
 const base = document.querySelector("base");
 const dark = matchMedia("(prefers-color-scheme: dark)");
 
-// Live typing re-renders the whole document per keystroke, so unchanged blocks come from these caches.
 const highlighted = new Map();
 const diagrams = new Map();
 const CACHE_LIMIT = 500;
@@ -34,7 +33,6 @@ function highlight(code) {
     code.classList.add("hljs");
 }
 
-// Mermaid is 5.5 MB, so only a document with a diagram pays to load it.
 async function importMermaid() {
     await new Promise((resolve, reject) => {
         const script = document.createElement("script");
@@ -80,7 +78,6 @@ async function drawDiagrams(previous) {
                     cached,
                     code.parentElement.dataset.sourcepos,
                 );
-            // Keep the old drawing in place while the edited diagram re-renders, instead of flashing its source.
             else
                 missing.push([
                     code.textContent,
@@ -150,7 +147,6 @@ const tocToggle = document.getElementById("toc-toggle");
 let tocHeadings = [];
 let tocKey = "";
 
-// Lists h1 to h3. Live typing rebuilds the list only when a heading changes, so the list keeps its scroll position.
 function buildToc() {
     tocHeadings = [...content.querySelectorAll("h1, h2, h3")].filter((h) => h.id);
     document.body.classList.toggle("has-toc", tocHeadings.length > 1);
@@ -171,8 +167,6 @@ function buildToc() {
     spy();
 }
 
-// Marks the section being read: the last heading within 64px of the window top, or the last heading at the page end.
-// A TOC click puts its heading 24px from the top (scroll-margin-top in style.css), so the clicked entry lights up.
 function spy() {
     const limit = 64;
     let lo = 0;
@@ -199,7 +193,6 @@ for (const event of ["scroll", "resize"])
         spyFrame = requestAnimationFrame(spy);
     });
 
-// WebKit can refuse storage to a custom scheme. The state then lasts only until the window closes.
 function collapseToc(collapsed) {
     document.body.classList.toggle("toc-collapsed", collapsed);
     tocToggle.setAttribute("aria-expanded", String(!collapsed));
@@ -213,7 +206,6 @@ try {
 } catch {}
 tocToggle.addEventListener("click", () => collapseToc(!document.body.classList.contains("toc-collapsed")));
 
-// Scrolls only when the block under the nvim cursor is off screen, so reading position survives edits elsewhere.
 function reveal(line) {
     let target;
     for (const el of content.querySelectorAll("[data-sourcepos]")) {
@@ -227,12 +219,9 @@ function reveal(line) {
 }
 
 let currentPath = "";
-// Set by a click on a link to another file. Applied when nvim sends that file.
 let pendingAnchor;
-// Set by Back or Forward to another file. Applied when nvim sends that file.
 let restoring;
 
-// Each history entry is {path, y}. A file switch arrives from nvim after popstate, so scroll is restored by hand.
 history.scrollRestoration = "manual";
 
 let saveTimer;
@@ -311,7 +300,6 @@ document.addEventListener("click", (event) => {
         if (scrollToAnchor(url.hash)) history.pushState({ path: currentPath, y: scrollY }, "");
         return;
     }
-    // Viewer.swift hands the navigation to nvim, and nvim sends the file back.
     if (file) pendingAnchor = { path: file, hash: url.hash };
 });
 

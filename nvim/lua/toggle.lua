@@ -1,5 +1,3 @@
--- Boolean toggles with a one-line confirmation.
-
 local M = {}
 
 ---@class ToggleSpec
@@ -17,7 +15,6 @@ function M.map(lhs, spec)
     end, { desc = 'Toggle ' .. spec.name })
 end
 
---- Toggle a boolean vim option.
 ---@param lhs string
 ---@param opt string
 ---@param name string?

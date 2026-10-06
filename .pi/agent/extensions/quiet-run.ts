@@ -1,23 +1,3 @@
-// quiet-run: runs a shell command with its output kept in a log file, so the
-// model reads one verdict line plus the slice it asks for.
-//
-// The call blocks on purpose. A job id plus a status tool turned every long
-// command into a sleep-poll loop that burned turns to learn "still running".
-// Live output reaches the TUI through onUpdate and never enters context.
-//
-// Destructive gate (scoreDestructive): before spawning, TypeSafe's Jev model
-// scores the command against the repo's git state, same endpoint and
-// fail-open contract as web-search's rerank. At or above DESTRUCTIVE_FLOOR the
-// user must approve in a dialog, and with no UI the call is refused. Measured
-// 2026-01 on 50 labeled commands in fixture repos (clean, dirty, no git):
-// reads, builds, tests, installs, and deleting ignored output scored
-// 0.02-0.57; lost work, pushes, publishes, deploys, and writes outside cwd
-// scored 0.75-0.99. Three safe commands still get a dialog: `find -delete` on
-// ignored logs 0.71, `rm -rf` on committed clean `src` 0.75, and
-// `git reset --hard` on a clean tree 0.82. Local Docker removals and prunes
-// score 0.08-0.51, and Docker against a remote host or registry 0.82-0.96.
-// Re-measure before moving the floor.
-
 import { execFile, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -30,6 +10,14 @@ const SUCCESS_TAIL = 10;
 const FAILURE_TAIL = 30;
 // 100 lines of this width stay under pi's 50KB tool-result cap.
 const MAX_LINE_CHARS = 300;
+// Measured 2026-01 on 50 labeled commands in fixture repos (clean, dirty, no git):
+// reads, builds, tests, installs, and deleting ignored output scored
+// 0.02-0.57; lost work, pushes, publishes, deploys, and writes outside cwd
+// scored 0.75-0.99. Three safe commands still get a dialog: `find -delete` on
+// ignored logs 0.71, `rm -rf` on committed clean `src` 0.75, and
+// `git reset --hard` on a clean tree 0.82. Local Docker removals and prunes
+// score 0.08-0.51, and Docker against a remote host or registry 0.82-0.96.
+// Re-measure before moving the floor.
 const DESTRUCTIVE_FLOOR = 0.65;
 
 function formatDuration(ms: number): string {
@@ -38,7 +26,6 @@ function formatDuration(ms: number): string {
   return `${Math.floor(ms / 60_000)}m${Math.floor((ms % 60_000) / 1000)}s`;
 }
 
-// A log is worth re-reading for a session at most.
 function pruneOldLogs(logDir: string): void {
   const cutoff = Date.now() - 3 * 24 * 60 * 60 * 1000;
   try {
@@ -47,13 +34,9 @@ function pruneOldLogs(logDir: string): void {
       if (name.endsWith(".log") && fs.statSync(p).mtimeMs < cutoff)
         fs.unlinkSync(p);
     }
-  } catch {
-    /* best effort */
-  }
+  } catch {}
 }
 
-// Terminal semantics, roughly: a progress bar redraws with \r, and only the
-// last frame is what a human would have seen.
 function cleanLine(raw: string): string {
   const line = raw.replace(/\r+$/, "");
   return stripVTControlCharacters(line.slice(line.lastIndexOf("\r") + 1));
@@ -65,7 +48,6 @@ function clip(line: string): string {
     : line;
 }
 
-// Installers and test runners repeat one line many times in a row.
 function collapseRuns(lines: string[]): string[] {
   const out: string[] = [];
   for (let i = 0; i < lines.length; ) {
@@ -79,10 +61,6 @@ function collapseRuns(lines: string[]): string[] {
 
 const execFileAsync = promisify(execFile);
 
-// Git decides what a delete costs: a committed, clean file comes back with
-// `git checkout`, an untracked one is gone. Jev judged by folder name alone,
-// so an untracked `build/` of sources scored 0.20. Null outside a repo, on
-// error, or past 2s in a huge repo, and the gate then assumes no git copy.
 async function gitState(cwd: string): Promise<object | null> {
   const git = async (args: string[]) =>
     (await execFileAsync("git", args, { cwd, timeout: 2_000 })).stdout;
@@ -113,9 +91,6 @@ async function gitState(cwd: string): Promise<object | null> {
   }
 }
 
-// Returns the probability that the command is destructive, or null when no
-// key is set or the call fails in any way. Null means "run it": without the
-// gate, quiet_run is no riskier than the bash tool.
 async function scoreDestructive(
   command: string,
   cwd: string,
@@ -125,7 +100,6 @@ async function scoreDestructive(
   if (!apiKey) return null;
   const git = await gitState(cwd);
   try {
-    // Median latency is ~0.8s; past this the gate gives up and the command runs.
     const timeout = AbortSignal.timeout(5_000);
     const res = await fetch("https://api.typesafe.ai/v1/systemone", {
       method: "POST",
@@ -162,8 +136,6 @@ async function scoreDestructive(
   }
 }
 
-// pi shows one dialog at a time: a second confirm() replaces the first, whose
-// promise then never settles. Parallel quiet_run calls queue here instead.
 let dialogQueue: Promise<unknown> = Promise.resolve();
 function queueDialog<T>(open: () => Promise<T>): Promise<T> {
   const next = dialogQueue.then(open, open);
@@ -171,8 +143,6 @@ function queueDialog<T>(open: () => Promise<T>): Promise<T> {
   return next;
 }
 
-// Process groups of commands still running. They are detached, so pi exiting
-// does not stop them.
 const liveGroups = new Set<number>();
 
 export default function (pi: ExtensionAPI) {
@@ -180,9 +150,7 @@ export default function (pi: ExtensionAPI) {
     for (const pid of liveGroups) {
       try {
         process.kill(-pid, "SIGTERM");
-      } catch {
-        /* already gone */
-      }
+      } catch {}
     }
     liveGroups.clear();
   });
@@ -233,7 +201,6 @@ export default function (pi: ExtensionAPI) {
         Type.String({ description: "Full log, when output was left out" }),
       ),
     }),
-    // TUI only. The command already sits in context as the call's arguments.
     renderCall(args, theme, context) {
       const text =
         (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
@@ -276,15 +243,12 @@ export default function (pi: ExtensionAPI) {
           const why = ctx.hasUI
             ? "the user declined to run it"
             : "no user is present to approve it";
-          // Name the bash side door, or the model walks through it.
           throw new Error(
             `quiet_run: blocked. Jev scored the command destructive (${score}) and ${why}. Do not run it through bash or another tool. Show the command to the user and wait for their decision.`,
           );
         }
       }
 
-      // scoreDestructive and the dialog swallow an abort, and a spawn after it
-      // would never see the abort event.
       if (signal?.aborted)
         throw new Error("quiet_run: aborted before the command started.");
 
@@ -298,8 +262,6 @@ export default function (pi: ExtensionAPI) {
       const logFd = fs.openSync(logPath, "w");
 
       const startedAt = Date.now();
-      // `exec 2>&1` merges stderr at the fd level, so lines keep the order the
-      // command wrote them in.
       const child = spawn("/bin/sh", ["-c", `exec 2>&1\n${command}`], {
         cwd,
         stdio: ["ignore", "pipe", "ignore"],
@@ -308,8 +270,6 @@ export default function (pi: ExtensionAPI) {
         detached: true,
       });
 
-      // Output is kept only as far as the result can show it, so a 500MB log
-      // costs no memory and needs no read-back.
       const keep = params.tail ?? FAILURE_TAIL;
       // pi previews the first 10 lines of a partial result: 1 header + 9.
       const LIVE_LINES = 9;
@@ -335,17 +295,13 @@ export default function (pi: ExtensionAPI) {
         }
         try {
           fs.writeSync(logFd, `${clean.join("\n")}\n`);
-        } catch {
-          /* disk trouble: the in-memory result still works */
-        }
+        } catch {}
       };
 
       child.stdout!.setEncoding("utf8");
       child.stdout!.on("data", (chunk: string) => {
         const parts = (pending + chunk).split("\n");
         pending = parts.pop()!;
-        // A \r-only progress bar never ends its line; keep its newest frame
-        // so pending stays small. A trailing \r can be half of \r\n.
         const cr = pending.lastIndexOf("\r", pending.length - 2);
         if (cr > 0) pending = pending.slice(cr + 1);
         if (parts.length) addLines(parts);
@@ -362,18 +318,14 @@ export default function (pi: ExtensionAPI) {
             ],
             details: {},
           });
-        } catch {
-          /* renderer errors must not kill the run */
-        }
+        } catch {}
       });
 
       let sigkillTimer: ReturnType<typeof setTimeout> | undefined;
       const killTree = (sig: NodeJS.Signals) => {
         try {
           if (child.pid) process.kill(-child.pid, sig);
-        } catch {
-          /* already gone */
-        }
+        } catch {}
       };
       const terminate = () => {
         killTree("SIGTERM");
@@ -429,7 +381,6 @@ export default function (pi: ExtensionAPI) {
       const hidden =
         shown.length < lineCount ||
         shown.some((l) => l.length > MAX_LINE_CHARS);
-      // A log whose every line is already in the result has no reader.
       if (!hidden) fs.rmSync(logPath, { force: true });
 
       const head = [

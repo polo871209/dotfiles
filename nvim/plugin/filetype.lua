@@ -1,7 +1,3 @@
--- Size-based detection wins over every other rule, so a huge file opens as
--- `bigfile` (see after/ftplugin/bigfile.lua) and nothing expensive attaches.
--- Returning nil for normal files lets detection carry on.
---
 -- The cutoff tracks the language server, not nvim: a 30MB go file opens in
 -- ~250ms with treesitter attached, while gopls took 4.3GB on it (jsonls 309MB
 -- on 9MB of json). Below this, highlighting is worth more than the savings.
@@ -44,8 +40,6 @@ vim.filetype.add {
     },
 }
 
--- Base jinja query keeps jinja_inline/comment injections; add properties
--- injection so the non-jinja text (config keys/values) gets highlighted too.
 vim.treesitter.query.set(
     'jinja',
     'injections',

@@ -1,12 +1,6 @@
--- Send selections / diagnostics from neovim to a pi instance running in the
--- same tmux session. Requires .pi/agent/extensions/tmux-bridge.ts to be loaded
--- in pi, which listens on $TMPDIR/pi-tmux-pane-<pane>-<pid>.sock. Multiple pi
--- panes in the session -> vim.ui.select to pick one.
 local M = {}
 
 local TIMEOUT = 1000
--- Bridge drops a connection whose buffered line exceeds 2 MiB; stay under it
--- with room for JSON escaping, which can nearly double a pathological file.
 local MAX_PAYLOAD = 900 * 1024
 
 local VISUAL_MODES = { v = true, V = true, ['\22'] = true }
@@ -17,16 +11,12 @@ local function notify(msg, level)
     vim.schedule(function() vim.notify(msg, level or vim.log.levels.INFO) end)
 end
 
---- Directories that may hold bridge sockets. pi uses Node's `os.tmpdir()`,
---- which on macOS is the per-user /var/folders path regardless of $TMPDIR, so
---- nvim's own $TMPDIR is not enough. Cached: `getconf` is a process spawn and
---- the answer never changes within a session.
 ---@type string[]?
-local temp_dirs_cache
+local bridge_socket_dirs_cache
 
 ---@return string[]
-local function temp_dirs()
-    if temp_dirs_cache then return temp_dirs_cache end
+local function bridge_socket_dirs()
+    if bridge_socket_dirs_cache then return bridge_socket_dirs_cache end
     local seen, out = {}, {}
     local function add(dir)
         if not dir or dir == '' then return end
@@ -40,13 +30,10 @@ local function temp_dirs()
     local r = vim.system({ 'getconf', 'DARWIN_USER_TEMP_DIR' }, { text = true, timeout = TIMEOUT }):wait()
     if r.code == 0 and r.stdout then add(vim.trim(r.stdout)) end
     add '/tmp'
-    temp_dirs_cache = out
+    bridge_socket_dirs_cache = out
     return out
 end
 
---- Check whether a unix socket has a live listener by attempting a connect.
---- Blocks up to ~150ms; a crashed pi leaves the socket file behind, so file
---- existence alone proves nothing.
 ---@param sock string
 ---@return boolean
 local function listener_alive(sock)
@@ -62,14 +49,12 @@ local function listener_alive(sock)
     return ok
 end
 
---- Live bridge sockets for one pane. The socket name carries pi's pid, so a
---- pane that reused an id after a crash can expose several candidates.
 ---@param pane_id string
 ---@return string[]
 local function sockets_for_pane(pane_id)
     local safe = pane_id:gsub('[^%w_%-]', '_')
     local found = {}
-    for _, dir in ipairs(temp_dirs()) do
+    for _, dir in ipairs(bridge_socket_dirs()) do
         for _, sock in ipairs(vim.fn.glob(('%s/pi-tmux-pane-%s-*.sock'):format(dir, safe), true, true)) do
             if listener_alive(sock) then table.insert(found, sock) end
         end
@@ -77,10 +62,6 @@ local function sockets_for_pane(pane_id)
     return found
 end
 
---- Every pane of the current tmux session that answers on a bridge socket.
---- Panes are probed by socket rather than by pane title or
---- pane_current_command: pi runs as "node", and its title is decoration that
---- changes with session state, so neither identifies it reliably.
 ---@return table[] { pane_id, sock, window_index, window_name }
 local function live_bridges()
     local fmt = '#{pane_id}\t#{window_index}\t#{window_name}'
@@ -98,8 +79,6 @@ local function live_bridges()
     return out
 end
 
---- Resolve which pi to send to: the session's only live bridge, or a
---- vim.ui.select prompt when there are several.
 ---@param cb fun(target: table?)
 local function resolve_target(cb)
     if vim.env.TMUX == nil then
@@ -112,26 +91,18 @@ local function resolve_target(cb)
         return cb(nil)
     end
     if #live == 1 then return cb(live[1]) end
-    -- Labelled with the tmux window index, which is what the status line shows
-    -- and the only thing distinguishing two panes with the same title.
     vim.ui.select(live, {
         prompt = 'Send to which pi agent?',
         format_item = function(p) return ('%s  %s'):format(p.window_index, p.window_name) end,
     }, function(choice) cb(choice) end)
 end
 
---- Bring a tmux pane into view for the attached client, best effort/async.
 ---@param pane_id string
 local function focus_pane(pane_id)
-    -- switch-client moves the client to the pane's session/window; select-pane
-    -- then makes it active within that window if it wasn't already.
     vim.system({ 'tmux', 'switch-client', '-t', pane_id }, { timeout = TIMEOUT })
     vim.system({ 'tmux', 'select-pane', '-t', pane_id }, { timeout = TIMEOUT })
 end
 
---- Send one JSON line and report what the bridge did with it. Written over a
---- raw uv pipe rather than `nc`: nc has no delivery signal, and killing it on
---- a timeout truncated large payloads into JSON the bridge silently dropped.
 ---@param sock string
 ---@param obj table
 ---@param on_ack? fun(ok: boolean, info: string)
@@ -195,7 +166,6 @@ local function selection_range()
         local cursor = vim.fn.getpos('.')[2]
         return math.min(anchor, cursor), math.max(anchor, cursor)
     end
-    -- Re-invoked from normal mode or `:'<,'>lua`: marks are the only source.
     local s = vim.api.nvim_buf_get_mark(0, '<')[1]
     local e = vim.api.nvim_buf_get_mark(0, '>')[1]
     if s == 0 or e == 0 then return nil end
@@ -221,8 +191,6 @@ function M.send_selection()
     leave_visual()
     if not sline or not eline then return notify('No visual selection', vim.log.levels.WARN) end
 
-    -- Absolute: pi's cwd is not necessarily nvim's, and the bridge shortens
-    -- the path for display on its own side.
     local filepath = vim.fn.fnamemodify(bufname, ':p')
     local ft = vim.bo[buf].filetype or ''
     local total = vim.api.nvim_buf_line_count(buf)
@@ -230,14 +198,6 @@ function M.send_selection()
 
     resolve_target(function(target)
         if not target then return end
-        -- Drop the snapshot into pi rather than prompting here: vim.ui.input
-        -- has no slash-commands or completion, pi's own editor does. The bridge
-        -- pastes it into that editor, so it becomes part of the prompt you
-        -- send, after your question. Only the selected lines go over: whole-file
-        -- payloads buried the actual question in unrelated context, and pi's
-        -- edit/write read from disk at exec time, so it can pull the rest itself
-        -- when it needs it. `total` only sizes the gutter and names what was
-        -- omitted.
         local selected = table.concat(vim.api.nvim_buf_get_lines(buf, sline - 1, eline, false), '\n')
         if #selected <= MAX_PAYLOAD / 2 then
             send(target.sock, { file = { path = filepath, sline = sline, eline = eline, ft = ft, content = selected, total = total } })

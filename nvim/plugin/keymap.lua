@@ -6,9 +6,6 @@ vim.keymap.set({ 'n', 'i' }, '<C-.>', '<cmd>bnext<CR>', { desc = 'Next Buffer' }
 vim.keymap.set('n', '<leader>-', '<cmd>split<CR>', { desc = 'Horizontal Split' })
 vim.keymap.set('n', '<leader>|', '<cmd>vsplit<CR>', { desc = 'Vertical Split' })
 
--- Move between nvim splits first, hand the key to tmux only at the edges.
--- tmux/tmux.conf binds the same keys and forwards them here whenever the pane
--- runs nvim, so both sides must agree or the sender eats them.
 local function tmux(...)
     -- $TMUX is "socket,pid,session"; -S pins the command to that server so a
     -- non-default socket (tmux -L) still resolves.
@@ -19,14 +16,14 @@ end
 
 local function is_zoomed() return vim.trim(tmux('display-message', '-p', '#{window_zoomed_flag}')) == '1' end
 
---- `wincmd` throws E11 in the command-line window; nothing to navigate there.
 ---@param arg string
-local function wincmd(arg) pcall(vim.cmd, 'wincmd ' .. arg) end
+local function wincmd(arg)
+    if vim.fn.getcmdwintype() ~= '' then return end
+    vim.cmd('wincmd ' .. arg)
+end
 
 local tmux_pane = { h = '-L', j = '-D', k = '-U', l = '-R' }
 
--- Whether the last hop crossed out of nvim, so <C-\> knows which side owns
--- "previous". A fresh nvim was entered from tmux, hence the initial true.
 local came_from_tmux = true
 
 ---@param direction 'h'|'j'|'k'|'l'
@@ -37,8 +34,6 @@ local function navigate(direction)
         came_from_tmux = false
         return
     end
-    -- No split that way, so tmux takes over. A zoomed pane is deliberately
-    -- fullscreen, so leaving it on <C-hjkl> is almost never what was meant.
     if not vim.env.TMUX or is_zoomed() then return end
     tmux('select-pane', tmux_pane[direction])
     came_from_tmux = true
@@ -49,8 +44,6 @@ local function last_active()
     wincmd 'p'
 end
 
--- Cycles every split, then every tmux pane: on the last split, wrap back to the
--- first one and let tmux advance instead.
 local function next_pane()
     if vim.env.TMUX and vim.fn.winnr() == vim.fn.winnr '$' then
         wincmd 't'
@@ -68,11 +61,9 @@ vim.keymap.set('n', '<C-Space>', next_pane, { desc = 'Next Pane' })
 
 vim.keymap.set('v', '<leader>p', '"_dP', { desc = 'Paste without replacing clipboard' })
 
--- Delete/change without yanking (dd, diw, ciw, etc.)
 vim.keymap.set({ 'n', 'v' }, 'd', '"_d', { desc = 'Delete without yanking' })
 vim.keymap.set({ 'n', 'v' }, 'c', '"_c', { desc = 'Change without yanking' })
 
--- Toggle diagnostics location list
 vim.keymap.set('n', '<leader>tt', function()
     if vim.fn.getloclist(0, { winid = 0 }).winid ~= 0 then
         vim.cmd 'lclose'

@@ -9,8 +9,6 @@ interface ExecResult {
   code: number;
 }
 
-// Always bounded: without a default cap, a hung child (e.g. `gh` waiting on
-// auth) hangs the awaiting tool call forever when the caller passes no signal.
 const DEFAULT_TIMEOUT_MS = 120_000;
 
 export function run(

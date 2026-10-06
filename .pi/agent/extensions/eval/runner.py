@@ -88,6 +88,31 @@ def _exec_cell(code: str, g: dict) -> object:
     return None
 
 
+def _serializable_or_degraded(value, error):
+    try:
+        json.dumps(value, default=str, allow_nan=False)
+        return value, error
+    except KeyboardInterrupt:
+        return None, error or "KeyboardInterrupt during result serialization"
+    except Exception:  # noqa: BLE001 -- fall back to repr for any non-JSON-serializable value
+        return repr(value), error
+
+
+def _emit_done_despite_sigint(emit, rid, value, error):
+    try:
+        emit({"id": rid, "op": "done", "value": value, "error": error})
+    except KeyboardInterrupt:
+        os.write(3, b"\n")
+        emit(
+            {
+                "id": rid,
+                "op": "done",
+                "value": None,
+                "error": error or "KeyboardInterrupt while emitting result",
+            }
+        )
+
+
 def main() -> None:
     _start_parent_watchdog()
     globals_dict = _build_globals()
@@ -118,37 +143,9 @@ def main() -> None:
         except BaseException:  # noqa: BLE001 -- must surface any cell failure (incl. SystemExit) as a result, never crash the kernel
             error = traceback.format_exc()
 
-        # A late SIGINT (e.g. while serializing a huge value) must not swallow
-        # the done event, or the host respawns and loses all session state.
-        # Degrade the value.
-        try:
-            json.dumps(value, default=str, allow_nan=False)
-            value_out = value
-        except KeyboardInterrupt:
-            value_out = None
-            error = error or "KeyboardInterrupt during result serialization"
-        except Exception:  # noqa: BLE001 -- fall back to repr for any non-JSON-serializable value
-            value_out = repr(value)
+        value, error = _serializable_or_degraded(value, error)
+        _emit_done_despite_sigint(emit, rid, value, error)
 
-        try:
-            emit({"id": rid, "op": "done", "value": value_out, "error": error})
-        except KeyboardInterrupt:
-            # A partial line may have been written; terminate it so the
-            # degraded done below stays parseable (host drops the fragment).
-            os.write(3, b"\n")
-            emit(
-                {
-                    "id": rid,
-                    "op": "done",
-                    "value": None,
-                    "error": error or "KeyboardInterrupt while emitting result",
-                }
-            )
-
-    # The host sends SIGINT on cell timeout (soft interrupt). When it lands
-    # inside a cell, _exec_cell's BaseException net turns it into a normal
-    # error result. When it lands here — blocked on readline between cells, or
-    # in the post-exec bookkeeping — it must not kill the kernel.
     while True:
         try:
             line = sys.stdin.readline()
@@ -166,9 +163,6 @@ def main() -> None:
         try:
             handle(req)
         except KeyboardInterrupt:
-            # Final net: interrupt landed outside all of handle()'s own
-            # guards. No done event was sent — the host escalates to a
-            # respawn if it never arrives.
             continue
 
 

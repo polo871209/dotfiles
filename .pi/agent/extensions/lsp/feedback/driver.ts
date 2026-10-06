@@ -1,7 +1,3 @@
-// Interface to the feedback Lua driver (_G.PiFeedback), loaded into each nvim
-// lane: a fast format-only pass for the inline hook (inline lane), and the
-// full format + diagnostics + code-action pass for the batched turn-end run
-// (main lane).
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -18,14 +14,9 @@ const logDriver = (msg: string) => {
       `[${new Date().toISOString()}] ${msg}\n`,
       "utf8",
     );
-  } catch {
-    /* best effort */
-  }
+  } catch {}
 };
 
-// _G.PiFeedback lives in a daemon shared with other pi processes, so "is it
-// loaded" is the daemon's answer, not ours; loadLuaOnce keys on daemon epoch +
-// source hash and no-ops when a peer already primed it.
 let feedbackSrc: { mtimeMs: number; src: string } | null = null;
 export const ensureFeedbackLoaded = async (
   cwd: string,
@@ -37,12 +28,8 @@ export const ensureFeedbackLoaded = async (
   await loadLuaOnce(cwd, "feedback", feedbackSrc.src, lane);
 };
 
-// Lua side enforces PER_FILE_BUDGET_MS = 4500 + ~1s settle. Match here
-// with headroom so the hard cap fires only on a wedged nvim.
 const PER_FILE_BUDGET_MS = 5_500;
 const BASE_TIMEOUT_MS = 3_000;
-// Esc cannot cancel the turn-end pass (pi passes no signal there), so cap the
-// whole pass: a large batch loses its feedback instead of stalling the agent.
 const MAX_PASS_MS = 30_000;
 const nvimCallTimeoutMs = (fileCount: number): number =>
   Math.min(
@@ -51,7 +38,6 @@ const nvimCallTimeoutMs = (fileCount: number): number =>
   );
 export const MAX_FILE_BYTES = 64 * 1024;
 
-// Full pass at turn end: safe code-actions + diagnostics.
 export const runDriver = async (
   files: string[],
   cwd: string,
@@ -59,7 +45,6 @@ export const runDriver = async (
 ): Promise<DriverResult | null> => {
   try {
     await ensureFeedbackLoaded(cwd);
-    // Hard cap via AbortSignal in case nvim wedges.
     const timeoutSignal = AbortSignal.timeout(nvimCallTimeoutMs(files.length));
     const combined = signal
       ? AbortSignal.any([signal, timeoutSignal])
@@ -78,16 +63,8 @@ export const runDriver = async (
   }
 };
 
-// Inline format-only pass on the "inline" lane, so it never queues behind the
-// turn-end pass. Short budget: it blocks the edit's tool_result hook. The
-// deadline covers ensureFeedbackLoaded too, because spawn/load take no signal
-// and a wedged startup must not hang edits. The lua-side format budget must
-// stay below the JS deadline: conform writes on success, and a write after we
-// stopped awaiting would desync the agent's view of the file.
 const INLINE_TIMEOUT_MS = 1_500;
 const INLINE_LUA_FORMAT_MS = 1_200;
-// Headroom between the lua budget and the JS deadline so a format finishing
-// right at the wire still gets awaited instead of writing after we gave up.
 const INLINE_MARGIN_MS = 100;
 export const formatFile = async (
   file: string,
@@ -106,8 +83,6 @@ export const formatFile = async (
         ),
       ),
     ]);
-    // ensureFeedbackLoaded ate into the shared deadline: give lua only what's
-    // left, and skip entirely when a write couldn't land before we stop waiting.
     const remaining = INLINE_TIMEOUT_MS - (Date.now() - start);
     if (remaining <= INLINE_MARGIN_MS) return false;
     const res = await callLua<{ formatted: string[] }>(

@@ -1,8 +1,3 @@
-// browser-task — runs one natural-language goal in the user's Chrome through
-// jev-ultrafast (https://github.com/browser-use/jev-ultrafast). TypeSafe Jev
-// picks each operation and element; TYPE_TEXT values come from pi's own model
-// auth over runner.py's stdin, so only TYPESAFE_API_KEY is needed.
-//
 // jev-ultrafast is a uv tool, not a mise tool. The repo has no tags, so mise
 // cannot list its versions and warns on every `mise up`. runner.py replaces
 // jev_ultrafast.agent.field_text and fails loudly if upstream renames it.
@@ -68,9 +63,7 @@ export default function (pi: ExtensionAPI) {
         }),
       ),
     }),
-    // One Chrome profile: parallel goals would fight over focus and tabs.
     executionMode: "sequential",
-    // A goal can submit forms, so a rerun can repeat the action.
     annotations: {
       readOnlyHint: false,
       destructiveHint: true,
@@ -121,7 +114,6 @@ export default function (pi: ExtensionAPI) {
         {
           env: { ...process.env, BH_TELEMETRY: "0" },
           stdio: ["pipe", "pipe", "pipe"],
-          // Own process group so abort also reaches runner.py's children.
           detached: true,
         },
       );
@@ -136,14 +128,12 @@ export default function (pi: ExtensionAPI) {
           process.kill(-child.pid!, sig);
         } catch {}
       };
-      // SIGTERM lets runner.py close the tab. SIGKILL covers a hung runner.
       let killTimer: ReturnType<typeof setTimeout> | undefined;
       const stop = () => {
         killGroup("SIGTERM");
         killTimer ??= setTimeout(() => killGroup("SIGKILL"), 5_000);
       };
       signal?.addEventListener("abort", stop, { once: true });
-      // Chrome approval prompts and slow pages both count; MAX_STEPS caps actions.
       let timedOut = false;
       const timer = setTimeout(() => {
         timedOut = true;
@@ -213,8 +203,6 @@ export default function (pi: ExtensionAPI) {
       } finally {
         clearTimeout(timer);
         signal?.removeEventListener("abort", stop);
-        // The runner exits on its own after a result. Without one, a throw
-        // above or a closed stdout can leave it running.
         if (!result && child.exitCode === null) stop();
         else clearTimeout(killTimer);
       }
@@ -226,7 +214,6 @@ export default function (pi: ExtensionAPI) {
             ? "was aborted"
             : "exited without a result";
         const error = `browser_task: runner ${why}. The goal may have partly run in the page.`;
-        // A result, not a throw, so the text-helper usage still counts.
         return {
           content: [
             {
@@ -273,7 +260,6 @@ export default function (pi: ExtensionAPI) {
           text: result.text.slice(0, 4000),
         },
         ...(usage ? { usage } : {}),
-        // runner.py reports its own crash as "error". Agent statuses stay results the model judges.
         ...(result.status === "error" ? { isError: true } : {}),
       };
     },

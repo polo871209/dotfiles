@@ -1,5 +1,3 @@
-// Single consolidated LSP tool: one `action` enum instead of one tool per op,
-// to cut the repeated schema and description sent on every turn.
 import * as fs from "node:fs";
 import { Type } from "typebox";
 import {
@@ -26,9 +24,6 @@ import {
   type LspLocation,
 } from "./utils";
 
-// Repo-wide diagnostics (no file/files): list tracked and untracked-unignored
-// files (git already knows what to skip), drop extensions no LSP client
-// attaches to, and cap the batch so one call can't wedge nvim.
 const WORKSPACE_DIAG_MAX_FILES = 300;
 const WORKSPACE_DIAG_MAX_BYTES = 1_500_000;
 const SKIP_EXTS = new Set([
@@ -284,11 +279,6 @@ async function runRename(
   if (!params.new_name)
     return err('LSP error: action "rename" requires new_name');
   const file = toAbs(normalizeAtPath(params.file), ctx.cwd);
-  // Tool calls run in parallel, so a rename that writes N files can interleave
-  // with an `edit` on one of them and lose a change. Queue on the anchor file,
-  // the same per-file queue `edit` and `write` take. The call-site files are
-  // only known after the driver returns, so they stay unqueued: this narrows
-  // the race to the anchor rather than closing it.
   return withFileMutationQueue(file, () =>
     withDriver<RenameResult>(
       ctx,
@@ -316,9 +306,6 @@ async function runRename(
   );
 }
 
-// Same teardown as the /lsp-restart command, then a warm respawn via a
-// status call so the result reflects a real, healthy daemon instead of
-// deferring the failure to the next navigation call.
 async function runRestart(
   ctx: Parameters<Parameters<typeof defineTool>[0]["execute"]>[4],
   signal: AbortSignal | undefined,
@@ -407,7 +394,6 @@ async function runDiagnostics(
 export const lspTool = defineTool({
   name: "lsp",
   label: "LSP",
-  // Worst case of all actions: rename writes files, restart kills the server.
   annotations: {
     readOnlyHint: false,
     destructiveHint: true,
@@ -469,8 +455,6 @@ export const lspTool = defineTool({
       Type.String({ description: "New name; required for action=rename." }),
     ),
   }),
-  // Every action reports through `text`. The counts let eval and codemode
-  // scripts branch without parsing prose.
   outputSchema: Type.Object({
     success: Type.Boolean(),
     text: Type.String({ description: "The result as the model sees it" }),

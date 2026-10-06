@@ -1,33 +1,17 @@
--- pi-lsp driver — loaded into the shared nvim daemon (see nvim.ts), possibly
--- by a peer pi process rather than this one. Exposes _G.PiLsp = { hover,
--- definition, references, implementation, type_definition, document_symbols,
--- diagnostics, rename, status } for the nav tools.
--- Caches one buffer per file (mtime-invalidated) so repeat queries are warm.
--- Eviction is PiDaemon.gc's job: this chunk is re-executed on every edit, so
--- any bookkeeping kept here would not survive to reap what it opened.
-
 local M = {}
 _G.PiLsp = M
 
 local ATTACH_TIMEOUT_MS = 2500
 local REQ_TIMEOUT_MS = 5000
--- Cap on waiting for initial project indexing (vtsls/gopls/rust-analyzer
--- emit `$/progress` while building their index; cross-file results are
--- partial until that finishes). Warm calls skip this since the counter is 0.
 local PROGRESS_TIMEOUT_MS = 8000
 
--- file (absolute) → bufnr. Reused so repeat queries don't re-:edit.
 local bufs = {}
--- file → mtime (ns). Reload buffer if disk newer.
 local mtimes = {}
 
 local function touch(bufnr)
     if _G.PiDaemon and _G.PiDaemon.touch then _G.PiDaemon.touch(bufnr) end
 end
 
--- Track in-flight WorkDoneProgress tokens via the LspProgress autocmd
--- (nvim 0.10+). When all begin tokens have matching end events, the server
--- is idle and cross-file queries are safe to send.
 local in_flight = 0
 local seen_tokens = {}
 vim.api.nvim_create_autocmd('LspProgress', {
@@ -63,11 +47,6 @@ end
 -- check this first.
 local function file_exists(file) return vim.uv.fs_stat(file) ~= nil end
 
--- Opens/refreshes the buffer and fires ft detection (which triggers
--- vim.lsp.enable() attach), but never blocks on attach or indexing. Callers
--- that fan out over many files (M.diagnostics) need every server spawned
--- before waiting on any of them, so their cold-start + initial indexing runs
--- concurrently across servers instead of serialized file-by-file.
 local function open_buf_nowait(file)
     local existing = bufs[file]
     local current_mtime = file_mtime(file)
@@ -80,7 +59,6 @@ local function open_buf_nowait(file)
     bufs[file] = b
     mtimes[file] = current_mtime
     touch(b)
-    -- Force ft detection + autocmds so vim.lsp.enable() triggers attach.
     pcall(function() vim.cmd 'filetype detect' end)
     pcall(function() vim.cmd 'doautocmd BufRead' end)
     pcall(function() vim.cmd 'doautocmd FileType' end)
@@ -89,10 +67,7 @@ end
 
 local function open_buf(file)
     local b = open_buf_nowait(file)
-    -- Wait for LSP attach (best-effort).
     vim.wait(ATTACH_TIMEOUT_MS, function() return #vim.lsp.get_clients { bufnr = b } > 0 end, 50)
-    -- Then wait for any initial project indexing to finish so cross-file
-    -- queries (references, definition) return complete results on first try.
     wait_progress_done(PROGRESS_TIMEOUT_MS)
     return b
 end
@@ -110,7 +85,6 @@ local function find_col(bufnr, line_1idx, symbol)
 end
 
 local function make_position_params(bufnr, line_1idx, symbol)
-    -- Brief wait if LSP not yet attached (cold buffer can race the request).
     if #vim.lsp.get_clients { bufnr = bufnr } == 0 then vim.wait(1500, function() return #vim.lsp.get_clients { bufnr = bufnr } > 0 end, 50) end
     local clients = vim.lsp.get_clients { bufnr = bufnr }
     if #clients == 0 then return nil, 'no LSP attached' end
@@ -178,7 +152,6 @@ local function normalize_locations(res)
         if result then
             if not vim.islist(result) then result = { result } end
             for _, loc in ipairs(result) do
-                -- LocationLink → Location
                 local uri = loc.uri or loc.targetUri
                 local range = loc.range or loc.targetSelectionRange or loc.targetRange
                 if uri and range then
@@ -211,10 +184,6 @@ function M.references(file, line, symbol)
     local ok, res = pcall(vim.lsp.buf_request_sync, b, 'textDocument/references', params, REQ_TIMEOUT_MS)
     if not ok then return { ok = false, error = 'request failed' } end
     local locations = normalize_locations(res)
-    -- vtsls (and similar lazy-loading TS servers) discover files on demand;
-    -- a first references call returns only the declaration but primes the
-    -- project model. If we got <= 1 hit, retry once — the second call sees
-    -- the newly discovered files.
     if #locations <= 1 then
         wait_progress_done(2000)
         local ok2, res2 = pcall(vim.lsp.buf_request_sync, b, 'textDocument/references', params, REQ_TIMEOUT_MS)
@@ -223,7 +192,6 @@ function M.references(file, line, symbol)
     return { ok = true, locations = locations }
 end
 
--- Shared body for position → location-list methods (definition-shaped).
 local function loc_request(file, line, symbol, method)
     if not file_exists(file) then return { ok = false, error = 'file not found: ' .. file } end
     local b = open_buf(file)
@@ -238,8 +206,6 @@ function M.implementation(file, line, symbol) return loc_request(file, line, sym
 
 function M.type_definition(file, line, symbol) return loc_request(file, line, symbol, 'textDocument/typeDefinition') end
 
--- Unique URIs touched by a WorkspaceEdit, in the shape callers need to save
--- affected buffers and report a per-file edit count afterward.
 local function collect_edit_uris(edit)
     local uris = {}
     local seen = {}
@@ -275,9 +241,6 @@ local function edits_for_uri(edit, uri)
     return 0
 end
 
--- Renames the symbol at file:line to new_name via textDocument/rename, then
--- applies and saves the returned WorkspaceEdit across every affected file
--- (vim.lsp.util.apply_workspace_edit edits buffers in-memory only).
 function M.rename(file, line, symbol, new_name)
     if not file_exists(file) then return { ok = false, error = 'file not found: ' .. file } end
     if not new_name or new_name == '' then return { ok = false, error = 'new_name is required' } end
@@ -323,7 +286,6 @@ function M.rename(file, line, symbol, new_name)
     return { ok = true, files = out_files, edit_count = total }
 end
 
--- LSP SymbolKind enum (1-indexed) → label.
 local SYMBOL_KINDS = {
     'file',
     'module',
@@ -390,11 +352,8 @@ function M.document_symbols(file)
     return { ok = true, symbols = out }
 end
 
--- Shared lint/diagnostic helpers on _G.PiLspShared; feedback.lua (loaded after,
--- into the same nvim) reuses them instead of duplicating.
 _G.PiLspShared = _G.PiLspShared or {}
 
--- Async/network linters (semgrep) leave orphan jobs in a sync pull; skip here.
 _G.PiLspShared.SLOW_LINTERS = { semgrep = true }
 
 -- nvim-lint's try_lint() always targets the current buffer and ignores any
@@ -410,10 +369,6 @@ function _G.PiLspShared.run_fast_lint(bufnr)
         if not _G.PiLspShared.SLOW_LINTERS[name] then table.insert(allowed, name) end
     end
     if #allowed == 0 then return end
-    -- nvim/lua/lint_patch.lua defers per-linter fixups off startup, so they land
-    -- on first use, and it also knows which linters cannot answer for a given
-    -- buffer. This path calls try_lint directly instead of going through
-    -- nvim/plugin/lint.lua, so it has to do both itself.
     pcall(function()
         local patch = require 'lint_patch'
         allowed = patch.filter(allowed, bufnr)
@@ -425,10 +380,6 @@ function _G.PiLspShared.run_fast_lint(bufnr)
     end)
 end
 
--- Fires pull requests without blocking: callers already poll
--- vim.diagnostic.get, and a sync round trip per client would only serialize
--- fan-out over many buffers. get_clients{method=...} (0.10+) uses
--- supports_method, which also covers dynamic registration.
 function _G.PiLspShared.pull_diagnostics(bufnr)
     local method = vim.lsp.protocol.Methods.textDocument_diagnostic
     local clients = vim.lsp.get_clients { bufnr = bufnr, method = method }
@@ -438,25 +389,17 @@ function _G.PiLspShared.pull_diagnostics(bufnr)
     end
 end
 
--- Pull-only diagnostics for the given files. Unlike PiFeedback.run this never
--- formats, applies code-actions, or writes — read-only verification the agent
--- can call instead of a slow full `tsc`. Reuses the warm buffer cache.
 function M.diagnostics(files)
     local sev = { 'error', 'warn', 'info', 'hint' }
     local out = { ok = true, diagnostics = {} }
     local opened = {}
     local seen = {}
     for _, file in ipairs(files) do
-        -- Dedupe: a repeated path would otherwise open the same buffer twice
-        -- and double-count its diagnostics below.
         if type(file) == 'string' and not seen[file] and vim.uv.fs_stat(file) then
             seen[file] = true
             table.insert(opened, open_buf_nowait(file))
         end
     end
-    -- One combined wait for attach, then one for indexing. The loop above
-    -- already spawned every server, so cold start and indexing overlap instead
-    -- of running file by file.
     vim.wait(ATTACH_TIMEOUT_MS, function()
         for _, b in ipairs(opened) do
             if vim.api.nvim_buf_is_valid(b) and #vim.lsp.get_clients { bufnr = b } == 0 then return false end
@@ -468,9 +411,6 @@ function M.diagnostics(files)
         _G.PiLspShared.pull_diagnostics(b)
         _G.PiLspShared.run_fast_lint(b)
     end
-    -- Servers push diagnostics late. Wait until the total count across all
-    -- files holds steady for two polls (works at zero too), so multi-file calls
-    -- don't drop stragglers and clean files don't burn the full cap.
     local function total_diags()
         local n = 0
         for _, b in ipairs(opened) do
@@ -481,9 +421,6 @@ function M.diagnostics(files)
     local last = -1
     local stable = 0
     local start = vim.uv.hrtime()
-    -- fast linters (eslint_d, ...) spawn a subprocess async and take a beat
-    -- to post; two back-to-back polls can both read 0 before that lands,
-    -- so require a time floor too, not just a stable-count, before exiting.
     vim.wait(3000, function()
         local n = total_diags()
         stable = (n == last) and (stable + 1) or 0

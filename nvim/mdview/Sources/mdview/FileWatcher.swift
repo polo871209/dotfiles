@@ -1,7 +1,5 @@
 import Foundation
 
-/// Calls `changed` with the new text when the content of the file at `path` changes on disk.
-/// Editors and agents either write in place or rename a temp file over the target, so this watches the file and its directory.
 @MainActor
 final class FileWatcher {
     let path: String
@@ -9,7 +7,6 @@ final class FileWatcher {
     private var directory: DispatchSourceFileSystemObject?
     private var file: DispatchSourceFileSystemObject?
     private var debounce: Task<Void, Never>?
-    /// Last content read from disk. A touch, a chmod, or another file in the directory reads the same text and reports nothing.
     private var text: String?
 
     init(path: String, changed: @escaping @MainActor (String) -> Void) {

@@ -1,7 +1,3 @@
-// Customizes pi TUI: input text color, slim footer, and the autocomplete
-// dropdown as a floating overlay that covers the conversation instead of
-// pushing the editor up. Everything hangs off ThemedEditor, installed through
-// setEditorComponent, so stock editors stay untouched.
 import {
   CustomEditor,
   type ExtensionAPI,
@@ -23,8 +19,6 @@ import {
 } from "@earendil-works/pi-tui";
 
 const SGR_RESET = "\x1b[0m";
-// Matches only decoration lines (a solid rule or a "↑ 3 more" scroll hint), so
-// a real input line of digits or words still gets colored.
 const BORDER =
   /^(?:\x1b\[[0-9;]*m)*(?:─+|[↑↓]\s*\d+\s*more)(?:\x1b\[[0-9;]*m)*$/;
 
@@ -34,11 +28,9 @@ const colorInputLine = (line: string, theme: PiTheme) => {
   return `${input}${line.replaceAll(SGR_RESET, `${SGR_RESET}${input}`)}${SGR_RESET}`;
 };
 
-// Fallback for editors other than ThemedEditor, which supplies the theme's userMessageBg.
 const OVERLAY_BG = "\x1b[48;2;60;56;54m";
 
 const wrapWithBg = (line: string, width: number, bg: string): string => {
-  // Reapply bg after each inner reset so nested ANSI codes don't strip it.
   const re = line.replaceAll(SGR_RESET, `${SGR_RESET}${bg}`);
   const filler = " ".repeat(Math.max(0, width - visibleWidth(line)));
   return `${bg}${re}${filler}${SGR_RESET}`;
@@ -96,16 +88,11 @@ const normalizeToSingleLine = (text: string) =>
   text.replace(/[\r\n]+/g, " ").trim();
 
 class DropdownOverlay implements Component {
-  // Scroll window of the list we last drew. Reset when the editor swaps in a
-  // new SelectList (it does so on every keystroke that refilters).
   private viewport: { list: SelectListLike; top: number } | null = null;
 
   constructor(private readonly editor: EditorWithOverlay) {}
 
   render(width: number): string[] {
-    // Read the live list at composite time, never a snapshot taken during
-    // editor.render: the editor replaces autocompleteList on every refilter
-    // and clears it on cancel, so a snapshot is one frame stale.
     if (!isAutocompleteOpen(this.editor)) return [];
     const list = this.editor.autocompleteList as SelectListLike;
     const bg =
@@ -115,10 +102,6 @@ class DropdownOverlay implements Component {
     );
   }
 
-  // Stock SelectList keeps the selected row pinned to the middle of the
-  // window once the list scrolls, so arrow-down moves the items instead of
-  // the marker. Draw a conventional dropdown instead: the marker walks to
-  // the edge, then the window scrolls by one.
   private renderList(list: SelectListLike, width: number): string[] {
     const items = list.filteredItems;
     const selected = list.selectedIndex;
@@ -131,7 +114,6 @@ class DropdownOverlay implements Component {
       typeof list.renderItem !== "function" ||
       typeof list.getPrimaryColumnWidth !== "function"
     ) {
-      // SelectList internals changed; fall back to the stock renderer.
       return list.render(width);
     }
     const count = items.length;
@@ -171,8 +153,6 @@ class DropdownOverlay implements Component {
     return lines;
   }
 
-  // Fullscreen mode routes the mouse to the overlay under the pointer. Without
-  // this, a wheel or click on the dropdown does nothing.
   handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
     if (!isAutocompleteOpen(this.editor)) return undefined;
     const list = this.editor.autocompleteList as SelectListLike;
@@ -192,11 +172,8 @@ class DropdownOverlay implements Component {
   invalidate() {}
 }
 
-const FOOTER_ROWS = 1; // pi's footer is one row tall
+const FOOTER_ROWS = 1;
 
-// Called synchronously from the editor's render. Safe because the screen
-// renders the component tree first and composites overlays afterwards, so
-// a stack push or splice here is observed in the same frame.
 const syncOverlay = (editor: EditorWithOverlay, editorHeight: number) => {
   const tui = editor.tui;
   if (!tui) return;
@@ -207,29 +184,18 @@ const syncOverlay = (editor: EditorWithOverlay, editorHeight: number) => {
       handle: null,
       comp: new DropdownOverlay(editor),
       opts: {
-        // Bottom-left anchor, lifted by (footer + editor height), keeps the
-        // overlay's bottom edge one row above the editor for any item count.
-        // TUI re-resolves the anchor on each render with the live overlay
-        // height.
         anchor: "bottom-left",
         offsetY: 0,
         col: 0,
         width: "100%",
         maxHeight: 0,
         nonCapturing: true,
-        // Render only while the editor holds focus and a list is open. A
-        // selector (ctx.ui.select, model/settings pickers) swaps the editor out
-        // of the tree, so editor.render stops firing and cannot hide this
-        // overlay, which would then linger on top of the selector.
         visible: () => editor.focused === true && isAutocompleteOpen(editor),
       },
     };
     editor.__overlay = s;
   }
 
-  // TUI keeps a reference to this options object and re-reads it on every
-  // composite, so updating in place repositions the overlay in the same
-  // frame without a hide/show round trip.
   s.opts.offsetY = -(FOOTER_ROWS + editorHeight);
   s.opts.maxHeight = (editor.autocompleteMaxVisible ?? 5) + 1;
 
@@ -241,8 +207,6 @@ const syncOverlay = (editor: EditorWithOverlay, editorHeight: number) => {
   }
 };
 
-// Builds before this one wrapped Editor.prototype.render. Restore the
-// original so a /reload in a long-lived pi does not draw the dropdown twice.
 const AC_TAG = "__acOverlay";
 const removeLegacyPrototypePatch = () => {
   const proto = Editor.prototype as unknown as {
@@ -260,14 +224,11 @@ class ThemedEditor extends CustomEditor {
     keybindings: KeybindingsManager,
     readonly getTheme: () => PiTheme,
   ) {
-    // Same as pi's default editor, which draws working status in its border.
     super(tui, editorTheme, keybindings, { embedWorkingStatus: true });
   }
 
   render(width: number): string[] {
     const theme = this.getTheme();
-    // Strip the inline dropdown so the editor occupies the same rows whether
-    // autocomplete is open or not. The overlay draws the list instead.
     // autocompleteState is private in pi-tui, hence the cast.
     const self = this as unknown as EditorWithOverlay;
     const state = self.autocompleteState;
@@ -297,8 +258,6 @@ const installInputColor = (pi: ExtensionAPI) => {
   });
 };
 
-// Working loader: subtle pulse + elapsed time so a long turn is visibly
-// alive and its age readable at a glance.
 const installWorking = (pi: ExtensionAPI) => {
   let timer: ReturnType<typeof setInterval> | null = null;
   const stop = () => {
@@ -308,8 +267,6 @@ const installWorking = (pi: ExtensionAPI) => {
     }
   };
 
-  // Frames are pre-colored strings, so agent_start rebuilds them to follow a
-  // theme change.
   const applyIndicator = (ctx: ExtensionContext) => {
     const t = ctx.ui.theme;
     ctx.ui.setWorkingIndicator({
@@ -328,8 +285,6 @@ const installWorking = (pi: ExtensionAPI) => {
     if (ctx.mode === "tui") applyIndicator(ctx);
   });
 
-  // One timer per run: agent_start fires again for each retry, compaction
-  // resume and lsp repair turn, and agent_settled fires once at the end.
   pi.on("agent_start", async (_event, ctx) => {
     if (ctx.mode !== "tui" || timer) return;
     applyIndicator(ctx);
@@ -355,7 +310,6 @@ const installWorking = (pi: ExtensionAPI) => {
   pi.on("session_shutdown", async () => stop());
 };
 
-// Tool outputs start collapsed; ctrl+o still expands on demand.
 const installCollapsedTools = (pi: ExtensionAPI) => {
   pi.on("session_start", async (_event, ctx) => {
     if (ctx.mode !== "tui") return;
@@ -363,7 +317,6 @@ const installCollapsedTools = (pi: ExtensionAPI) => {
   });
 };
 
-// e.g. 1000 -> "1.0k", 1000000 -> "1.0M".
 const formatTokenCount = (n: number): string => {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
@@ -398,8 +351,6 @@ const installFooter = (pi: ExtensionAPI) => {
             ? `${usage.percent.toFixed(1)}%/${formatTokenCount(usage.contextWindow)}`
             : "";
 
-        // Subagent panes are narrow tmux slivers — the full footer wraps or
-        // gets clipped, so show only usage/model/thinking there.
         if (process.env.PI_IS_SUBAGENT === "1") {
           const subLeft = [
             usageText,
@@ -410,16 +361,12 @@ const installFooter = (pi: ExtensionAPI) => {
           return [theme.fg("dim", subLeft)];
         }
 
-        // lark/gws statuses come from skill-toggle.ts via ctx.ui.setStatus,
-        // exposed here through footerData.
         const statuses = footerData.getExtensionStatuses();
         const larkText = statuses.get("lark") ?? "";
-        // Lark brand blue.
         const larkColored = larkText
           ? `\x1b[38;2;51;112;255m${larkText}\x1b[39m`
           : "";
         const gwsText = statuses.get("gws") ?? "";
-        // Google brand blue.
         const gwsColored = gwsText
           ? `\x1b[38;2;66;133;244m${gwsText}\x1b[39m`
           : "";

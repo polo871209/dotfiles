@@ -1,6 +1,3 @@
-// Shared factory for on-demand skill-pack toggles (used by skill-packs.ts): clone an
-// upstream skills repo into ~/.cache, register it with pi only when enabled,
-// and expose /<name> [update] to flip/sync it.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { execFile } from "node:child_process";
 import { existsSync, renameSync, rmSync } from "node:fs";
@@ -26,14 +23,10 @@ const git = (args: string[], cwd?: string): Promise<string> =>
   });
 
 interface SkillToggleConfig {
-  /** Command name, e.g. "lark" (registers /lark). */
   name: string;
-  /** Human-readable label used in notifications, e.g. "Lark/Feishu skills". */
   label: string;
   repoUrl: string;
-  /** Directory under ~/.cache to clone into. */
   cacheDirName: string;
-  /** Subdirectory of the clone containing SKILL.md files. */
   skillsSubdir?: string;
 }
 
@@ -47,11 +40,6 @@ export function registerSkillToggle(
     ? join(cloneDir, config.skillsSubdir)
     : cloneDir;
 
-  // The flag cannot live in module state, because /reload re-runs this module
-  // and /<name> on|off itself calls ctx.reload(). It lives in the session as a
-  // custom entry. Reload keeps the SessionManager, so the entry survives, as
-  // does a later /resume. A new session has no entry and starts off. Custom
-  // entries never reach the LLM.
   const ENTRY_TYPE = "skill-pack-toggle";
   interface ToggleEntry {
     name: string;
@@ -65,8 +53,6 @@ export function registerSkillToggle(
     pi.appendEntry<ToggleEntry>(ENTRY_TYPE, { name, enabled: v });
   };
 
-  // Last write wins. Read before resources_discover, which pi emits after
-  // session_start on both startup and reload.
   const restoreEnabled = (entries: readonly { type: string }[]): void => {
     for (const entry of entries) {
       if (entry.type !== "custom") continue;
@@ -77,8 +63,6 @@ export function registerSkillToggle(
     }
   };
 
-  // Clone beside the target and rename, so a killed clone never leaves a
-  // half-filled cloneDir that blocks the next clone.
   const ensureClone = async (): Promise<void> => {
     if (existsSync(skillsDir)) return;
     const partial = `${cloneDir}.partial`;
@@ -88,8 +72,6 @@ export function registerSkillToggle(
     renameSync(partial, cloneDir);
   };
 
-  // Clone if missing, else pull. Returns a human-readable outcome; a pull
-  // failure (offline etc.) is non-fatal — the stale clone still works.
   const syncClone = async (): Promise<string> => {
     if (!existsSync(skillsDir)) {
       await ensureClone();
@@ -108,9 +90,6 @@ export function registerSkillToggle(
     return { skillPaths: [skillsDir] };
   });
 
-  // Publish state through the footer-status channel (reset on every reload), so
-  // extensions need not reach into each other's state.
-  // getBranch(): a toggle recorded on a branch that /tree left does not count.
   pi.on("session_start", async (_event, ctx) => {
     restoreEnabled(ctx.sessionManager.getBranch());
     ctx.ui.setStatus(name, isEnabled() ? `${name}:on` : undefined);
@@ -149,7 +128,6 @@ export function registerSkillToggle(
         return;
       }
 
-      // Bare /<name>: flip.
       if (isEnabled()) {
         setEnabled(false);
         ctx.ui.notify(`${label} off — reloading`, "info");

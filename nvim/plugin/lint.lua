@@ -2,8 +2,6 @@ vim.pack.add { 'https://github.com/mfussenegger/nvim-lint' }
 
 local lint = require 'lint'
 
--- semgrep: free SAST. `--config auto` pulls registry rules (cached after first
--- fetch). Not built into nvim-lint, so define it.
 local semgrep_sev = {
     ERROR = vim.diagnostic.severity.ERROR,
     WARNING = vim.diagnostic.severity.WARN,
@@ -36,9 +34,6 @@ lint.linters.semgrep = {
     end,
 }
 
--- zlint: third-party Zig linter with its own semantic analyzer (zls/ast-check
--- only catch syntax + compile errors). Catches unsafe undefined, swallowed
--- errors, dead decls, no-print, etc. NDJSON output, one object per line.
 local zlint_sev = {
     err = vim.diagnostic.severity.ERROR,
     error = vim.diagnostic.severity.ERROR,
@@ -47,18 +42,10 @@ local zlint_sev = {
     info = vim.diagnostic.severity.INFO,
 }
 lint.linters.zlint = {
-    -- zlint (v0.8.1) emits nothing for absolute paths, so cd into the file's
-    -- dir and pass its basename. Wrap in sh to make that hermetic regardless
-    -- of nvim's cwd.
-    cmd = 'sh',
+    cmd = 'zlint',
     stdin = false,
-    append_fname = false,
-    args = {
-        '-c',
-        'cd "$(dirname "$1")" && zlint --format json "$(basename "$1")"',
-        'sh',
-        function() return vim.api.nvim_buf_get_name(0) end,
-    },
+    append_fname = true,
+    args = { '--format', 'json' },
     stream = 'stdout',
     ignore_exitcode = true,
     parser = function(output, _)
@@ -97,18 +84,14 @@ lint.linters_by_ft = {
     zig = { 'zlint' },
 }
 
--- semgrep is too slow (network) to run on every keystroke pause; gate it to
--- save. Fast linters run on read/save/InsertLeave as usual.
 local SLOW_LINTERS = { semgrep = true }
 
 local function lint_buf(on_save)
     if not vim.bo.modifiable then return end
     local names = lint.linters_by_ft[vim.bo.filetype]
     if not names then return end
-    -- On save run everything (except under headless agent nvim, whose
-    -- lsp-feedback loop drives diagnostics on its own cadence). Otherwise
-    -- skip slow (network) linters.
-    if not (on_save and not vim.g.pi_agent) then names = vim.tbl_filter(function(n) return not SLOW_LINTERS[n] end, names) end
+    local run_slow = on_save and not vim.g.pi_agent
+    if not run_slow then names = vim.tbl_filter(function(n) return not SLOW_LINTERS[n] end, names) end
     names = require('lint_patch').filter(names, 0)
     if #names == 0 then return end
     require('lint_patch').apply(names)

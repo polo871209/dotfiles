@@ -1,9 +1,7 @@
 import AppKit
-
-// Protocol.swift holds the wire format. EOF on stdin, Esc, q, or closing the window quits.
+import Carbon.HIToolbox
 
 let app = NSApplication.shared
-// No Dock icon and no app switcher entry: the window is a temporary popup.
 app.setActivationPolicy(.accessory)
 
 // Key equivalents such as Cmd-C reach the web view only through a main menu.
@@ -21,28 +19,25 @@ app.mainMenu = menu
 
 let viewer = Viewer()
 
-// Safari's history keys: Cmd-[ and Cmd-], Cmd-Left and Cmd-Right, and the mouse side buttons.
 NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .otherMouseDown]) { event in
     let delta: Int?
     var quit = false
     var find = false
     if event.type == .otherMouseDown {
-        // Buttons 3 and 4 are the side buttons, back and forward.
-        delta = [3: -1, 4: 1][event.buttonNumber]
+        let backButton = 3, forwardButton = 4
+        delta = [backButton: -1, forwardButton: 1][event.buttonNumber]
     } else {
         let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad, .function])
         let key = event.charactersIgnoringModifiers
-        // In the find field, Cmd-Left, q, and Esc keep their text-field meaning.
         let typing = event.window?.firstResponder is NSText
-        // 123 and 124 are the Left and Right arrows. 53 is Esc.
-        if !typing, mods == .command, key == "[" || event.keyCode == 123 {
+        if !typing, mods == .command, key == "[" || Int(event.keyCode) == kVK_LeftArrow {
             delta = -1
-        } else if !typing, mods == .command, key == "]" || event.keyCode == 124 {
+        } else if !typing, mods == .command, key == "]" || Int(event.keyCode) == kVK_RightArrow {
             delta = 1
         } else {
             delta = nil
             find = mods == .command && key == "f"
-            quit = !typing && mods.isEmpty && (event.keyCode == 53 || key == "q")
+            quit = !typing && mods.isEmpty && (Int(event.keyCode) == kVK_Escape || key == "q")
         }
     }
     guard delta != nil || quit || find else { return event }
@@ -52,7 +47,6 @@ NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .otherMouseDown]) { event 
         } else if find {
             viewer.find.shown = true
         } else if viewer.find.shown {
-            // Esc or q with the bar open but focus on the page closes the bar, not the window.
             viewer.find.shown = false
         } else {
             NSApp.terminate(nil)

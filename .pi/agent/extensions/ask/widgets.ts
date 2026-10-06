@@ -1,7 +1,3 @@
-// Leaf TUI widgets for the questionnaire dialog: the wrapping option list and
-// its typed wrappers (option list, multi-select, chat row), plus the tab bar
-// and submit picker. Each is purely props-driven via setProps.
-
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import {
   type Component,
@@ -13,9 +9,6 @@ import {
 import type { QuestionData } from "./schema";
 import { sentinelLabel } from "./schema";
 
-// Grapheme-aware cursor extraction: pi-tui's Input advances `cursor` by
-// grapheme-cluster code-unit length, so the cursor can land between code units
-// of one cluster (emoji, ZWJ, combining marks).
 const graphemeSegmenter = new Intl.Segmenter(undefined, {
   granularity: "grapheme",
 });
@@ -112,7 +105,6 @@ class WrappingSelect implements Component {
     return lines;
   }
 
-  /** [startRow, endRow) of the focused item within render(width) output. */
   focusedItemRowRange(width: number): [number, number] {
     if (this.items.length === 0) return [0, 0];
     const { startIndex, endIndex } = this.computeVisibleWindow();
@@ -187,10 +179,6 @@ class WrappingSelect implements Component {
     ];
   }
 
-  // Cursor as ECMA-48 SGR 7 reverse-video on the cell at the cursor (not an
-  // inserted glyph). NBSP at end-of-buffer avoids wrapTextWithAnsi breaking
-  // the line on the whitespace under the cursor. CURSOR_MARKER (zero-width)
-  // positions the hardware cursor.
   private renderInlineInputRow(
     rowPrefix: string,
     continuationPrefix: string,
@@ -205,7 +193,9 @@ class WrappingSelect implements Component {
     const before = buffer.slice(0, offset);
     const [firstGrapheme] = graphemeSegmenter.segment(buffer.slice(offset));
     const rawAt = firstGrapheme ? firstGrapheme.segment : "";
-    const atCursor = rawAt === "" || rawAt === " " ? "\u00a0" : rawAt;
+    const unbreakableCursorCell = "\u00a0";
+    const atCursor =
+      rawAt === "" || rawAt === " " ? unbreakableCursorCell : rawAt;
     const after = buffer.slice(offset + rawAt.length);
     const raw = `${before}${CURSOR_MARKER}\x1b[7m${atCursor}\x1b[27m${after}`;
     const wrapped = wrapTextWithAnsi(raw, contentWidth);
@@ -242,8 +232,6 @@ class WrappingSelect implements Component {
     );
   }
 }
-
-// OptionListView — single-select option list (wraps one WrappingSelect).
 
 const MAX_VISIBLE_OPTIONS = 10;
 
@@ -296,8 +284,6 @@ export class OptionListView {
     return this.select.render(width).length;
   }
 }
-
-// MultiSelectView — checkbox list + Next/Submit sentinel.
 
 export const MULTI_SUBMIT_LABEL = "Submit";
 
@@ -396,7 +382,7 @@ export class MultiSelectView {
       if (opt.description)
         total += wrapTextWithAnsi(opt.description, contentWidth).length;
     }
-    return total + 1; // Next sentinel row.
+    return total + 1;
   }
 
   private prefixVisibleWidth(): number {
@@ -405,8 +391,6 @@ export class MultiSelectView {
     );
   }
 }
-
-// ChatRowView — single-item WrappingSelect rendered in the footer.
 
 interface ChatRowViewProps {
   focused: boolean;
@@ -433,8 +417,6 @@ export class ChatRowView implements Component {
     return this.select.render(width);
   }
 }
-
-// TabBar — one segment per question + a Submit segment.
 
 export interface TabBarProps {
   tabs: ReadonlyArray<{ label: string; answered: boolean; active: boolean }>;
@@ -480,8 +462,6 @@ export class TabBar implements Component {
     return [truncateToWidth(pieces.join(""), width, ""), ""];
   }
 }
-
-// SubmitPicker — static 2-row Submit / Cancel picker on the Submit tab.
 
 const SUBMIT_LABEL = "Submit answers";
 const CANCEL_LABEL = "Cancel";

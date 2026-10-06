@@ -1,4 +1,3 @@
--- HTTP client for .http files. Agent nvim has no use for interactive requests.
 if vim.g.pi_agent then return end
 
 vim.pack.add { 'https://github.com/mistweaverco/kulala.nvim' }
@@ -22,8 +21,6 @@ local function load(buf)
     pcall(vim.api.nvim_del_augroup_by_id, ft_group)
 
     require('kulala').setup {
-        -- Default also covers javascript/typescript/lua for *.http.{js,ts,lua}
-        -- scripts, which would run the ft hook on every such buffer.
         lsp = { filetypes = { 'http', 'rest' } },
         global_keymaps = {
             -- Entries given here are used verbatim: only kulala's own defaults
@@ -33,17 +30,11 @@ local function load(buf)
         -- Merged per-name over the defaults, so replacing an entry also drops
         -- the key it used to own. The winbar reads the same table, so its
         -- "Verbose (V)" hint follows the remap.
-        --
-        -- Verbose moves to `v` to leave `V` free: the result buffer is a normal
-        -- buffer and linewise visual select is how text gets yanked out of it.
-        -- Tabs move off <C-h>/<C-l>, which shadowed the window+tmux pane
-        -- navigation from plugin/keymap.lua.
         kulala_keymaps = {
             ['Show verbose'] = { 'v', function() require('kulala.ui').show_verbose() end },
             ['Next tab'] = { 'gt', function() require('kulala.ui').show_next_tab() end },
             ['Previous tab'] = { 'gT', function() require('kulala.ui').show_previous_tab() end },
         },
-        -- Restoring needs eager loading plus 'sessionoptions' +=globals.
         session = { restore = false },
     }
 

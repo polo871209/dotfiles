@@ -9,8 +9,6 @@ const BAR = "▎ ";
 export function barWidget(lines: string[]) {
   return (_tui: unknown, theme: Theme) => {
     const container = new Container();
-    // Colors are baked into each Text, so rebuild on invalidate(): a theme
-    // change invalidates components, and `theme` reads the active palette.
     const build = () => {
       container.clear();
       lines.forEach((line, i) => {

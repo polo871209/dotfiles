@@ -1,9 +1,3 @@
-// /subagent — delegate work to an isolated `pi` running as a real interactive
-// agent inside its own tmux pane, split off the calling pane. Single-layer
-// only: agents cannot spawn other subagents (PI_IS_SUBAGENT=1 in the child
-// env makes this extension early-exit before registering its tool). tmux-only:
-// outside tmux there is no pane to split, so the tool is not registered at all.
-//
 // Agents live in pi's standard agents dir (`~/.pi/agent/agents/*.md`) as
 // markdown with YAML frontmatter:
 //   ---
@@ -11,24 +5,15 @@
 //   description: ...
 //   tools: read, grep, find, ls       # optional --tools allowlist
 //   hidden: true                       # optional, invocable but not listed
+//   model: anthropic/claude-sonnet-5-5 # optional, overrides the provider default
+//   thinking: low                      # optional, defaults to the main agent's level
 //   ---
 //   <body, appended to the child's own system prompt>
-//
-// Status comes from the pane title that notifier.ts sets (busy/blocked/done),
-// polled here. Completion and final output come from a result file the child
-// writes on agent_settled, because pane capture is width-wrapped and, in
-// fullscreen mode, holds only the visible screen.
-//
-// Context isolation: only --no-session applies (no parent history). SYSTEM.md,
-// AGENTS.md/CLAUDE.md discovery, skills, and prompt templates load as in any
-// session, and the agent body arrives through --append-system-prompt.
-// folder-context.ts and subagent.ts early-exit under PI_IS_SUBAGENT so a
-// subagent cannot add ancestor AGENTS.md or spawn subagents. The subagent knows
-// only the task string, so write tasks self-contained.
 
 import { execFile, execFileSync } from "node:child_process";
 import { collectTextMessages, extractText } from "./shared/message";
 import { parseStatusTitle } from "./shared/status";
+import { surviveReload } from "./shared/reload";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -48,6 +33,7 @@ import {
   Text,
   visibleWidth,
 } from "@earendil-works/pi-tui";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { JsonValue } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
 
@@ -57,16 +43,27 @@ interface AgentConfig {
   hidden: boolean;
   tools: string[];
   appendPrompt: string;
+  model?: string;
+  thinking?: ThinkingLevel;
 }
 
-// Parent provider -> model every subagent of that session runs on. Same rule
-// for all agents, no per-agent exceptions; unmapped providers inherit the
-// parent's own model.
-const MODEL_BY_PARENT_PROVIDER: Record<string, string> = {
-  anthropic: "anthropic/claude-sonnet-5-5",
+// pi exports the ThinkingLevel type but not its isValidThinkingLevel check.
+const THINKING_LEVELS: Record<ThinkingLevel, true> = {
+  off: true,
+  minimal: true,
+  low: true,
+  medium: true,
+  high: true,
+  xhigh: true,
+  max: true,
 };
 
-const SUBAGENT_THINKING = "high";
+const isThinkingLevel = (value: unknown): value is ThinkingLevel =>
+  typeof value === "string" && Object.hasOwn(THINKING_LEVELS, value);
+
+const SUBAGENT_MODEL_BY_PROVIDER: Record<string, string> = {
+  anthropic: "anthropic/claude-sonnet-5-5",
+};
 
 interface Progress {
   id?: string;
@@ -81,32 +78,20 @@ interface Progress {
   error?: string;
 }
 
-// Registry of every run this session started (foreground or background), keyed
-// by run id. Backs subagent_manage list, steer, and stop. globalThis-backed
-// like resultStore so a reload does not orphan runs in flight.
 interface RunRecord {
   id: string;
-  // Session that started the run. Its entries go there and nowhere else.
   sessionId: string;
   paneId?: string;
   controller: AbortController;
   progress: Progress;
-  // Resolves (never rejects) when the run reaches a terminal state. This is
-  // what subagent_manage (wait) awaits, so a parent that started background
-  // runs blocks exactly as long as they take instead of sleeping a guess.
   settled?: Promise<void>;
 }
-const runsStore = (() => {
-  const g = globalThis as unknown as {
-    __piSubagentRuns?: Map<string, RunRecord>;
-  };
-  return (g.__piSubagentRuns ??= new Map());
-})();
+const runsStore = surviveReload(
+  "__piSubagentRuns",
+  () => new Map<string, RunRecord>(),
+);
 const MAX_TRACKED_RUNS = 50;
 
-// Bound the registry: drop oldest finished runs first once over the cap so a
-// long session doesn't accumulate unbounded history; running ones are kept
-// regardless of age.
 function pruneRunsStore(): void {
   if (runsStore.size <= MAX_TRACKED_RUNS) return;
   const finished = [...runsStore.values()]
@@ -115,34 +100,20 @@ function pruneRunsStore(): void {
   for (const r of finished) {
     if (runsStore.size <= MAX_TRACKED_RUNS) break;
     runsStore.delete(r.id);
-    // The captured result outlives its run record on purpose: it is persisted
-    // as a session entry, so dropping the in-memory copy only means the next
-    // session_start hydrates it back.
   }
 }
 
-// Structured results captured from a run's trailing ```result-json block,
-// keyed by the subagent's own target id ("sub-<agent>-<ts>-<rand>"), so the
-// parent can pull one field instead of re-reading the whole transcript.
-//
-// The map is the read cache. The durable copy is a custom session entry, which
-// costs no LLM context and survives /reload and a /resume in a new process
-// (panes are gone by then).
 const RESULT_ENTRY_TYPE = "subagent-result";
 interface ResultEntry {
   id: string;
   value: unknown;
 }
 
-const resultStore = (() => {
-  const g = globalThis as unknown as {
-    __piSubagentResults?: Map<string, unknown>;
-  };
-  return (g.__piSubagentResults ??= new Map());
-})();
+const resultStore = surviveReload(
+  "__piSubagentResults",
+  () => new Map<string, unknown>(),
+);
 
-// Run lifecycle entries. A "running" entry with no later terminal entry means
-// pi stopped while the run was in progress: a crash, or a quit that killed it.
 const RUN_ENTRY_TYPE = "subagent-run";
 interface RunEntry {
   id: string;
@@ -151,35 +122,23 @@ interface RunEntry {
   error?: string;
 }
 
-// Runs that a previous pi process started and never finished. The next
-// session_start fills it, so wait and result can name the interruption.
 const interruptedRuns = new Map<string, RunEntry>();
 
-// The latest factory's appendEntry, bound to the session that was current when
-// it ran. globalThis-backed because a run outlives /reload, and the old
-// runtime's pi is stale after it.
-const sink = (() => {
-  const g = globalThis as unknown as {
-    __piSubagentSink?: {
-      sessionId?: string;
-      append?: (type: string, data: unknown) => void;
-    };
-  };
-  return (g.__piSubagentSink ??= {});
-})();
+const sink = surviveReload(
+  "__piSubagentSink",
+  (): {
+    sessionId?: string;
+    append?: (type: string, data: unknown) => void;
+  } => ({}),
+);
 
-// Writes only into the session that started the run: after /new or /resume,
-// the entry would land in an unrelated session.
 function persist(sessionId: string, type: string, data: unknown): void {
   if (sink.sessionId !== sessionId) return;
   try {
     sink.append?.(type, data);
-  } catch {
-    /* runtime replaced mid-call; the entry is lost, the run is not */
-  }
+  } catch {}
 }
 
-// Set per run; extractResultBlock has no session handle of its own.
 let persistResult: ((id: string, value: unknown) => void) | undefined;
 
 function hydrateResultStore(entries: readonly { type: string }[]): void {
@@ -197,7 +156,6 @@ function hydrateResultStore(entries: readonly { type: string }[]): void {
   }
   interruptedRuns.clear();
   for (const run of lastRun.values()) {
-    // A run in runsStore survived /reload and still reports for itself.
     if (run.status === "running" && !runsStore.has(run.id))
       interruptedRuns.set(run.id, run);
   }
@@ -216,11 +174,6 @@ function interruptedValue(run: RunEntry): Static<typeof RunValueSchema> {
   };
 }
 
-// ```result-json fenced block a subagent ends its output with.
-// Optional: only stripped and cached when present and valid JSON. Unanchored
-// because pi's input box and status line always trail the final message in the
-// live pane. Last valid block wins, since an echoed task can mention the fence
-// earlier.
 const RESULT_BLOCK_RE = /```result-json\s*\n([\s\S]*?)\n```/g;
 
 function extractResultBlock(
@@ -231,9 +184,7 @@ function extractResultBlock(
   for (const m of text.matchAll(RESULT_BLOCK_RE)) {
     try {
       hit = { value: JSON.parse(m[1]!), index: m.index };
-    } catch {
-      /* invalid JSON stays ordinary transcript text */
-    }
+    } catch {}
   }
   if (!hit) return { text, captured: false };
   resultStore.set(id, hit.value);
@@ -276,7 +227,6 @@ function runValue(
     agent: p.agent,
     status: p.status,
     output: p.output,
-    // Stored values come from JSON.parse.
     ...(resultStore.has(id)
       ? { result: getByPath(resultStore.get(id), fieldPath) as JsonValue }
       : {}),
@@ -306,8 +256,6 @@ const UPDATE_INTERVAL_MS = 150;
 const TASK_PREVIEW_MAX = 140;
 const FORBIDDEN_TOOLS = new Set(["ask_user_question", "subagent"]);
 const DEFAULT_MAX_DURATION_MS = 3_600_000;
-// Runs already stop themselves at their own cap, so this only guards a wait
-// whose record somehow never settles.
 const DEFAULT_WAIT_TIMEOUT_MS = DEFAULT_MAX_DURATION_MS + 60_000;
 const TMUX_POLL_MS = 500;
 
@@ -317,7 +265,6 @@ function tmuxActive(): boolean {
   return !!process.env.TMUX && !!process.env.TMUX_PANE;
 }
 
-// tmux prints plain text on stdout, not JSON — every helper here just trims it.
 async function tmuxOut(args: string[]): Promise<string> {
   try {
     const { stdout } = await execFileAsync("tmux", args, {
@@ -339,24 +286,11 @@ async function tmuxRun(args: string[]): Promise<boolean> {
   }
 }
 
-// Shared panel: concurrent subagents stack in one vertical column. The first
-// splits off the calling pane (side column), later ones split the previous
-// subagent's pane downward, so the column width never grows with agent count. A
-// promise chain serializes split/close calls so concurrent executions cannot
-// race on the panel list.
-//
-// The pane-id list lives on globalThis (pattern from go.ts) because tmux panes
-// survive an extension reload, and a module-scoped array would reset and orphan
-// them.
-const panelSlot = (() => {
-  const g = globalThis as unknown as { __piSubagentPanel?: { ids: string[] } };
-  if (!g.__piSubagentPanel) g.__piSubagentPanel = { ids: [] };
-  return g.__piSubagentPanel;
-})();
+const panelSlot = surviveReload("__piSubagentPanel", () => ({
+  ids: [] as string[],
+}));
 let panelChain: Promise<unknown> = Promise.resolve();
 
-// Drop pane ids whose tmux pane is gone (killed manually, or leaked across a
-// reload) so dead entries don't poison anchor choice and rebalancing.
 async function prunePanel(): Promise<void> {
   const alive: string[] = [];
   for (const id of panelSlot.ids) {
@@ -376,9 +310,6 @@ function withPanelLock<T>(fn: () => Promise<T>): Promise<T> {
   return result;
 }
 
-// Give every pane in the column equal height, not the halving cascade (50%,
-// 25%, 12.5%, ...) of split-window's default. Resizing all but the last is
-// enough, since tmux gives the last the remainder.
 async function rebalancePanel(): Promise<void> {
   const panel = panelSlot.ids;
   if (panel.length < 2) return;
@@ -486,7 +417,6 @@ function loadAgents(): AgentConfig[] {
     } catch {
       continue;
     }
-    // YAML scalars: strings for the flag-like fields, real boolean for `hidden`.
     const { frontmatter, body } = parseFrontmatter<
       Record<string, string | boolean | undefined> & { hidden?: boolean }
     >(content);
@@ -501,12 +431,21 @@ function loadAgents(): AgentConfig[] {
       .split(",")
       .map((t) => t.trim())
       .filter((t) => t.length > 0);
+    const { model, thinking } = frontmatter;
+    if (model !== undefined && typeof model !== "string")
+      throw new Error(`${entry}: model must be a string`);
+    if (thinking !== undefined && !isThinkingLevel(thinking))
+      throw new Error(
+        `${entry}: thinking must be one of ${Object.keys(THINKING_LEVELS).join(", ")}`,
+      );
     out.push({
       name: frontmatter.name,
       description: frontmatter.description,
       hidden: frontmatter.hidden === true,
       tools,
       appendPrompt: body.trim(),
+      model,
+      thinking,
     });
   }
   return out;
@@ -526,7 +465,6 @@ const headTruncate = (s: string, maxBytes: number): string => {
   return buf.subarray(0, maxBytes).toString("utf-8") + "\n…(truncated)";
 };
 
-// Preserves ANSI escapes so colored rows truncate without leaking codes.
 const fitLine = (text: string, maxWidth: number): string => {
   const flat = text.includes("\n") ? text.replace(/\r?\n/g, " ") : text;
   if (visibleWidth(flat) <= maxWidth) return flat;
@@ -549,7 +487,6 @@ const fitLine = (text: string, maxWidth: number): string => {
   return out;
 };
 
-// Throttle leading + trailing.
 function throttle<F extends (...args: never[]) => void>(fn: F, ms: number): F {
   let last = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -614,8 +551,6 @@ const renderCallComponent = (args: SubagentArgs, theme: Theme) => {
   const c = new Container();
   const head = `${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("text", args.agent)}`;
   c.addChild(new Text(head, 0, 0));
-  // First line only, capped — the full task is often a multi-paragraph prompt
-  // we don't want echoed into the conversation.
   const firstLine = args.task.split("\n", 1)[0] ?? "";
   const taskPreview =
     firstLine.length > TASK_PREVIEW_MAX
@@ -721,10 +656,7 @@ const manageParams = () =>
     ),
   });
 
-// Actions models invent for this tool, taken from real transcripts: each one
-// means "show me what it said" or "kill it", so routing beats an error turn.
 const ACTION_ALIASES: Record<string, ManageAction> = {
-  // "Is it done yet" is answered by blocking until it is, output included.
   list: "wait",
   status: "wait",
   transcript: "result",
@@ -757,8 +689,6 @@ const formatRunLine = (r: RunRecord): string => {
   return `${r.id}  [${p.status}]  ${p.agent}  ${dur}${msg ? `  — ${msg}` : ""}`;
 };
 
-// Captured result-json when the run emitted one, else the transcript. Shared
-// by wait and result, so a wait needs no follow-up call.
 const runPayload = (
   id: string,
   transcript: string,
@@ -788,10 +718,6 @@ function toolsFlagValue(
   return expanded.length > 0 ? expanded.join(",") : undefined;
 }
 
-// Pane-title status suffix notifier.ts sets for a subagent pane (see
-// notifier.ts's setWindowStatus): "<title>-busy" / "-blocked" / "-done" / "-idle".
-// A dedicated pane title (not the shared window name) because the subagent
-// pane lives inside the parent's own window.
 async function runInTmux(
   pi: ExtensionAPI,
   agent: AgentConfig,
@@ -813,16 +739,13 @@ async function runInTmux(
   const promptFile = path.join(os.tmpdir(), `pi-subagent-sys-${target}.txt`);
   const taskFile = path.join(os.tmpdir(), `pi-subagent-task-${target}.txt`);
   const resultFile = path.join(os.tmpdir(), `pi-subagent-result-${target}.txt`);
-  // 0600: task/prompt text can carry repo paths and secrets, tmpdir is shared.
   fs.writeFileSync(promptFile, agent.appendPrompt, { mode: 0o600 });
   fs.writeFileSync(taskFile, task, { mode: 0o600 });
   const cleanupFiles = () => {
     for (const f of [promptFile, taskFile, resultFile, `${resultFile}.tmp`]) {
       try {
         fs.unlinkSync(f);
-      } catch {
-        /* best effort */
-      }
+      } catch {}
     }
   };
 
@@ -832,21 +755,14 @@ async function runInTmux(
     `PI_SUBAGENT_RESULT_FILE='${resultFile}'`,
     "pi",
     "--no-session",
-    // Append, not --system-prompt: the flag reads the file itself, and the
-    // child keeps whichever SYSTEM.md pi discovers for this cwd.
     `--append-system-prompt '${promptFile}'`,
   ];
-  // The child must not stop at a project-trust prompt nobody sees, so it
-  // inherits the parent's decision.
   parts.push(trusted ? "--approve" : "--no-approve");
   if (toolsFlag) parts.push(`--tools ${toolsFlag}`);
   parts.push(`--exclude-tools ${[...FORBIDDEN_TOOLS].join(",")}`);
   if (model) parts.push(`--model '${model.replaceAll("'", "'\\''")}'`);
   if (thinking) parts.push(`--thinking ${thinking}`);
   parts.push(`"$(cat '${taskFile}')"`);
-  // Real interactive pi, not --print: the task is the initial prompt, then
-  // pi stays running and idle in the pane afterward — watchable, and you can
-  // type into it directly to steer or follow up.
   const shCmd = parts.join(" ");
 
   const paneId = await acquirePanelSlot(cwd, shCmd);
@@ -865,8 +781,6 @@ async function runInTmux(
       isError: true,
     };
   }
-  // Best effort: name the pane after the subagent for readability before
-  // notifier.ts (running inside it) takes over with status suffixes.
   void tmuxRun(["select-pane", "-t", paneId, "-T", target]);
   record.paneId = paneId;
 
@@ -889,9 +803,6 @@ async function runInTmux(
       break;
     }
 
-    // Result file appearing is the primary completion signal — written
-    // child-side by this same extension on agent_settled, so it holds even
-    // when notifier.ts (pane title) is missing or broken in the child.
     if (fs.existsSync(resultFile)) {
       finalStatus = "idle";
       break;
@@ -908,9 +819,6 @@ async function runInTmux(
     progress.lastMessage = status ? `tmux: ${status}` : "tmux: starting…";
     push();
 
-    // notifier.ts only ever sets "done" from a real agent_end, and a subagent
-    // pane is never OS-focused, so "done" (not the ambiguous initial "idle")
-    // is the terminal signal here — no need to first observe "busy".
     if (status === "done") {
       finalStatus = "idle";
       break;
@@ -920,7 +828,7 @@ async function runInTmux(
       break;
     }
     if (!paneTitle) {
-      finalStatus = "idle"; // pane vanished
+      finalStatus = "idle";
       break;
     }
 
@@ -948,25 +856,17 @@ async function runInTmux(
     };
   }
 
-  // Prefer the child-written result file: the final assistant message,
-  // verbatim. Pane capture is the fallback (blocked runs, file write failed):
-  // it is width-wrapped, so JSON inside may not parse, and in fullscreen mode
-  // it holds only the visible screen.
   let rawOutput = "";
   if (finalStatus === "idle") {
     try {
       rawOutput = fs.readFileSync(resultFile, "utf-8").trim();
-    } catch {
-      /* fall back to pane capture */
-    }
+    } catch {}
   }
   if (!rawOutput) {
     rawOutput = (
       await tmuxOut(["capture-pane", "-p", "-J", "-t", paneId, "-S", "-"])
     ).trim();
   }
-  // Extract before truncating: a valid result block may sit beyond the output
-  // budget. Invalid blocks remain ordinary transcript text.
   const extracted = extractResultBlock(rawOutput, target);
   let finalText = headTruncate(extracted.text, MAX_OUTPUT_BYTES);
   if (extracted.captured) {
@@ -1001,11 +901,6 @@ async function runInTmux(
   };
 }
 
-// Child side: mirror the final assistant message into PI_SUBAGENT_RESULT_FILE.
-// tmp+rename so the parent's existence poll never reads a partial write.
-//
-// Wait for agent_settled: lsp/feedback's repair turn runs before it, and an
-// earlier write hands the parent an answer the child then keeps editing.
 function registerChildResultMirror(pi: ExtensionAPI): void {
   const file = process.env.PI_SUBAGENT_RESULT_FILE;
   if (!file) return;
@@ -1021,14 +916,10 @@ function registerChildResultMirror(pi: ExtensionAPI): void {
         fs.renameSync(`${file}.tmp`, file);
         break;
       }
-    } catch {
-      /* parent falls back to pane capture */
-    }
+    } catch {}
   });
 }
 
-// Task, prompt, and result files of runs that a crashed pi never cleaned up.
-// Older than the longest run plus its wait, so no live run owns them.
 function sweepStaleRunFiles(): void {
   const cutoff = Date.now() - DEFAULT_WAIT_TIMEOUT_MS * 2;
   const dir = os.tmpdir();
@@ -1043,9 +934,7 @@ function sweepStaleRunFiles(): void {
     const file = path.join(dir, name);
     try {
       if (fs.statSync(file).mtimeMs < cutoff) fs.unlinkSync(file);
-    } catch {
-      /* gone or not ours */
-    }
+    } catch {}
   }
 }
 
@@ -1064,15 +953,10 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (event, ctx) => {
     sink.sessionId = ctx.sessionManager.getSessionId();
     if (event.reason === "startup") sweepStaleRunFiles();
-    // The store is process-wide, so a switch to another session drops the
-    // previous session's results. getBranch() skips results recorded on a
-    // branch that /tree left.
     if (event.reason !== "startup" && event.reason !== "reload")
       resultStore.clear();
     hydrateResultStore(ctx.sessionManager.getBranch());
   });
-  // On quit, a running child can no longer report back: stop it and close its
-  // pane. Sync calls, because the process exits right after this handler.
   pi.on("session_shutdown", (event) => {
     if (event.reason !== "quit") return;
     for (const record of runsStore.values()) {
@@ -1083,17 +967,13 @@ export default function (pi: ExtensionAPI) {
         execFileSync("tmux", ["kill-pane", "-t", record.paneId], {
           timeout: 2_000,
         });
-      } catch {
-        /* pane already gone */
-      }
+      } catch {}
     }
   });
 
   const agents = loadAgents();
   if (agents.length === 0) return;
   const byName = new Map(agents.map((a) => [a.name, a]));
-  // Hidden agents stay invocable (they're in the param enum) but pay no
-  // per-turn description cost — a skill that knows the name invokes them.
   const agentList = agents
     .filter((a) => !a.hidden)
     .map((a) => {
@@ -1132,7 +1012,6 @@ export default function (pi: ExtensionAPI) {
       if (!p) {
         return new Text(theme.fg("dim", "  …"), 0, 0);
       }
-      // Lay out at the width pi renders with, not the terminal width.
       return {
         render: (width: number) =>
           renderProgressComponent(p, theme, width - 2, options.expanded).render(
@@ -1157,17 +1036,15 @@ export default function (pi: ExtensionAPI) {
         ? `${ctx.model.provider}/${ctx.model.id}`
         : undefined;
       const model =
-        (ctx.model && MODEL_BY_PARENT_PROVIDER[ctx.model.provider]) ??
+        agent.model ??
+        (ctx.model && SUBAGENT_MODEL_BY_PROVIDER[ctx.model.provider]) ??
         parentModel;
-      const thinking = SUBAGENT_THINKING;
+      const thinking = agent.thinking ?? pi.getThinkingLevel();
 
       const target = `sub-${agent.name}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
       const progress = initialProgress(agent, args.task, model ?? "default");
       progress.id = target;
 
-      // Own AbortController so subagent_manage can stop a background run
-      // that has no live framework signal (its tool call already returned).
-      // A background run is not part of the turn, so Esc leaves it running.
       const controller = new AbortController();
       if (signal && !args.background) {
         if (signal.aborted) controller.abort();
@@ -1186,7 +1063,6 @@ export default function (pi: ExtensionAPI) {
         status: "running",
       } satisfies RunEntry);
 
-      // Throttled push so render redraws don't pile up under fast event bursts.
       const pushNow = () => {
         progress.durationMs = Date.now() - progress.startedAt;
         onUpdate?.({
@@ -1211,8 +1087,6 @@ export default function (pi: ExtensionAPI) {
         ctx.isProjectTrusted(),
       );
 
-      // One settle promise for both modes. runInTmux mutates `progress` (shared
-      // with the record in runsStore), so subagent_manage sees live state.
       record.settled = runPromise
         .then(
           () => undefined,
@@ -1250,7 +1124,6 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool<ReturnType<typeof manageParams>, undefined>({
     name: "subagent_manage",
     label: "Subagent Manage",
-    // wait and result read. steer and stop change a run.
     annotations: {
       readOnlyHint: false,
       destructiveHint: true,
@@ -1352,8 +1225,6 @@ export default function (pi: ExtensionAPI) {
             state.outcome = "timeout";
             resolve();
           }, timeoutMs);
-          // The user pressing escape must end the wait, not the runs: they
-          // keep going in their panes and stay reachable by id.
           signal?.addEventListener(
             "abort",
             () => {
@@ -1369,8 +1240,6 @@ export default function (pi: ExtensionAPI) {
         ]);
         if (timer) clearTimeout(timer);
 
-        // Output inline, per run: a result call after this one would fetch
-        // what the parent already paid to wait for.
         const blocks = records
           .map((r) =>
             r.progress.status === "running"
@@ -1420,8 +1289,6 @@ export default function (pi: ExtensionAPI) {
           const run = runsStore.get(runId);
           if (!run) {
             if (resultStore.has(runId)) {
-              // Result outlived its run record (pruned, or hydrated from an
-              // earlier session), so the id still answers.
               blocks.push(`${runId}\n${runPayload(runId, "", fieldPath)}`);
               values.push({
                 id: runId,
@@ -1459,7 +1326,6 @@ export default function (pi: ExtensionAPI) {
         };
       }
 
-      // steer / stop
       const record = runsStore.get(id);
       if (!record) {
         return fail(`subagent_manage: no tracked run with id "${id}"`);
@@ -1477,7 +1343,6 @@ export default function (pi: ExtensionAPI) {
           structuredContent: manageValue({ runs: [runValue(record.progress)] }),
         };
       }
-      // steer
       if (record.progress.status !== "running" || !record.paneId) {
         return fail(
           `subagent_manage: run "${id}" is not running, cannot steer.`,

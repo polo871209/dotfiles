@@ -78,10 +78,7 @@ interface SessionState {
   cwd: string;
   fallbacks: Record<string, AgentTool<any>> | null;
   ctx: ExtensionToolContext | null;
-  // Tokens spent by `completion` calls during the current execute, reported
-  // on the tool result so session totals include them.
   usage: Usage | null;
-  // Nested tool calls of the current execute, listed when a cell fails.
   calls: ToolCallRecord[];
 }
 
@@ -173,12 +170,10 @@ function bridgeHandler(state: SessionState): BridgeHandler {
     const tool = callableTools(state).find((t) => t.name === name);
     if (tool && state.ctx?.executeTool) {
       const record = recordCall(state, name);
-      // Runs through pi's validation, tool_call hooks, and permission checks, like a model call.
       const outcome = await state.ctx.executeTool(name, args, { signal });
       record.status = outcome.isError ? "error" : "ok";
       return toPythonValue(name, tool.outputSchema, outcome);
     }
-    // Inactive read-only built-ins stay reachable. They bypass tool_call hooks.
     const fallback = ensureFallbacks(state)[name];
     if (fallback) {
       const record = recordCall(state, name);
@@ -265,14 +260,12 @@ function bridgeHandler(state: SessionState): BridgeHandler {
   };
 }
 
-// A record that stays "running" means the call threw, or a timeout or abort cut it off.
 function recordCall(state: SessionState, name: string): ToolCallRecord {
   const record: ToolCallRecord = { name, status: "running" };
   state.calls.push(record);
   return record;
 }
 
-// The model must know which side effects already happened before it retries.
 function formatCallLog(calls: ToolCallRecord[]): string {
   if (calls.length === 0) return "";
   const counts = new Map<string, number>();
@@ -312,7 +305,6 @@ function flattenToolResult(result: AgentToolResult<unknown>): unknown {
   return images.length === 0 ? text : { text, images };
 }
 
-// Codemode's contract: schema tools return structuredContent even on error, so `tool.bash` keeps exit_code.
 function toPythonValue(
   name: string,
   outputSchema: unknown,
@@ -383,7 +375,6 @@ function outputBudget(summary: string) {
   };
 }
 
-// Streamed updates keep only the tail, because they must not write a file on every update.
 function boundOutput(summary: string, body: string): string {
   if (!body) return summary;
   const bounded = truncateTail(body, outputBudget(summary));
@@ -399,8 +390,6 @@ function boundOutput(summary: string, body: string): string {
   return parts.join("\n\n");
 }
 
-// Final output keeps the head and the tail like codemode, because setup lines and the
-// final result are both at the edges, and saves the full text so nothing is lost.
 async function boundFinal(
   summary: string,
   body: string,
@@ -468,7 +457,6 @@ Helpers:
 - \`completion(prompt, model="default", system=None, schema=None)\`: one stateless model call. With a JSON Schema \`schema\`, returns parsed JSON.
 - \`install(*pkgs, upgrade=False)\`: installs Python packages that persist across sessions.`;
 
-// Compact Python-style type of a JSON Schema, deep enough for tool results.
 function schemaType(schema: unknown, depth = 0): string {
   const s = (schema ?? {}) as Record<string, any>;
   if ("const" in s) return JSON.stringify(s.const);
@@ -505,8 +493,6 @@ function schemaType(schema: unknown, depth = 0): string {
 
 function describeCallable(loadout: ToolLoadout): string {
   const { declared, callable } = loadout;
-  // Deferred tools (for example MCP tools) are found by search, like in
-  // codemode, so listing them here would grow without bound.
   const tools = callable.filter(
     (tool) =>
       tool.name !== "eval" && loadout.getExposure(tool.name) !== "deferred",
@@ -521,7 +507,6 @@ function describeCallable(loadout: ToolLoadout): string {
     );
   }
   if (hidden.length > 0) {
-    // Not declared to the model, so this line is the only place it learns they exist.
     sections.push(
       `Callable from cells only (\`tool.describe\` shows the schema):\n${hidden
         .map((tool) => `- \`${tool.name}\`: ${tool.description.split("\n")[0]}`)
@@ -581,7 +566,6 @@ export default function (pi: ExtensionAPI) {
     promptGuidelines: [
       "Use eval to batch or chain several tool calls, to filter large tool output down to what you need, or to iterate on data across calls, instead of issuing many individual tool calls. Batch independent calls in one cell with parallel([...]). Use bash or read directly for a single one-off call.",
     ],
-    // Scripts must not start other scripts, and codemode must not list eval.
     exposure: "model-only",
     annotations: {
       readOnlyHint: false,
@@ -599,8 +583,6 @@ export default function (pi: ExtensionAPI) {
     async execute(_callId, params: EvalParamsT, signal, onUpdate, ctx) {
       if (cleaned) throw new Error("eval extension is shut down");
       if (signal?.aborted) throw new Error("eval aborted before cell start");
-      // Variables live in this process's kernel. After /reload, resume, a pi
-      // crash, or a kernel death they are gone, and the model must be told.
       const stateLost =
         !params.cells[0]?.reset &&
         !(state.py?.alive && state.cwd === ctx.cwd) &&

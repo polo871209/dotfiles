@@ -1,6 +1,3 @@
-// Tests for the eval extension. Run with:
-//   node --experimental-strip-types --test eval/eval.test.ts
-
 import { describe, it, after, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { readFile, rm } from "node:fs/promises";

@@ -1,4 +1,3 @@
--- Agent nvim skips cosmetic plugins.
 if vim.g.pi_agent then return end
 
 vim.pack.add {
@@ -20,14 +19,12 @@ require('catppuccin').setup {
         which_key = true,
     },
 
-    -- Catppuccin italicises comments by default.
     styles = {
         comments = {},
     },
 
     custom_highlights = function()
         return {
-            -- Gruvbox-style popup backgrounds
             NormalFloat = { bg = '#282828' },
             FloatBorder = { bg = '#282828', fg = '#fabd2f' },
         }

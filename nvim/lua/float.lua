@@ -1,22 +1,11 @@
--- Floating replacements for the cmdline prompts. 'cmdheight' is 0, so the
--- native ones draw on a line the screen does not reserve.
---
--- `M.anchor` is shared with picker/core.lua's compact layout, so the vim.ui
--- select box and the vim.ui input box open at the same width and the same top
--- row: choosing a target and then typing at it should look like one box that
--- changed contents, not two unrelated windows.
-
 local M = {}
 
 local MIN_WIDTH = 40
 local MAX_WIDTH = 80
 local WIDTH_FRAC = 0.45
--- Well above centre: with a tall box the eye still lands near the middle, and
--- the text being asked about stays visible underneath.
 local TOP_FRAC = 0.18
 local MAX_INPUT_HEIGHT = 12
 
---- Width and position every centred prompt float shares.
 ---@return { width: integer, row: integer, col: integer }
 function M.anchor()
     local width = math.max(1, math.min(math.floor(vim.o.columns * WIDTH_FRAC), MAX_WIDTH, vim.o.columns - 4))
@@ -68,8 +57,6 @@ function M.input(opts, on_confirm)
         vim.cmd 'stopinsert'
         pcall(vim.api.nvim_win_close, win, true)
         pcall(vim.api.nvim_buf_delete, buf, { force = true })
-        -- Scheduled so the caller runs with the prompt already gone: it often
-        -- opens another float, and nesting the two orphans this one.
         vim.schedule(function() on_confirm(value) end)
     end
 
@@ -95,10 +82,10 @@ function M.input(opts, on_confirm)
     set('<C-c>', function() finish(nil) end)
 
     if opts.completion then
-        -- The whole line is the completion base, so replace from column 1.
         vim.keymap.set('i', '<Tab>', function()
             local matches = vim.fn.getcompletion(vim.api.nvim_get_current_line(), opts.completion)
-            if #matches > 0 then vim.fn.complete(1, matches) end
+            local replace_whole_line = 1
+            if #matches > 0 then vim.fn.complete(replace_whole_line, matches) end
         end, { buffer = buf, nowait = true })
     end
 

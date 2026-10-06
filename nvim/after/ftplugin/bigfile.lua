@@ -1,7 +1,3 @@
--- Assigned by plugin/filetype.lua purely on size. Because the filetype is
--- `bigfile` rather than the real one, treesitter, LSP and syntax never attach;
--- what is left is to switch off the remaining per-buffer cost.
-
 vim.b.completion = false -- blink.cmp reads this flag
 vim.bo.swapfile = false
 vim.bo.undofile = false

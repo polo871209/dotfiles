@@ -2,9 +2,7 @@ import Foundation
 import UniformTypeIdentifiers
 import WebKit
 
-/// Serves `mdview://app/<name>` from the bundled Resources and `mdview://file/<abs path>` from disk.
 struct Assets: URLSchemeHandler {
-    // Markdown can reach mdview://file, so the disk route serves images only, never text or keys.
     private static let imageTypes: Set<String> = ["png", "jpg", "jpeg", "gif", "svg", "webp", "avif", "heic", "ico", "bmp"]
     private static let root = Bundle.module.url(forResource: "Resources", withExtension: nil)!
 

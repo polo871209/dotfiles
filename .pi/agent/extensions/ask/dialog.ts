@@ -1,10 +1,3 @@
-// View assembly + the bordered dialog itself.
-//
-//   buildQuestionnaire()         — constructs every component + the adapter
-//   QuestionnairePropsAdapter    — fans canonical state out to components each tick
-//   DialogView                   — borders, tab bar, body, footer, overflow scroll
-//   {Question,Submit}TabStrategy — per-tab body/heading/footer content
-
 import { DynamicBorder, type Theme } from "@earendil-works/pi-coding-agent";
 import {
   type Component,
@@ -40,8 +33,6 @@ import {
   type WrappingSelectTheme,
 } from "./widgets";
 
-// Hint strings
-
 const HINT_PART_ENTER = "Enter to select";
 const HINT_PART_NAV = "↑/↓ to navigate";
 const HINT_PART_TOGGLE = "Space to toggle";
@@ -70,8 +61,6 @@ function buildHintText(
   parts.push(HINT_PART_COLLAPSE);
   return parts.join(" · ");
 }
-
-// Derivations
 
 function selectActiveTabIndex(
   currentTab: number,
@@ -105,7 +94,6 @@ function selectConfirmedIndicator(
   return { index };
 }
 
-// Reads pi-tui Input's private cursor with runtime validation; undefined → end-of-buffer.
 function getInputCursorOffset(input: Input): number | undefined {
   const raw = (input as unknown as { cursor?: unknown }).cursor;
   if (typeof raw !== "number" || !Number.isSafeInteger(raw)) return undefined;
@@ -113,8 +101,6 @@ function getInputCursorOffset(input: Input): number | undefined {
   if (raw < 0 || raw > value.length) return undefined;
   return raw;
 }
-
-// Tab components + strategies
 
 interface TabComponents {
   optionList: OptionListView;
@@ -136,9 +122,6 @@ interface TabContentStrategy {
   ): [number, number] | undefined;
 }
 
-// Single-row width-clipped chrome cell: keeps the hint on one line so the
-// strategy's footerRowCount invariant holds; the collapse affordance clips
-// with "…" on narrow terminals.
 class OneLineClippedText implements Component {
   constructor(
     private readonly text: string,
@@ -174,7 +157,7 @@ interface QuestionTabStrategyConfig {
 }
 
 class QuestionTabStrategy implements TabContentStrategy {
-  readonly footerRowCount = 4; // Spacer + chatRow + Spacer + hint
+  readonly footerRowCount = 4;
 
   constructor(private readonly config: QuestionTabStrategyConfig) {}
 
@@ -248,7 +231,7 @@ interface SubmitTabStrategyConfig {
 }
 
 class SubmitTabStrategy implements TabContentStrategy {
-  readonly footerRowCount = 5; // Spacer + prompt + Spacer + picker(2)
+  readonly footerRowCount = 5;
 
   constructor(private readonly config: SubmitTabStrategyConfig) {}
 
@@ -322,8 +305,6 @@ class SubmitTabStrategy implements TabContentStrategy {
     return undefined;
   }
 }
-
-// DialogView
 
 interface DialogProps {
   state: DialogState;
@@ -399,7 +380,6 @@ class DialogView {
       headingRowCache,
     ).render(width);
 
-    // TabBar.render() returns [tabLine, ""] — always 2 rows.
     const topFixed =
       1 + (this.config.isMulti && this.config.tabBar ? 2 : 0) + 1;
     const bottomFixed = 1 + strategy.footerRowCount;
@@ -421,7 +401,6 @@ class DialogView {
         : natural;
     }
 
-    // Overflow: 3-region partition with scroll-to-focus.
     const availableMiddle = Math.max(0, termRows - topFixed - bottomFixed);
     if (availableMiddle === 0) {
       const chromeOnly = [
@@ -500,8 +479,6 @@ class DialogView {
     return container;
   }
 }
-
-// Props adapter: state → component props each tick
 
 export class QuestionnairePropsAdapter {
   constructor(
@@ -609,7 +586,6 @@ export class QuestionnairePropsAdapter {
   }
 
   invalidate(): void {
-    // DialogView rebuilds its container every render — nothing to invalidate there.
     this.chatRow.invalidate();
     this.tabBar?.invalidate();
     this.submitPicker?.invalidate();
@@ -619,8 +595,6 @@ export class QuestionnairePropsAdapter {
     }
   }
 }
-
-// Builder
 
 interface QuestionnaireBuildConfig {
   tui: { terminal: { columns: number; rows: number }; requestRender(): void };
@@ -661,7 +635,6 @@ export function buildQuestionnaire(
 
   const inlineInput = new Input();
 
-  // Tabs
   const tabsByIndex: TabComponents[] = questions.map((question, index) => {
     const optionList = new OptionListView(itemsByTab[index] ?? [], selectTheme);
     const multiSelect = question.multiSelect

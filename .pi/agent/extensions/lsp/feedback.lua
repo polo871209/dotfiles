@@ -1,16 +1,8 @@
--- Feedback driver for the lsp subsystem, loaded into the shared nvim daemon.
--- _G.PiFeedback.format(files): fast format-only, for the inline per-edit hook.
--- _G.PiFeedback.run(files): safe code-actions (fixAll, organizeImports) plus
--- diagnostics, for the batched turn-end pass. Formatting happens inline per
--- edit, so run only re-formats code-action output.
-
 local M = {}
 _G.PiFeedback = M
 
 local FORMAT_TIMEOUT_MS = 3000
 local CODEACTION_TIMEOUT_MS = 2000
--- Per-file budget so a slow first file doesn't starve later ones.
--- TS side caps the whole call separately (see nvimCallTimeoutMs).
 local PER_FILE_BUDGET_MS = 4500
 local SETTLE_MS = 1000
 
@@ -19,10 +11,6 @@ local FIXALL_KINDS = {
     'source.organizeImports',
 }
 
--- Conservative guard: only apply a code-action whose WorkspaceEdit is confined
--- to the current buffer's own file. Anything that would touch another file (or
--- a create/rename/delete file op) is skipped so an on-demand fix never edits
--- code unrelated to the diagnostic.
 local function edit_is_single_file(workspace_edit, self_file)
     local function same(uri) return uri ~= nil and vim.uri_to_fname(uri) == self_file end
     if workspace_edit.documentChanges then
@@ -88,15 +76,10 @@ end
 
 local function pull_diagnostics(bufnr) _G.PiLspShared.pull_diagnostics(bufnr) end
 
--- Stamp the buffer for PiDaemon.gc. Without it the inline lane had no
--- eviction at all: every file the agent ever edited stayed loaded and pinned
--- its language server until the daemon died.
 local function touch(bufnr)
     if _G.PiDaemon and _G.PiDaemon.touch then _G.PiDaemon.touch(bufnr) end
 end
 
--- A repeated path would otherwise be processed twice and double-count that
--- file's diagnostics.
 local function dedupe_files(files)
     local seen = {}
     local out = {}
@@ -109,11 +92,6 @@ local function dedupe_files(files)
     return out
 end
 
--- Fast format-only pass for the inline per-edit hook: format and write, with no
--- diagnostic settle and no code-actions (those stay in M.run), so the edit
--- result can be amended synchronously.
--- timeout_ms: caller budget, short so a slow formatter aborts instead of
--- writing after the caller gave up.
 function M.format(files, timeout_ms)
     local formatted = {}
     for _, file in ipairs(dedupe_files(files)) do
@@ -151,18 +129,11 @@ function M.run(files)
             pcall(function() vim.cmd 'doautocmd BufEnter' end)
             pcall(function() vim.cmd 'doautocmd FileType' end)
 
-            -- 1) Wait LSP attach (best-effort). No format here: the inline
-            --    per-edit hook already formatted these files.
             vim.wait(math.min(2000, remaining()), function() return #vim.lsp.get_clients { bufnr = bufnr } > 0 end, 50)
 
             pull_diagnostics(bufnr)
-            -- User-configured diagnostic autocmds (including nvim-lint) were
-            -- triggered by the normal buffer events above. Do not select or
-            -- invoke a linter here; just allow all producers to publish.
             vim.wait(math.min(800, remaining()), function() return false end, 50)
 
-            -- 2) Safe auto-fixes (organizeImports + source.fixAll); their
-            --    edits arrive unformatted, so re-format just those.
             local fixed = apply_code_actions(bufnr, remaining)
             if fixed then
                 local refmt = try_format(bufnr)
@@ -176,7 +147,6 @@ function M.run(files)
         end
     end
 
-    -- Final settle for async publishDiagnostics.
     vim.wait(SETTLE_MS, function() return false end, 50)
 
     local out = { formatted = formatted, diagnostics = {} }

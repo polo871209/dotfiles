@@ -1,12 +1,4 @@
-// ask — registers the `ask_user_question` tool: a tabbed questionnaire dialog
-// the model presents instead of guessing when a request is underspecified.
-// Single + multi-select, an "Other" free-text fallback, a chat escape hatch,
-// and a Submit/review tab.
-//
-// Native port of @juicesharp/rpiv-ask-user-question (i18n dropped). The schema
-// has no hard length caps (see schema.ts), so execute() clamps over-long values
-// and the first call always lands.
-
+// Native port of @juicesharp/rpiv-ask-user-question.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
   buildQuestionnaireResponse,
@@ -21,34 +13,49 @@ import {
   validateQuestionnaire,
 } from "./schema";
 
-/** Drop excess items instead of rejecting — same "first call always lands" reasoning as clamp(). */
-function capItems<T>(items: T[], max: number): T[] {
-  return items.length > max ? items.slice(0, max) : items;
-}
 import { buildItemsForQuestion, QuestionnaireSession } from "./session";
 import type { WrappingSelectItem } from "./widgets";
 
 const ERROR_NO_UI = "Error: UI not available (running in non-interactive mode)";
 
-/** Truncate to a code-point budget, appending "…" when clipped. Advisory, never rejects. */
+function capItems<T>(items: T[], max: number): T[] {
+  return items.length > max ? items.slice(0, max) : items;
+}
+
 function clamp(value: string, max: number): string {
   const chars = Array.from(value);
   if (chars.length <= max) return value;
   return `${chars.slice(0, Math.max(0, max - 1)).join("")}…`;
 }
 
-/** Graceful normalization: clamp over-long header/label and cap array sizes so the call always lands. */
-function clampParams(params: QuestionParams): QuestionParams {
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+// pi validates after this runs, so over-limit values get clamped, not rejected.
+function clampArguments(args: unknown): QuestionParams {
+  if (!isRecord(args) || !Array.isArray(args.questions))
+    return args as QuestionParams;
   return {
-    questions: capItems(params.questions, MAX_QUESTIONS).map((q) => ({
-      ...q,
-      header: clamp(q.header, MAX_HEADER_LENGTH),
-      options: capItems(q.options, MAX_OPTIONS).map((o) => ({
-        ...o,
-        label: clamp(o.label, MAX_LABEL_LENGTH),
-      })),
-    })),
-  };
+    ...args,
+    questions: capItems(args.questions, MAX_QUESTIONS).map((q) =>
+      isRecord(q)
+        ? {
+            ...q,
+            header:
+              typeof q.header === "string"
+                ? clamp(q.header, MAX_HEADER_LENGTH)
+                : q.header,
+            options: Array.isArray(q.options)
+              ? capItems(q.options, MAX_OPTIONS).map((o) =>
+                  isRecord(o) && typeof o.label === "string"
+                    ? { ...o, label: clamp(o.label, MAX_LABEL_LENGTH) }
+                    : o,
+                )
+              : q.options,
+          }
+        : q,
+    ),
+  } as QuestionParams;
 }
 
 const DESCRIPTION =
@@ -61,14 +68,14 @@ function registerAskUserQuestionTool(pi: ExtensionAPI): void {
     description: DESCRIPTION,
     promptSnippet: "Structured choice dialog",
     parameters: QuestionParamsSchema,
-    // Only the model may ask the user.
+    prepareArguments: clampArguments,
     exposure: "model-only",
     annotations: { readOnlyHint: true, openWorldHint: false },
     // pi shows one custom dialog at a time, so two asks in one turn must queue.
     executionMode: "sequential",
 
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const raw = params as unknown as QuestionParams;
+      const typed = params as unknown as QuestionParams;
       // RPC reports hasUI but its ui.custom() returns undefined at once.
       if (ctx.mode !== "tui")
         return {
@@ -79,8 +86,6 @@ function registerAskUserQuestionTool(pi: ExtensionAPI): void {
           }),
           isError: true,
         };
-
-      const typed = clampParams(raw);
 
       const validation = validateQuestionnaire(typed);
       if (!validation.ok) {
@@ -98,10 +103,6 @@ function registerAskUserQuestionTool(pi: ExtensionAPI): void {
         buildItemsForQuestion(q),
       );
 
-      // Inline, not overlay: replaces the editor so the conversation stays
-      // visible above the dialog.
-      // Turn abort must tear the dialog down instead of leaving it waiting
-      // for an answer that no longer has a consumer.
       let onAbort: (() => void) | undefined;
       const result = await ctx.ui.custom<QuestionnaireResult>(
         (tui, theme, _kb, done) => {

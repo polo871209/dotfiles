@@ -1,11 +1,3 @@
-// lsp — the LSP subsystem, backed by shared headless nvim daemons (see
-// nvim.ts): connected at session_start by the feedback pass, else lazily on
-// first tool call, and left running for other pi processes at shutdown. Two
-// halves:
-//   - Navigation (pull): one `lsp` tool with an `action` enum, see ./tool.ts.
-//   - Feedback pass (push, ./feedback): formats edits inline and runs batched
-//     diagnostics + LLM auto-fix after a turn. See ./feedback/index.ts.
-
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { callDriver, daemonInfo, disconnectNvim, restartDaemons } from "./nvim";
 import { registerFeedback } from "./feedback";
@@ -71,8 +63,6 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // Disconnect only. The daemons are shared with other pi processes and reap
-  // themselves once the last client leaves.
   pi.on("session_shutdown", () => {
     disconnectNvim();
   });

@@ -1,4 +1,3 @@
--- Agent nvim skips cosmetic plugins.
 if vim.g.pi_agent then return end
 
 -- vim.pack.add sources blink's own plugin/blink-cmp.lua, which merges blink's
@@ -30,7 +29,6 @@ vim.api.nvim_create_autocmd('InsertEnter', {
             },
 
             sources = {
-                -- zsh's edit-command-line buffer sets b:shell_cmdline (see zsh/.zshrc).
                 default = function()
                     if vim.b.shell_cmdline == 1 then return { 'shell_path', 'buffer', 'lsp' } end
                     return { 'path', 'buffer', 'lsp' }

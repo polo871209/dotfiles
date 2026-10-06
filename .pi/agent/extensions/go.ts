@@ -1,8 +1,3 @@
-// /go: re-run the agent loop on the existing transcript without appending a
-// message. Use it after you abort a prompt mid-stream, or after it stalls and
-// auto-retry gives up. The transcript still ends at your message A, and this
-// re-runs inference on it as-is, with no duplicate A.
-//
 // pi exposes no public "continue" from idle (every public path appends a
 // message), so this reaches the live AgentSession. Two internals remain:
 // the session lookup below and AgentSession._runAgentPrompt. Everything else
@@ -29,8 +24,6 @@ function sessionRegistry(): WeakMap<object, AgentSession> {
   const sessions = new WeakMap<object, AgentSession>();
   g[key] = sessions;
   const proto = AgentSession.prototype as unknown as Record<string, unknown>;
-  // Every mode calls bindExtensions on each new session. prompt covers the
-  // /go command itself.
   for (const name of ["bindExtensions", "subscribe", "prompt"]) {
     const orig = proto[name];
     if (typeof orig !== "function") continue;
@@ -50,9 +43,6 @@ const isAbandoned = (m: AgentMessage): boolean =>
   m.role === "assistant" &&
   (m.stopReason === "aborted" || m.stopReason === "error");
 
-// Same repair as pi's auto-retry (_omitRecoveryAttempt). Trailing tool results
-// stay: after an abort mid-tool, the run resumes from the aborted tool result
-// instead of re-running the original prompt.
 function omitAbandoned(session: AgentSession): void {
   const { entries } = session.sessionManager.buildSessionProjection();
   let omitted = false;
@@ -98,8 +88,6 @@ async function go(ctx: ExtensionContext): Promise<void> {
     ctx.ui.notify("No live session found for /go", "warning");
     return;
   }
-  // Fail loudly instead of a bare agent.continue(), which skips retries and
-  // the settle events, and leaves session.isStreaming false during the run.
   const run = (session as unknown as { _runAgentPrompt?: RunLoop })
     ._runAgentPrompt;
   if (typeof run !== "function") {
@@ -133,8 +121,6 @@ export default function goExtension(pi: ExtensionAPI): void {
     handler: async (_args, ctx) => go(ctx),
   });
 
-  // ctrl+alt+* is the one namespace pi leaves almost empty (it binds only
-  // ctrl+alt+]), so extension shortcuts land there and survive an upgrade.
   pi.registerShortcut("ctrl+alt+g", {
     description: "Re-run the agent on the current transcript",
     handler: (ctx) => go(ctx),

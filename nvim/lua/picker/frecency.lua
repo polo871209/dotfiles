@@ -1,11 +1,5 @@
--- Frequency + recency per path, persisted under stdpath('data'). A file opened
--- often and recently outranks one opened once, long ago.
---
--- The store is shared by every project, so keys must be absolute: a relative
--- key would make `src/main.rs` the same entry in every repository.
-
 local FILE = vim.fn.stdpath 'data' .. '/picker-frecency.json'
-local HALF_LIFE = 30 * 24 * 60 * 60 -- 30 days
+local HALF_LIFE = 30 * 24 * 60 * 60
 
 ---@alias PickerFrecencyEntry { count: integer, last: integer }
 
@@ -67,7 +61,6 @@ end
 function M.save()
     M.dirty = false
     if not M.data then return end
-    -- Drop entries that have decayed into irrelevance so the store stays small.
     local pruned = {}
     for path, entry in pairs(M.data) do
         if decay(entry) > 0.01 then pruned[path] = entry end

@@ -1,14 +1,3 @@
--- The picker widget: three floats, a candidate pool, and the matching, render
--- and scroll loop over them. Sources in `picker/init.lua` drive it through
--- `PickerOpts`; nothing here knows where candidates come from.
---
--- Layout is a fullscreen split, with the prompt under the list:
---   +-------------------------+-------------+
---   | list                    | preview 45% |
---   +-------------------------+             |
---   | input (reverse = true)  |             |
---   +-------------------------+-------------+
-
 local display = require 'picker.display'
 local float = require 'float'
 local frecency = require 'picker.frecency'
@@ -18,19 +7,11 @@ local ns = vim.api.nvim_create_namespace 'picker'
 local RENDER_MS = 30
 local LIVE_DEBOUNCE_MS = 80
 local PREVIEW_MAX_LINES = 2000
--- Re-sorting by frecency copies the match array; skip it once the result set is
--- large enough that matchfuzzypos' own ordering is good enough anyway.
 local RESORT_LIMIT = 5000
--- Cap results per keystroke. Most of the cost of a match is marshalling result
--- dicts back across the Vim boundary, so capping keeps huge trees responsive.
 local MATCH_LIMIT = 10000
--- Stop a live source once this many results land, then kill the process: nobody
--- scrolls past a few hundred grep hits, and letting rg run to completion on a
--- big tree is pure latency.
+local BORDER = 2
 local LIVE_LIMIT = 10000
 
---- Scratch buffers stay non-modifiable so stray keys can't corrupt them; every
---- write flips the flag for the duration of the update.
 ---@param buf integer
 ---@param lines string[]
 local function set_lines(buf, lines)
@@ -117,8 +98,6 @@ function Picker.new(opts)
     return self
 end
 
---- Drop every candidate and matching artefact, and invalidate stdout still in
---- flight from the job that produced them.
 function Picker:reset()
     self.tick = (self.tick or 0) + 1
     self.items, self.pool, self.matched, self.positions = {}, {}, {}, {}
@@ -127,7 +106,6 @@ function Picker:reset()
     self.truncated = false
 end
 
---- Live windows, skipping the ones this layout has no use for.
 ---@return integer[]
 function Picker:wins()
     local wins = { self.list_win }
@@ -144,7 +122,6 @@ function Picker:bufs()
     return bufs
 end
 
--- Below this the three floats cannot be given a positive height.
 local MIN_LINES = 8
 
 ---@param buf integer
@@ -163,11 +140,9 @@ local function open_float(buf, cfg)
     )
 end
 
---- Centred box the size of its content, sharing width and top row with the
---- input float so the two read as one window.
 function Picker:layout_compact()
     local anchor = float.anchor()
-    local room = vim.o.lines - vim.o.cmdheight - anchor.row - 2
+    local room = vim.o.lines - vim.o.cmdheight - anchor.row - BORDER
     self.list_h = math.max(1, math.min(self.opts.compact or 1, room))
     self.list_buf = vim.api.nvim_create_buf(false, true)
     self.list_win = open_float(self.list_buf, {
@@ -180,14 +155,12 @@ function Picker:layout_compact()
     })
 end
 
---- Fullscreen split: results above the prompt, preview alongside.
 function Picker:layout_full()
     local W, H = vim.o.columns, vim.o.lines - vim.o.cmdheight
     local preview_w = self.opts.preview == false and 0 or math.floor(W * 0.45)
     local left_w = W - preview_w
     local input_h = 1
-    -- Every float carries a rounded border, costing 2 rows/cols each.
-    local list_h = H - (input_h + 2) - 2
+    local list_h = H - (input_h + BORDER) - BORDER
 
     self.list_buf = vim.api.nvim_create_buf(false, true)
     self.input_buf = vim.api.nvim_create_buf(false, true)
@@ -195,15 +168,15 @@ function Picker:layout_full()
     self.list_win = open_float(self.list_buf, {
         row = 0,
         col = 0,
-        width = left_w - 2,
+        width = left_w - BORDER,
         height = list_h,
         title = ' Results ',
         title_pos = 'center',
     })
     self.input_win = open_float(self.input_buf, {
-        row = list_h + 2,
+        row = list_h + BORDER,
         col = 0,
-        width = left_w - 2,
+        width = left_w - BORDER,
         height = input_h,
         title = (' %s '):format(self.opts.title or 'Picker'),
         title_pos = 'center',
@@ -213,8 +186,8 @@ function Picker:layout_full()
         self.preview_win = open_float(self.preview_buf, {
             row = 0,
             col = left_w,
-            width = preview_w - 2,
-            height = H - 2,
+            width = preview_w - BORDER,
+            height = H - BORDER,
             title = ' Preview ',
             title_pos = 'center',
         })
@@ -240,7 +213,6 @@ function Picker:layout()
     else
         self:layout_full()
     end
-    -- Compact mode has no prompt, so the list itself takes focus and the keys.
     self.key_buf = self.input_buf or self.list_buf
 
     for _, win in ipairs(self:wins()) do
@@ -248,8 +220,6 @@ function Picker:layout()
         vim.wo[win].cursorline = false
     end
     if self.preview_win then vim.wo[self.preview_win].number = true end
-    -- Preview churns through buffers on every cursor move; keeping undo off
-    -- stops that from accumulating history for content nobody edits.
     for _, buf in ipairs(self:bufs()) do
         if buf ~= self.input_buf then
             vim.bo[buf].undolevels = -1
@@ -351,7 +321,6 @@ function Picker:stop_job()
     end
 end
 
---- Feed items from a command, streaming stdout so the list fills as it arrives.
 function Picker:spawn(cmd, on_line)
     self:stop_job()
     local pending = ''
@@ -398,11 +367,8 @@ function Picker:add(batch)
         if not self.opts.live then self.pool[#self.pool + 1] = { text = item.text, idx = #self.items } end
     end
     if self.opts.live then
-        -- rg already filtered; running a fuzzy pass over its output would both
-        -- re-filter results the user asked for and choke on NUL bytes.
         vim.list_extend(self.matched, batch)
     elseif self.query == '' then
-        -- With no query the pool is the match set, so arrivals show immediately.
         self:refilter()
     else
         self:match_batch(batch)
@@ -410,7 +376,6 @@ function Picker:add(batch)
     self:schedule_render()
 end
 
---- Match only newly arrived items against the live query, appending survivors.
 function Picker:match_batch(batch)
     local first = #self.items - #batch + 1
     local slice = {}
@@ -421,9 +386,6 @@ function Picker:match_batch(batch)
     for i, dict in ipairs(res[1]) do
         self.matched[#self.matched + 1] = self.items[dict.idx]
         self.positions[#self.positions + 1] = res[2][i]
-        -- The cache is the pool for the next, longer query. Survivors that
-        -- arrive after it was built have to join it or they drop out of the
-        -- results for good on the next keystroke.
         if self.pool_cache then self.pool_cache[#self.pool_cache + 1] = dict end
     end
 end
@@ -437,8 +399,6 @@ function Picker:load()
     self.opts.produce(self)
 end
 
---- Live sources (grep) re-run the command on every keystroke; rg does the
---- filtering, so no client-side fuzzy pass happens at all.
 function Picker:reload_live()
     self:reset()
     self:stop_job()
@@ -468,8 +428,6 @@ function Picker:on_query()
     self:schedule_render()
 end
 
---- Re-order matches by fuzzy score blended with frecency and the static bonus,
---- carrying the parallel `positions` array along.
 ---@param matched PickerItem[]
 ---@param positions integer[][]
 ---@param scores number[] per-match fuzzy scores from matchfuzzypos
@@ -494,21 +452,16 @@ end
 function Picker:refilter()
     local q = self.query
     if q == '' then
-        -- A copy, not `self.items`: the live branch of `add` appends to
-        -- `matched`, and aliasing the two would corrupt the item list.
         self.matched = vim.list_slice(self.items)
         self.positions = {}
         self.pool_cache = nil
         self.truncated = false
     else
-        -- Growing the query can only shrink the match set, so re-match against
-        -- the previous survivors instead of every item.
         local pool = self.pool
         local cache, prev = self.pool_cache, self.last_query
-        if cache and prev and prev ~= '' and q:sub(1, #prev) == prev then pool = cache end
+        local narrows_previous = prev and prev ~= '' and q:sub(1, #prev) == prev
+        if cache and narrows_previous then pool = cache end
         local res = vim.fn.matchfuzzypos(pool, q, { key = 'text', limit = MATCH_LIMIT })
-        -- A truncated result set is not a valid pool for the next keystroke: an
-        -- item cut off here could outrank the survivors on a longer query.
         self.truncated = #res[1] >= MATCH_LIMIT
         self.pool_cache = not self.truncated and res[1] or nil
         local matched, positions = {}, {}
@@ -543,13 +496,10 @@ function Picker:schedule_render()
     )
 end
 
---- `delta` is in screen rows: positive always moves the selection visually
---- down, which walks *back* through the results in the bottom-up full layout
---- and forward in the top-down compact one.
----@param delta integer
-function Picker:move(delta)
+---@param screen_rows integer
+function Picker:move(screen_rows)
     if #self.matched == 0 then return end
-    local step = self.opts.compact and delta or -delta
+    local step = self.opts.compact and screen_rows or -screen_rows
     self.sel = math.max(1, math.min(#self.matched, self.sel + step))
     self:schedule_render()
 end
@@ -557,15 +507,10 @@ end
 function Picker:render()
     if not vim.api.nvim_win_is_valid(self.list_win) then return end
     local total = #self.matched
-    -- Keep the selection inside the viewport.
     if self.sel < self.top then self.top = self.sel end
     if self.sel > self.top + self.list_h - 1 then self.top = self.sel - self.list_h + 1 end
     self.top = math.max(1, self.top)
 
-    -- The full layout puts the best match on the bottom row, next to the input,
-    -- and grows upward, padding the top with blanks when results are few. The
-    -- compact box has no prompt to sit beside, so it reads top-down and keeps
-    -- the caller's order.
     local lines, meta = {}, {}
     for row = 1, self.list_h do
         lines[row] = ''
@@ -592,8 +537,6 @@ function Picker:render()
         local positions = self.positions[m.idx]
         if positions and m.off then
             for _, pos in ipairs(positions) do
-                -- matchfuzzypos yields 0-based char indices into item.text,
-                -- which is laid out verbatim starting at `off`.
                 local col = m.off + pos
                 if col < #lines[row] then
                     pcall(vim.api.nvim_buf_set_extmark, self.list_buf, ns, row - 1, col, {
@@ -614,8 +557,6 @@ function Picker:render()
         end
     end
 
-    -- Compact mode shows the whole list at once, so a running count is noise;
-    -- it keeps the caller's prompt as its title.
     if not self.opts.compact then
         vim.api.nvim_win_set_config(self.list_win, {
             title = (' Results  %d/%d%s '):format(math.min(self.sel, total), total, self.truncated and '+' or ''),

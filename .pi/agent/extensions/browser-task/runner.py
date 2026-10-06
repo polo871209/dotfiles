@@ -9,21 +9,24 @@ import sys
 import threading
 import time
 
-# Library and harness prints must not corrupt the protocol stream.
-proto = os.fdopen(os.dup(1), "w", buffering=1)
-os.dup2(2, 1)
+
+def _reserve_stdout_for_protocol():
+    proto = os.fdopen(os.dup(1), "w", buffering=1)
+    os.dup2(2, 1)
+    return proto
+
+
+proto = _reserve_stdout_for_protocol()
 
 
 def emit(**message):
     proto.write(json.dumps(message) + "\n")
 
 
-# SIGTERM from an abort becomes SystemExit, so Agent.__exit__ still closes the tab.
 signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
 
 
 def _watch_parent(ppid):
-    # A crashed pi reparents this process. SIGTERM, not _exit, so the tab still closes.
     while os.getppid() == ppid:
         time.sleep(5)
     os.kill(os.getpid(), signal.SIGTERM)
@@ -40,7 +43,6 @@ from jev_ultrafast.questions import TEXT_VALUE  # pyrefly: ignore[missing-import
 
 
 def field_text(context):
-    # pi answers with its own model auth, so no TEXT_MODEL_API_KEY is needed.
     emit(type="text_request", system=TEXT_VALUE, context=context)
     reply = json.loads(sys.stdin.readline() or "{}")
     if reply.get("error"):
@@ -101,11 +103,9 @@ def chrome_running():
 
 
 def ensure_chrome():
-    # browser-harness fails with chrome-not-running instead of launching Chrome.
     if chrome_running():
         return
     emit(type="note", text="starting Chrome in the background…")
-    # -g keeps Chrome behind the terminal.
     subprocess.run(["open", "-g", "-a", "Google Chrome"], check=True)
     deadline = time.monotonic() + 10
     while not chrome_running():
@@ -115,8 +115,6 @@ def ensure_chrome():
 
 
 def auto_approve(done):
-    # Chrome 144+ asks "Allow remote debugging?" once per Chrome launch, and
-    # browser-harness waits on it with no deadline. Click Allow only during our own connect.
     deadline = time.monotonic() + 60
     while not done.is_set() and time.monotonic() < deadline:
         status, detail = bh_macos.approve_remote_debugging()
@@ -139,7 +137,6 @@ try:
     with agent:
         if args.get("watch"):
             cdp("Target.activateTarget", targetId=agent.browser.target)
-            # A no-op close leaves the finished tab open for the user.
             agent.close = lambda: None
         state = agent.snapshot()
         for state in agent.run():
@@ -151,6 +148,5 @@ try:
                 last=last and last["action"],
             )
         summary(state, state["status"])
-# Any failure must still reach pi as a result line, not a bare exit.
 except Exception as error:  # noqa: BLE001
     summary(state, "error", f"{type(error).__name__}: {error}")

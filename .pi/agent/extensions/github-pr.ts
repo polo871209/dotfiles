@@ -1,11 +1,3 @@
-// github-pr — fetch a PR as signal-only markdown. Drops timeline noise,
-// resolved threads, and bot summary comments; keeps metadata, checks, and
-// unresolved threads (incl. bot inline findings like CodeRabbit).
-//
-// Diff is OFF by default: on the PR branch the agent reads local files and
-// re-reads them to edit anyway. Pull the diff only when code isn't reachable
-// locally.
-
 import {
   formatSize,
   truncateHead,
@@ -22,8 +14,6 @@ const MAX_BODY_BYTES = 6 * 1024;
 // byte-only, so disable the line limit rather than add a second one.
 const NO_LINE_CAP = Number.MAX_SAFE_INTEGER;
 
-// Bot authors whose summary comments are noise. "[bot]" suffix covers GitHub
-// Apps; the set covers App accounts presenting as normal users.
 const BOT_LOGINS = new Set([
   "coderabbitai",
   "dependabot",
@@ -41,8 +31,6 @@ function isBot(login: string, typename?: string): boolean {
   return l.includes("coderabbit") || l.includes("sonarqube");
 }
 
-// Strip HTML comment fences (fingerprinting, cr-comment markers) from review
-// thread bodies, keeping the finding text + proposed diff.
 function stripHtmlComments(s: string): string {
   return s
     .replace(/<!--[\s\S]*?-->/g, "")
@@ -50,9 +38,7 @@ function stripHtmlComments(s: string): string {
     .trim();
 }
 
-// Strip auto-generated blocks (coderabbit release notes etc.) from the PR body.
 function cleanBody(body: string): string {
-  // Visible text sits between an opening and matching "end of" fence.
   let b = body.replace(
     /<!--\s*This is an auto-generated comment[\s\S]*?end of auto-generated comment[\s\S]*?-->/gi,
     "",
@@ -105,8 +91,6 @@ mutation($id:ID!){
   resolveReviewThread(input:{threadId:$id}){ thread{ id isResolved } }
 }`;
 
-// One in-flight mutation per thread would serialize badly on a big review;
-// more than a handful trips GitHub's abuse detection.
 const RESOLVE_CONCURRENCY = 4;
 
 function fmt(n: number): string {
@@ -127,7 +111,6 @@ function fail(msg: string): ToolResult {
   };
 }
 
-// Mark every unresolved review thread as resolved, with no reply comment.
 async function resolveThreads(
   owner: string,
   repo: string,
@@ -160,7 +143,6 @@ async function resolveThreads(
   }
 
   let threads: Thread[];
-  // The query reads the newest 100 threads only.
   let unseen = 0;
   try {
     const data = JSON.parse(gql.stdout) as {
@@ -234,7 +216,6 @@ async function resolveThreads(
   return {
     content: [{ type: "text" as const, text: out.join("\n") }],
     details: { summary },
-    // Resolving is idempotent, so the model can rerun resolve after a failure.
     ...(failed.length || skipped ? { isError: true } : {}),
   };
 }
@@ -289,7 +270,6 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool<typeof params, { summary: string }>({
     name: "github_pr",
     label: "GitHub PR",
-    // report reads. resolve writes, and a rerun skips resolved threads.
     annotations: {
       readOnlyHint: false,
       destructiveHint: false,
@@ -298,8 +278,6 @@ export default function (pi: ExtensionAPI) {
     },
     promptSnippet:
       "Fetch PR metadata, failing checks, review threads, or a diff",
-    // Keep the TUI quiet: the full markdown goes to the model via `content`,
-    // but the terminal only shows a one-line summary from `details`.
     renderResult(result, _options, theme: Theme) {
       const s = result.details?.summary ?? "github_pr";
       return new Text(theme.fg("dim", `  ${s}`), 0, 0);
@@ -337,8 +315,6 @@ export default function (pi: ExtensionAPI) {
       const metaFields =
         "number,title,state,isDraft,baseRefName,headRefName,author,body,labels,additions,deletions,changedFiles,url,mergeable,reviewDecision,files,statusCheckRollup";
 
-      // gh graphql needs explicit owner/repo. If only a bare number was given
-      // (no URL, no --repo), resolve the session cwd's repo.
       let glOwner = "";
       let glRepo = "";
       if (ownerRepo.includes("/")) {
@@ -535,9 +511,6 @@ export default function (pi: ExtensionAPI) {
           if (unfetchedC > 0)
             out.push(`\n_(+${unfetchedC} earlier comment(s) not fetched)_`);
 
-          // Bots are NOT filtered out of review threads: inline findings
-          // (CodeRabbit etc.) are line-anchored and actionable, unlike their
-          // summary issue comments above.
           const threads = pr.reviewThreads.nodes.filter(
             (t) => a.includeResolved || (!t.isResolved && !t.isOutdated),
           );
@@ -576,7 +549,6 @@ export default function (pi: ExtensionAPI) {
         );
       }
 
-      // Diff last — biggest, most useful for code review.
       if (wantDiffSection && wantDiff && diff.code === 0 && diff.stdout) {
         const cut = truncateHead(diff.stdout, {
           maxBytes: MAX_DIFF_BYTES,

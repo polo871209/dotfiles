@@ -1,15 +1,7 @@
--- Per-linter fixups, applied the first time each linter actually runs.
---
 -- They cannot be applied at startup: reading `lint.linters.<name>` requires that
 -- linter's module, and some do real work in their body. golangcilint builds its
 -- args by shelling out to `golangci-lint version` and `go env GOMOD`, which cost
 -- ~50ms of every nvim start for a linter most sessions never run.
---
--- Two callers reach nvim-lint independently -- plugin/lint.lua for interactive
--- nvim and .pi/agent/extensions/lsp/driver.lua for the agent instance -- so both
--- must route through M.filter and then M.apply, or the fixups silently never
--- land and a linter runs against a buffer it cannot answer for.
-
 local M = {}
 
 --- Directory of the nearest eslint config, or nil when the buffer has none.
@@ -41,8 +33,6 @@ local patches = {
             '-c',
             'cd "$1" && shift && exec eslint_d "$@"',
             'sh',
-            -- M.filter already dropped the buffers with no config, so the
-            -- fallback is unreachable in practice and only keeps sh honest.
             function() return eslint_root() or vim.fn.getcwd() end,
             '--format',
             'json',
@@ -51,11 +41,12 @@ local patches = {
             function() return vim.api.nvim_buf_get_name(0) end,
         }
     end,
-    -- Global hadolint ignores (DL3007: latest tag)
-    hadolint = function(l) l.args = vim.list_extend(vim.deepcopy(l.args or {}), { '--ignore', 'DL3007' }) end,
+    hadolint = function(l)
+        local allow_latest_tag = { '--ignore', 'DL3007' }
+        l.args = vim.list_extend(vim.deepcopy(l.args or {}), allow_latest_tag)
+    end,
 }
 
---- Linters that cannot answer for every buffer, keyed by name.
 ---@type table<string, fun(bufnr: integer?): boolean>
 local runnable = {
     -- eslint_d is a daemon shared across projects, and the agent's nvim roams

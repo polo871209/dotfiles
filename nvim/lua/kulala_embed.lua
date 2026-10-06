@@ -17,21 +17,14 @@
 --- On top of that it adds globals shared by every block (see `shared_lines`)
 --- and puts kulala's own status inlay back on the comment (`mirror_status`),
 --- which would otherwise be drawn on the invisible scratch buffer.
-
 local M = {}
 
---- Innermost node at the first non-blank column of `lnum` able to hold a
---- request: a comment in any language, or a multi-line string used as a comment
---- block (Python docstrings, Lua `[[ ]]`). Ancestors are searched because a
---- docstring's delimiter is its own single-row token.
 ---@param lnum integer 1-indexed; out-of-range lines yield nil
 ---@return TSNode?
 local function block_node(lnum)
     local col = vim.fn.getline(lnum):find '%S'
     if not col then return end
 
-    -- `get_node` yields nil while the tree is unparsed, which is the state
-    -- whenever highlighting has not run over the buffer. Cheap once valid.
     local parsed, parser = pcall(vim.treesitter.get_parser, 0)
     if not parsed or not parser then return end
     parser:parse()
@@ -50,8 +43,6 @@ local function block_node(lnum)
     end
 end
 
---- True when `lnum` holds a one-line comment, i.e. a block that grows by
---- absorbing its neighbours rather than one the parser already delimits.
 ---@param lnum integer
 local function is_line_comment(lnum)
     local node = block_node(lnum)
@@ -60,7 +51,6 @@ local function is_line_comment(lnum)
     return erow == srow or (erow == srow + 1 and ecol == 0)
 end
 
---- Bounds of the comment or block-string containing `lnum`, 1-indexed inclusive.
 ---@param lnum integer
 ---@return integer? first, integer? last
 local function block_range(lnum)
@@ -69,7 +59,6 @@ local function block_range(lnum)
 
     local srow, _, erow, ecol = node:range()
     srow, erow = srow + 1, erow + 1
-    -- Some grammars close a node on the following row at column 0.
     if erow > srow and ecol == 0 then erow = erow - 1 end
 
     if erow > srow then return srow, erow end
@@ -84,26 +73,14 @@ local function block_range(lnum)
     return srow, erow
 end
 
---- Lines that are pure delimiter noise once the comment markers are off: `"""`,
---- `/*`, `*/`, ```` ``` ````. Kulala's `###` separator and its `# @directive`s
---- are punctuation-only too, hence the explicit exemption.
----
---- Requires at least one punctuation character, so a blank line survives: a
---- commented-out blank (`#` on its own) strips to "", and that empty line is
---- what separates headers from the body.
 ---@param line string
 local function is_delimiter(line)
     if line:match '^%s*###' or line:match '^%s*#%s*@' then return false end
     return line:match '^%s*%p+%s*$' ~= nil
 end
 
---- A JetBrains start line: method plus target. Anchored on an all-caps word so
---- `GetUser returns one user.` does not read as a verb.
 local START_LINE = '^%u[%u%d]*%s+%S'
 
---- True where a request starts: a start line, a kulala separator, directive or
---- `run`/`import` statement, or a variable assignment. Used to drop the prose a
---- doc comment opens with.
 ---@param line string
 local function is_request_start(line)
     return line:match '^###' ~= nil
@@ -114,9 +91,6 @@ local function is_request_start(line)
         or line:match(START_LINE) ~= nil
 end
 
---- A blank line still belongs to the block around it, but carries no node to
---- search from. Look up first, so the block just finished writing wins over the
---- one below.
 ---@param lnum integer
 ---@return integer
 local function nearest_content(lnum)
@@ -127,7 +101,6 @@ local function nearest_content(lnum)
     return lnum
 end
 
---- Name of the per-project file holding globals shared by every comment block.
 local SHARED = 'kulala.http'
 
 --- Header for blocks the extraction has to supply itself. Named, not a bare
@@ -136,9 +109,6 @@ local SHARED = 'kulala.http'
 --- produces. It also reads better than the generated `REQUEST_001`.
 local HEADER = '### embedded'
 
---- The nearest `kulala.http` split into the preamble every comment block gets,
---- and its named blocks keyed by name.
----
 --- The preamble is everything above the first `###`. Document-level `@vars`
 --- there reach every request in the document; a `### Shared` block would not,
 --- its variables never propagate (kulala-core 0.37).
@@ -164,8 +134,6 @@ local function shared_document(path)
     return preamble, blocks
 end
 
---- Replace every `run #name` with the named block from `kulala.http`.
----
 --- Inlining rather than leaning on kulala's own `import`/`run`: kulala-core will
 --- not execute a `run` statement and a request of its own in one pass, and an
 --- `import` line makes every request in the imported file fire once the document
@@ -186,13 +154,9 @@ local function expand_runs(lines, blocks)
             out[#out + 1] = line
         else
             expanded = true
-            -- The block carries its own `### name` header.
             vim.list_extend(out, block)
             out[#out + 1] = ''
 
-            -- Whatever follows is a separate request and needs its own header,
-            -- unless it already opens one -- two headers in a row would leave an
-            -- empty block between them.
             local opens_block
             for j = i + 1, #lines do
                 if lines[j]:match '%S' then
@@ -207,8 +171,6 @@ local function expand_runs(lines, blocks)
     return out, expanded
 end
 
---- Turn source lines `first`..`last` into a request, with `lnum` deciding which
---- request is targeted when the range holds several.
 ---@param first integer
 ---@param last integer
 ---@param lnum integer
@@ -216,11 +178,8 @@ end
 ---@return string[]? lines, integer? anchor, integer? target, boolean? expanded
 local function request_from(first, last, lnum, blocks)
     local raw = vim.api.nvim_buf_get_lines(0, first - 1, last, false)
-    -- Kulala's own stripper: drops leading comment markers and indentation while
-    -- preserving `###` and `# @` at the start of a line.
     local stripped = require('kulala.parser.utils').strip_invalid_chars(raw)
 
-    -- Kept in step, so a kept line can be mapped back to where it came from.
     ---@type string[], integer[]
     local lines, source_lines = {}, {}
     for i, line in ipairs(stripped) do
@@ -234,22 +193,16 @@ local function request_from(first, last, lnum, blocks)
     while start <= #lines and not is_request_start(lines[start]) do
         start = start + 1
     end
-    -- A comment with no request in it: let the caller fall back to kulala.
     if start > #lines then return end
 
     lines = vim.list_slice(lines, start)
     source_lines = vim.list_slice(source_lines, start)
 
-    -- Which extracted line the cursor sits on, so a block holding several
-    -- requests sends the one being looked at.
     local target = 1
     for i, source in ipairs(source_lines) do
         if source <= lnum then target = i end
     end
 
-    -- Hang the inlay off that request's method line rather than an `@var` or
-    -- `# @directive` line, searching forward first so a cursor parked on a
-    -- directive still resolves downwards to its own request.
     local anchor = source_lines[target]
     for i = target, #lines do
         if lines[i]:match(START_LINE) then
@@ -261,10 +214,6 @@ local function request_from(first, last, lnum, blocks)
     local expanded
     lines, expanded = expand_runs(lines, blocks)
 
-    -- kulala-core wants a block header, but only add one when the document has
-    -- none of its own: prepending it would push leading `@var` assignments inside
-    -- the first block instead of leaving them at document scope, where later
-    -- blocks can still see them.
     local has_header = vim.iter(lines):any(function(line) return line:match '^###' ~= nil end)
     if not has_header then
         table.insert(lines, 1, HEADER)
@@ -274,7 +223,6 @@ local function request_from(first, last, lnum, blocks)
     return lines, anchor, target, expanded
 end
 
---- The request in the comment or block-string under the cursor.
 ---@param lnum integer
 ---@param blocks table<string, string[]>
 ---@return string[]? lines, integer? anchor, integer? target, boolean? expanded
@@ -285,7 +233,6 @@ local function block_request(lnum, blocks)
     return request_from(first, last, lnum, blocks)
 end
 
---- The request in the current linewise selection, which is left on exit.
 ---@param blocks table<string, string[]>
 ---@return string[]? lines, integer? anchor, integer? target, boolean? expanded
 local function selection_request(blocks)
@@ -303,8 +250,6 @@ end
 ---@type table<string, integer> source path -> scratch buffer
 local scratch = {}
 
---- Hidden `http` buffer standing in for `path`, reused across runs so repeated
---- sends do not leak buffers or collide on the name.
 ---@param path string
 ---@return integer
 local function scratch_buf(path)
@@ -325,11 +270,6 @@ end
 
 local NS = vim.api.nvim_create_namespace 'kulala_inlay_hints'
 
---- Virtual-text chunks kulala is currently showing in `buf`, keeping the
---- highlight groups so the mirrored copy looks identical.
---- An expanded `run #name` runs several requests, so kulala leaves one mark per
---- request. Collapse them into the single state worth reporting: still waiting
---- beats a failure, and a failure beats a success.
 ---@param buf integer
 ---@param icons table<string, string>
 ---@return table[]? chunks, boolean? settled, boolean? failed
@@ -344,7 +284,7 @@ local function inlay_chunks(buf, icons)
             if icons.error and text:find(icons.error, 1, true) then
                 failed = failed or chunks
             elseif icons.done and text:find(icons.done, 1, true) then
-                done = chunks -- last one wins, so the duration shown is the whole run
+                done = chunks
             else
                 loading = loading or chunks
             end
@@ -366,9 +306,6 @@ local function stop_mirror()
     mirror = nil
 end
 
---- Run `targets` (line numbers in the scratch document) one at a time, copying
---- kulala's status onto `line` of `source` as it goes.
----
 --- One at a time rather than one whole-document run: kulala-core 0.37 hangs on a
 --- document run whole when it holds more than one request. That reproduces with
 --- kulala's own `run_all` on a hand-written .http file, so it is not something
@@ -403,7 +340,6 @@ local function run_sequence(from, source, line, targets)
         100,
         vim.schedule_wrap(function()
             ticks = ticks + 1
-            -- 60s, longer than any request kulala will still be waiting on.
             if ticks > 600 or not vim.api.nvim_buf_is_valid(source) then return stop_mirror() end
 
             local chunks, settled, failed = inlay_chunks(from, icons)
@@ -418,8 +354,6 @@ local function run_sequence(from, source, line, targets)
             vim.api.nvim_buf_set_extmark(source, NS, line - 1, 0, { virt_text = chunks, hl_mode = 'combine' })
 
             if not (settled and started) then return end
-            -- Stop on failure: whatever follows was almost certainly relying on
-            -- the request that just failed.
             if failed or index >= #targets then return stop_mirror() end
             fire()
         end)
@@ -431,11 +365,8 @@ function M.run()
     local kulala = require 'kulala'
     local ft = vim.bo.filetype
 
-    -- A run that is not ours must not keep writing to a stale anchor.
     stop_mirror()
 
-    -- In an .http buffer kulala's own handling is already right, selections
-    -- included.
     if ft == 'http' or ft == 'rest' then return kulala.run() end
 
     -- A linewise selection goes through the same stripping: kulala's own visual
@@ -453,7 +384,6 @@ function M.run()
         lines, anchor, target, expanded = block_request(vim.api.nvim_win_get_cursor(0)[1], blocks)
     end
 
-    -- Not in a comment; let kulala try the current line or a fence as usual.
     if not lines or not anchor or not target then return kulala.run() end
 
     local doc = preamble

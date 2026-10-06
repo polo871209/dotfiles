@@ -1,24 +1,3 @@
-// auto-rename — once a session has more than 3 user turns, spawn a
-// stateless LLM call to pick a short, descriptive session name.
-//
-// Pi has no default session title. The selector falls back to the raw first
-// user message (`session.name ?? session.firstMessage`), which scans badly
-// when the session opens with a pasted log or an `@file` mention. This
-// extension hooks `agent_settled` and `session_start` and renames via
-// `pi.setSessionName()`.
-//
-// Trade-off: the selector's "named" filter (keybinding id
-// `app.session.toggleNamedFilter`) then matches nearly every session, so it
-// stops working as a bookmark. Raise THRESHOLD if you rely on that filter.
-//
-// Stateless: the rename call is NOT added to session history (mirrors
-// btw.ts). Each session is renamed at most once unless the user clears
-// the name with `/rename -`. Set a name by hand with pi's built-in `/name`.
-//
-// Usage:
-//   /rename     regenerate the name now, whatever the turn count
-//   /rename -   clear the name and re-arm the automatic rename
-
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -30,23 +9,18 @@ import {
   type SideChannelOpts,
 } from "./shared/llm";
 
-// Naming a session is cheap classification work, so pin it to Haiku instead
-// of burning the session model. The call falls back to the session model when
-// Haiku is missing or has no auth.
 const NAME_PROVIDER = "anthropic";
 const NAME_MODEL = "claude-haiku-4-5";
 
-const THRESHOLD = 3; // strictly more than this many user turns
+const RENAME_AFTER_USER_TURNS = 3;
 const MAX_NAME_LEN = 60;
-const MAX_CONTEXT_MESSAGES = 12; // the latest 12 text messages name the task
+const MAX_CONTEXT_MESSAGES = 12;
 const RENAME_TIMEOUT_MS = 20_000;
 const SYSTEM_PROMPT =
   "You name chat sessions. Reply with ONLY a short title (max 6 words, " +
   "no quotes, no punctuation at end, no trailing period). Describe the " +
   "user's overall task or topic. Plain text only.";
 
-// Trim model chatter down to a label: strip wrapping quotes and trailing
-// punctuation, collapse whitespace, cap the width the selector can show.
 function normalizeName(raw: string): string {
   return raw
     .replace(/^["'`]+|["'`]+$/g, "")
@@ -56,8 +30,6 @@ function normalizeName(raw: string): string {
     .slice(0, MAX_NAME_LEN);
 }
 
-// Single place that builds the side-channel call, so the automatic path and
-// /rename always share one model and one prompt.
 function buildCall(ctx: ExtensionContext): {
   opts: SideChannelOpts;
   userTurns: number;
@@ -90,25 +62,22 @@ function buildCall(ctx: ExtensionContext): {
 }
 
 export default function (pi: ExtensionAPI) {
-  // Per-session-file guard so we don't fire concurrent renames.
   const inFlight = new Set<string>();
-  // Sessions we've already renamed in this process; avoid clobbering a
-  // user-set name (also checked via getSessionName()).
-  const done = new Set<string>();
+  const settledSessions = new Set<string>();
 
   const tryRename = async (ctx: ExtensionContext) => {
     if (!ctx.model) return;
 
     const sessionFile = ctx.sessionManager.getSessionFile();
     if (!sessionFile) return;
-    if (inFlight.has(sessionFile) || done.has(sessionFile)) return;
+    if (inFlight.has(sessionFile) || settledSessions.has(sessionFile)) return;
     if (pi.getSessionName()) {
-      done.add(sessionFile);
+      settledSessions.add(sessionFile);
       return;
     }
 
     const { opts, userTurns } = buildCall(ctx);
-    if (userTurns <= THRESHOLD) return;
+    if (userTurns <= RENAME_AFTER_USER_TURNS) return;
 
     inFlight.add(sessionFile);
     try {
@@ -116,29 +85,23 @@ export default function (pi: ExtensionAPI) {
         ...opts,
         signal: AbortSignal.timeout(RENAME_TIMEOUT_MS),
       });
-      // Background task: fail silently, never notify.
       if (!result.ok) return;
       const name = normalizeName(result.text);
       if (!name) return;
 
-      // The user may have switched sessions or set a name while we waited.
-      // A stale ctx throws here, which the caller swallows.
       if (ctx.sessionManager.getSessionFile() !== sessionFile) return;
       if (pi.getSessionName()) {
-        done.add(sessionFile);
+        settledSessions.add(sessionFile);
         return;
       }
 
       pi.setSessionName(name);
-      done.add(sessionFile);
+      settledSessions.add(sessionFile);
     } finally {
       inFlight.delete(sessionFile);
     }
   };
 
-  // Never return the promise: pi awaits agent_settled and session_start
-  // handlers, so the agent would stay busy, and startup would wait, for the
-  // name call. agent_settled, not agent_end: it skips repair turns.
   const renameInBackground = (ctx: ExtensionContext) => {
     void tryRename(ctx).catch(() => {});
   };
@@ -152,11 +115,9 @@ export default function (pi: ExtensionAPI) {
       const arg = (args ?? "").trim();
       const sessionFile = ctx.sessionManager.getSessionFile();
 
-      // Clear: an empty session_info entry drops the name, so the selector
-      // falls back to the first message and the automatic rename re-arms.
       if (arg === "-" || arg.toLowerCase() === "clear") {
         pi.setSessionName("");
-        if (sessionFile) done.delete(sessionFile);
+        if (sessionFile) settledSessions.delete(sessionFile);
         ctx.ui.notify("Session name cleared", "info");
         return;
       }
@@ -184,7 +145,6 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      // No turn threshold here: the user asked for the rename explicitly.
       if (sessionFile) inFlight.add(sessionFile);
       try {
         const text = await sideChannelWithLoader(ctx, "Naming session", opts);
@@ -195,7 +155,7 @@ export default function (pi: ExtensionAPI) {
           return;
         }
         pi.setSessionName(name);
-        if (sessionFile) done.add(sessionFile);
+        if (sessionFile) settledSessions.add(sessionFile);
         ctx.ui.notify(`Session named: ${name}`, "info");
       } finally {
         if (sessionFile) inFlight.delete(sessionFile);

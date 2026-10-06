@@ -1,12 +1,7 @@
--- Highlights the other occurrences of whatever is selected, which is all of
--- visimatch.nvim we used. A decoration provider recomputes matches per redraw
--- over the visible lines only, so nothing has to be cleared when the selection
--- moves and nothing goes stale when the buffer changes.
 if vim.g.pi_agent then return end
 
 local ns = vim.api.nvim_create_namespace 'visual-match'
 local HL = 'LspReferenceTarget'
--- Shorter selections match everywhere and just add noise.
 local MIN_CHARS = 6
 local MAX_LINES = 30
 local IGNORECASE_FT = { help = true, markdown = true, text = true }
@@ -19,11 +14,9 @@ local IGNORECASE_FT = { help = true, markdown = true, text = true }
 ---@field col integer 0-indexed start column
 ---@field ignorecase boolean
 
---- Current selection, or nil when there is nothing worth matching.
 ---@return VisualSelection?
 local function selection()
     local mode = vim.fn.mode()
-    -- Blockwise selections are not contiguous text.
     if mode ~= 'v' and mode ~= 'V' then return end
 
     local anchor, cursor = vim.fn.getpos 'v', vim.fn.getpos '.'
@@ -35,7 +28,6 @@ local function selection()
     if last - first + 1 > MAX_LINES then return end
 
     local buf = vim.api.nvim_get_current_buf()
-    -- Handles empty lines, virtual columns, and multibyte endpoints safely.
     local lines = vim.fn.getregion(anchor, cursor, { type = mode, exclusive = false })
     if #lines == 0 then return end
     if mode == 'V' then fcol = 0 end
@@ -45,7 +37,6 @@ local function selection()
         chars = chars + #line
     end
     if chars < MIN_CHARS then return end
-    -- Whitespace-only selections match every indent in the file.
     if #lines == 1 and lines[1]:find '^%s*$' then return end
 
     local ft = vim.bo[buf].filetype
@@ -72,8 +63,6 @@ vim.api.nvim_set_decoration_provider(ns, {
 
         local needle = sel.lines
         local n = #needle
-        -- A match can start above the window or end below it; fetch the
-        -- overhang so partially visible matches still highlight.
         local from = math.max(top - n + 1, 0)
         local lines = vim.api.nvim_buf_get_lines(buf, from, bot + n, false)
         if sel.ignorecase then
@@ -90,7 +79,6 @@ vim.api.nvim_set_decoration_provider(ns, {
             vim.api.nvim_buf_set_extmark(buf, ns, row, scol, { end_col = ecol, hl_group = HL, ephemeral = true })
         end
 
-        --- The selection is already highlighted as Visual.
         ---@param row integer 0-indexed
         ---@param col integer 0-indexed
         ---@return boolean
@@ -109,8 +97,6 @@ vim.api.nvim_set_decoration_provider(ns, {
             return false
         end
 
-        -- Multi-line: the first line matches as a suffix, the interior lines
-        -- whole, the last line as a prefix -- the shape a selection cuts out.
         local head, tail = needle[1], needle[n]
         for i = 1, #lines - n + 1 do
             local start = lines[i]

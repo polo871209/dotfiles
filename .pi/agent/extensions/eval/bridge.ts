@@ -1,5 +1,3 @@
-// Loopback HTTP bridge for Python calls into host tools.
-
 import { randomUUID } from "node:crypto";
 import * as http from "node:http";
 import type { AddressInfo } from "node:net";

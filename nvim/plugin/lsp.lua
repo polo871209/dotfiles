@@ -2,7 +2,6 @@ vim.pack.add {
     'https://github.com/b0o/SchemaStore.nvim',
 }
 
--- LSPs/tools installed via mise (see mise/config.toml)
 vim.lsp.config('*', {
     root_markers = { '.git' },
 })
@@ -82,9 +81,6 @@ vim.diagnostic.config {
     jump = { float = true },
 }
 
--- gf follows links/files under the cursor and pushes the tagstack so <C-t>
--- jumps back: file://...#Lnnn doc-links (e.g. ZLS hover -> std source) read
--- straight out of the hover float, and plain/relative paths via native gF.
 local function push_tag()
     local win = vim.api.nvim_get_current_win()
     local pos = vim.api.nvim_win_get_cursor(win)
@@ -102,43 +98,41 @@ local function follow_file_link(text)
     return true
 end
 
-vim.keymap.set('n', 'gf', function()
-    -- 1. file:// link inside the open hover float (no need to enter it)
+local function follow_hover_link()
     local fwin = vim.b.lsp_floating_preview
-    if fwin and vim.api.nvim_win_is_valid(fwin) then
-        local text = table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(fwin), 0, -1, false), '\n')
-        if text:match 'file://' then
-            vim.api.nvim_win_close(fwin, true)
-            vim.b.lsp_floating_preview = nil
-            if follow_file_link(text) then return end
-        end
-    end
-    -- 2. file:// link on the current line
-    if follow_file_link(vim.api.nvim_get_current_line()) then return end
-    -- 3. plain/relative file under cursor (gF honors a trailing :line). Push
-    --    the tagstack, rolling back if gF can't open anything.
+    if not (fwin and vim.api.nvim_win_is_valid(fwin)) then return false end
+    local text = table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(fwin), 0, -1, false), '\n')
+    if not text:match 'file://' then return false end
+    vim.api.nvim_win_close(fwin, true)
+    vim.b.lsp_floating_preview = nil
+    return follow_file_link(text)
+end
+
+local function follow_path_under_cursor()
     local win = vim.api.nvim_get_current_win()
     local saved = vim.fn.gettagstack(win)
     push_tag()
-    if not pcall(function() vim.cmd 'normal! gF' end) then
-        vim.fn.settagstack(win, saved, 'r')
-        vim.cmd 'normal! gf' -- surface the native "can't find file" error
-    end
+    if pcall(function() vim.cmd 'normal! gF' end) then return end
+    vim.fn.settagstack(win, saved, 'r')
+    vim.cmd 'normal! gf'
+end
+
+vim.keymap.set('n', 'gf', function()
+    if follow_hover_link() then return end
+    if follow_file_link(vim.api.nvim_get_current_line()) then return end
+    follow_path_under_cursor()
 end, { desc = 'Follow link / file under cursor' })
 
 vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagnostic [Q]uickfix list' })
 
--- Forwards LSP progress to nvim_echo so it integrates with the ghostty status line
 vim.api.nvim_create_autocmd('LspProgress', {
     group = vim.api.nvim_create_augroup('lsp-osc-progress', { clear = true }),
     callback = function(ev)
         local value = ev.data.params.value or {}
         local msg = value.message or 'done'
 
-        -- rust-analyzer in particular has really long LSP messages so truncate them
         if #msg > 40 then msg = msg:sub(1, 37) .. '...' end
 
-        -- :h LspProgress
         vim.api.nvim_echo({ { msg } }, false, {
             id = 'lsp',
             kind = 'progress',

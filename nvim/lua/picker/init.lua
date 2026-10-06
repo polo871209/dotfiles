@@ -1,9 +1,3 @@
--- Self-contained fuzzy picker: fd/rg produce candidates, matchfuzzypos ranks
--- them, and picker/core.lua renders them. No plugin dependency beyond an
--- optional nvim-web-devicons for filetype icons.
---
--- This module holds only the sources; the widget lives in picker/core.lua.
-
 local Picker = require 'picker.core'
 local frecency = require 'picker.frecency'
 local search = require 'picker.search'
@@ -17,16 +11,13 @@ local M = {}
 ---@param col integer?
 local function open_file(path, cwd, action, lnum, col)
     frecency.bump(path, cwd)
-    -- Resolved against the picker's cwd, not nvim's: :tcd or an autocmd may have
-    -- moved the latter while the picker was open.
     local abs = vim.fs.normalize(vim.fs.joinpath(cwd, path))
-    vim.cmd "normal! m'" -- jumplist entry so <C-o> comes back
+    vim.cmd "normal! m'"
     vim.cmd(('%s %s'):format(action or 'edit', vim.fn.fnameescape(abs)))
     if lnum then pcall(vim.api.nvim_win_set_cursor, 0, { lnum, math.max(0, (col or 1) - 1) }) end
     vim.cmd 'normal! zz'
 end
 
---- buffers + oldfiles + every file under cwd, ranked by frecency.
 function M.smart()
     local list_cmd = search.files()
     if not list_cmd then
@@ -71,7 +62,6 @@ function M.smart()
     }):open()
 end
 
---- Live ripgrep. Every keystroke respawns rg; no client-side filtering.
 ---@param opts { hidden: boolean?, ignored: boolean? }?
 function M.grep(opts)
     opts = opts or {}
@@ -103,8 +93,6 @@ function M.grep(opts)
     }):open()
 end
 
---- `vim.ui.select` on the picker widget, so the pane/choice prompts look and
---- behave like every other list here instead of a cmdline enumeration.
 ---@param items any[]
 ---@param opts { prompt: string?, format_item: (fun(item: any): string)?, kind: string? }?
 ---@param on_choice fun(item: any?, idx: integer?)
@@ -127,7 +115,6 @@ function M.select(items, opts, on_choice)
     }):open()
 end
 
---- Spell suggestions for the word under the cursor.
 function M.spelling()
     local word = vim.fn.expand '<cword>'
     if word == '' then return end
@@ -142,9 +129,6 @@ function M.spelling()
         title = ('Spelling: %s'):format(word),
         preview = false,
         confirm = function(item)
-            -- The picker restores the originating window, but the buffer in it
-            -- can still have changed; replacing a word in the wrong one is worse
-            -- than doing nothing.
             if vim.api.nvim_get_current_buf() ~= buf then return end
             vim.api.nvim_win_set_cursor(0, pos)
             vim.cmd(('normal! ciw%s'):format(item.text))

@@ -1,7 +1,3 @@
-// /yeet — stage, commit, and push. Side-channel LLM call for commit message
-// (does NOT pollute main conversation). Leaves a short marker entry in
-// history after success.
-
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -35,7 +31,6 @@ Return the raw commit message itself, starting with the Conventional Commits sub
 const YEET_MSG_TYPE = "yeet-marker";
 const YEET_WIDGET_KEY = "yeet-progress";
 const PUSH_TIMEOUT_MS = 120_000;
-// A hung hook would block /yeet, and pi has no way to cancel a command.
 const HOOK_TIMEOUT_MS = 600_000;
 
 
@@ -94,12 +89,9 @@ export default function (pi: ExtensionAPI) {
       );
     };
 
-    // Repo-root paths /yeet never stages, diffs, or commits (e.g. dotfiles'
-    // stowed gitconfig gets dirtied by tools mid-session). Extend as needed.
     const IGNORED_PATHS = ["git/"];
     const EXCLUDE = IGNORED_PATHS.map((p) => `:(exclude,top)${p}`);
 
-    // Force no ANSI color in diffs regardless of user gitconfig.
     const gitWith = async (timeout: number | undefined, gargs: string[]) => {
       const r = await pi.exec("git", ["-c", "color.ui=never", ...gargs], {
         cwd,
@@ -115,13 +107,10 @@ export default function (pi: ExtensionAPI) {
       };
     };
     const git = (...gargs: string[]) => gitWith(undefined, gargs);
-    // A push waiting on an unreachable remote or a credential prompt would
-    // hang the command, and pi has no way to cancel it.
     const gitPush = (...gargs: string[]) =>
       gitWith(PUSH_TIMEOUT_MS, ["push", ...gargs]);
 
     const pushAndReport = async (sha: string, subject: string) => {
-      // New branches have no upstream yet: retry with --set-upstream.
       showProgress(4);
       let push = await gitPush();
       if (!push.ok && /no upstream branch|--set-upstream/i.test(push.stderr)) {
@@ -142,9 +131,6 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.setWidget(YEET_WIDGET_KEY, undefined);
       }
 
-      // Leave a small marker in history (one line; sent to LLM next turn).
-      // triggerTurn false: if the agent is running, the marker waits for the
-      // turn to end instead of steering it.
       pi.sendMessage(
         {
           customType: YEET_MSG_TYPE,
@@ -160,14 +146,10 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    // Staging happens before the hook and the message call, so both see the
-    // exact index. A cancel after this point leaves the changes staged.
     const hasHead = (await git("rev-parse", "--verify", "HEAD")).ok;
     const wtStatus = (await git("status", "--porcelain", "--", ".", ...EXCLUDE))
       .out;
     if (!wtStatus) {
-      // A rerun after a failed or cut-off push: the commit exists, so only
-      // the push is left.
       const ahead = await git("rev-list", "--count", "@{upstream}..HEAD");
       if (ahead.ok && Number(ahead.out) > 0) {
         const sha = (await git("rev-parse", "--short", "HEAD")).out;
@@ -191,7 +173,6 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    // Check hooks before spending an LLM call; rerun after hook formatting.
     showProgress(1);
     let hook = await gitWith(HOOK_TIMEOUT_MS, [
       "hook",
@@ -232,8 +213,8 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    // No HEAD yet (first commit): diff against the well-known empty tree.
-    const base = hasHead ? "HEAD" : "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+    const emptyTreeSha = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+    const base = hasHead ? "HEAD" : emptyTreeSha;
     const stat = await git(
       "diff",
       "--cached",
@@ -250,15 +231,12 @@ export default function (pi: ExtensionAPI) {
       diff.length > 6000 ? diff.slice(0, 6000) + "\n…(truncated)" : diff;
     const hint = args?.trim() ? `\nUser hint: ${args.trim()}\n` : "";
 
-    // Recent commit subjects so the message matches the repo's established
-    // type/scope vocabulary and phrasing.
     const log = await git("log", "-10", "--no-merges", "--format=%s");
     const historyBlock =
       log.ok && log.out
         ? `Recent commit subjects (style reference):\n${log.out}\n\n`
         : "";
 
-    // Branch name often encodes ticket/scope (e.g. feat/auth-xyz).
     const branch = (await git("symbolic-ref", "--quiet", "--short", "HEAD"))
       .out;
     const branchBlock = branch ? `Current branch: ${branch}\n\n` : "";
@@ -287,8 +265,6 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    // Drop reasoning before the subject line (models sometimes think out loud),
-    // then strip quotes and prefix labels.
     const COMMIT_TYPES =
       "feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert";
     const subjectLineRe = new RegExp(
@@ -309,12 +285,10 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    // Skip the hook: it already ran on this exact index.
     showProgress(3);
     const commit = await git("commit", "--no-verify", "-m", cleanMessage);
     if (!commit.ok) {
       showProgress(3, true);
-      // Pre-commit hooks usually write to stdout; surface both streams.
       const detail = [commit.stdout, commit.stderr]
         .map((s) => s.trim())
         .filter(Boolean)
@@ -342,7 +316,6 @@ export default function (pi: ExtensionAPI) {
     handler: runYeet,
   });
 
-  // No hint argument from a keypress: the shortcut is the plain-commit path.
   pi.registerShortcut("ctrl+alt+y", {
     description: "Stage, commit, and push current repo changes",
     handler: (ctx) => runYeet("", ctx),

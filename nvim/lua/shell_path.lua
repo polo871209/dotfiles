@@ -11,8 +11,6 @@ function source:get_trigger_characters() return { '/' } end
 
 local MAX_ENTRIES = 2000
 
--- Characters that end a shell word: blanks, quotes, redirects, operators, and
--- `=` so that `--file=deploy/` completes too.
 local WORD = '[^%s=\'"`<>|;&()]*$'
 
 local function resolve_dir(dir_part)
@@ -30,7 +28,6 @@ function source:get_completions(ctx, callback)
     local dir_part, name = word:match '^(.*/)([^/]*)$'
     if not dir_part then
         dir_part, name = '', word
-        -- A bare word in command position is a command, and a dash starts a flag.
         local head = before:sub(1, #before - #word)
         if head:match '^%s*$' or head:match '[|;&(]%s*$' or name:sub(1, 1) == '-' then return callback(empty) end
     end
@@ -49,7 +46,6 @@ function source:get_completions(ctx, callback)
         if show_hidden or entry:sub(1, 1) ~= '.' then
             if type == 'link' then type = (vim.uv.fs_stat(dir .. '/' .. entry) or {}).type end
             local is_dir = type == 'directory'
-            -- Match zsh: a space in a file name needs a backslash.
             local text = entry:gsub(' ', '\\ ')
             items[#items + 1] = {
                 label = entry,

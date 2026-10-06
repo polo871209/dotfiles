@@ -1,7 +1,3 @@
--- Shared bodies for `after/ftplugin/`. That directory takes one file per
--- filetype, so related types (c/cpp, the prose types) would otherwise carry
--- byte-identical copies of the same settings.
-
 local M = {}
 
 --- Append to `b:undo_ftplugin`. Nvim only restores what that variable names, so
@@ -9,7 +5,6 @@ local M = {}
 ---@param cmds string
 function M.undo(cmds) vim.b.undo_ftplugin = (vim.b.undo_ftplugin and vim.b.undo_ftplugin .. ' | ' or '') .. cmds end
 
---- Spell check on, for filetypes that are prose rather than code.
 function M.prose()
     vim.opt_local.spell = true
     M.undo 'setl spell<'

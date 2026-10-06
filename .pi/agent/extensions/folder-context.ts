@@ -1,16 +1,3 @@
-// folder-context — when the agent touches a path via read/edit/write/grep/
-// find/ls, walk from that path's dir up to (but NOT including) the session
-// cwd and inject every ancestor's AGENTS.md. pi already loads the cwd's own
-// AGENTS.md. Paths outside cwd are ignored.
-//
-// Only AGENTS.md is a candidate, not CLAUDE.md or README.md. Each content
-// identity is loaded once per session. A changed file is reinjected with
-// explicit supersession.
-//
-// Injection returns a hidden custom message from turn_end. Pi persists it
-// after the turn's tool results, so every later provider call sees it. The
-// context event cannot replace this: its changes apply to one request only.
-
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
@@ -29,9 +16,6 @@ interface InjectedDetails {
   identity: string;
 }
 
-// Resolve symlinks so the same file reached through different path spellings
-// (e.g. `~/.pi/agent` symlinked elsewhere) dedupes correctly. Falls back to
-// the plain resolved path if the file vanished between existsSync and here.
 function canonical(path: string): string {
   try {
     return realpathSync(path);
@@ -59,19 +43,12 @@ function frameContext(
 }
 
 export default function (pi: ExtensionAPI) {
-  // Subagents get a clean context: only their own agent .md + tools, no
-  // ambient repo docs injected mid-run.
   if (process.env.PI_IS_SUBAGENT === "1") return;
 
-  // Canonical candidate path → content identity. A changed file is reinjected
-  // so edits to repository instructions supersede the earlier snapshot.
   const injected = new Map<string, string>();
-  // Files pi itself put in the system prompt, seeded per prompt.
   const inSystemPrompt = new Map<string, string>();
   const pending: { text: string; details: InjectedDetails }[] = [];
 
-  // Rebuild from what the model can still see: a compaction summarizes the
-  // messages away, and /tree can move to a branch that never had them.
   const syncFromContext = (ctx: ExtensionContext): void => {
     injected.clear();
     for (const m of ctx.sessionManager.buildSessionProjection().messages) {
@@ -100,14 +77,6 @@ export default function (pi: ExtensionAPI) {
     return { entries: [...event.entries, ...drafts] };
   });
 
-  // Seed `injected` with what pi already put in the system prompt (the global
-  // agentDir file plus the cwd ancestor chain, see loadProjectContextFiles).
-  // Otherwise a path under agentDir re-injects agentDir's own AGENTS.md.
-  // Re-seed every turn to pick up files pi reloaded after /reload.
-  //
-  // Compare realpaths: pi resolves agentDir without following symlinks, while
-  // our walk starts at `ctx.cwd`, which can reach the same file through a
-  // different spelling. Without realpath the dedup silently no-ops.
   pi.on("before_agent_start", (event) => {
     inSystemPrompt.clear();
     for (const cf of event.systemPromptOptions.contextFiles ?? []) {
@@ -125,8 +94,6 @@ export default function (pi: ExtensionAPI) {
     const rel = relative(ctx.cwd, absPath);
     if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return;
 
-    // Dir-oriented tools (grep/find/ls) pass the directory itself; file tools
-    // pass a file. Start the walk at the dir either way.
     let startDir: string;
     try {
       startDir = statSync(absPath).isDirectory() ? absPath : dirname(absPath);
@@ -134,8 +101,6 @@ export default function (pi: ExtensionAPI) {
       startDir = dirname(absPath);
     }
 
-    // Walk up to (but not including) cwd. cwd's own AGENTS.md is already
-    // loaded by pi as project context — skipping it avoids duplicate injection.
     const ancestors: string[] = [];
     let cur = startDir;
     while (cur !== ctx.cwd) {
@@ -162,9 +127,7 @@ export default function (pi: ExtensionAPI) {
           text: frameContext(rawCandidate, content, previous !== undefined),
           details: { path: candidate, identity },
         });
-      } catch {
-        // allow retry on next call
-      }
+      } catch {}
     }
   });
 }

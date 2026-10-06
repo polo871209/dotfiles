@@ -1,10 +1,3 @@
-// The questionnaire state machine and its runtime host.
-//
-//   routeKey  : (key, state, runtime) → action   — pure key dispatch
-//   reduce    : (state, action, ctx) → (state, effects[]) — pure transition
-//   QuestionnaireSession : owns the canonical state cell + the inline Input,
-//                          runs effects, and fans state out to the view.
-
 import {
   getKeybindings,
   type Input,
@@ -28,8 +21,6 @@ import {
 } from "./dialog";
 import type { WrappingSelectItem } from "./widgets";
 
-// State
-
 export interface QuestionnaireState {
   currentTab: number;
   optionIndex: number;
@@ -52,7 +43,6 @@ interface QuestionnaireRuntime {
 
 export type ActiveView = "chat" | "options" | "submit";
 
-/** Priority: submit > chat > options. Mirrors the routeKey cascade. */
 export function selectActiveView(
   state: { chatFocused: boolean; currentTab: number },
   totalQuestions: number,
@@ -62,7 +52,6 @@ export function selectActiveView(
   return "options";
 }
 
-/** Build the option rows (author options + appended sentinels) for one question. */
 export function buildItemsForQuestion(
   question: QuestionData,
 ): WrappingSelectItem[] {
@@ -76,8 +65,6 @@ export function buildItemsForQuestion(
   }
   return items;
 }
-
-// Actions (key-router output)
 
 type QuestionnaireAction =
   | { kind: "nav"; nextIndex: number }
@@ -231,8 +218,6 @@ function routeKey(
 ): QuestionnaireAction {
   const kb = runtime.keybindings;
 
-  // Collapse/expand: intercepted from every inner mode. Ctrl+] is free in every
-  // mainstream terminal + multiplexer.
   if (matchesKey(data, Key.ctrl("]"))) return { kind: "toggle_collapsed" };
 
   if (state.collapsed) {
@@ -338,8 +323,6 @@ function routeKey(
   if (kb.matches(data, KEYBIND_CANCEL)) return { kind: "cancel" };
   return { kind: "ignore" };
 }
-
-// Reducer
 
 type Effect =
   | { kind: "set_input_buffer"; value: string }
@@ -578,8 +561,6 @@ export function reduce(
   return handler(state, action as never, ctx);
 }
 
-// Runtime host
-
 interface QuestionnaireSessionConfig {
   tui: { terminal: { columns: number; rows: number }; requestRender(): void };
   theme: Theme;
@@ -676,8 +657,6 @@ export class QuestionnaireSession {
   private runEffect(effect: Effect): void {
     switch (effect.kind) {
       case "set_input_buffer":
-        // A bracketed paste into an empty Input parks the cursor after the
-        // text without depending on the user's cursor-line-end key.
         this.inlineInput.setValue("");
         this.inlineInput.handleInput(`\x1b[200~${effect.value}\x1b[201~`);
         return;
@@ -690,9 +669,6 @@ export class QuestionnaireSession {
     }
   }
 
-  // Fast path for per-keystroke typing in the inline free-text row: route to
-  // the headless Input so paste/CSI-u decode work, then re-project without a
-  // reducer round-trip.
   private handleIgnoreInline(data: string): void {
     if (!this.state.inputMode) return;
     this.inlineInput.handleInput(data);

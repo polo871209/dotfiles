@@ -1,5 +1,3 @@
-// Shared formatting + path helpers for navigation tools.
-
 import * as path from "node:path";
 import {
   DEFAULT_MAX_BYTES,
@@ -10,8 +8,6 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { callDriver } from "./nvim";
 
-// Cap tool output at pi's default budgets so an unbounded LSP response
-// (overload-heavy definitions, giant hover docs) can't flood agent context.
 export const capText = (full: string): { text: string; truncated: boolean } => {
   const t = truncateHead(full, {
     maxLines: DEFAULT_MAX_LINES,
@@ -36,8 +32,6 @@ export interface DriverErr {
   error?: string;
 }
 
-// Shared progress → callDriver → ok/err wrapper. Takes raw driver args so
-// callers with different arg shapes can use it unchanged.
 export async function withDriver<R extends DriverErr>(
   ctx: ExtensionContext,
   driverFn: string,
@@ -52,8 +46,6 @@ export async function withDriver<R extends DriverErr>(
 ): Promise<AgentToolResult<unknown>> {
   const progress = (text: string) =>
     onUpdate?.({ content: [{ type: "text", text }], details: {} });
-  // callDriver enforces the hard timeout (wedged-nvim guard). Here we just
-  // turn a thrown abort/timeout into a clean tool error instead of a crash.
   let res: R;
   try {
     res = await callDriver<R>(ctx.cwd, driverFn, args, signal, progress);
@@ -121,8 +113,6 @@ const SEV_RANK: Record<Severity, number> = {
   hint: 3,
 };
 
-// Shared by the lsp tool's diagnostics action and the post-edit feedback widget so severity
-// ordering and line formatting stay identical between the two.
 export const sortDiagnostics = <D extends Diag>(diags: D[]): D[] =>
   [...diags].sort((a, b) => {
     const s = SEV_RANK[a.severity] - SEV_RANK[b.severity];

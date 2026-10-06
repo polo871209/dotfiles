@@ -1,6 +1,3 @@
-// Long-lived Python kernel: spawn `python3 runner.py`, multiplex requests over
-// stdin and events over fd 3.
-
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
@@ -119,8 +116,6 @@ export class PyKernel {
 
     this.#proc.stdin?.on("error", () => {});
     this.#proc.stdout?.resume();
-    // Cell output arrives on fd 3, so stderr carries only runner crashes. Keep
-    // its tail for the exit error: writing it to process.stderr garbles the TUI.
     let stderrTail = "";
     const crashNote = () => (stderrTail.trim() ? `\n${stderrTail.trim()}` : "");
     this.#proc.stderr?.setEncoding("utf-8");

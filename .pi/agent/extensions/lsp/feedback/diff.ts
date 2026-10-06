@@ -1,17 +1,10 @@
-// Unified-diff helpers shared by the inline format hook and the batched fixer.
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 
-// Cap the diff we inline into an edit result / inject after a fix. Past this a
-// formatter reflow is no cheaper than a re-read, so we tell the agent to re-read
-// instead of dumping a huge diff into context.
 export const MAX_DIFF_BYTES = 6 * 1024;
 
-// Unified diff via the system `diff` (POSIX -u). Header lines carry temp paths,
-// so strip them; the caller supplies the real path in prose. null = no diff /
-// diff unavailable.
 const unifiedDiff = (before: string, after: string): string | null => {
   let dir: string | null = null;
   try {
@@ -36,15 +29,11 @@ const unifiedDiff = (before: string, after: string): string | null => {
     if (dir) {
       try {
         fs.rmSync(dir, { recursive: true, force: true });
-      } catch {
-        /* best effort */
-      }
+      } catch {}
     }
   }
 };
 
-// Message body telling the agent the file's on-disk bytes changed under it,
-// so its edit result stays the source of truth and no re-read is needed.
 export const changeNote = (
   before: string,
   after: string,

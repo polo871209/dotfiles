@@ -1,9 +1,5 @@
--- How one result row looks: highlight groups, filetype icons, treesitter marks
--- for grep lines, and the assembly of all three into a rendered string.
-
 local M = {}
 
---- Highlight groups, all `default = true` so a colorscheme can override them.
 function M.setup()
     local hl = {
         PickerMatch = { link = 'Special' },
@@ -23,13 +19,6 @@ end
 local icons = nil
 local icon_cache = {} ---@type table<string, [string, string]>
 
---- Filetype icon and its highlight for a path.
----
---- mini.icons resolves basenames and extensions directly and falls back to
---- nvim's own filetype detection for the rest (`.envrc`, `BUILD`), which
---- plugin/filetype.lua extends. The full path goes in so pattern-based
---- filetypes match. Results are memoised per basename because a render formats
---- every visible row.
 ---@param path string
 ---@return string, string
 local function icon_for(path)
@@ -49,8 +38,6 @@ local function icon_for(path)
     return ic, hl
 end
 
--- One reusable scratch buffer per language, so highlighting a list row costs a
--- parse rather than a buffer create.
 local scratch = {} ---@type table<string, integer>
 
 ---@param lang string
@@ -64,8 +51,6 @@ local function scratch_buf(lang)
     return buf
 end
 
---- Treesitter highlights for a single line of code, as offsets into `text`.
---- This is what makes grep results read like source instead of flat strings.
 ---@param text string
 ---@param ft string?
 ---@return { col: integer, end_col: integer, hl: string }[]
@@ -101,9 +86,6 @@ local function ts_highlights(text, ft)
     return out
 end
 
---- Concatenate display segments into a line plus absolute highlight ranges.
---- Segments carry either a single hl for the whole chunk, or pre-computed
---- treesitter marks relative to the chunk.
 ---@param segments { [1]: string, [2]: string?, marks: table[]? }[]
 ---@return string, { col: integer, end_col: integer, hl: string }[]
 local function join(segments)
@@ -120,12 +102,8 @@ local function join(segments)
     return table.concat(parts), hls
 end
 
--- Left gutter, so rows do not sit flush against the window border.
 local PAD = ' '
 
---- Path split into a dimmed directory and a bright basename. Returns the
---- segments plus the byte offset where `item.text` starts, so fuzzy match
---- positions map straight onto them.
 ---@param item PickerItem
 ---@return table[], integer
 local function path_segments(item)
@@ -161,8 +139,6 @@ function M.row(item, kind)
         segs[#segs + 1] = { ':', 'PickerDelim' }
         segs[#segs + 1] = { tostring(item.col), 'PickerCol' }
         segs[#segs + 1] = { ' ' }
-        -- Parsing is per-item and cached: a re-render on cursor movement must
-        -- not re-run treesitter over every visible row.
         local text = (item.line or ''):gsub('^%s+', '')
         if item.marks == nil then
             item.ft = item.ft or vim.filetype.match { filename = item.file } or ''

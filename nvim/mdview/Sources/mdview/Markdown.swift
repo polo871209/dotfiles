@@ -3,8 +3,6 @@ import cmark_gfm_extensions
 import Foundation
 
 enum Markdown {
-    // SOURCEPOS tags each block with data-sourcepos, which app.js uses to reveal the edited line.
-    // UNSAFE keeps raw HTML such as <details> and <img width>. The page CSP blocks inline scripts.
     private static let options = CMARK_OPT_SOURCEPOS | CMARK_OPT_UNSAFE | CMARK_OPT_FOOTNOTES
 
     static func html(_ text: String) -> String {

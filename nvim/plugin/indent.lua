@@ -8,11 +8,8 @@ local ns = vim.api.nvim_create_namespace 'indent-guides'
 local CHAR = '│'
 local HL = 'Whitespace'
 
--- Shared by every guide; nvim copies the values out on each call.
 local GUIDE = { virt_text = { { CHAR, HL } }, virt_text_pos = 'overlay', hl_mode = 'combine', priority = 1, ephemeral = true }
 
---- Byte offset of every guide column in a line's leading whitespace. Walks the
---- whitespace once so mixed tabs and spaces land on real screen columns.
 ---@param line string
 ---@param sw integer
 ---@param ts integer
@@ -37,16 +34,12 @@ local function guide_cols(line, sw, ts)
             break
         end
     end
-    -- Trailing partial indent (a continuation line aligned to a paren) is not a
-    -- level, so drop guides the whitespace is too short to hold.
     while #marks > 0 and cols[#cols] + sw > col do
         marks[#marks], cols[#cols] = nil, nil
     end
     return marks
 end
 
--- Blank lines carry no whitespace to anchor to, so the whole run is one
--- overlay string starting at column 0.
 local blanks = {} ---@type table<string, string>
 local function blank_text(levels, sw)
     local key = levels .. ':' .. sw
@@ -58,8 +51,6 @@ local function blank_text(levels, sw)
     return text
 end
 
---- Indent a blank line inherits: the shallower of its neighbours, plus one
---- level when they differ so the guide does not stop short at a block end.
 ---@param lnum integer
 ---@param sw integer
 ---@return integer
@@ -74,9 +65,6 @@ end
 
 vim.api.nvim_set_decoration_provider(ns, {
     on_win = function(_, win, buf, top, bot)
-        -- Guides are whitespace decoration, so 'list' governs them as it did
-        -- when they were a listchars entry: `:set nolist` hides them, and
-        -- after/ftplugin/bigfile.lua switches them off with everything else.
         if vim.bo[buf].buftype ~= '' or not vim.wo[win].list then return false end
         local ts = vim.bo[buf].tabstop
         local sw = vim.bo[buf].shiftwidth

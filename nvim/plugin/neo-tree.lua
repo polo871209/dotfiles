@@ -1,9 +1,7 @@
--- Agent nvim skips cosmetic plugins.
 if vim.g.pi_agent then return end
 
 local ignore = require 'ignore'
 
--- Resize neo-tree window to fit the longest visible node.
 local function fit()
     local state = require('neo-tree.sources.manager').get_state 'filesystem'
     if not state or not state.tree or not state.winid then return end
@@ -55,7 +53,6 @@ local function load_neotree()
             last_modified = { enabled = false },
             created = { enabled = false },
             symlink_target = { enabled = false },
-            -- Right-aligned columns pad lines to window width and break our auto-resize.
             diagnostics = { align = 'left' },
             git_status = { align = 'left' },
         },
@@ -99,7 +96,6 @@ end
 vim.keymap.set('n', '\\', function()
     load_neotree()
     local bufname = vim.api.nvim_buf_get_name(0)
-    -- reveal errors on paths that are not on disk (deleted/renamed file, scratch buffers).
     local revealable = bufname ~= '' and vim.bo.buftype == '' and vim.bo.filetype ~= 'ministarter' and vim.uv.fs_stat(bufname) ~= nil
     vim.cmd(revealable and 'Neotree reveal' or 'Neotree toggle')
 end, { desc = 'NeoTree toggle/reveal', silent = true })

@@ -1,5 +1,3 @@
-// Side-channel LLM call: one request through the model registry that never
-// touches session history. No reasoning option is passed, so thinking stays off.
 import type { Api, Message, Model, Usage } from "@earendil-works/pi-ai";
 import {
   BorderedLoader,
@@ -20,9 +18,6 @@ type SideChannelResult =
   | { ok: true; text: string; usage: Usage }
   | { ok: false; reason: "no-model" | "aborted" | "error"; error?: string };
 
-// Interactive variant: run the call behind a BorderedLoader (esc aborts),
-// notifying on failure. Returns null when aborted or failed. Outside the TUI,
-// ui.custom() returns undefined without running the factory, so call directly.
 export async function sideChannelWithLoader(
   ctx: ExtensionContext,
   label: string,
@@ -87,8 +82,6 @@ export async function sideChannelComplete(
   }
 }
 
-// Sum side-call usage so a tool can report it as result.usage, which pi adds
-// to the session cost.
 export function addUsage(total: Usage | null, next: Usage): Usage {
   if (!total) return structuredClone(next);
   const optional = (a?: number, b?: number) =>

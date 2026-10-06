@@ -1,16 +1,12 @@
 return {
     cmd = { 'lua-language-server' },
     filetypes = { 'lua' },
-    -- Second rank: a directory that carries lint or format configuration is a
-    -- Lua project even without a .luarc.json, and rooting there keeps a
-    -- vendored plugin from being analyzed as part of the outer repository.
     root_markers = {
         { '.luarc.json', '.luarc.jsonc' },
         { '.luacheckrc', '.stylua.toml', 'stylua.toml' },
         '.git',
     },
     on_init = function(client)
-        -- Skip config overrides when a .luarc.json exists in the workspace
         if client.workspace_folders then
             local path = client.workspace_folders[1].name
             if path ~= vim.fn.stdpath 'config' and (vim.uv.fs_stat(path .. '/.luarc.json') or vim.uv.fs_stat(path .. '/.luarc.jsonc')) then return end

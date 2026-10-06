@@ -1,18 +1,13 @@
-# Injected at kernel startup. Defines the in-cell `tool` proxy and helpers.
-# All names defined here are available to user cells without import.
-
 import base64 as _base64
 import json as _json
 import os as _os
 import urllib.error as _urlerr
 import urllib.request as _urlreq
 
-# Set by the runner before each cell exec so events route to the right pending.
 _current_id = ""
 
 
 def _emit(event):
-    # Emit a kernel event to the host over fd 3 (control channel).
     event.setdefault("id", _current_id)
     line = _json.dumps(event, default=str, allow_nan=False) + "\n"
     _os.write(3, line.encode("utf-8"))
@@ -21,24 +16,22 @@ def _emit(event):
 def display(value):
     """Render a value in the current cell output."""
     try:
-        # Matplotlib figures -> PNG.
-        import matplotlib.figure as _mplfig  # pyrefly: ignore[missing-import]
+        import matplotlib.figure as _mplfig
+    except ImportError:
+        _mplfig = None
+    if _mplfig is not None and isinstance(value, _mplfig.Figure):
+        import io
 
-        if isinstance(value, _mplfig.Figure):
-            import io
-
-            buf = io.BytesIO()
-            value.savefig(buf, format="png", bbox_inches="tight")
-            _emit(
-                {
-                    "op": "display",
-                    "mime": "image/png",
-                    "data": _base64.b64encode(buf.getvalue()).decode("ascii"),
-                }
-            )
-            return
-    except Exception:  # noqa: BLE001, S110 -- optional matplotlib import, any failure falls through to generic display
-        pass
+        buf = io.BytesIO()
+        value.savefig(buf, format="png", bbox_inches="tight")
+        _emit(
+            {
+                "op": "display",
+                "mime": "image/png",
+                "data": _base64.b64encode(buf.getvalue()).decode("ascii"),
+            }
+        )
+        return
     try:
         text = _json.dumps(value, default=str, indent=2, allow_nan=False)
         mime = "application/json"
@@ -86,9 +79,6 @@ class _ToolCallable:
             },
         )
         try:
-            # No client-side timeout: the cell's own timeout is the bound — a
-            # long tool.bash may legitimately outlast any fixed cap, and the
-            # host's SIGINT interrupts a blocked urlopen anyway.
             with _urlreq.urlopen(req) as resp:
                 body = resp.read()
         except _urlerr.HTTPError as exc:
@@ -120,7 +110,6 @@ class _ToolProxy:
         return _ToolCallable(self, name)
 
 
-# Shorthand wrappers around common bridge tools.
 def read(path, offset=None, limit=None):
     args = {"path": path}
     if offset is not None:

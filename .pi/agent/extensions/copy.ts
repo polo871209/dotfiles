@@ -1,6 +1,3 @@
-// /copy-blocks — picker over fenced code blocks in the last assistant
-// response. /copy-all — copy entire session history (user + assistant)
-// as markdown. Built-in /copy (last assistant verbatim) is left alone.
 import { copyToClipboard } from "@earendil-works/pi-coding-agent";
 import type {
   ExtensionAPI,
@@ -20,7 +17,6 @@ const extractCodeBlocks = (text: string): Block[] => {
   const blocks: Block[] = [];
   let i = 0;
   while (i < lines.length) {
-    // Indented fences occur inside list items; ~~~ is the other fence char.
     const open = lines[i].match(/^( *)(`{3,}|~{3,})(.*)$/);
     if (!open) {
       i++;
@@ -29,19 +25,15 @@ const extractCodeBlocks = (text: string): Block[] => {
     const indent = open[1].length;
     const fence = open[2];
     const lang = sanitizeLang(open[3].trim().split(/\s+/)[0] ?? "");
-    // A closing fence repeats the char at least as often, with nothing after.
     const close = new RegExp(`^ *${fence[0]}{${fence.length},}\\s*$`);
     const codeLines: string[] = [];
     let j = i + 1;
     while (j < lines.length && !close.test(lines[j])) {
-      // Drop the fence's own indent, as Markdown does.
       const line = lines[j];
       const lead = line.length - line.trimStart().length;
       codeLines.push(line.slice(Math.min(indent, lead)));
       j++;
     }
-    // Unclosed fence (response truncated mid-block) is still treated as a
-    // block closed at EOF, matching how Markdown itself handles it.
     blocks.push({ lang, code: codeLines.join("\n") });
     i = j + 1;
   }

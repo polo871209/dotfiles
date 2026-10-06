@@ -2,7 +2,6 @@ import Foundation
 
 // The wire format with nvim/lua/mdview.lua: one JSON object per line in each direction.
 // stdin carries `Message`, stdout carries `Open`. EOF on stdin quits the viewer.
-
 /// nvim to viewer: the buffer to render.
 struct Message: Decodable, Sendable {
     let path: String
