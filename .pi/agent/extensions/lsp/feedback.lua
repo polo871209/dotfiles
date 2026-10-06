@@ -1,10 +1,8 @@
--- Feedback driver for the lsp subsystem — loaded into the shared --embed nvim.
--- Exposes _G.PiFeedback.format(files) (fast format-only, for the inline
--- per-edit hook) and _G.PiFeedback.run(files) (safe LSP code-actions
--- (fixAll, organizeImports) + diagnostics, for the batched turn-end pass;
--- formatting happens inline per edit, so here only code-action output gets
--- re-formatted).
--- Reuses the shared nvim so we skip spawn + init.lua load each agent turn.
+-- Feedback driver for the lsp subsystem, loaded into the shared nvim daemon.
+-- _G.PiFeedback.format(files): fast format-only, for the inline per-edit hook.
+-- _G.PiFeedback.run(files): safe code-actions (fixAll, organizeImports) plus
+-- diagnostics, for the batched turn-end pass. Formatting happens inline per
+-- edit, so run only re-formats code-action output.
 
 local M = {}
 _G.PiFeedback = M
@@ -90,8 +88,6 @@ end
 
 local function pull_diagnostics(bufnr) _G.PiLspShared.pull_diagnostics(bufnr) end
 
--- A repeated path would otherwise open/format/pull-diagnostics twice and
--- double-count that file's diagnostics in the result.
 -- Stamp the buffer for PiDaemon.gc. Without it the inline lane had no
 -- eviction at all: every file the agent ever edited stayed loaded and pinned
 -- its language server until the daemon died.
@@ -99,6 +95,8 @@ local function touch(bufnr)
     if _G.PiDaemon and _G.PiDaemon.touch then _G.PiDaemon.touch(bufnr) end
 end
 
+-- A repeated path would otherwise be processed twice and double-count that
+-- file's diagnostics.
 local function dedupe_files(files)
     local seen = {}
     local out = {}
@@ -111,16 +109,15 @@ local function dedupe_files(files)
     return out
 end
 
--- Fast, format-only pass for the inline (per-edit) hook. Just conform/LSP
--- formatting + write; NO diagnostic settle, NO code-actions (those stay in the
--- batched M.run at turn end). Keeps per-edit latency to a formatter call so the
--- agent's edit result can be amended with the formatted bytes synchronously.
--- timeout_ms: caller-side budget (inline hook passes a short one so a slow
--- formatter aborts instead of writing after the caller already gave up).
+-- Fast format-only pass for the inline per-edit hook: format and write, with no
+-- diagnostic settle and no code-actions (those stay in M.run), so the edit
+-- result can be amended synchronously.
+-- timeout_ms: caller budget, short so a slow formatter aborts instead of
+-- writing after the caller gave up.
 function M.format(files, timeout_ms)
     local formatted = {}
     for _, file in ipairs(dedupe_files(files)) do
-        if type(file) == 'string' and vim.uv.fs_stat(file) then
+        if vim.uv.fs_stat(file) then
             vim.cmd('silent! edit ' .. vim.fn.fnameescape(file))
             local bufnr = vim.api.nvim_get_current_buf()
             touch(bufnr)
@@ -141,7 +138,7 @@ function M.run(files)
     local bufs = {}
 
     for _, file in ipairs(dedupe_files(files)) do
-        if type(file) == 'string' and vim.uv.fs_stat(file) then
+        if vim.uv.fs_stat(file) then
             local file_started = vim.uv.now()
             local function remaining() return math.max(0, PER_FILE_BUDGET_MS - (vim.uv.now() - file_started)) end
             vim.cmd('silent! edit ' .. vim.fn.fnameescape(file))

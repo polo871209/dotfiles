@@ -1,5 +1,3 @@
-// Shared types for the eval extension.
-
 export interface DisplayItem {
   mime: string;
   data: string;
@@ -19,19 +17,19 @@ export interface CellResult {
 
 export type KernelRequest = { id: string; op: "run"; code: string };
 
-export interface KernelEventDisplay {
+interface KernelEventDisplay {
   id: string;
   op: "display";
   mime: string;
   data: string;
 }
-export interface KernelEventStream {
+interface KernelEventStream {
   id: string;
   op: "stream";
   stream: "stdout" | "stderr";
   text: string;
 }
-export interface KernelEventDone {
+interface KernelEventDone {
   id: string;
   op: "done";
   value: unknown;

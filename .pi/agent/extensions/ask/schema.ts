@@ -2,34 +2,27 @@
 // metadata table that drives sentinel rows, runtime validation, and the
 // LLM-facing answer envelope.
 //
-// IMPORTANT: the schema deliberately carries NO `maxLength` on header/label,
-// and no `minItems`/`maxItems` on questions/options either. Any hard bound in
-// the schema makes pi reject the whole tool call before execute() runs,
-// forcing the model to retry (the "needs twice to trigger" bug) — that once
-// bit the options array specifically (a question with 1 authored option got
-// rejected outright instead of just working). All limits here are advisory in
-// the descriptions and enforced by graceful clamping in index.ts instead, so
-// the first call always lands.
+// IMPORTANT: the schema has NO `maxLength` on header/label and no
+// `minItems`/`maxItems` on questions/options. Any hard bound makes pi reject
+// the whole tool call before execute() runs, so the model must retry (the
+// "needs twice to trigger" bug). It once rejected a question with 1 authored
+// option. Limits are advisory in the descriptions and clamped in index.ts.
 
 import { type Static, Type } from "typebox";
 
 export const MAX_QUESTIONS = 4;
-export const MIN_OPTIONS = 2;
+const MIN_OPTIONS = 2;
 export const MAX_OPTIONS = 4;
 export const MAX_HEADER_LENGTH = 16;
 export const MAX_LABEL_LENGTH = 60;
 
 // Row-intent metadata — single source of truth for the four row kinds.
 
-export type RowKind = "option" | "other" | "chat" | "next";
-export type SentinelKind = Exclude<RowKind, "option">;
-export const SENTINEL_KINDS: readonly SentinelKind[] = [
-  "other",
-  "chat",
-  "next",
-];
+type RowKind = "option" | "other" | "chat" | "next";
+type SentinelKind = Exclude<RowKind, "option">;
+const SENTINEL_KINDS: readonly SentinelKind[] = ["other", "chat", "next"];
 
-export interface RowIntentMeta {
+interface RowIntentMeta {
   label: string;
   reserved: boolean;
   livesInMainList: boolean;
@@ -93,7 +86,7 @@ export function sentinelLabel(kind: SentinelKind): string {
 }
 
 /** "Other" is model-conditioned (CC parity) and reserved on top of the runtime sentinels. */
-export const RESERVED_LABELS = [
+const RESERVED_LABELS = [
   "Other",
   ROW_INTENT_META.other.label,
   ROW_INTENT_META.chat.label,
@@ -119,7 +112,7 @@ export function sentinelsToAppend(question: QuestionData): SentinelKind[] {
 
 // Parameter schema (no hard length caps — see file header).
 
-export const OptionSchema = Type.Object({
+const OptionSchema = Type.Object({
   label: Type.String({
     description: `Display text for the option (1-5 words, aim for ≤${MAX_LABEL_LENGTH} chars); over-long labels are auto-truncated, never rejected. If recommending one, put it first and append "(Recommended)". Reserved labels: "Other", "Type something.", "Chat about this", "Next".`,
   }),
@@ -129,7 +122,7 @@ export const OptionSchema = Type.Object({
   }),
 });
 
-export const QuestionSchema = Type.Object({
+const QuestionSchema = Type.Object({
   question: Type.String({
     description:
       'The complete question to ask the user. Should be clear, specific, and end with a question mark. Example: "Which library should we use for date formatting?" If multiSelect is true, phrase it accordingly, e.g. "Which features do you want to enable?"',
@@ -168,7 +161,7 @@ export interface QuestionAnswer {
   selected?: string[];
 }
 
-export type QuestionnaireError =
+type QuestionnaireError =
   | "no_ui"
   | "no_questions"
   | "empty_options"
@@ -186,7 +179,7 @@ export interface QuestionnaireResult {
 // Validation. Length is NOT validated here (clamped in index.ts). Covers the
 // semantic guards only; no_ui stays inline at the call site.
 
-export type ValidationResult =
+type ValidationResult =
   | { ok: true }
   | { ok: false; error: QuestionnaireError; message: string };
 
@@ -251,14 +244,14 @@ export function validateQuestionnaire(typed: QuestionParams): ValidationResult {
 
 // Answer formatting + LLM-facing envelope.
 
-export const DECLINE_MESSAGE = "User declined to answer questions";
+const DECLINE_MESSAGE = "User declined to answer questions";
 const ENVELOPE_PREFIX = "User answered:";
 const CHAT_CONTINUATION_MESSAGE =
   "User wants to chat about this. Continue the conversation to help them decide.";
-export const CHAT_SUMMARY_MESSAGE = "User wants to chat about this";
+const CHAT_SUMMARY_MESSAGE = "User wants to chat about this";
 const NO_INPUT_PLACEHOLDER = "(no input)";
 
-export type FormatAnswerVariant = "summary" | "envelope";
+type FormatAnswerVariant = "summary" | "envelope";
 
 export function formatAnswerScalar(
   a: QuestionAnswer,

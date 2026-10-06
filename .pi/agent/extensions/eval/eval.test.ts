@@ -3,6 +3,7 @@
 
 import { describe, it, after, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import { readFile, rm } from "node:fs/promises";
 import {
   registerBridgeSession,
   setBridgeSignal,
@@ -153,7 +154,10 @@ describe("public eval tool", () => {
     return { definition: registered[0]!, shutdown };
   }
 
-  const ctx = { cwd: process.cwd() } as never;
+  const ctx = {
+    cwd: process.cwd(),
+    sessionManager: { getBranch: () => [] },
+  } as never;
 
   it("registers a Python-only sequential contract", () => {
     const { definition, shutdown } = makeTool();
@@ -242,6 +246,38 @@ describe("public eval tool", () => {
     shutdown();
   });
 
+  it("says when a new kernel replaces one from earlier eval calls", async () => {
+    const { definition, shutdown } = makeTool();
+    const earlier = {
+      cwd: process.cwd(),
+      sessionManager: {
+        getBranch: () => [
+          {
+            type: "message",
+            message: { role: "toolResult", toolName: "eval" },
+          },
+        ],
+      },
+    } as never;
+    const fresh = await definition.execute(
+      "restart-note",
+      { cells: [{ code: "1" }] },
+      undefined,
+      undefined,
+      earlier,
+    );
+    assert.match(fresh.content[0].text, /kernel restarted/);
+    const warm = await definition.execute(
+      "restart-note-warm",
+      { cells: [{ code: "2" }] },
+      undefined,
+      undefined,
+      earlier,
+    );
+    assert.doesNotMatch(warm.content[0].text, /kernel restarted/);
+    shutdown();
+  });
+
   it("streams the active cell and bounds model-facing output", async () => {
     const { definition, shutdown } = makeTool();
     const updates: string[] = [];
@@ -272,6 +308,24 @@ describe("public eval tool", () => {
     );
     assert.match(large.content[0].text, /Output truncated/);
     assert.ok(Buffer.byteLength(large.content[0].text) <= 50 * 1024);
+
+    const lines = await definition.execute(
+      "public-head-tail",
+      { cells: [{ code: "for i in range(5000): print(f'line {i}')" }] },
+      undefined,
+      undefined,
+      ctx,
+    );
+    const out = lines.content[0].text as string;
+    assert.match(out, /^line 0$/m);
+    assert.match(out, /^line 4999$/m);
+    assert.doesNotMatch(out, /^line 2500$/m);
+    assert.ok(Buffer.byteLength(out) <= 50 * 1024);
+    const saved = lines.details.fullOutputPath as string;
+    assert.ok(out.includes(saved));
+    const full = await readFile(saved, "utf8");
+    assert.match(full, /^line 2500$/m);
+    await rm(saved);
     shutdown();
   });
 
@@ -328,6 +382,7 @@ describe("public eval tool", () => {
     const text = (t: string) => [{ type: "text", text: t }];
     const toolCtx = {
       cwd: process.cwd(),
+      sessionManager: { getBranch: () => [] },
       tools: [
         { name: "eval", description: "self", parameters: {} },
         {
@@ -380,6 +435,25 @@ describe("public eval tool", () => {
     assert.match(out, /false,\s*true,\s*true/);
     assert.match(out, /"type": "string"/);
     assert.equal(calls.filter((c) => c.name === "echo").length, 4);
+    assert.doesNotMatch(out, /not undone/);
+
+    const failed = await definition.execute(
+      "public-call-log",
+      {
+        cells: [
+          { code: "tool.echo(v=1); tool.echo(v=2)" },
+          { code: "tool.echo(fail=True)" },
+        ],
+      },
+      undefined,
+      undefined,
+      toolCtx,
+    );
+    assert.equal(failed.isError, true);
+    assert.match(
+      failed.content[0].text,
+      /Cell 2 failed\. 2\/2 cells ran in [\d.]+s\.\nTool calls made before the failure \(they are not undone\): echo \(ok\) x2, echo \(error\)\./,
+    );
     shutdown();
   });
 });

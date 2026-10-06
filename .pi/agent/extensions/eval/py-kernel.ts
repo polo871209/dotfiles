@@ -74,7 +74,7 @@ function ensureVenv(): VenvInfo {
   return cachedVenv;
 }
 
-export interface PyKernelOptions {
+interface PyKernelOptions {
   bridgeUrl: string;
   bridgeToken: string;
   bridgeSession: string;

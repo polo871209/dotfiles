@@ -3,7 +3,7 @@
 
 import { spawn } from "node:child_process";
 
-export interface ExecResult {
+interface ExecResult {
   stdout: string;
   stderr: string;
   code: number;

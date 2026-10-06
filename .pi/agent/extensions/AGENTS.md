@@ -18,6 +18,10 @@ Before changing Pi-native behavior, read directly relevant documentation in the 
 
 Report a tool failure with a throw or `isError: true`. Pi ignores an `error` field on the result and shows the call as a success. A tool whose result is data declares `outputSchema` and returns `structuredContent`, because `eval` cells and codemode scripts receive that value instead of the text.
 
+Declare `annotations` on every tool: `readOnlyHint` and `openWorldHint` always, plus `destructiveHint` and `idempotentHint` when the tool writes. For a tool with several actions, annotate the worst action. Set `readOnlyHint` or `idempotentHint` only when a rerun after a crash or retry repeats no side effect.
+
+Work that outlives its tool call, such as a background subagent run, writes a start entry and an end entry with `pi.appendEntry()`. On `session_start`, a start entry with no end entry means pi stopped mid-run, and the tool must report that run as interrupted instead of unknown.
+
 ## What it adds to vanilla pi
 
 ### Bigger toolbox for the model
@@ -26,7 +30,7 @@ Report a tool failure with a throw or `isError: true`. Pi ignores an `error` fie
 - **`eval/`** — runs persistent Python for iterative computation, bulk aggregation, and batched or parallel tool calls.
 - **`lsp/`** — provides symbol navigation and deterministic post-edit diagnostics and fixes for code work.
 - **`github-pr.ts`** — fetches concise PR metadata, failures, review threads, diffs, or a single section for PR analysis, and resolves all open review threads once the fixes land.
-- **`subagent.ts`** — delegates external research, read-only recon of the local repo, or a read-only parallel review to an isolated agent, with background control and compact structured results.
+- **`subagent.ts`** — delegates external research, read-only recon of the local repo, or a read-only parallel review to an isolated agent, with background control, compact structured results, and an interrupted status for runs that a pi restart cut off.
 - **`quiet-run.ts`** — runs shell commands by default, with output kept in a log file, returning only the verdict and the requested slice, and holds a destructive command until the user approves it.
 - **`ask/`** — presents structured choices when a request needs clarification.
 - **`browser-task/`** — runs one narrow goal in a real web page in the user's Chrome and returns the actions taken and the final page text.

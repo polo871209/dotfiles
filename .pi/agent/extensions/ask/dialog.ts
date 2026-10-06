@@ -325,7 +325,7 @@ class SubmitTabStrategy implements TabContentStrategy {
 
 // DialogView
 
-export interface DialogProps {
+interface DialogProps {
   state: DialogState;
   activeOptionList: OptionListView;
 }
@@ -622,7 +622,7 @@ export class QuestionnairePropsAdapter {
 
 // Builder
 
-export interface QuestionnaireBuildConfig {
+interface QuestionnaireBuildConfig {
   tui: { terminal: { columns: number; rows: number }; requestRender(): void };
   theme: Theme;
   questions: readonly QuestionData[];
@@ -632,7 +632,7 @@ export interface QuestionnaireBuildConfig {
   getCurrentTab: () => number;
 }
 
-export interface QuestionnaireBuilt {
+interface QuestionnaireBuilt {
   adapter: QuestionnairePropsAdapter;
   inlineInput: Input;
   render: (width: number) => string[];

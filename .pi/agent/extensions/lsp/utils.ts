@@ -36,10 +36,8 @@ export interface DriverErr {
   error?: string;
 }
 
-// Wraps the toAbs → progress → callDriver → ok/err pattern shared by every
-// LSP tool. Takes the raw driver args directly so callers with different
-// shapes (document_symbols' file-only, diagnostics'
-// files array) don't have to re-roll this themselves.
+// Shared progress → callDriver → ok/err wrapper. Takes raw driver args so
+// callers with different arg shapes can use it unchanged.
 export async function withDriver<R extends DriverErr>(
   ctx: ExtensionContext,
   driverFn: string,

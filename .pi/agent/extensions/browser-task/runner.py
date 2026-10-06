@@ -21,6 +21,16 @@ def emit(**message):
 # SIGTERM from an abort becomes SystemExit, so Agent.__exit__ still closes the tab.
 signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
 
+
+def _watch_parent(ppid):
+    # A crashed pi reparents this process. SIGTERM, not _exit, so the tab still closes.
+    while os.getppid() == ppid:
+        time.sleep(5)
+    os.kill(os.getpid(), signal.SIGTERM)
+
+
+threading.Thread(target=_watch_parent, args=(os.getppid(),), daemon=True).start()
+
 # jev_ultrafast exists only in the uv tool env whose python index.ts starts.
 import browser_harness.macos as bh_macos  # pyrefly: ignore[missing-import]
 import jev_ultrafast.agent as jev_agent  # pyrefly: ignore[missing-import]

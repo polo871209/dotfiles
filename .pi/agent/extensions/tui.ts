@@ -1,8 +1,7 @@
 // Customizes pi TUI: input text color, slim footer, and the autocomplete
-// dropdown as a floating overlay above the editor. The dropdown covers the
-// conversation lines underneath instead of pushing the editor up or
-// reserving a permanent gap. Everything hangs off ThemedEditor, the editor
-// pi installs through setEditorComponent, so stock editors stay untouched.
+// dropdown as a floating overlay that covers the conversation instead of
+// pushing the editor up. Everything hangs off ThemedEditor, installed through
+// setEditorComponent, so stock editors stay untouched.
 import {
   CustomEditor,
   type ExtensionAPI,
@@ -24,9 +23,8 @@ import {
 } from "@earendil-works/pi-tui";
 
 const SGR_RESET = "\x1b[0m";
-// Matches only actual decoration lines (a solid horizontal rule, or a
-// "↑ 3 more"-style scroll hint) so we don't skip coloring a real input line
-// that happens to be all digits or a word overlapping those characters.
+// Matches only decoration lines (a solid rule or a "↑ 3 more" scroll hint), so
+// a real input line of digits or words still gets colored.
 const BORDER =
   /^(?:\x1b\[[0-9;]*m)*(?:─+|[↑↓]\s*\d+\s*more)(?:\x1b\[[0-9;]*m)*$/;
 
@@ -36,10 +34,6 @@ const colorInputLine = (line: string, theme: PiTheme) => {
   return `${input}${line.replaceAll(SGR_RESET, `${SGR_RESET}${input}`)}${SGR_RESET}`;
 };
 
-// Render the autocomplete dropdown as a floating overlay above the
-// editor. The editor never reserves space for it, so the input box
-// never shifts vertically. The overlay covers conversation lines
-// underneath when open and the lines are restored when it closes.
 // Fallback for editors other than ThemedEditor, which supplies the theme's userMessageBg.
 const OVERLAY_BG = "\x1b[48;2;60;56;54m";
 
@@ -51,9 +45,9 @@ const wrapWithBg = (line: string, width: number, bg: string): string => {
 };
 
 // Structural view of pi-tui's SelectList. `renderItem` and
-// `getPrimaryColumnWidth` are TS-private but plain methods at runtime; we
-// call them so the overlay draws items exactly like the stock dropdown
-// while owning the scroll window (see DropdownOverlay.renderList).
+// `getPrimaryColumnWidth` are TS-private but plain methods at runtime. The
+// overlay calls them to draw items like the stock dropdown while owning the
+// scroll window.
 interface SelectItemLike {
   value: string;
   label: string;
@@ -213,21 +207,20 @@ const syncOverlay = (editor: EditorWithOverlay, editorHeight: number) => {
       handle: null,
       comp: new DropdownOverlay(editor),
       opts: {
-        // Anchor bottom-left and lift by (footer + editor height) so the
-        // overlay's bottom edge sits one row above the editor regardless
-        // of how many items the list currently renders. TUI re-runs anchor
-        // resolution on each render with the live overlay height.
+        // Bottom-left anchor, lifted by (footer + editor height), keeps the
+        // overlay's bottom edge one row above the editor for any item count.
+        // TUI re-resolves the anchor on each render with the live overlay
+        // height.
         anchor: "bottom-left",
         offsetY: 0,
         col: 0,
         width: "100%",
         maxHeight: 0,
         nonCapturing: true,
-        // Only render while the editor holds focus and a list is open. A
-        // selector (ctx.ui.select, model/settings pickers) swaps the editor
-        // out of the tree and takes focus, so editor.render stops firing
-        // and can't hide this overlay; without the focus gate it lingers
-        // on top of the selector and blocks it.
+        // Render only while the editor holds focus and a list is open. A
+        // selector (ctx.ui.select, model/settings pickers) swaps the editor out
+        // of the tree, so editor.render stops firing and cannot hide this
+        // overlay, which would then linger on top of the selector.
         visible: () => editor.focused === true && isAutocompleteOpen(editor),
       },
     };

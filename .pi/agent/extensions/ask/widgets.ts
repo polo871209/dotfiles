@@ -32,7 +32,7 @@ export interface WrappingSelectTheme {
   scrollInfo: (text: string) => string;
 }
 
-export class WrappingSelect implements Component {
+class WrappingSelect implements Component {
   private static readonly ACTIVE_POINTER = "→ ";
   private static readonly INACTIVE_POINTER = "  ";
   private static readonly CONFIRMED_MARK = " ✔";
@@ -245,7 +245,7 @@ export class WrappingSelect implements Component {
 
 // OptionListView — single-select option list (wraps one WrappingSelect).
 
-export const MAX_VISIBLE_OPTIONS = 10;
+const MAX_VISIBLE_OPTIONS = 10;
 
 export interface OptionListViewProps {
   selectedIndex: number;
@@ -408,7 +408,7 @@ export class MultiSelectView {
 
 // ChatRowView — single-item WrappingSelect rendered in the footer.
 
-export interface ChatRowViewProps {
+interface ChatRowViewProps {
   focused: boolean;
 }
 
@@ -483,8 +483,8 @@ export class TabBar implements Component {
 
 // SubmitPicker — static 2-row Submit / Cancel picker on the Submit tab.
 
-export const SUBMIT_LABEL = "Submit answers";
-export const CANCEL_LABEL = "Cancel";
+const SUBMIT_LABEL = "Submit answers";
+const CANCEL_LABEL = "Cancel";
 
 const SP_ACTIVE_POINTER = "→ ";
 const SP_INACTIVE_POINTER = "  ";

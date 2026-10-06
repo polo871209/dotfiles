@@ -16,7 +16,7 @@ export interface SideChannelOpts {
   model?: Model<Api>;
 }
 
-export type SideChannelResult =
+type SideChannelResult =
   | { ok: true; text: string; usage: Usage }
   | { ok: false; reason: "no-model" | "aborted" | "error"; error?: string };
 

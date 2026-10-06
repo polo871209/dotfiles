@@ -118,11 +118,9 @@ def main() -> None:
         except BaseException:  # noqa: BLE001 -- must surface any cell failure (incl. SystemExit) as a result, never crash the kernel
             error = traceback.format_exc()
 
-        # Best-effort JSON serializability check; fall back to repr. A late
-        # SIGINT (soft interrupt landing after the cell already finished, e.g.
-        # while serializing a huge value) must not swallow the done event —
-        # that would make the host needlessly escalate to a respawn and lose
-        # all session state. Degrade the value instead.
+        # A late SIGINT (e.g. while serializing a huge value) must not swallow
+        # the done event, or the host respawns and loses all session state.
+        # Degrade the value.
         try:
             json.dumps(value, default=str, allow_nan=False)
             value_out = value

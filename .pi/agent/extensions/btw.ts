@@ -5,13 +5,8 @@
 // IS sent as context so the side answer can be informed by what came
 // before.
 //
-// Usage:
-//   /btw why does that error happen?
-//
 // The answer widget auto-dismisses when you submit your next prompt or run
 // /btw again.
-//
-// Inspired by Claude Code's /btw command.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { collectTextMessages, modelVisibleEntries } from "./shared/message";

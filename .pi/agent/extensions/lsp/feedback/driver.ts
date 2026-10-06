@@ -51,7 +51,7 @@ const nvimCallTimeoutMs = (fileCount: number): number =>
   );
 export const MAX_FILE_BYTES = 64 * 1024;
 
-// Full pass: format + safe code-actions + diagnostics. Used at turn end.
+// Full pass at turn end: safe code-actions + diagnostics.
 export const runDriver = async (
   files: string[],
   cwd: string,
@@ -78,15 +78,12 @@ export const runDriver = async (
   }
 };
 
-// Inline format-only pass: format this one file and report whether it changed.
-// Runs on the dedicated "inline" nvim lane so it never queues behind the heavy
-// turn-end diagnostics pass (main lane). Short budget: it blocks the edit's
-// tool_result hook, so give up fast rather than stall the agent. The deadline
-// covers ensureFeedbackLoaded too — spawn/load take no signal, and a wedged
-// startup (e.g. a config error breaking the RPC channel) must not hang edits.
-// The lua-side format budget must stay below the JS deadline: conform writes
-// the buffer on success, and a write landing after we stopped awaiting would
-// silently desync the agent's view of the file.
+// Inline format-only pass on the "inline" lane, so it never queues behind the
+// turn-end pass. Short budget: it blocks the edit's tool_result hook. The
+// deadline covers ensureFeedbackLoaded too, because spawn/load take no signal
+// and a wedged startup must not hang edits. The lua-side format budget must
+// stay below the JS deadline: conform writes on success, and a write after we
+// stopped awaiting would desync the agent's view of the file.
 const INLINE_TIMEOUT_MS = 1_500;
 const INLINE_LUA_FORMAT_MS = 1_200;
 // Headroom between the lua budget and the JS deadline so a format finishing

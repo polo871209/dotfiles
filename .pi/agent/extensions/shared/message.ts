@@ -23,7 +23,7 @@ export function extractText(content: unknown): string {
     .join("\n");
 }
 
-export interface CollectedBranch {
+interface CollectedBranch {
   messages: Message[];
   userTurns: number;
 }

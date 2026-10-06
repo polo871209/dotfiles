@@ -17,7 +17,8 @@ node --experimental-strip-types --test eval/eval.test.ts
 - Abort sends SIGINT first and kills after the two-second grace period if ignored; timeout and abort remain distinct.
 - Kernel cwd and fallback/bridge bindings follow `ctx.cwd`; cwd changes recycle them.
 - Bridge requests require bearer auth and an object body with string `session`/`name` and object `args`.
-- Final and streamed text is bounded with a summary and tail; large aggregates should be summarized or written to a file. Successful image displays remain image content.
+- Streamed text keeps the summary and the tail. Final text keeps the summary, the head, and the tail, and saves the full text to a temp file named in the result and in `details.fullOutputPath`. Successful image displays remain image content.
+- A failed call lists the nested tool calls it made, because those side effects are not undone.
 - Details contain compact execution metadata, not cell payloads.
 - Installed Python packages persist in the managed venv.
 

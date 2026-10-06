@@ -3,17 +3,13 @@
 -- skip guards, and the timers below must survive a config error rather than
 -- depend on it.
 --
--- One daemon per lane serves every pi process on the machine, so it owns two
--- jobs no single client can: keeping concurrent clients off each other's toes
--- (guard), and making sure an unused daemon does not sit on a pile of language
--- servers forever (sweep).
+-- One daemon per lane serves every pi process, so it owns two jobs no single
+-- client can: keeping concurrent clients apart (guard) and exiting when unused
+-- (sweep).
 
--- An inherited GOROOT can point at a Go toolchain install that does not
--- match the `go` binary on PATH (e.g. after a version bump elsewhere on the
--- machine), which fails every gopls typecheck with a tool-version mismatch.
--- Go resolves GOROOT correctly from the binary's own location when the
--- variable is unset, so clearing a stale one here, before any server spawns,
--- is strictly safer than forwarding it.
+-- An inherited GOROOT can mismatch the `go` on PATH (e.g. after a version
+-- bump) and fail every gopls typecheck. Go finds GOROOT from the binary's own
+-- location when unset, so clear it before any server spawns.
 if vim.env.GOROOT then vim.env.GOROOT = nil end
 
 vim.g.pi_agent = true

@@ -4,12 +4,10 @@
 // window title, so we set it to the project name -> "pi" / "<project>" /
 // "<message>".
 //
-// Also renames this pane's tmux window to reflect the agent's status (busy /
-// ask / done / idle) so the tab makes it obvious at a glance, and subagent.ts
-// polls that same window name to know when a subagent pane has finished.
-// Subagent panes (PI_IS_SUBAGENT=1) still get the window rename — the parent
-// needs it to poll completion — but skip the desktop notification/sound,
-// which would otherwise fire once per subagent turn.
+// Also renames this pane's tmux window to show the agent's status (busy /
+// blocked / done / idle). Subagent panes (PI_IS_SUBAGENT=1) set their pane
+// title instead, which subagent.ts polls for completion, and skip the desktop
+// notification and sound.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { exec, execFile, execFileSync } from "node:child_process";
 import { APP_TITLE, statusTitle, type AgentStatus } from "./shared/status";
@@ -45,8 +43,6 @@ const execFileP = (
       else resolve((stdout ?? "").trim());
     });
   });
-
-// Focus detection. Ported from opencode/plugins/notifier.ts.
 
 const getFrontmostPid = async (): Promise<number | null> => {
   try {
@@ -268,12 +264,11 @@ const getVisiblePaneTty = async (): Promise<string | null> => {
 
 // false = no ghostty target, caller should use osascript.
 //
-// ghostty forces the window title in as the banner's subtitle line — not
-// removable (empty title falls back to pwd, space renders a blank line).
-// Nothing else manages the OS window title under tmux (set-titles off), so
-// whatever stale bytes last landed there would show as the subtitle — set it
-// to the project first, no restore needed. When pi's pane is hidden we route
-// through a visible pane's tty (tmux drops passthrough from hidden panes).
+// ghostty forces the window title in as the banner subtitle (empty title falls
+// back to pwd, a space renders a blank line). Nothing else sets the OS window
+// title under tmux (set-titles off), so a stale title would show. Set it to the
+// project first, no restore needed. A hidden pane routes through a visible
+// pane's tty, because tmux drops passthrough from hidden panes.
 const sendGhostty = async (project: string, body: string): Promise<boolean> => {
   if (!isGhostty()) return false;
 
@@ -324,20 +319,18 @@ const playSound = (): void => {
   execFile("afplay", [SOUND_PATH], { timeout: 5000 }, () => {});
 };
 
-// Reflect the agent's status in this pane's tmux window name so the tab makes
-// it obvious at a glance which agent is busy / waiting / done. Renaming pins
-// the name (disables tmux automatic-rename), which is what we want per window.
+// Show the agent's status in this pane's tmux window name. Renaming also
+// disables tmux automatic-rename, which we want per window.
 //
-// A subagent pane shares its window with the parent pi session (subagent.ts
-// splits a pane instead of opening a new window), so renaming the window
-// would fight over one name with two writers. Subagent panes set their own
-// pane title instead (per-pane, `select-pane -T`) — invisible to the user,
-// but subagent.ts polls it to know when that pane's turn finished.
-// Calls happen back-to-back within a single tick (e.g. busy -> blocked while
-// handling ask_user_question). execFile is async, so without serialization a
-// later status's tmux process could finish before an earlier one's, letting
-// the stale status win and leave the tab stuck. Chain them so tmux always
-// applies them in call order.
+// A subagent pane shares its window with the parent pi (subagent.ts splits a
+// pane), so two writers would fight over one name. Subagent panes set the pane
+// title instead (`select-pane -T`), and subagent.ts polls it to detect turn
+// end.
+//
+// Calls can come back-to-back in one tick (busy -> blocked on
+// ask_user_question). execFile is async, so a later tmux process could finish
+// first and leave the stale status. Chain the calls so tmux applies them in
+// order.
 let windowStatusChain: Promise<void> = Promise.resolve();
 const setWindowStatus = (status: AgentStatus): void => {
   const pane = process.env.TMUX_PANE;
@@ -442,7 +435,7 @@ export default function (pi: ExtensionAPI) {
     // osascript.
     void (async () => {
       if (IS_SUBAGENT) {
-        // subagent.ts polls this window name to know when the pane is done;
+        // subagent.ts polls the pane title to know when the pane is done;
         // no notification/sound for a background turn nobody is watching.
         setWindowStatus("done");
         return;

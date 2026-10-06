@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs/promises";
+import * as os from "node:os";
 import * as path from "node:path";
 import {
   DEFAULT_MAX_BYTES,
@@ -9,6 +10,7 @@ import {
   createLsTool,
   createReadTool,
   formatSize,
+  truncateHead,
   truncateTail,
   type ExtensionAPI,
   type ExtensionContext,
@@ -79,6 +81,13 @@ interface SessionState {
   // Tokens spent by `completion` calls during the current execute, reported
   // on the tool result so session totals include them.
   usage: Usage | null;
+  // Nested tool calls of the current execute, listed when a cell fails.
+  calls: ToolCallRecord[];
+}
+
+interface ToolCallRecord {
+  name: string;
+  status: "running" | "ok" | "error";
 }
 
 interface ExecutionDetails {
@@ -88,6 +97,7 @@ interface ExecutionDetails {
   aborted?: boolean;
   timedOut?: boolean;
   durationMs: number;
+  fullOutputPath?: string;
 }
 
 function extractJsonText(text: string): string {
@@ -162,18 +172,22 @@ function bridgeHandler(state: SessionState): BridgeHandler {
     }
     const tool = callableTools(state).find((t) => t.name === name);
     if (tool && state.ctx?.executeTool) {
+      const record = recordCall(state, name);
       // Runs through pi's validation, tool_call hooks, and permission checks, like a model call.
       const outcome = await state.ctx.executeTool(name, args, { signal });
+      record.status = outcome.isError ? "error" : "ok";
       return toPythonValue(name, tool.outputSchema, outcome);
     }
     // Inactive read-only built-ins stay reachable. They bypass tool_call hooks.
     const fallback = ensureFallbacks(state)[name];
     if (fallback) {
+      const record = recordCall(state, name);
       const result = await fallback.execute(
         `eval-bridge-${randomUUID()}`,
         args as Static<typeof fallback.parameters>,
         signal,
       );
+      record.status = "ok";
       return flattenToolResult(result);
     }
     switch (name) {
@@ -249,6 +263,28 @@ function bridgeHandler(state: SessionState): BridgeHandler {
         throw new Error(`unknown bridge tool: ${name}`);
     }
   };
+}
+
+// A record that stays "running" means the call threw, or a timeout or abort cut it off.
+function recordCall(state: SessionState, name: string): ToolCallRecord {
+  const record: ToolCallRecord = { name, status: "running" };
+  state.calls.push(record);
+  return record;
+}
+
+// The model must know which side effects already happened before it retries.
+function formatCallLog(calls: ToolCallRecord[]): string {
+  if (calls.length === 0) return "";
+  const counts = new Map<string, number>();
+  for (const call of calls) {
+    const status = call.status === "running" ? "interrupted" : call.status;
+    const key = `${call.name} (${status})`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const list = [...counts]
+    .map(([key, count]) => (count > 1 ? `${key} x${count}` : key))
+    .join(", ");
+  return `Tool calls made before the failure (they are not undone): ${list}.`;
 }
 
 function ensureFallbacks(state: SessionState): Record<string, AgentTool<any>> {
@@ -337,16 +373,20 @@ function formatResult(r: CellResult, idx: number): string {
   return parts.join("\n");
 }
 
+function outputBudget(summary: string) {
+  return {
+    maxBytes: Math.max(
+      1024,
+      DEFAULT_MAX_BYTES - Buffer.byteLength(summary) - 512,
+    ),
+    maxLines: Math.max(2, DEFAULT_MAX_LINES - 4),
+  };
+}
+
+// Streamed updates keep only the tail, because they must not write a file on every update.
 function boundOutput(summary: string, body: string): string {
   if (!body) return summary;
-  const budget = Math.max(
-    1024,
-    DEFAULT_MAX_BYTES - Buffer.byteLength(summary) - 512,
-  );
-  const bounded = truncateTail(body, {
-    maxBytes: budget,
-    maxLines: Math.max(1, DEFAULT_MAX_LINES - 4),
-  });
+  const bounded = truncateTail(body, outputBudget(summary));
   const parts = [summary];
   if (bounded.content) parts.push(bounded.content);
   if (bounded.truncated) {
@@ -359,6 +399,55 @@ function boundOutput(summary: string, body: string): string {
   return parts.join("\n\n");
 }
 
+// Final output keeps the head and the tail like codemode, because setup lines and the
+// final result are both at the edges, and saves the full text so nothing is lost.
+async function boundFinal(
+  summary: string,
+  body: string,
+): Promise<{ text: string; fullOutputPath?: string }> {
+  const { maxBytes, maxLines } = outputBudget(summary);
+  if (
+    !body ||
+    (Buffer.byteLength(body) <= maxBytes && body.split("\n").length <= maxLines)
+  ) {
+    return { text: body ? `${summary}\n\n${body}` : summary };
+  }
+  const head = truncateHead(body, {
+    maxBytes: Math.floor(maxBytes / 2),
+    maxLines: Math.floor(maxLines / 2),
+  });
+  const tail = truncateTail(body, {
+    maxBytes: maxBytes - head.outputBytes,
+    maxLines: maxLines - head.outputLines,
+  });
+  const omitted = head.totalBytes - head.outputBytes - tail.outputBytes;
+  let fullOutputPath: string | undefined = path.join(
+    os.tmpdir(),
+    `pi-eval-${randomUUID()}.txt`,
+  );
+  let saved: string;
+  try {
+    await fs.writeFile(fullOutputPath, body);
+    saved = `Full output: ${fullOutputPath} (read it with offset and limit).`;
+  } catch (err) {
+    fullOutputPath = undefined;
+    saved = `Could not save the full output: ${err instanceof Error ? err.message : String(err)}.`;
+  }
+  const note =
+    `[Output truncated: kept the first ${head.outputLines} and last ${tail.outputLines} ` +
+    `of ${head.totalLines} lines (${formatSize(head.totalBytes)}). ${saved}]`;
+  const text = [
+    summary,
+    head.content,
+    `[… ${formatSize(Math.max(0, omitted))} omitted …]`,
+    tail.content,
+    note,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+  return { text, ...(fullOutputPath ? { fullOutputPath } : {}) };
+}
+
 const DESCRIPTION = `Run persistent Python for iterative computation and orchestrating tool calls.
 - Cells run in order in one CPython process. Variables, imports, and loaded data persist across cells and calls until a cell sets \`reset\`.
 - A cell's last expression is its value. \`print()\` output and \`display(value)\` also reach the result.
@@ -368,7 +457,7 @@ const DESCRIPTION = `Run persistent Python for iterative computation and orchest
 - A failed, blocked, or invalid tool call raises RuntimeError with the tool's error text. \`tool.bash\` returns \`exit_code\` instead of raising on a non-zero exit.
 - Tool calls are real and have side effects. A cell that fails partway does not undo earlier calls.
 - The first failed cell stops the remaining cells. A cell times out after \`timeout\` seconds.
-- Output keeps the last 2000 lines or 50KB. Keep raw data in variables and return a compact aggregate, or write it to a file.
+- Output over 2000 lines or 50KB keeps its start and end, and the full text goes to a temp file named in the result. Keep raw data in variables and return a compact aggregate.
 
 Helpers:
 - \`parallel(calls: list[tuple[str, dict]], max_workers=8) -> list\`: runs tool calls concurrently and returns results in input order, with the exception object in the slot of a failed call.
@@ -467,6 +556,7 @@ export default function (pi: ExtensionAPI) {
     fallbacks: null,
     ctx: null,
     usage: null,
+    calls: [],
   };
   let cleaned = false;
 
@@ -493,6 +583,12 @@ export default function (pi: ExtensionAPI) {
     ],
     // Scripts must not start other scripts, and codemode must not list eval.
     exposure: "model-only",
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
     prepareLoadout: (loadout) => ({
       descriptions: {
         eval: describeCallable(loadout),
@@ -503,6 +599,21 @@ export default function (pi: ExtensionAPI) {
     async execute(_callId, params: EvalParamsT, signal, onUpdate, ctx) {
       if (cleaned) throw new Error("eval extension is shut down");
       if (signal?.aborted) throw new Error("eval aborted before cell start");
+      // Variables live in this process's kernel. After /reload, resume, a pi
+      // crash, or a kernel death they are gone, and the model must be told.
+      const stateLost =
+        !params.cells[0]?.reset &&
+        !(state.py?.alive && state.cwd === ctx.cwd) &&
+        ctx.sessionManager.getBranch().some((entry) => {
+          const message = (
+            entry as { message?: { role?: string; toolName?: string } }
+          ).message;
+          return (
+            entry.type === "message" &&
+            message?.role === "toolResult" &&
+            message.toolName === "eval"
+          );
+        });
       if (state.cwd && state.cwd !== ctx.cwd) {
         state.py?.dispose();
         state.py = null;
@@ -513,6 +624,8 @@ export default function (pi: ExtensionAPI) {
       state.cwd = ctx.cwd;
       state.ctx = ctx;
       state.usage = null;
+      state.calls = [];
+      const startedAt = performance.now();
       const reg = await ensureBridge(state);
       setBridgeSignal(reg.session, signal);
       const results: CellResult[] = [];
@@ -571,16 +684,28 @@ export default function (pi: ExtensionAPI) {
       }
 
       const last = results.at(-1);
+      const seconds = ((performance.now() - startedAt) / 1000).toFixed(1);
+      const ran = `${results.length}/${params.cells.length} cells ran in ${seconds}s.`;
       const summary =
         failedCell === undefined
-          ? `${results.length} cells ran.`
+          ? `${results.length} cells ran in ${seconds}s.`
           : signal?.aborted || last?.aborted
-            ? `Cell ${failedCell + 1} aborted. ${results.length}/${params.cells.length} cells ran.`
+            ? `Cell ${failedCell + 1} aborted. ${ran}`
             : last?.timedOut
-              ? `Cell ${failedCell + 1} timed out. ${results.length}/${params.cells.length} cells ran.`
-              : `Cell ${failedCell + 1} failed. ${results.length}/${params.cells.length} cells ran.`;
+              ? `Cell ${failedCell + 1} timed out. ${ran}`
+              : `Cell ${failedCell + 1} failed. ${ran}`;
       const body = results.map((r, i) => formatResult(r, i)).join("\n\n");
-      const text = boundOutput(summary, body);
+      const { text, fullOutputPath } = await boundFinal(
+        [
+          stateLost
+            ? `${summary} The Python kernel restarted before this call, so variables from earlier eval calls are gone.`
+            : summary,
+          failedCell === undefined ? "" : formatCallLog(state.calls),
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        body,
+      );
 
       const content: (
         | { type: "text"; text: string }
@@ -600,7 +725,10 @@ export default function (pi: ExtensionAPI) {
       // isError instead of a throw: a thrown error drops details and usage.
       return {
         content,
-        details: details(results, params.cells.length),
+        details: {
+          ...details(results, params.cells.length),
+          ...(fullOutputPath ? { fullOutputPath } : {}),
+        },
         ...(state.usage ? { usage: state.usage } : {}),
         ...(failedCell !== undefined ? { isError: true } : {}),
       };

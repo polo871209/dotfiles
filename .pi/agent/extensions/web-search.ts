@@ -1,25 +1,18 @@
 // web-search — minimal web research: search the web and read a page's content.
 //
-// - Search backends, in the order runSearch walks them, all keyless: Exa's
-//   public MCP endpoint (mcp.exa.ai) twice, once for its advanced tool and
-//   once for its basic one, then Parallel's public MCP endpoint
-//   (search.parallel.ai/mcp), then DuckDuckGo's HTML page. Each is a
-//   JSON-RPC POST over plain HTTP, no MCP client wiring needed. Keyed
-//   providers (Brave, Tavily, Perplexity, Kagi, Serper) stay out: this
-//   machine has none of those keys.
-//   Measured 2026-01 over 3 queries, median snippet per result: Exa ~4000
-//   chars, Parallel 1500, DuckDuckGo 150-300. That is the ordering rationale.
-//   Exa is also the least reliable of the three (a 20s timeout on one query),
-//   which is why the chain exists.
-// - Relevance rerank (rerankResults): optional, off unless TYPESAFE_API_KEY
-//   is set, and fail-open in every failure mode. See the function comment.
-//   All four providers rank by their own notion of a match, which is not the
-//   same as answering the question the agent asked. It also trims: measured
-//   2026-01 over 4 queries, pages that answered the query scored 0.54-0.98
-//   and the rest 0.12-0.33, so RERANK_FLOOR sits in that gap and a thin
-//   topic returns 3 results instead of 10. Before moving the floor, log the
-//   scores scoreCandidates returns for a handful of real queries and look
-//   for the gap.
+// - Search backends, in runSearch order, all keyless: Exa's public MCP
+//   endpoint (mcp.exa.ai) twice (advanced tool, then basic tool), Parallel's
+//   (search.parallel.ai/mcp), then DuckDuckGo's HTML page. The MCP calls are
+//   plain-HTTP JSON-RPC POSTs, no MCP client. Keyed providers stay out
+//   because this machine has none of those keys.
+//   Order rationale, measured 2026-01 over 3 queries, median snippet per
+//   result: Exa ~4000 chars, Parallel 1500, DuckDuckGo 150-300. Exa is also
+//   the least reliable (a 20s timeout on one query), hence the chain.
+// - Relevance rerank (rerankResults): off unless TYPESAFE_API_KEY is set, and
+//   fail-open in every failure mode. It also trims. Measured 2026-01 over 4
+//   queries, pages that answered scored 0.54-0.98 and the rest 0.12-0.33, so
+//   RERANK_FLOOR sits in that gap and a thin topic returns 3 results, not 10.
+//   Before moving the floor, log scoreCandidates scores for real queries.
 // - Cross-query dedup (dedupKey): a multi-query call otherwise prints the
 //   same page once per query that found it.
 // - SSRF guard (assertSafeUrl/fetchSafely): blocks localhost and private-IP
@@ -37,13 +30,12 @@
 // search provider, non-YouTube video or PDF extraction, inline image fetch,
 // LLM page-QA, and any config file.
 //
-// Available but not wired up: `web_search_advanced_exa` also takes
-// includeDomains/excludeDomains, startPublishedDate/endPublishedDate,
-// category, and additionalQueries (read its live schema with a tools/list
-// call against mcp.exa.ai/mcp?tools=web_search_advanced_exa). Those would
-// need new tool parameters and a degraded form for the other three
-// providers, which only accept `site:` text. Add them when a search actually
-// needs a filter, not before.
+// Not wired up: `web_search_advanced_exa` also takes includeDomains,
+// excludeDomains, startPublishedDate, endPublishedDate, category, and
+// additionalQueries (live schema: tools/list against
+// mcp.exa.ai/mcp?tools=web_search_advanced_exa). They would need new tool
+// parameters and a degraded form for the other providers, which only accept
+// `site:` text. Add them when a search needs a filter.
 
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
@@ -421,10 +413,9 @@ async function callMcpTool(
 }
 
 // Exa's public MCP endpoint exposes the advanced tool only when the query
-// string asks for it (verified live via tools/list). It is worth asking for:
-// it answers with structured JSON instead of a `Title:`/`URL:` text blob, and
-// it takes textMaxCharacters plus highlights, so each result arrives with the
-// passages that matched rather than the top of the page.
+// string asks for it (verified live via tools/list). It returns structured
+// JSON, not a `Title:`/`URL:` text blob, and takes textMaxCharacters plus
+// highlights, so results carry the matched passages, not the page head.
 async function exaAdvancedSearch(
   query: string,
   numResults: number,
@@ -518,9 +509,8 @@ async function exaBasicSearch(
 }
 
 // Parallel's public MCP endpoint (https://search.parallel.ai/mcp) is the
-// second keyless surface with real page excerpts — verified live with no
-// Authorization header. It sits between Exa and DuckDuckGo because its
-// excerpts are far richer than a DuckDuckGo snippet.
+// second keyless source of real page excerpts (verified live, no
+// Authorization header). It ranks above DuckDuckGo for richer excerpts.
 async function parallelSearch(
   query: string,
   numResults: number,
@@ -555,8 +545,8 @@ async function parallelSearch(
 }
 
 // DuckDuckGo's HTML endpoint is the only other keyless search surface, so it
-// covers an Exa outage or rate limit. Snippets are one or two sentences, much
-// thinner than Exa's page text, which is why it stays a fallback.
+// covers an Exa outage or rate limit. Its one-or-two-sentence snippets are
+// why it stays a fallback.
 async function duckDuckGoSearch(
   query: string,
   numResults: number,
@@ -705,10 +695,9 @@ async function runSearch(
 }
 
 // Optional relevance scoring through TypeSafe's System One endpoint: one
-// request carrying every candidate, one Noul per candidate. Every provider
-// ranks by its own notion of a match, which answers "contains these words"
-// rather than "answers this question", so the useful page often sits at rank
-// 4 while the model reads rank 1.
+// request carrying every candidate, one Noul per candidate. Providers rank by
+// "contains these words", not "answers this question", so the useful page
+// often sits at rank 4 while the model reads rank 1.
 //
 // Returns null on every failure (no key, an error status, a timeout, an
 // unparseable body) so the caller keeps the provider's order.
@@ -1017,17 +1006,18 @@ function execCapture(
     );
     if (signal) {
       const onAbort = () => child.kill();
+      if (signal.aborted) onAbort();
       signal.addEventListener("abort", onAbort, { once: true });
       child.once("exit", () => signal.removeEventListener("abort", onAbort));
     }
   });
 }
 
-// VTT -> prose. Auto-captions repeat each line as the caption block scrolls,
-// so an adjacent-line dedupe is required or every sentence lands twice; it's
-// adjacent-only so genuine repetition later in the video survives. Cue lines
-// break mid-sentence, so the kept lines are joined into one paragraph rather
-// than emitted as ~40-char lines that read as false structure.
+// VTT -> prose. Auto-captions repeat each line as the block scrolls, so
+// adjacent-line dedupe is required or every sentence lands twice. It is
+// adjacent-only so real repetition later in the video survives. Cue lines
+// break mid-sentence, so kept lines join into one paragraph, not ~40-char
+// lines that read as false structure.
 function vttToText(raw: string): string {
   const out: string[] = [];
   let previous = "";
@@ -1095,11 +1085,10 @@ async function downloadSubtitleFile(
   return best ? join(dir, best) : null;
 }
 
-// Second chance for videos captioned only in another language: ask what tracks
-// exist rather than downloading every one of them speculatively. Picking the
-// alphabetically first code would hand back an auto-translation ("ab"), so
-// prefer the `-orig` track YouTube tags as the spoken language, then any
-// human-authored track over the machine-translated pile.
+// Second chance for videos captioned only in another language: list the
+// tracks instead of downloading all. The alphabetically first code would be an
+// auto-translation ("ab"), so prefer the `-orig` track (the spoken language),
+// then any human-authored track.
 async function fallbackSubLang(
   videoId: string,
   signal?: AbortSignal,
@@ -1245,6 +1234,30 @@ function parseGitHubUrl(rawUrl: string): GitHubUrlInfo | null {
   };
 }
 
+function sweepDeadClones(): void {
+  let names: string[];
+  try {
+    names = readdirSync(tmpdir());
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    const pid = Number(/^pi-github-repos-(\d+)$/.exec(name)?.[1]);
+    if (!pid || pid === process.pid || pidAlive(pid)) continue;
+    rmSync(join(tmpdir(), name), { recursive: true, force: true });
+  }
+}
+
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // EPERM: the pid exists but belongs to another user.
+    return (err as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
 // Dedupes concurrent/repeat clones of the same repo+ref within this process.
 const cloneCache = new Map<string, Promise<string>>();
 
@@ -1263,6 +1276,7 @@ function execGitClone(args: string[], signal?: AbortSignal): Promise<void> {
     );
     if (signal) {
       const onAbort = () => child.kill();
+      if (signal.aborted) onAbort();
       signal.addEventListener("abort", onAbort, { once: true });
       child.once("exit", () => signal.removeEventListener("abort", onAbort));
     }
@@ -1287,6 +1301,8 @@ async function cloneGitHubRepo(
     ref ? `${repo}@${ref}` : repo,
   );
   const promise = (async () => {
+    // A clone from before /reload: earlier tool results point at it.
+    if (existsSync(join(localPath, ".git"))) return localPath;
     rmSync(localPath, { recursive: true, force: true });
     mkdirSync(dirname(localPath), { recursive: true });
     const args = ["clone", "--depth", "1", "--single-branch"];
@@ -1604,9 +1620,8 @@ interface CachedExtraction {
 
 const extractCache = new Map<string, CachedExtraction>();
 
-// A paged read used to refetch and reconvert the whole document per { offset }
-// call, which also let the page change between pages. Extraction now happens
-// once and later offsets slice the stored text.
+// Extract once and slice the stored text for later offsets, so the page cannot
+// change between pages.
 async function fetchOneCached(
   url: string,
   signal?: AbortSignal,
@@ -1641,7 +1656,7 @@ const searchQueries = Type.Array(nonEmptyText, {
 // Root must be a plain Type.Object: pi-ai sends Anthropic only the root
 // `properties`, so an Intersect or Union root reaches the model as `{}`.
 // execute() enforces "query or queries".
-export const searchParameters = Type.Object({
+const searchParameters = Type.Object({
   query: Type.Optional(nonEmptyText),
   queries: Type.Optional(searchQueries),
   numResults: Type.Optional(
@@ -1659,7 +1674,7 @@ const fetchUrls = Type.Array(nonEmptyText, {
   description: "URLs to fetch in one call.",
 });
 // Plain Type.Object root for the same reason as searchParameters.
-export const fetchParameters = Type.Object({
+const fetchParameters = Type.Object({
   url: Type.Optional(nonEmptyText),
   urls: Type.Optional(fetchUrls),
   mode: Type.Optional(
@@ -1688,6 +1703,10 @@ function errorLine(
 }
 
 export default function (pi: ExtensionAPI) {
+  // A crashed pi never reaches the quit handler below, so its clones stay.
+  pi.on("session_start", (event) => {
+    if (event.reason === "startup") sweepDeadClones();
+  });
   // Keep clones across /reload and session switches: earlier tool results
   // still point at those paths. Drop the whole per-process tree on quit.
   pi.on("session_shutdown", (event) => {

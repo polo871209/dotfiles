@@ -1,18 +1,15 @@
 // folder-context — when the agent touches a path via read/edit/write/grep/
 // find/ls, walk from that path's dir up to (but NOT including) the session
-// cwd and inject every ancestor's AGENTS.md. cwd itself is skipped — pi
-// already loads the cwd's AGENTS.md as project context. Paths outside cwd
-// are ignored.
+// cwd and inject every ancestor's AGENTS.md. pi already loads the cwd's own
+// AGENTS.md. Paths outside cwd are ignored.
 //
-// CLAUDE.md and README.md are intentionally NOT candidates — only AGENTS.md
-// is the convention this harness follows. Each content identity is loaded
-// once per session; changed files are reinjected with explicit supersession.
+// Only AGENTS.md is a candidate, not CLAUDE.md or README.md. Each content
+// identity is loaded once per session. A changed file is reinjected with
+// explicit supersession.
 //
 // Injection returns a hidden custom message from turn_end. Pi persists it
-// right after the turn's tool results, so it reaches the next provider call in
-// the same run and every call after it. The context event is no substitute:
-// its changes apply to one request only, and the instructions vanished after
-// that request.
+// after the turn's tool results, so every later provider call sees it. The
+// context event cannot replace this: its changes apply to one request only.
 
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
@@ -47,7 +44,7 @@ function contentIdentity(content: string): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
-export function frameContext(
+function frameContext(
   candidate: string,
   content: string,
   supersedes: boolean,
@@ -103,19 +100,14 @@ export default function (pi: ExtensionAPI) {
     return { entries: [...event.entries, ...drafts] };
   });
 
-  // Seed `injected` with whatever pi already put in the system prompt for
-  // this turn — the global agentDir file plus the cwd ancestor chain
-  // (resource-loader.js: loadProjectContextFiles). Without this, a path
-  // under agentDir (e.g. agentDir/extensions/*) would have its ancestor
-  // walk re-read and re-inject agentDir's own AGENTS.md, duplicating what's
-  // already in the system prompt. Re-seeding every turn (not just
-  // session_start) picks up files pi (re)loaded after a /reload.
+  // Seed `injected` with what pi already put in the system prompt (the global
+  // agentDir file plus the cwd ancestor chain, see loadProjectContextFiles).
+  // Otherwise a path under agentDir re-injects agentDir's own AGENTS.md.
+  // Re-seed every turn to pick up files pi reloaded after /reload.
   //
-  // Realpath both sides of the dedup check: pi resolves agentDir (e.g.
-  // `~/.pi/agent`) without following symlinks, while this handler's own
-  // walk is rooted at `ctx.cwd`, which may reach the same file through a
-  // different (symlinked) path string. Without realpath, the two spellings
-  // of the same file never compare equal and the dedup silently no-ops.
+  // Compare realpaths: pi resolves agentDir without following symlinks, while
+  // our walk starts at `ctx.cwd`, which can reach the same file through a
+  // different spelling. Without realpath the dedup silently no-ops.
   pi.on("before_agent_start", (event) => {
     inSystemPrompt.clear();
     for (const cf of event.systemPromptOptions.contextFiles ?? []) {
@@ -130,7 +122,6 @@ export default function (pi: ExtensionAPI) {
 
     const absPath = isAbsolute(rawPath) ? rawPath : resolve(ctx.cwd, rawPath);
 
-    // Only walk inside cwd; skip paths outside the session root entirely.
     const rel = relative(ctx.cwd, absPath);
     if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return;
 

@@ -2,9 +2,7 @@
 // nvim.ts): connected at session_start by the feedback pass, else lazily on
 // first tool call, and left running for other pi processes at shutdown. Two
 // halves:
-//   - Navigation (pull): one `lsp` tool with an action enum (hover,
-//     definition, references, implementation, type_definition,
-//     document_symbols, and the on-demand read-only diagnostics).
+//   - Navigation (pull): one `lsp` tool with an `action` enum, see ./tool.ts.
 //   - Feedback pass (push, ./feedback): formats edits inline and runs batched
 //     diagnostics + LLM auto-fix after a turn. See ./feedback/index.ts.
 

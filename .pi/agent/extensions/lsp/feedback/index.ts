@@ -45,8 +45,7 @@ const isRebasing = (cwd: string): boolean => {
   return false;
 };
 
-// Skip throwaway scratch paths: /tmp, /var/folders/... (macOS $TMPDIR),
-// /private/tmp, /private/var/folders/...
+// Skip throwaway scratch paths, including macOS $TMPDIR under /var/folders.
 const SKIP_PREFIXES = [
   "/tmp/",
   "/private/tmp/",
@@ -107,15 +106,19 @@ export function registerFeedback(pi: ExtensionAPI): void {
   // agent_before_settle after an abort, so unchecked edits must carry over.
   let checked = true;
   let repairFollowups = 0;
+  // Passes in a row that returned no result. A broken daemon costs up to
+  // MAX_PASS_MS per try, so the edits count as checked after the second miss.
+  let missedPasses = 0;
 
   pi.on("session_start", async (_event, ctx) => {
     const cwd = ctx.cwd;
     touched.clear();
     checked = true;
     repairFollowups = 0;
-    // Warm nvim + feedback lua in the background so the first edit skips spawn
-    // + init.lua + LSP-attach. Deferred a tick to keep the sync prefix (file
-    // read + spawn syscall) off pi's startup path.
+    missedPasses = 0;
+    // Warm nvim and the feedback lua in the background so the first edit skips
+    // spawn, init.lua, and LSP attach. Deferred a tick to keep the sync prefix
+    // (file read + spawn syscall) off pi's startup path.
     setTimeout(() => {
       void ensureFeedbackLoaded(cwd).catch(() => {});
       // Warm the inline lane too: format-on-edit runs on its own nvim so it
@@ -133,9 +136,9 @@ export function registerFeedback(pi: ExtensionAPI): void {
   });
 
   // Format one file in place, register it for the batched diagnostics pass, and
-  // return a note describing the format delta (undefined if skipped/unchanged).
-  // The queue is pi's own per-file lock for edit and write, so a parallel edit
-  // of the same file cannot land between our read, format, and re-read.
+  // return a format-delta note (undefined if skipped or unchanged). The queue
+  // is pi's per-file lock for edit and write, so a parallel edit cannot land
+  // between our read, format, and re-read.
   const processFile = async (
     abs: string,
     cwd: string,
@@ -164,10 +167,9 @@ export function registerFeedback(pi: ExtensionAPI): void {
     });
   };
 
-  // Inline format-on-save: format each touched file and fold the deltas into
-  // the agent's own tool result, keeping its view synced to disk (no re-read)
-  // without a separate context entry. Deterministic diagnostics and safe LSP
-  // actions run batched at agent_before_settle over the same `touched` set.
+  // Fold each file's format delta into the tool result so the agent stays
+  // synced to disk without a re-read. Diagnostics and code actions run batched
+  // at agent_before_settle over the same `touched` set.
   pi.on("tool_result", async (event, ctx) => {
     if (event.isError) return;
 
@@ -187,9 +189,17 @@ export function registerFeedback(pi: ExtensionAPI): void {
     if (touched.size === 0 || repairFollowups >= MAX_REPAIR_FOLLOWUPS) return;
     const projectCwd = ctx.cwd;
     if (isRebasing(projectCwd)) return;
-    checked = true;
     const result = await runDriver(Array.from(touched), projectCwd, ctx.signal);
-    if (!result) return;
+    // No result means no pass ran, so the edits stay unchecked for one retry.
+    if (!result) {
+      if (++missedPasses >= 2) {
+        checked = true;
+        missedPasses = 0;
+      }
+      return;
+    }
+    missedPasses = 0;
+    checked = true;
     if (result.diagnostics.length === 0) {
       touched.clear();
       return;

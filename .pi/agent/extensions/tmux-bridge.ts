@@ -27,12 +27,10 @@
 // {"ok":false,"error":...}, so the client can report what actually happened
 // instead of assuming a successful write means the message landed.
 //
-// "paste" and "file" land in the real pi editor (ctx.ui.pasteToEditor) rather
-// than being sent as messages directly, so the user finishes composing there
-// with full slash-command support and pi's own completion — neither exists in
-// an nvim-side input prompt. Editor paste handling collapses a bulky snapshot
-// to a placeholder, and the snapshot stays ordinary prompt text the user can
-// trim or drop before sending.
+// "paste" and "file" land in pi's editor (ctx.ui.pasteToEditor), not as direct
+// messages, so the user finishes composing there with slash commands and pi's
+// completion, which an nvim prompt lacks. The editor collapses a bulky snapshot
+// to a placeholder, and the user can trim or drop it before sending.
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -46,6 +44,38 @@ import * as path from "node:path";
 function socketPathForPane(paneId: string): string {
   const safe = paneId.replace(/[^a-zA-Z0-9_-]/g, "_");
   return path.join(os.tmpdir(), `pi-tmux-pane-${safe}-${process.pid}.sock`);
+}
+
+// A crashed pi in this pane never unlinks its socket, and clients glob every
+// socket of the pane.
+function removeDeadSockets(paneId: string): void {
+  const prefix = path
+    .basename(socketPathForPane(paneId))
+    .replace(/-\d+\.sock$/, "-");
+  let names: string[];
+  try {
+    names = fs.readdirSync(os.tmpdir());
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (!name.startsWith(prefix) || !name.endsWith(".sock")) continue;
+    const pid = Number(name.slice(prefix.length, -".sock".length));
+    if (!Number.isInteger(pid) || pid <= 0) continue;
+    if (pid !== process.pid) {
+      try {
+        process.kill(pid, 0);
+        continue; // a live pi in the same pane
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "EPERM") continue;
+      }
+    }
+    try {
+      fs.unlinkSync(path.join(os.tmpdir(), name));
+    } catch {
+      /* already gone */
+    }
+  }
 }
 
 // Clients send absolute paths because their cwd need not match pi's; show the
@@ -78,7 +108,7 @@ function snapshotLabel(d: SnapshotDetails): string {
   return `${displayPath(d.path)} (L${d.sline}-${d.eline})`;
 }
 
-export function formatFileSnapshot(f: FilePayload): string {
+function formatFileSnapshot(f: FilePayload): string {
   const srcLines = f.content.split(/\r?\n/);
   const from = Math.max(Math.floor(f.sline), 1);
   const to = from + srcLines.length - 1;
@@ -113,7 +143,7 @@ function tabFidelityNote(content: string): string {
 }
 
 export default function (pi: ExtensionAPI) {
-  if (process.env.PI_IS_SUBAGENT === "1") return; // subagents get no bridge
+  if (process.env.PI_IS_SUBAGENT === "1") return;
 
   // Transcript shows one dim line per snapshot; the numbered body is only a
   // ctrl+o expand away, and always reaches the model regardless.
@@ -133,7 +163,7 @@ export default function (pi: ExtensionAPI) {
   );
 
   const paneId = process.env.TMUX_PANE;
-  if (!process.env.TMUX || !paneId) return; // not in tmux — nothing to do
+  if (!process.env.TMUX || !paneId) return;
   const sockPath = socketPathForPane(paneId);
 
   let server: net.Server | undefined;
@@ -189,12 +219,11 @@ export default function (pi: ExtensionAPI) {
           display: true,
           details: { path: f.path, sline: f.sline, eline: f.eline },
         };
-        // An explicit mode wants the snapshot delivered without the user
-        // sending anything. "steer" is the earliest safe insertion point into a
-        // running turn: appending straight into a live request risks splitting
-        // a tool_use from its tool_result, so delivery lands after the current
-        // assistant turn's tool calls, and steeringMode "one-at-a-time" (the
-        // default) releases one queued snapshot per turn.
+        // An explicit mode delivers without the user sending anything.
+        // Appending into a live request could split a tool_use from its
+        // tool_result, so "steer" lands after the current turn's tool calls,
+        // one queued snapshot per turn (steeringMode "one-at-a-time", the
+        // default).
         pi.sendMessage<SnapshotDetails>(message, { deliverAs: requested });
         // Idle, pi appends steer and followUp messages to the history without
         // starting a turn, so they reach the model with the next prompt.
@@ -249,11 +278,7 @@ export default function (pi: ExtensionAPI) {
       return; // already listening (e.g. /new re-firing session_start)
     }
     currentCtx = ctx;
-    try {
-      fs.unlinkSync(sockPath); // stale file from a crashed pi in this pane
-    } catch {
-      /* not present */
-    }
+    removeDeadSockets(paneId);
     // A whole-file snapshot is a legitimate payload, so the cap only has to
     // stop a runaway peer; the client refuses to send anywhere near it.
     const MAX_BUF = 2 * 1024 * 1024;

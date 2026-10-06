@@ -41,7 +41,7 @@ export interface QuestionnaireState {
   collapsed: boolean;
 }
 
-export interface QuestionnaireRuntime {
+interface QuestionnaireRuntime {
   keybindings: { matches(data: string, name: string): boolean };
   inputBuffer: string;
   questions: readonly QuestionData[];
@@ -79,7 +79,7 @@ export function buildItemsForQuestion(
 
 // Actions (key-router output)
 
-export type QuestionnaireAction =
+type QuestionnaireAction =
   | { kind: "nav"; nextIndex: number }
   | { kind: "tab_switch"; nextTab: number }
   | { kind: "confirm"; answer: QuestionAnswer; autoAdvanceTab?: number }
@@ -224,7 +224,7 @@ function prevNavOnUp(
   };
 }
 
-export function routeKey(
+function routeKey(
   data: string,
   state: QuestionnaireState,
   runtime: QuestionnaireRuntime,
@@ -341,12 +341,12 @@ export function routeKey(
 
 // Reducer
 
-export type Effect =
+type Effect =
   | { kind: "set_input_buffer"; value: string }
   | { kind: "clear_input_buffer" }
   | { kind: "done"; result: QuestionnaireResult };
 
-export interface ApplyContext {
+interface ApplyContext {
   questions: readonly QuestionData[];
   itemsByTab: ReadonlyArray<readonly WrappingSelectItem[]>;
 }
@@ -580,7 +580,7 @@ export function reduce(
 
 // Runtime host
 
-export interface QuestionnaireSessionConfig {
+interface QuestionnaireSessionConfig {
   tui: { terminal: { columns: number; rows: number }; requestRender(): void };
   theme: Theme;
   params: QuestionParams;
@@ -588,7 +588,7 @@ export interface QuestionnaireSessionConfig {
   done: (result: QuestionnaireResult) => void;
 }
 
-export interface QuestionnaireSessionComponent {
+interface QuestionnaireSessionComponent {
   render(width: number): string[];
   invalidate(): void;
   handleInput(data: string): void;

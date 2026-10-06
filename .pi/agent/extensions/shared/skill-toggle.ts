@@ -3,7 +3,7 @@
 // and expose /<name> [update] to flip/sync it.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, renameSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -25,7 +25,7 @@ const git = (args: string[], cwd?: string): Promise<string> =>
     );
   });
 
-export interface SkillToggleConfig {
+interface SkillToggleConfig {
   /** Command name, e.g. "lark" (registers /lark). */
   name: string;
   /** Human-readable label used in notifications, e.g. "Lark/Feishu skills". */
@@ -47,13 +47,11 @@ export function registerSkillToggle(
     ? join(cloneDir, config.skillsSubdir)
     : cloneDir;
 
-  // /reload re-runs this module with a fresh scope, and /<name> on|off itself
-  // triggers ctx.reload(), so the flag cannot live in module state. It lives
-  // in the session as a custom entry: reload keeps the same SessionManager, so
-  // the entry survives, and so does a later /resume of the same session. A new
-  // session has no entry and therefore starts off.
-  //
-  // Custom entries never reach the LLM, so this costs no context.
+  // The flag cannot live in module state, because /reload re-runs this module
+  // and /<name> on|off itself calls ctx.reload(). It lives in the session as a
+  // custom entry. Reload keeps the SessionManager, so the entry survives, as
+  // does a later /resume. A new session has no entry and starts off. Custom
+  // entries never reach the LLM.
   const ENTRY_TYPE = "skill-pack-toggle";
   interface ToggleEntry {
     name: string;
@@ -79,9 +77,15 @@ export function registerSkillToggle(
     }
   };
 
+  // Clone beside the target and rename, so a killed clone never leaves a
+  // half-filled cloneDir that blocks the next clone.
   const ensureClone = async (): Promise<void> => {
     if (existsSync(skillsDir)) return;
-    await git(["clone", "--depth", "1", repoUrl, cloneDir]);
+    const partial = `${cloneDir}.partial`;
+    rmSync(partial, { recursive: true, force: true });
+    rmSync(cloneDir, { recursive: true, force: true });
+    await git(["clone", "--depth", "1", repoUrl, partial]);
+    renameSync(partial, cloneDir);
   };
 
   // Clone if missing, else pull. Returns a human-readable outcome; a pull
@@ -104,9 +108,8 @@ export function registerSkillToggle(
     return { skillPaths: [skillsDir] };
   });
 
-  // Publish on/off state through the built-in footer-status channel (reset
-  // on every reload) instead of extensions reaching into each other's
-  // internal state.
+  // Publish state through the footer-status channel (reset on every reload), so
+  // extensions need not reach into each other's state.
   // getBranch(): a toggle recorded on a branch that /tree left does not count.
   pi.on("session_start", async (_event, ctx) => {
     restoreEnabled(ctx.sessionManager.getBranch());

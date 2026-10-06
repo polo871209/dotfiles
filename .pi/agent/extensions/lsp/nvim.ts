@@ -19,12 +19,9 @@ const DAEMON_PATH = path.join(import.meta.dirname, "daemon.lua");
 const LOG_FILE = path.join(os.tmpdir(), "pi-lsp.log");
 const LOG_TTL_MS = 24 * 60 * 60 * 1000;
 
-// Every process has to derive the same path or the whole design silently
-// degrades into one daemon per disagreeing process. So: no env in here. Not
-// os.tmpdir() (TMPDIR differs between a terminal and a launchd-spawned process
-// on macOS) and not XDG_RUNTIME_DIR either, however conventional — one pane
-// exporting it and the next not is enough to split the pool. Keep it short too:
-// unix socket paths cap around 104 bytes.
+// Derive from $HOME only. Any env input (TMPDIR, XDG_RUNTIME_DIR) can differ
+// between processes and split the daemon pool. Keep it short: unix socket
+// paths cap around 104 bytes.
 const RUNTIME_DIR = path.join(os.homedir(), ".cache", "pi-lsp");
 
 const CONNECT_TIMEOUT_MS = 2_000;
@@ -138,11 +135,9 @@ const openSession = async (
 ): Promise<NvimSession> => {
   const client = attach({ reader: socket, writer: socket });
   // Tell the daemon whose channel this is. Its client count gates the idle
-  // exit, so a channel it can't attribute is a channel it can't reclaim: a
-  // peer that died without a clean close would otherwise keep the daemon (and
-  // every language server under it) alive forever.
-  // Fire-and-forget by design (the API returns void), but written to the
-  // transport before the next request, so the daemon has it in hand.
+  // exit, so an unattributable channel from a dead peer would keep the daemon
+  // and its language servers alive forever. Fire-and-forget (the API returns
+  // void), but written before the next request.
   client.setClientInfo(
     "pi-lsp",
     {},
@@ -206,7 +201,7 @@ const spawnDaemon = (lane: Lane, cwd: string): void => {
     ],
     { cwd, detached: true, stdio: "ignore", env: process.env },
   );
-  // Outliving this pi process is the point: no unref/kill handles kept.
+  // The daemon must outlive this pi process.
   proc.unref();
   log(`nvim[${lane}] daemon spawned pid=${proc.pid}`);
 };
@@ -451,12 +446,9 @@ export const callLua = async <T = unknown>(
   });
 };
 
-// Hard cap on a single nav/diagnostics driver call. Lua-side budgets bound
-// each op (attach 2.5s + progress 8s + per-file pulls), but a wedged nvim or
-// a server that never returns would otherwise hang the tool forever, since
-// callLua's abort only stops awaiting. Scale by file count so a cold
-// multi-file diagnostics pass isn't cut short; the signal fires only on a
-// real wedge.
+// Hard cap on one driver call. Lua-side budgets bound each op, but a wedged
+// nvim would hang the tool forever because callLua's abort only stops awaiting.
+// Scales by file count so a cold multi-file pass isn't cut short.
 const DRIVER_CAP_BASE_MS = 15_000;
 const DRIVER_CAP_PER_FILE_MS = 8_000;
 
@@ -528,7 +520,7 @@ const ensureDriverLoaded = async (
 };
 
 // Daemon-side vitals for /lsp-status.
-export interface DaemonInfo {
+interface DaemonInfo {
   pid: number;
   epoch: string;
   uptime_s: number;

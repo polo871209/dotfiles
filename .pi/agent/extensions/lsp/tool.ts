@@ -1,6 +1,5 @@
-// Single consolidated LSP tool: one `action` enum instead of 7 separate
-// tools. Same 7 ops, same driver calls — this only cuts the repeated
-// file/line/symbol schema + boilerplate description sent on every turn.
+// Single consolidated LSP tool: one `action` enum instead of one tool per op,
+// to cut the repeated schema and description sent on every turn.
 import * as fs from "node:fs";
 import { Type } from "typebox";
 import {
@@ -27,11 +26,9 @@ import {
   type LspLocation,
 } from "./utils";
 
-// Repo-wide diagnostics (action=diagnostics, no file/files): enumerate
-// git-tracked + untracked-but-not-ignored files (git already knows what to
-// skip — node_modules, build output, etc. — so this never reimplements
-// ignore-file logic), drop extensions no LSP client ever attaches to, and
-// cap the batch so one call can't wedge nvim opening thousands of buffers.
+// Repo-wide diagnostics (no file/files): list tracked and untracked-unignored
+// files (git already knows what to skip), drop extensions no LSP client
+// attaches to, and cap the batch so one call can't wedge nvim.
 const WORKSPACE_DIAG_MAX_FILES = 300;
 const WORKSPACE_DIAG_MAX_BYTES = 1_500_000;
 const SKIP_EXTS = new Set([
@@ -410,6 +407,13 @@ async function runDiagnostics(
 export const lspTool = defineTool({
   name: "lsp",
   label: "LSP",
+  // Worst case of all actions: rename writes files, restart kills the server.
+  annotations: {
+    readOnlyHint: false,
+    destructiveHint: true,
+    idempotentHint: false,
+    openWorldHint: false,
+  },
   description:
     "Language-server navigation, symbol outlines, diagnostics, and rename. Actions: hover (type/docs), definition (canonical declaration), references (all uses), implementation (concrete implementors), type_definition (value type), document_symbols (file outline), diagnostics (read-only file/workspace check), rename (apply/save workspace edits), restart (respawn the LSP server).",
   promptSnippet:

@@ -12,7 +12,7 @@ export const MAX_DIFF_BYTES = 6 * 1024;
 // Unified diff via the system `diff` (POSIX -u). Header lines carry temp paths,
 // so strip them; the caller supplies the real path in prose. null = no diff /
 // diff unavailable.
-export const unifiedDiff = (before: string, after: string): string | null => {
+const unifiedDiff = (before: string, after: string): string | null => {
   let dir: string | null = null;
   try {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "lspfb-"));

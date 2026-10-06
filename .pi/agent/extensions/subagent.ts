@@ -14,21 +14,17 @@
 //   ---
 //   <body, appended to the child's own system prompt>
 //
-// Status comes from notifier.ts, which sets the child pane's tmux pane title
-// to reflect busy/ask/done — polled here instead of a parsed JSON event stream.
-// Completion and final output come from a result file the child side of this
-// same extension writes on agent_settled: pane capture is width-wrapped by
-// the TUI and, in fullscreen mode, holds only the visible screen. The file
-// has neither problem.
+// Status comes from the pane title that notifier.ts sets (busy/blocked/done),
+// polled here. Completion and final output come from a result file the child
+// writes on agent_settled, because pane capture is width-wrapped and, in
+// fullscreen mode, holds only the visible screen.
 //
-// Context isolation: the only thing suppressed is --no-session (parent
-// conversation history doesn't carry over). SYSTEM.md, AGENTS.md/CLAUDE.md
-// discovery, skills, and prompt templates all load same as any session
-// (the agent body arrives through --append-system-prompt) — folder-
-// context.ts and subagent.ts still early-exit under PI_IS_SUBAGENT so a
-// subagent can't inject extra ancestor AGENTS.md beyond normal discovery or
-// spawn its own subagents. Beyond that, whatever the task string doesn't
-// say, the subagent doesn't know — write tasks self-contained.
+// Context isolation: only --no-session applies (no parent history). SYSTEM.md,
+// AGENTS.md/CLAUDE.md discovery, skills, and prompt templates load as in any
+// session, and the agent body arrives through --append-system-prompt.
+// folder-context.ts and subagent.ts early-exit under PI_IS_SUBAGENT so a
+// subagent cannot add ancestor AGENTS.md or spawn subagents. The subagent knows
+// only the task string, so write tasks self-contained.
 
 import { execFile, execFileSync } from "node:child_process";
 import { collectTextMessages, extractText } from "./shared/message";
@@ -85,12 +81,13 @@ interface Progress {
   error?: string;
 }
 
-// Live registry of every run this session has started (foreground or
-// background), keyed by run id — backs subagent_manage's list (fleet overview) and
-// steer/stop actions (by id). globalThis-backed like resultStore so
-// an extension reload doesn't orphan runs still in flight.
+// Registry of every run this session started (foreground or background), keyed
+// by run id. Backs subagent_manage list, steer, and stop. globalThis-backed
+// like resultStore so a reload does not orphan runs in flight.
 interface RunRecord {
   id: string;
+  // Session that started the run. Its entries go there and nowhere else.
+  sessionId: string;
   paneId?: string;
   controller: AbortController;
   progress: Progress;
@@ -129,8 +126,8 @@ function pruneRunsStore(): void {
 // parent can pull one field instead of re-reading the whole transcript.
 //
 // The map is the read cache. The durable copy is a custom session entry, which
-// costs no LLM context and survives both /reload and a later /resume in a new
-// process, where the tmux panes and their transcripts are long gone.
+// costs no LLM context and survives /reload and a /resume in a new process
+// (panes are gone by then).
 const RESULT_ENTRY_TYPE = "subagent-result";
 interface ResultEntry {
   id: string;
@@ -144,28 +141,89 @@ const resultStore = (() => {
   return (g.__piSubagentResults ??= new Map());
 })();
 
-// Set by the extension factory; extractResultBlock has no pi handle of its own.
-let persistResult: ((id: string, value: unknown) => void) | undefined;
+// Run lifecycle entries. A "running" entry with no later terminal entry means
+// pi stopped while the run was in progress: a crash, or a quit that killed it.
+const RUN_ENTRY_TYPE = "subagent-run";
+interface RunEntry {
+  id: string;
+  agent: string;
+  status: Progress["status"];
+  error?: string;
+}
 
-function hydrateResultStore(entries: readonly { type: string }[]): void {
-  for (const entry of entries) {
-    if (entry.type !== "custom") continue;
-    const custom = entry as { customType?: string; data?: unknown };
-    if (custom.customType !== RESULT_ENTRY_TYPE) continue;
-    const data = custom.data as ResultEntry | undefined;
-    if (data?.id) resultStore.set(data.id, data.value);
+// Runs that a previous pi process started and never finished. The next
+// session_start fills it, so wait and result can name the interruption.
+const interruptedRuns = new Map<string, RunEntry>();
+
+// The latest factory's appendEntry, bound to the session that was current when
+// it ran. globalThis-backed because a run outlives /reload, and the old
+// runtime's pi is stale after it.
+const sink = (() => {
+  const g = globalThis as unknown as {
+    __piSubagentSink?: {
+      sessionId?: string;
+      append?: (type: string, data: unknown) => void;
+    };
+  };
+  return (g.__piSubagentSink ??= {});
+})();
+
+// Writes only into the session that started the run: after /new or /resume,
+// the entry would land in an unrelated session.
+function persist(sessionId: string, type: string, data: unknown): void {
+  if (sink.sessionId !== sessionId) return;
+  try {
+    sink.append?.(type, data);
+  } catch {
+    /* runtime replaced mid-call; the entry is lost, the run is not */
   }
 }
 
+// Set per run; extractResultBlock has no session handle of its own.
+let persistResult: ((id: string, value: unknown) => void) | undefined;
+
+function hydrateResultStore(entries: readonly { type: string }[]): void {
+  const lastRun = new Map<string, RunEntry>();
+  for (const entry of entries) {
+    if (entry.type !== "custom") continue;
+    const custom = entry as { customType?: string; data?: unknown };
+    if (custom.customType === RESULT_ENTRY_TYPE) {
+      const data = custom.data as ResultEntry | undefined;
+      if (data?.id) resultStore.set(data.id, data.value);
+    } else if (custom.customType === RUN_ENTRY_TYPE) {
+      const data = custom.data as RunEntry | undefined;
+      if (data?.id) lastRun.set(data.id, data);
+    }
+  }
+  interruptedRuns.clear();
+  for (const run of lastRun.values()) {
+    // A run in runsStore survived /reload and still reports for itself.
+    if (run.status === "running" && !runsStore.has(run.id))
+      interruptedRuns.set(run.id, run);
+  }
+}
+
+const INTERRUPTED_ERROR =
+  "interrupted: pi stopped while this run was in progress, so its work may be partial. Start a new run if the answer is still needed.";
+
+function interruptedValue(run: RunEntry): Static<typeof RunValueSchema> {
+  return {
+    id: run.id,
+    agent: run.agent,
+    status: "failed",
+    output: "",
+    error: INTERRUPTED_ERROR,
+  };
+}
+
 // ```result-json fenced block a subagent ends its output with.
-// Optional convention: only stripped/cached when present and valid JSON.
-// Unanchored: the capture is a live interactive pane, so pi's input box and
-// status line always trail the agent's final message — an end-of-string
-// anchor would never match. Last valid block wins, since an echoed task can
-// mention the fence earlier in the pane.
+// Optional: only stripped and cached when present and valid JSON. Unanchored
+// because pi's input box and status line always trail the final message in the
+// live pane. Last valid block wins, since an echoed task can mention the fence
+// earlier.
 const RESULT_BLOCK_RE = /```result-json\s*\n([\s\S]*?)\n```/g;
 
-export function extractResultBlock(
+function extractResultBlock(
   text: string,
   id: string,
 ): { text: string; captured: boolean } {
@@ -281,17 +339,15 @@ async function tmuxRun(args: string[]): Promise<boolean> {
   }
 }
 
-// Shared panel: concurrent subagents stack in one vertical column instead of
-// each carving a fresh horizontal slice out of the calling pane. The first
-// subagent splits off the calling pane (side column); later concurrent ones
-// split the previous subagent's pane downward, so the column's width never
-// grows with agent count. A promise chain serializes the split/close calls
-// that mutate the shared panel list so concurrent executions can't race each
-// other's layout changes.
+// Shared panel: concurrent subagents stack in one vertical column. The first
+// splits off the calling pane (side column), later ones split the previous
+// subagent's pane downward, so the column width never grows with agent count. A
+// promise chain serializes split/close calls so concurrent executions cannot
+// race on the panel list.
 //
-// The pane-id list lives on globalThis (pattern from go.ts): tmux panes
-// survive an extension reload, so a module-scoped array would reset and
-// orphan them, breaking the column layout.
+// The pane-id list lives on globalThis (pattern from go.ts) because tmux panes
+// survive an extension reload, and a module-scoped array would reset and orphan
+// them.
 const panelSlot = (() => {
   const g = globalThis as unknown as { __piSubagentPanel?: { ids: string[] } };
   if (!g.__piSubagentPanel) g.__piSubagentPanel = { ids: [] };
@@ -320,10 +376,9 @@ function withPanelLock<T>(fn: () => Promise<T>): Promise<T> {
   return result;
 }
 
-// Give every pane in the panel column equal height instead of the halving
-// cascade split-window's default 50/50 would produce (1st pane 50%, 2nd 25%,
-// 3rd 12.5%, ...). Resizing all but the last is enough — tmux gives the last
-// pane whatever's left, which lands on the same equal share by construction.
+// Give every pane in the column equal height, not the halving cascade (50%,
+// 25%, 12.5%, ...) of split-window's default. Resizing all but the last is
+// enough, since tmux gives the last the remainder.
 async function rebalancePanel(): Promise<void> {
   const panel = panelSlot.ids;
   if (panel.length < 2) return;
@@ -623,10 +678,10 @@ const initialProgress = (
   output: "",
 });
 
-// One flat object, not a discriminated union of objects: providers render a
-// top-level union as `anyOf`, so any near-miss argument comes back as a
-// per-branch error dump the model then burns turns retrying. Flat schema plus
-// runtime field checks give one actionable error line instead.
+// One flat object, not a union: providers render a top-level union as `anyOf`,
+// so a near-miss argument returns a per-branch error dump the model burns turns
+// retrying. Flat schema plus runtime field checks give one actionable error
+// line.
 const MANAGE_ACTIONS = [
   "wait",
   "result",
@@ -734,7 +789,7 @@ function toolsFlagValue(
 }
 
 // Pane-title status suffix notifier.ts sets for a subagent pane (see
-// notifier.ts's setWindowStatus): "<title>-busy" / "-ask" / "-done" / "-idle".
+// notifier.ts's setWindowStatus): "<title>-busy" / "-blocked" / "-done" / "-idle".
 // A dedicated pane title (not the shared window name) because the subagent
 // pane lives inside the parent's own window.
 async function runInTmux(
@@ -946,12 +1001,10 @@ async function runInTmux(
   };
 }
 
-// Child side: mirror the final assistant message into the file the parent
-// named via PI_SUBAGENT_RESULT_FILE. tmp+rename so the parent's existence
-// poll never reads a partial write.
+// Child side: mirror the final assistant message into PI_SUBAGENT_RESULT_FILE.
+// tmp+rename so the parent's existence poll never reads a partial write.
 //
-// The file is the parent's primary completion signal, so it waits for
-// agent_settled: lsp/feedback's repair turn runs before that event, and an
+// Wait for agent_settled: lsp/feedback's repair turn runs before it, and an
 // earlier write hands the parent an answer the child then keeps editing.
 function registerChildResultMirror(pi: ExtensionAPI): void {
   const file = process.env.PI_SUBAGENT_RESULT_FILE;
@@ -974,6 +1027,28 @@ function registerChildResultMirror(pi: ExtensionAPI): void {
   });
 }
 
+// Task, prompt, and result files of runs that a crashed pi never cleaned up.
+// Older than the longest run plus its wait, so no live run owns them.
+function sweepStaleRunFiles(): void {
+  const cutoff = Date.now() - DEFAULT_WAIT_TIMEOUT_MS * 2;
+  const dir = os.tmpdir();
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (!name.startsWith("pi-subagent-")) continue;
+    const file = path.join(dir, name);
+    try {
+      if (fs.statSync(file).mtimeMs < cutoff) fs.unlinkSync(file);
+    } catch {
+      /* gone or not ours */
+    }
+  }
+}
+
 export default function (pi: ExtensionAPI) {
   if (process.env.PI_IS_SUBAGENT === "1") {
     registerChildResultMirror(pi);
@@ -981,9 +1056,14 @@ export default function (pi: ExtensionAPI) {
   }
   if (!tmuxActive()) return;
 
-  persistResult = (id, value) =>
-    pi.appendEntry<ResultEntry>(RESULT_ENTRY_TYPE, { id, value });
+  sink.append = (type, data) => pi.appendEntry(type, data);
+  persistResult = (id, value) => {
+    const sessionId = runsStore.get(id)?.sessionId;
+    if (sessionId) persist(sessionId, RESULT_ENTRY_TYPE, { id, value });
+  };
   pi.on("session_start", async (event, ctx) => {
+    sink.sessionId = ctx.sessionManager.getSessionId();
+    if (event.reason === "startup") sweepStaleRunFiles();
     // The store is process-wide, so a switch to another session drops the
     // previous session's results. getBranch() skips results recorded on a
     // branch that /tree left.
@@ -1027,6 +1107,12 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool<typeof params, Progress | undefined>({
     name: "subagent",
     label: "Subagent",
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
     promptSnippet:
       "Delegate work that needs its own context to an isolated agent",
     description:
@@ -1081,17 +1167,24 @@ export default function (pi: ExtensionAPI) {
 
       // Own AbortController so subagent_manage can stop a background run
       // that has no live framework signal (its tool call already returned).
+      // A background run is not part of the turn, so Esc leaves it running.
       const controller = new AbortController();
-      if (signal) {
+      if (signal && !args.background) {
         if (signal.aborted) controller.abort();
         else
           signal.addEventListener("abort", () => controller.abort(), {
             once: true,
           });
       }
-      const record: RunRecord = { id: target, controller, progress };
+      const sessionId = ctx.sessionManager.getSessionId();
+      const record: RunRecord = { id: target, sessionId, controller, progress };
       runsStore.set(target, record);
       pruneRunsStore();
+      persist(sessionId, RUN_ENTRY_TYPE, {
+        id: target,
+        agent: agent.name,
+        status: "running",
+      } satisfies RunEntry);
 
       // Throttled push so render redraws don't pile up under fast event bursts.
       const pushNow = () => {
@@ -1118,17 +1211,24 @@ export default function (pi: ExtensionAPI) {
         ctx.isProjectTrusted(),
       );
 
-      // Single settle promise for both modes: runInTmux mutates `progress`
-      // (shared with the record already in runsStore) as it goes, so
-      // subagent_manage sees live state, and wait gets a handle that resolves
-      // the instant the run ends.
-      record.settled = runPromise.then(
-        () => undefined,
-        (err) => {
-          progress.status = "failed";
-          progress.error = String(err);
-        },
-      );
+      // One settle promise for both modes. runInTmux mutates `progress` (shared
+      // with the record in runsStore), so subagent_manage sees live state.
+      record.settled = runPromise
+        .then(
+          () => undefined,
+          (err) => {
+            progress.status = "failed";
+            progress.error = String(err);
+          },
+        )
+        .then(() =>
+          persist(sessionId, RUN_ENTRY_TYPE, {
+            id: target,
+            agent: agent.name,
+            status: progress.status,
+            ...(progress.error ? { error: progress.error } : {}),
+          } satisfies RunEntry),
+        );
 
       if (args.background) {
         return {
@@ -1150,6 +1250,13 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool<ReturnType<typeof manageParams>, undefined>({
     name: "subagent_manage",
     label: "Subagent Manage",
+    // wait and result read. steer and stop change a run.
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
     promptSnippet: "Wait for, read, steer, or stop subagent runs",
     description:
       "Inspect or control background subagent runs started this session. A foreground run already returned its output, so it needs no call here.\n\n" +
@@ -1185,7 +1292,13 @@ export default function (pi: ExtensionAPI) {
           .split(",")
           .map((s) => s.trim())
           .filter(Boolean);
-        const unknown = wanted.filter((runId) => !runsStore.has(runId));
+        const interrupted = wanted
+          .filter((runId) => !runsStore.has(runId))
+          .map((runId) => interruptedRuns.get(runId))
+          .filter((run): run is RunEntry => run !== undefined);
+        const unknown = wanted.filter(
+          (runId) => !runsStore.has(runId) && !interruptedRuns.has(runId),
+        );
         if (unknown.length > 0) {
           return fail(
             `subagent_manage: no tracked run with id ${unknown.map((u) => `"${u}"`).join(", ")}`,
@@ -1193,10 +1306,29 @@ export default function (pi: ExtensionAPI) {
         }
         const records =
           wanted.length > 0
-            ? wanted.map((runId) => runsStore.get(runId)!)
+            ? wanted.flatMap((runId) => runsStore.get(runId) ?? [])
             : [...runsStore.values()].filter(
                 (r) => r.progress.status === "running",
               );
+        if (records.length === 0 && interrupted.length > 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: interrupted
+                  .map((r) => `${r.id}  [interrupted]  ${r.agent}`)
+                  .concat(INTERRUPTED_ERROR)
+                  .join("\n"),
+              },
+            ],
+            details: undefined,
+            isError: true,
+            structuredContent: manageValue({
+              outcome: "finished",
+              runs: interrupted.map(interruptedValue),
+            }),
+          };
+        }
         if (records.length === 0) {
           return {
             content: [{ type: "text", text: "No subagent runs to wait for." }],
@@ -1239,11 +1371,17 @@ export default function (pi: ExtensionAPI) {
 
         // Output inline, per run: a result call after this one would fetch
         // what the parent already paid to wait for.
-        const blocks = records.map((r) =>
-          r.progress.status === "running"
-            ? formatRunLine(r)
-            : `${formatRunLine(r)}\n${runPayload(r.id, transcriptOf(r))}`,
-        );
+        const blocks = records
+          .map((r) =>
+            r.progress.status === "running"
+              ? formatRunLine(r)
+              : `${formatRunLine(r)}\n${runPayload(r.id, transcriptOf(r))}`,
+          )
+          .concat(
+            interrupted.map(
+              (r) => `${r.id}  [interrupted]  ${r.agent}\n${INTERRUPTED_ERROR}`,
+            ),
+          );
         const head =
           state.outcome === "timeout"
             ? `Wait timed out after ${formatDuration(timeoutMs)}. The runs below keep going.`
@@ -1257,7 +1395,10 @@ export default function (pi: ExtensionAPI) {
           details: undefined,
           structuredContent: manageValue({
             outcome: state.outcome,
-            runs: records.map((r) => runValue(r.progress)),
+            runs: [
+              ...records.map((r) => runValue(r.progress)),
+              ...interrupted.map(interruptedValue),
+            ],
           }),
         };
       }
@@ -1289,6 +1430,14 @@ export default function (pi: ExtensionAPI) {
                 output: "",
                 result: getByPath(resultStore.get(runId), fieldPath),
               });
+              continue;
+            }
+            const lost = interruptedRuns.get(runId);
+            if (lost) {
+              blocks.push(
+                `${runId}  [interrupted]  ${lost.agent}\n${INTERRUPTED_ERROR}`,
+              );
+              values.push(interruptedValue(lost));
               continue;
             }
             return fail(`subagent_manage: no tracked run with id "${runId}"`);

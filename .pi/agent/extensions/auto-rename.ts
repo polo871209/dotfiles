@@ -4,7 +4,8 @@
 // Pi has no default session title. The selector falls back to the raw first
 // user message (`session.name ?? session.firstMessage`), which scans badly
 // when the session opens with a pasted log or an `@file` mention. This
-// extension hooks `agent_end` and renames via `pi.setSessionName()`.
+// extension hooks `agent_settled` and `session_start` and renames via
+// `pi.setSessionName()`.
 //
 // Trade-off: the selector's "named" filter (keybinding id
 // `app.session.toggleNamedFilter`) then matches nearly every session, so it
@@ -29,7 +30,6 @@ import {
   type SideChannelOpts,
 } from "./shared/llm";
 
-// ---- config ----
 // Naming a session is cheap classification work, so pin it to Haiku instead
 // of burning the session model. The call falls back to the session model when
 // Haiku is missing or has no auth.
@@ -44,7 +44,6 @@ const SYSTEM_PROMPT =
   "You name chat sessions. Reply with ONLY a short title (max 6 words, " +
   "no quotes, no punctuation at end, no trailing period). Describe the " +
   "user's overall task or topic. Plain text only.";
-// ---- end config ----
 
 // Trim model chatter down to a label: strip wrapping quotes and trailing
 // punctuation, collapse whitespace, cap the width the selector can show.
@@ -137,12 +136,13 @@ export default function (pi: ExtensionAPI) {
     }
   };
 
-  // Never return the promise: pi awaits agent_end and session_start handlers,
-  // so the agent would stay busy, and startup would wait, for the name call.
+  // Never return the promise: pi awaits agent_settled and session_start
+  // handlers, so the agent would stay busy, and startup would wait, for the
+  // name call. agent_settled, not agent_end: it skips repair turns.
   const renameInBackground = (ctx: ExtensionContext) => {
     void tryRename(ctx).catch(() => {});
   };
-  pi.on("agent_end", (_e, ctx) => renameInBackground(ctx));
+  pi.on("agent_settled", (_e, ctx) => renameInBackground(ctx));
   pi.on("session_start", (_e, ctx) => renameInBackground(ctx));
 
   pi.registerCommand("rename", {

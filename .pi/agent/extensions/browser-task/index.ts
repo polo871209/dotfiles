@@ -70,6 +70,13 @@ export default function (pi: ExtensionAPI) {
     }),
     // One Chrome profile: parallel goals would fight over focus and tabs.
     executionMode: "sequential",
+    // A goal can submit forms, so a rerun can repeat the action.
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
     outputSchema: Type.Object({
       status: Type.String(),
       error: Type.Union([Type.String(), Type.Null()]),
@@ -104,9 +111,12 @@ export default function (pi: ExtensionAPI) {
       const haiku = ctx.modelRegistry.find("anthropic", "claude-haiku-4-5");
       const textModel =
         haiku && ctx.modelRegistry.hasConfiguredAuth(haiku) ? haiku : ctx.model;
+      const python = await resolveJevPython();
+      if (signal?.aborted)
+        throw new Error("browser_task: aborted before the runner started.");
 
       const child = spawn(
-        await resolveJevPython(),
+        python,
         [path.join(import.meta.dirname, "runner.py"), JSON.stringify(params)],
         {
           env: { ...process.env, BH_TELEMETRY: "0" },
@@ -119,10 +129,18 @@ export default function (pi: ExtensionAPI) {
       child.stderr.on("data", (d) => {
         stderr = (stderr + d).slice(-4000);
       });
-      const stop = () => {
+      // A text reply written after the runner died raises EPIPE here.
+      child.stdin.on("error", () => {});
+      const killGroup = (sig: NodeJS.Signals) => {
         try {
-          process.kill(-child.pid!, "SIGTERM");
+          process.kill(-child.pid!, sig);
         } catch {}
+      };
+      // SIGTERM lets runner.py close the tab. SIGKILL covers a hung runner.
+      let killTimer: ReturnType<typeof setTimeout> | undefined;
+      const stop = () => {
+        killGroup("SIGTERM");
+        killTimer ??= setTimeout(() => killGroup("SIGKILL"), 5_000);
       };
       signal?.addEventListener("abort", stop, { once: true });
       // Chrome approval prompts and slow pages both count; MAX_STEPS caps actions.
@@ -136,63 +154,70 @@ export default function (pi: ExtensionAPI) {
       let usage: Usage | null = null;
       let steps = 0;
       const lines = createInterface({ input: child.stdout });
-      for await (const line of lines) {
-        let msg: Record<string, any>;
-        try {
-          msg = JSON.parse(line);
-        } catch {
-          continue;
+      try {
+        for await (const line of lines) {
+          let msg: Record<string, any>;
+          try {
+            msg = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          if (msg.type === "note") {
+            onUpdate?.({
+              content: [{ type: "text", text: msg.text }],
+              details: {},
+            });
+          } else if (msg.type === "step") {
+            steps++;
+            onUpdate?.({
+              content: [
+                {
+                  type: "text",
+                  text: `step ${steps} · ${msg.elapsed_ms} ms · ${msg.last ?? msg.status}`,
+                },
+              ],
+              details: {},
+            });
+          } else if (msg.type === "text_request") {
+            const started = Date.now();
+            const r = textModel
+              ? await sideChannelComplete(ctx, {
+                  model: textModel,
+                  systemPrompt: msg.system,
+                  messages: [
+                    {
+                      role: "user",
+                      content: JSON.stringify(msg.context),
+                      timestamp: Date.now(),
+                    },
+                  ],
+                  signal,
+                })
+              : { ok: false as const, reason: "no-model", error: undefined };
+            if (r.ok) usage = addUsage(usage, r.usage);
+            child.stdin.write(
+              JSON.stringify(
+                r.ok
+                  ? {
+                      text: r.text,
+                      model: textModel!.id,
+                      latency_ms: Date.now() - started,
+                    }
+                  : { error: r.error ?? r.reason },
+              ) + "\n",
+            );
+          } else if (msg.type === "result") {
+            result = msg as unknown as RunResult;
+          }
         }
-        if (msg.type === "note") {
-          onUpdate?.({
-            content: [{ type: "text", text: msg.text }],
-            details: {},
-          });
-        } else if (msg.type === "step") {
-          steps++;
-          onUpdate?.({
-            content: [
-              {
-                type: "text",
-                text: `step ${steps} · ${msg.elapsed_ms} ms · ${msg.last ?? msg.status}`,
-              },
-            ],
-            details: {},
-          });
-        } else if (msg.type === "text_request") {
-          const started = Date.now();
-          const r = textModel
-            ? await sideChannelComplete(ctx, {
-                model: textModel,
-                systemPrompt: msg.system,
-                messages: [
-                  {
-                    role: "user",
-                    content: JSON.stringify(msg.context),
-                    timestamp: Date.now(),
-                  },
-                ],
-                signal,
-              })
-            : { ok: false as const, reason: "no-model", error: undefined };
-          if (r.ok) usage = addUsage(usage, r.usage);
-          child.stdin.write(
-            JSON.stringify(
-              r.ok
-                ? {
-                    text: r.text,
-                    model: textModel!.id,
-                    latency_ms: Date.now() - started,
-                  }
-                : { error: r.error ?? r.reason },
-            ) + "\n",
-          );
-        } else if (msg.type === "result") {
-          result = msg as unknown as RunResult;
-        }
+      } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", stop);
+        // The runner exits on its own after a result. Without one, a throw
+        // above or a closed stdout can leave it running.
+        if (!result && child.exitCode === null) stop();
+        else clearTimeout(killTimer);
       }
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", stop);
 
       if (!result) {
         const why = timedOut
@@ -200,9 +225,28 @@ export default function (pi: ExtensionAPI) {
           : signal?.aborted
             ? "was aborted"
             : "exited without a result";
-        throw new Error(
-          `browser_task: runner ${why}.\n${stderr.trim().split("\n").slice(-10).join("\n")}`,
-        );
+        const error = `browser_task: runner ${why}. The goal may have partly run in the page.`;
+        // A result, not a throw, so the text-helper usage still counts.
+        return {
+          content: [
+            {
+              type: "text",
+              text: `${error}\n${stderr.trim().split("\n").slice(-10).join("\n")}`,
+            },
+          ],
+          details: { status: "error" },
+          structuredContent: {
+            status: "error",
+            error,
+            elapsed_ms: 0,
+            url: null,
+            title: null,
+            actions: [],
+            text: "",
+          },
+          ...(usage ? { usage } : {}),
+          isError: true,
+        };
       }
       const actions = result.history.map(
         (h, i) =>

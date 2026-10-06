@@ -116,7 +116,7 @@ async function gitState(cwd: string): Promise<object | null> {
 // Returns the probability that the command is destructive, or null when no
 // key is set or the call fails in any way. Null means "run it": without the
 // gate, quiet_run is no riskier than the bash tool.
-export async function scoreDestructive(
+async function scoreDestructive(
   command: string,
   cwd: string,
   signal?: AbortSignal,
@@ -171,10 +171,31 @@ function queueDialog<T>(open: () => Promise<T>): Promise<T> {
   return next;
 }
 
+// Process groups of commands still running. They are detached, so pi exiting
+// does not stop them.
+const liveGroups = new Set<number>();
+
 export default function (pi: ExtensionAPI) {
+  pi.on("session_shutdown", () => {
+    for (const pid of liveGroups) {
+      try {
+        process.kill(-pid, "SIGTERM");
+      } catch {
+        /* already gone */
+      }
+    }
+    liveGroups.clear();
+  });
+
   pi.registerTool({
     name: "quiet_run",
     label: "Quiet Run",
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
     description:
       "Default tool for shell commands. Runs the command with its output kept out of context and returns one verdict line (exit, duration, line count) plus the last lines, or the `filter` matches with line numbers. " +
       "The verdict names the log file only when output was left out; read it with offset or grep it. " +
@@ -201,7 +222,9 @@ export default function (pi: ExtensionAPI) {
       ),
     }),
     outputSchema: Type.Object({
-      verdict: Type.String({ description: "exit=N, timeout, aborted, or killed" }),
+      verdict: Type.String({
+        description: "exit=N, timeout, aborted, or killed",
+      }),
       exit_code: Type.Union([Type.Number(), Type.Null()]),
       duration_ms: Type.Number(),
       lines: Type.Number({ description: "Total output lines" }),
@@ -259,6 +282,11 @@ export default function (pi: ExtensionAPI) {
           );
         }
       }
+
+      // scoreDestructive and the dialog swallow an abort, and a spawn after it
+      // would never see the abort event.
+      if (signal?.aborted)
+        throw new Error("quiet_run: aborted before the command started.");
 
       const logDir = path.join(cwd, ".pi", "tasks");
       fs.mkdirSync(logDir, { recursive: true });
@@ -359,6 +387,7 @@ export default function (pi: ExtensionAPI) {
           }, params.timeoutSeconds * 1000)
         : undefined;
       signal?.addEventListener("abort", terminate, { once: true });
+      if (child.pid) liveGroups.add(child.pid);
 
       const { code, killSignal, spawnError } = await new Promise<{
         code: number | null;
@@ -373,6 +402,7 @@ export default function (pi: ExtensionAPI) {
       clearTimeout(timer);
       clearTimeout(sigkillTimer);
       signal?.removeEventListener("abort", terminate);
+      if (child.pid) liveGroups.delete(child.pid);
       if (pending) addLines([pending]);
       fs.closeSync(logFd);
 

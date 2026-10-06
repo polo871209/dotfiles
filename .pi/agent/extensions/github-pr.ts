@@ -2,9 +2,9 @@
 // resolved threads, and bot summary comments; keeps metadata, checks, and
 // unresolved threads (incl. bot inline findings like CodeRabbit).
 //
-// Diff is OFF by default: on the PR branch the agent reads local files, which
-// serves review and editing in one pass. A diff is only a patch — agent
-// re-reads to edit anyway. Pull diff only when code isn't reachable locally.
+// Diff is OFF by default: on the PR branch the agent reads local files and
+// re-reads them to edit anyway. Pull the diff only when code isn't reachable
+// locally.
 
 import {
   formatSize,
@@ -160,23 +160,30 @@ async function resolveThreads(
   }
 
   let threads: Thread[];
+  // The query reads the newest 100 threads only.
+  let unseen = 0;
   try {
     const data = JSON.parse(gql.stdout) as {
       data: {
         repository: {
-          pullRequest: { reviewThreads: { nodes: Thread[] } };
+          pullRequest: {
+            reviewThreads: { totalCount: number; nodes: Thread[] };
+          };
         };
       };
     };
-    threads = data.data.repository.pullRequest.reviewThreads.nodes.filter(
-      (t) => !t.isResolved,
-    );
+    const all = data.data.repository.pullRequest.reviewThreads;
+    unseen = Math.max(0, all.totalCount - all.nodes.length);
+    threads = all.nodes.filter((t) => !t.isResolved);
   } catch {
     return fail("github_pr: could not parse review threads");
   }
 
+  const unseenNote = unseen
+    ? `${unseen} older thread(s) were not checked. Resolve them on GitHub.`
+    : "";
   if (!threads.length) {
-    const msg = `PR #${num}: no unresolved review threads`;
+    const msg = `PR #${num}: no unresolved review threads${unseen ? ` in the newest 100. ${unseenNote}` : ""}`;
     return {
       content: [{ type: "text" as const, text: msg }],
       details: { summary: msg },
@@ -186,6 +193,7 @@ async function resolveThreads(
   const done: string[] = [];
   const failed: string[] = [];
   for (let i = 0; i < threads.length; i += RESOLVE_CONCURRENCY) {
+    if (signal?.aborted) break;
     const batch = threads.slice(i, i + RESOLVE_CONCURRENCY);
     const results = await Promise.all(
       batch.map((t) =>
@@ -211,17 +219,23 @@ async function resolveThreads(
     });
   }
 
+  const skipped = threads.length - done.length - failed.length;
   const out = [
     `# PR #${num}: resolved ${done.length}/${threads.length} thread(s)`,
   ];
   for (const loc of done) out.push(`- ✅ \`${loc}\``);
   for (const f of failed) out.push(`- ⚠️ ${f}`);
+  if (skipped) out.push(`- ⏹ ${skipped} not attempted: aborted`);
+  if (unseenNote) out.push(unseenNote);
   const summary =
     `PR #${num} · resolved ${done.length} thread(s)` +
-    (failed.length ? ` · ${failed.length} failed` : "");
+    (failed.length ? ` · ${failed.length} failed` : "") +
+    (skipped ? ` · ${skipped} skipped` : "");
   return {
     content: [{ type: "text" as const, text: out.join("\n") }],
     details: { summary },
+    // Resolving is idempotent, so the model can rerun resolve after a failure.
+    ...(failed.length || skipped ? { isError: true } : {}),
   };
 }
 
@@ -275,6 +289,13 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool<typeof params, { summary: string }>({
     name: "github_pr",
     label: "GitHub PR",
+    // report reads. resolve writes, and a rerun skips resolved threads.
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
     promptSnippet:
       "Fetch PR metadata, failing checks, review threads, or a diff",
     // Keep the TUI quiet: the full markdown goes to the model via `content`,
@@ -447,7 +468,6 @@ export default function (pi: ExtensionAPI) {
         if (body) out.push(`\n## Description\n${body}`);
       }
 
-      // Checks: summarize counts, list only non-passing.
       const rollup = wantChecks ? (m.statusCheckRollup ?? []) : [];
       if (rollup.length) {
         const norm = rollup.map((c) => ({
@@ -474,7 +494,6 @@ export default function (pi: ExtensionAPI) {
         }
       }
 
-      // Changed files.
       if (wantFiles && m.files?.length) {
         out.push(`\n## Files`);
         for (const f of m.files) {
@@ -484,7 +503,6 @@ export default function (pi: ExtensionAPI) {
         }
       }
 
-      // Comments + review threads from GraphQL.
       let nComments = 0;
       let nThreads = 0;
       if (wantComments && gql.code === 0 && gql.stdout) {

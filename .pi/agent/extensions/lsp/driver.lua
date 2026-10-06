@@ -397,12 +397,9 @@ _G.PiLspShared = _G.PiLspShared or {}
 -- Async/network linters (semgrep) leave orphan jobs in a sync pull; skip here.
 _G.PiLspShared.SLOW_LINTERS = { semgrep = true }
 
--- nvim-lint's try_lint() always targets vim.api.nvim_get_current_buf(),
--- ignoring any bufnr passed around it — so callers that process buffers out
--- of band with :edit (e.g. M.diagnostics opening every file first, then
--- linting each after the fact) MUST switch current buffer via
--- nvim_buf_call, or every call here silently re-lints whatever buffer was
--- last :edit'd instead of bufnr.
+-- nvim-lint's try_lint() always targets the current buffer and ignores any
+-- bufnr, so callers that :edit buffers out of band (M.diagnostics) MUST switch
+-- buffer via nvim_buf_call, or every call re-lints the last :edit'd buffer.
 function _G.PiLspShared.run_fast_lint(bufnr)
     local ok, lint = pcall(require, 'lint')
     if not ok then return end
@@ -428,13 +425,10 @@ function _G.PiLspShared.run_fast_lint(bufnr)
     end)
 end
 
--- Fires pull requests without blocking; callers already vim.wait/poll
--- vim.diagnostic.get afterward, so a synchronous per-client round trip here
--- only serializes callers that fan out over many buffers (repo-wide
--- diagnostics) for no benefit — the response still lands via the normal
--- handler and shows up on the next poll. get_clients{method=...} (0.10+)
--- checks client:supports_method, which also covers dynamic registration —
--- more correct than reading server_capabilities.diagnosticProvider by hand.
+-- Fires pull requests without blocking: callers already poll
+-- vim.diagnostic.get, and a sync round trip per client would only serialize
+-- fan-out over many buffers. get_clients{method=...} (0.10+) uses
+-- supports_method, which also covers dynamic registration.
 function _G.PiLspShared.pull_diagnostics(bufnr)
     local method = vim.lsp.protocol.Methods.textDocument_diagnostic
     local clients = vim.lsp.get_clients { bufnr = bufnr, method = method }
@@ -460,11 +454,9 @@ function M.diagnostics(files)
             table.insert(opened, open_buf_nowait(file))
         end
     end
-    -- One combined wait for attach across every newly-opened buffer, then one
-    -- combined wait for any in-flight project indexing. Every distinct
-    -- language server was already spawned by the loop above, so their
-    -- cold-start + initial indexing overlaps here instead of paying each
-    -- server's full cost serially, file by file.
+    -- One combined wait for attach, then one for indexing. The loop above
+    -- already spawned every server, so cold start and indexing overlap instead
+    -- of running file by file.
     vim.wait(ATTACH_TIMEOUT_MS, function()
         for _, b in ipairs(opened) do
             if vim.api.nvim_buf_is_valid(b) and #vim.lsp.get_clients { bufnr = b } == 0 then return false end
@@ -476,11 +468,9 @@ function M.diagnostics(files)
         _G.PiLspShared.pull_diagnostics(b)
         _G.PiLspShared.run_fast_lint(b)
     end
-    -- Servers push diagnostics async and lag; across files some report later.
-    -- Wait until the total count stops growing, not just the first buffer, so
-    -- multi-file calls don't drop stragglers. Settled once the count holds
-    -- steady across two polls after the baseline read (works at zero too),
-    -- so clean files don't burn the full cap.
+    -- Servers push diagnostics late. Wait until the total count across all
+    -- files holds steady for two polls (works at zero too), so multi-file calls
+    -- don't drop stragglers and clean files don't burn the full cap.
     local function total_diags()
         local n = 0
         for _, b in ipairs(opened) do

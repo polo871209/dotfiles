@@ -4,9 +4,8 @@
 // and a Submit/review tab.
 //
 // Native port of @juicesharp/rpiv-ask-user-question (i18n dropped). The schema
-// carries NO hard length caps — over-long header/label values are clamped here
-// in execute() rather than rejected pre-call, so the model's first invocation
-// always lands (the prior "needs twice to trigger" failure mode).
+// has no hard length caps (see schema.ts), so execute() clamps over-long values
+// and the first call always lands.
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
@@ -55,7 +54,7 @@ function clampParams(params: QuestionParams): QuestionParams {
 const DESCRIPTION =
   "Ask an interactive user to choose when a request needs a decision among multiple valid readings or directions. Call in the same turn ambiguity appears, not after prose; do not use when available tools can determine the facts.";
 
-export function registerAskUserQuestionTool(pi: ExtensionAPI): void {
+function registerAskUserQuestionTool(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "ask_user_question",
     label: "Ask User Question",
@@ -64,6 +63,7 @@ export function registerAskUserQuestionTool(pi: ExtensionAPI): void {
     parameters: QuestionParamsSchema,
     // Only the model may ask the user.
     exposure: "model-only",
+    annotations: { readOnlyHint: true, openWorldHint: false },
     // pi shows one custom dialog at a time, so two asks in one turn must queue.
     executionMode: "sequential",
 
@@ -98,9 +98,8 @@ export function registerAskUserQuestionTool(pi: ExtensionAPI): void {
         buildItemsForQuestion(q),
       );
 
-      // Inline (non-overlay): replaces the editor instead of floating over the
-      // scrollback, so the conversation stays visible and is pushed up above the
-      // dialog rather than hidden behind it.
+      // Inline, not overlay: replaces the editor so the conversation stays
+      // visible above the dialog.
       // Turn abort must tear the dialog down instead of leaving it waiting
       // for an answer that no longer has a consumer.
       let onAbort: (() => void) | undefined;
