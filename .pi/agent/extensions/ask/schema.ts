@@ -6,14 +6,12 @@ export const MAX_OPTIONS = 4;
 export const MAX_HEADER_LENGTH = 16;
 export const MAX_LABEL_LENGTH = 60;
 
-type RowKind = "option" | "other" | "chat" | "next";
+type RowKind = "option" | "other" | "next";
 type SentinelKind = Exclude<RowKind, "option">;
-const SENTINEL_KINDS: readonly SentinelKind[] = ["other", "chat", "next"];
+const SENTINEL_KINDS: readonly SentinelKind[] = ["other", "next"];
 
 interface RowIntentMeta {
   label: string;
-  reserved: boolean;
-  livesInMainList: boolean;
   activatesInputMode: boolean;
   blocksMultiToggle: boolean;
   autoSubmitsInMulti: boolean;
@@ -24,8 +22,6 @@ interface RowIntentMeta {
 export const ROW_INTENT_META: Record<RowKind, RowIntentMeta> = {
   option: {
     label: "",
-    reserved: false,
-    livesInMainList: true,
     activatesInputMode: false,
     blocksMultiToggle: false,
     autoSubmitsInMulti: false,
@@ -34,28 +30,14 @@ export const ROW_INTENT_META: Record<RowKind, RowIntentMeta> = {
   },
   other: {
     label: "Type something.",
-    reserved: true,
-    livesInMainList: true,
     activatesInputMode: true,
-    blocksMultiToggle: false,
+    blocksMultiToggle: true,
     autoSubmitsInMulti: false,
     autoAppendOnSingleSelect: true,
-    autoAppendOnMultiSelect: false,
-  },
-  chat: {
-    label: "Chat about this",
-    reserved: true,
-    livesInMainList: false,
-    activatesInputMode: false,
-    blocksMultiToggle: false,
-    autoSubmitsInMulti: false,
-    autoAppendOnSingleSelect: false,
-    autoAppendOnMultiSelect: false,
+    autoAppendOnMultiSelect: true,
   },
   next: {
     label: "Next",
-    reserved: true,
-    livesInMainList: true,
     activatesInputMode: false,
     blocksMultiToggle: true,
     autoSubmitsInMulti: true,
@@ -71,7 +53,6 @@ export function sentinelLabel(kind: SentinelKind): string {
 const RESERVED_LABELS = [
   "Other",
   ROW_INTENT_META.other.label,
-  ROW_INTENT_META.chat.label,
   ROW_INTENT_META.next.label,
 ] as const;
 
@@ -81,7 +62,6 @@ export function sentinelsToAppend(question: QuestionData): SentinelKind[] {
   const out: SentinelKind[] = [];
   for (const k of SENTINEL_KINDS) {
     const meta = ROW_INTENT_META[k];
-    if (!meta.livesInMainList) continue;
     if (question.multiSelect === true) {
       if (meta.autoAppendOnMultiSelect) out.push(k);
     } else if (meta.autoAppendOnSingleSelect) {
@@ -93,7 +73,7 @@ export function sentinelsToAppend(question: QuestionData): SentinelKind[] {
 
 const OptionSchema = Type.Object({
   label: Type.String({
-    description: `Display text for the option (1-5 words, aim for ≤${MAX_LABEL_LENGTH} chars); over-long labels are auto-truncated, never rejected. If recommending one, put it first and append "(Recommended)". Reserved labels: "Other", "Type something.", "Chat about this", "Next".`,
+    description: `Display text for the option (1-5 words, aim for ≤${MAX_LABEL_LENGTH} chars); over-long labels are auto-truncated, never rejected. If recommending one, put it first and append "(Recommended)". Reserved labels: "Other", "Type something.", "Next".`,
   }),
   description: Type.String({
     description:
@@ -110,7 +90,7 @@ const QuestionSchema = Type.Object({
     description: `Very short chip/tag shown next to the question (aim for ≤${MAX_HEADER_LENGTH} chars). Examples: "Auth method", "Library", "Approach". Over-long headers are auto-truncated, never rejected.`,
   }),
   options: Type.Array(OptionSchema, {
-    description: `Available choices (soft limit ${MIN_OPTIONS}-${MAX_OPTIONS}; extras are dropped). A single-select question with one authored option remains usable because a free-text fallback is appended. Keep choices distinct unless multiSelect is enabled.`,
+    description: `Available choices (soft limit ${MIN_OPTIONS}-${MAX_OPTIONS}; extras are dropped). Every question gets a free-text row, so a question with one authored option remains usable. Keep choices distinct unless multiSelect is enabled.`,
   }),
   multiSelect: Type.Optional(
     Type.Boolean({
@@ -133,9 +113,10 @@ export type QuestionParams = Static<typeof QuestionParamsSchema>;
 export interface QuestionAnswer {
   questionIndex: number;
   question: string;
-  kind: "option" | "custom" | "chat" | "multi";
+  kind: "option" | "custom" | "multi";
   answer: string | null;
   selected?: string[];
+  custom?: string;
 }
 
 type QuestionnaireError =
@@ -218,26 +199,14 @@ export function validateQuestionnaire(typed: QuestionParams): ValidationResult {
 
 const DECLINE_MESSAGE = "User declined to answer questions";
 const ENVELOPE_PREFIX = "User answered:";
-const CHAT_CONTINUATION_MESSAGE =
-  "User wants to chat about this. Continue the conversation to help them decide.";
-const CHAT_SUMMARY_MESSAGE = "User wants to chat about this";
 const NO_INPUT_PLACEHOLDER = "(no input)";
 
-type FormatAnswerVariant = "summary" | "envelope";
-
-export function formatAnswerScalar(
-  a: QuestionAnswer,
-  variant: FormatAnswerVariant,
-): string {
+export function formatAnswerScalar(a: QuestionAnswer): string {
   switch (a.kind) {
-    case "chat":
-      return variant === "envelope"
-        ? CHAT_CONTINUATION_MESSAGE
-        : CHAT_SUMMARY_MESSAGE;
-    case "multi":
-      return a.selected && a.selected.length > 0
-        ? a.selected.join(", ")
-        : NO_INPUT_PLACEHOLDER;
+    case "multi": {
+      const parts = [...(a.selected ?? []), ...(a.custom ? [a.custom] : [])];
+      return parts.length > 0 ? parts.join(", ") : NO_INPUT_PLACEHOLDER;
+    }
     case "custom":
       return a.answer && a.answer.length > 0 ? a.answer : NO_INPUT_PLACEHOLDER;
     case "option":
@@ -246,7 +215,7 @@ export function formatAnswerScalar(
 }
 
 function buildAnswerSegment(a: QuestionAnswer, echoQuestion: boolean): string {
-  const answer = formatAnswerScalar(a, "envelope");
+  const answer = formatAnswerScalar(a);
   return echoQuestion ? `"${a.question}"="${answer}"` : answer;
 }
 

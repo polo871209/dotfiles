@@ -19,7 +19,6 @@ import {
   selectActiveView,
 } from "./session";
 import {
-  ChatRowView,
   MULTI_SUBMIT_LABEL,
   type MultiSelectViewProps,
   MultiSelectView,
@@ -79,7 +78,7 @@ function selectConfirmedIndicator(
   const q = questions[currentTab];
   if (!q || q.multiSelect === true) return undefined;
   const prior = answers.get(currentTab);
-  if (!prior || prior.kind === "chat") return undefined;
+  if (!prior) return undefined;
   if (prior.kind === "custom") {
     const otherIndex = items.findIndex((it) => it.kind === "other");
     if (otherIndex < 0) return undefined;
@@ -151,13 +150,12 @@ interface QuestionTabStrategyConfig {
   questions: readonly QuestionData[];
   getActiveOptionList: () => OptionListView;
   tabsByIndex: ReadonlyArray<TabComponents>;
-  chatRow: ChatRowView;
   isMulti: boolean;
   getCurrentBodyHeight: (width: number) => number;
 }
 
 class QuestionTabStrategy implements TabContentStrategy {
-  readonly footerRowCount = 4;
+  readonly footerRowCount = 2;
 
   constructor(private readonly config: QuestionTabStrategyConfig) {}
 
@@ -199,8 +197,6 @@ class QuestionTabStrategy implements TabContentStrategy {
   footerRows(state: DialogState): Component[] {
     const question = this.config.questions[state.currentTab];
     return [
-      new Spacer(1),
-      this.config.chatRow,
       new Spacer(1),
       new OneLineClippedText(
         this.config.theme.fg(
@@ -252,7 +248,7 @@ class SubmitTabStrategy implements TabContentStrategy {
       const q = this.config.questions[i]!;
       const a = state.answers.get(i);
       if (!a) continue;
-      const answerText = formatAnswerScalar(a, "summary");
+      const answerText = formatAnswerScalar(a);
       c.addChild(
         new Text(this.config.theme.fg("muted", ` ● ${tabLabel(q, i)}`), 1, 0),
       );
@@ -315,7 +311,6 @@ interface DialogConfig {
   theme: Theme;
   questions: readonly QuestionData[];
   tabBar: TabBar | undefined;
-  chatRow: ChatRowView;
   isMulti: boolean;
   tabsByIndex: ReadonlyArray<TabComponents>;
   submitPicker?: Component;
@@ -343,7 +338,6 @@ class DialogView {
       questions: config.questions,
       getActiveOptionList: () => this.liveProps.activeOptionList,
       tabsByIndex: config.tabsByIndex,
-      chatRow: config.chatRow,
       isMulti: config.isMulti,
       getCurrentBodyHeight: config.getCurrentBodyHeight,
     });
@@ -488,7 +482,6 @@ export class QuestionnairePropsAdapter {
     private readonly tabsByIndex: ReadonlyArray<TabComponents>,
     private readonly inlineInput: Input,
     private readonly dialog: DialogView,
-    private readonly chatRow: ChatRowView,
     private readonly submitPicker: SubmitPicker | undefined,
     private readonly tabBar: TabBar | undefined,
   ) {}
@@ -503,8 +496,6 @@ export class QuestionnairePropsAdapter {
     const inputCursorOffset = getInputCursorOffset(this.inlineInput);
 
     this.dialog.setProps({ state, activeOptionList });
-
-    this.chatRow.setProps({ focused: activeView === "chat" });
 
     if (this.submitPicker) {
       const focused = activeView === "submit";
@@ -550,7 +541,9 @@ export class QuestionnairePropsAdapter {
         } satisfies OptionListViewProps);
       }
       if (tab.multiSelect) {
-        tab.multiSelect.setProps(this.multiSelectProps(state, i, activeView));
+        tab.multiSelect.setProps(
+          this.multiSelectProps(state, i, activeView, inputCursorOffset),
+        );
       }
     }
 
@@ -561,15 +554,20 @@ export class QuestionnairePropsAdapter {
     state: QuestionnaireState,
     i: number,
     activeView: ActiveView,
+    inputCursorOffset: number | undefined,
   ): MultiSelectViewProps {
     const question = this.questions[i];
     if (!question)
       return {
         rows: [],
+        other: { active: false, text: "" },
         nextActive: false,
         nextLabel: ROW_INTENT_META.next.label,
       };
     const focused = activeView === "options" && i === state.currentTab;
+    const focusedKind = focused
+      ? this.itemsByTab[i]?.[state.optionIndex]?.kind
+      : undefined;
     const rows: { checked: boolean; active: boolean }[] = [];
     for (let j = 0; j < question.options.length; j++) {
       rows.push({
@@ -577,16 +575,22 @@ export class QuestionnairePropsAdapter {
         active: focused && j === state.optionIndex,
       });
     }
-    const nextActive = focused && state.optionIndex === question.options.length;
+    const other =
+      focusedKind === "other"
+        ? {
+            active: true,
+            text: this.inlineInput.getValue(),
+            cursorOffset: inputCursorOffset,
+          }
+        : { active: false, text: state.answers.get(i)?.custom ?? "" };
     const nextLabel =
       i === this.questions.length - 1
         ? MULTI_SUBMIT_LABEL
         : ROW_INTENT_META.next.label;
-    return { rows, nextActive, nextLabel };
+    return { rows, other, nextActive: focusedKind === "next", nextLabel };
   }
 
   invalidate(): void {
-    this.chatRow.invalidate();
     this.tabBar?.invalidate();
     this.submitPicker?.invalidate();
     for (const tab of this.tabsByIndex) {
@@ -649,10 +653,6 @@ export function buildQuestionnaire(
 
   const submitPicker = isMulti ? new SubmitPicker(theme) : undefined;
   const tabBar = isMulti ? new TabBar(theme) : undefined;
-  const chatRow = new ChatRowView(
-    { kind: "chat", label: ROW_INTENT_META.chat.label },
-    selectTheme,
-  );
 
   const getBodyHeight = (width: number): number => {
     let max = 0;
@@ -676,7 +676,6 @@ export function buildQuestionnaire(
       theme,
       questions,
       tabBar,
-      chatRow,
       isMulti,
       tabsByIndex,
       submitPicker,
@@ -698,7 +697,6 @@ export function buildQuestionnaire(
     tabsByIndex,
     inlineInput,
     dialog,
-    chatRow,
     submitPicker,
     tabBar,
   );

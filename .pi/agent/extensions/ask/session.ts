@@ -25,7 +25,6 @@ export interface QuestionnaireState {
   currentTab: number;
   optionIndex: number;
   inputMode: boolean;
-  chatFocused: boolean;
   answers: ReadonlyMap<number, QuestionAnswer>;
   multiSelectChecked: ReadonlySet<number>;
   submitChoiceIndex: number;
@@ -41,15 +40,13 @@ interface QuestionnaireRuntime {
   items: readonly WrappingSelectItem[];
 }
 
-export type ActiveView = "chat" | "options" | "submit";
+export type ActiveView = "options" | "submit";
 
 export function selectActiveView(
-  state: { chatFocused: boolean; currentTab: number },
+  state: { currentTab: number },
   totalQuestions: number,
 ): ActiveView {
-  if (state.currentTab === totalQuestions) return "submit";
-  if (state.chatFocused) return "chat";
-  return "options";
+  return state.currentTab === totalQuestions ? "submit" : "options";
 }
 
 export function buildItemsForQuestion(
@@ -71,12 +68,11 @@ type QuestionnaireAction =
   | { kind: "tab_switch"; nextTab: number }
   | { kind: "confirm"; answer: QuestionAnswer; autoAdvanceTab?: number }
   | { kind: "toggle"; index: number }
-  | { kind: "multi_confirm"; selected: string[]; autoAdvanceTab?: number }
+  | { kind: "multi_confirm"; autoAdvanceTab?: number }
+  | { kind: "custom_text"; text: string }
   | { kind: "cancel" }
   | { kind: "submit" }
   | { kind: "submit_nav"; nextIndex: 0 | 1 }
-  | { kind: "focus_chat" }
-  | { kind: "focus_options"; optionIndex: number }
   | { kind: "toggle_collapsed" }
   | { kind: "ignore" };
 
@@ -113,14 +109,6 @@ function buildSingleSelectAnswer(
   if (!q) return null;
 
   const item = runtime.currentItem;
-  if (item?.kind === "chat") {
-    return {
-      questionIndex: state.currentTab,
-      question: q.question,
-      kind: "chat",
-      answer: item.label,
-    };
-  }
   if (state.inputMode) {
     const label = runtime.inputBuffer;
     return {
@@ -138,22 +126,6 @@ function buildSingleSelectAnswer(
     kind: "option",
     answer: item.label,
   };
-}
-
-function buildMultiSelected(
-  state: QuestionnaireState,
-  runtime: QuestionnaireRuntime,
-): string[] {
-  const q = runtime.questions[state.currentTab];
-  if (!q) return [];
-  const out: string[] = [];
-  for (let i = 0; i < q.options.length; i++) {
-    if (state.multiSelectChecked.has(i)) {
-      const label = q.options[i]?.label;
-      if (typeof label === "string") out.push(label);
-    }
-  }
-  return out;
 }
 
 function tabSwitchAction(
@@ -178,34 +150,22 @@ function tabSwitchAction(
   return null;
 }
 
-function nextNavOnDown(
+function navAction(
+  data: string,
   state: QuestionnaireState,
   runtime: QuestionnaireRuntime,
-): QuestionnaireAction {
-  if (
-    runtime.items.length > 0 &&
-    state.optionIndex === runtime.items.length - 1
-  )
-    return { kind: "focus_chat" };
+): QuestionnaireAction | null {
+  const kb = runtime.keybindings;
+  const delta = kb.matches(data, KEYBIND_DOWN)
+    ? 1
+    : kb.matches(data, KEYBIND_UP)
+      ? -1
+      : 0;
+  if (delta === 0) return null;
   return {
     kind: "nav",
     nextIndex: wrapTab(
-      state.optionIndex + 1,
-      Math.max(1, runtime.items.length),
-    ),
-  };
-}
-
-function prevNavOnUp(
-  state: QuestionnaireState,
-  runtime: QuestionnaireRuntime,
-): QuestionnaireAction {
-  if (runtime.items.length > 0 && state.optionIndex === 0)
-    return { kind: "focus_chat" };
-  return {
-    kind: "nav",
-    nextIndex: wrapTab(
-      state.optionIndex - 1,
+      state.optionIndex + delta,
       Math.max(1, runtime.items.length),
     ),
   };
@@ -225,31 +185,16 @@ function routeKey(
     return { kind: "ignore" };
   }
 
-  if (state.chatFocused) {
-    if (kb.matches(data, KEYBIND_CANCEL)) return { kind: "cancel" };
-    if (kb.matches(data, KEYBIND_CONFIRM)) {
-      const answer = buildSingleSelectAnswer(state, runtime);
-      if (!answer) return { kind: "ignore" };
-      return {
-        kind: "confirm",
-        answer,
-        autoAdvanceTab: computeAutoAdvanceTab(state, runtime),
-      };
-    }
-    if (kb.matches(data, KEYBIND_UP)) {
-      return {
-        kind: "focus_options",
-        optionIndex: Math.max(0, runtime.items.length - 1),
-      };
-    }
-    if (kb.matches(data, KEYBIND_DOWN))
-      return { kind: "focus_options", optionIndex: 0 };
-    const tab = tabSwitchAction(data, state, runtime);
-    if (tab) return tab;
-    return { kind: "ignore" };
-  }
-
   if (state.inputMode) {
+    if (
+      kb.matches(data, KEYBIND_CONFIRM) &&
+      runtime.questions[state.currentTab]?.multiSelect
+    ) {
+      return {
+        kind: "multi_confirm",
+        autoAdvanceTab: computeAutoAdvanceTab(state, runtime),
+      };
+    }
     if (kb.matches(data, KEYBIND_CONFIRM)) {
       const answer = buildSingleSelectAnswer(state, runtime);
       if (!answer) return { kind: "ignore" };
@@ -260,9 +205,7 @@ function routeKey(
       };
     }
     if (kb.matches(data, KEYBIND_CANCEL)) return { kind: "cancel" };
-    if (kb.matches(data, KEYBIND_UP)) return prevNavOnUp(state, runtime);
-    if (kb.matches(data, KEYBIND_DOWN)) return nextNavOnDown(state, runtime);
-    return { kind: "ignore" };
+    return navAction(data, state, runtime) ?? { kind: "ignore" };
   }
 
   if (runtime.isMulti && state.currentTab === runtime.questions.length) {
@@ -288,8 +231,8 @@ function routeKey(
   const q = runtime.questions[state.currentTab];
   if (!q) return { kind: "ignore" };
 
-  if (kb.matches(data, KEYBIND_UP)) return prevNavOnUp(state, runtime);
-  if (kb.matches(data, KEYBIND_DOWN)) return nextNavOnDown(state, runtime);
+  const nav = navAction(data, state, runtime);
+  if (nav) return nav;
 
   if (q.multiSelect) {
     const focusedKind = runtime.currentItem?.kind;
@@ -303,7 +246,6 @@ function routeKey(
         return { kind: "toggle", index: state.optionIndex };
       return {
         kind: "multi_confirm",
-        selected: buildMultiSelected(state, runtime),
         autoAdvanceTab: computeAutoAdvanceTab(state, runtime),
       };
     }
@@ -366,28 +308,36 @@ function syncMultiSelectFromAnswers(
   return indices;
 }
 
-function persistMultiSelectAnswer(
+function buildMultiSelectAnswer(
   state: QuestionnaireState,
-  ctx: ApplyContext,
-): ReadonlyMap<number, QuestionAnswer> {
-  const q = ctx.questions[state.currentTab];
-  if (!q?.multiSelect) return state.answers;
-  const selected: string[] = [];
-  for (let i = 0; i < q.options.length; i++) {
-    if (state.multiSelectChecked.has(i)) selected.push(q.options[i]!.label);
-  }
-  const out = new Map(state.answers);
-  if (selected.length === 0) {
-    out.delete(state.currentTab);
-    return out;
-  }
-  out.set(state.currentTab, {
+  q: QuestionData,
+  custom: string | undefined,
+): QuestionAnswer {
+  const selected = q.options
+    .filter((_, i) => state.multiSelectChecked.has(i))
+    .map((o) => o.label);
+  return {
     questionIndex: state.currentTab,
     question: q.question,
     kind: "multi",
     answer: null,
     selected,
-  });
+    ...(custom && custom.trim().length > 0 ? { custom } : {}),
+  };
+}
+
+function persistMultiSelectAnswer(
+  state: QuestionnaireState,
+  ctx: ApplyContext,
+  custom: string | undefined,
+): ReadonlyMap<number, QuestionAnswer> {
+  const q = ctx.questions[state.currentTab];
+  if (!q?.multiSelect) return state.answers;
+  const answer = buildMultiSelectAnswer(state, q, custom);
+  const out = new Map(state.answers);
+  if (answer.selected?.length === 0 && answer.custom === undefined)
+    out.delete(state.currentTab);
+  else out.set(state.currentTab, answer);
   return out;
 }
 
@@ -401,7 +351,6 @@ function switchTabResult(
     currentTab: nextTab,
     optionIndex: 0,
     inputMode: false,
-    chatFocused: false,
     submitChoiceIndex: 0,
     multiSelectChecked: syncMultiSelectFromAnswers(
       state.answers,
@@ -448,10 +397,16 @@ const navHandler: Handler<"nav"> = (state, action, ctx) => {
   if (!inputMode)
     return { state: next, effects: [{ kind: "clear_input_buffer" }] };
   const prior = state.answers.get(state.currentTab);
-  if (prior?.kind === "custom" && typeof prior.answer === "string") {
+  const priorText =
+    prior?.kind === "custom"
+      ? prior.answer
+      : prior?.kind === "multi"
+        ? prior.custom
+        : undefined;
+  if (typeof priorText === "string") {
     return {
       state: next,
-      effects: [{ kind: "set_input_buffer", value: prior.answer }],
+      effects: [{ kind: "set_input_buffer", value: priorText }],
     };
   }
   return { state: next, effects: [] };
@@ -465,7 +420,6 @@ const confirmHandler: Handler<"confirm"> = (state, action, ctx) => {
   const answers = new Map(state.answers);
   answers.set(answer.questionIndex, answer);
   const next: QuestionnaireState = { ...state, answers };
-  if (answer.kind === "chat") return doneFor(next, ctx, false);
   if (action.autoAdvanceTab !== undefined)
     return switchTabResult(next, action.autoAdvanceTab, ctx);
   return doneFor(next, ctx, false);
@@ -482,53 +436,40 @@ const toggleHandler: Handler<"toggle"> = (state, action, ctx) => {
   return {
     state: {
       ...intermediate,
-      answers: persistMultiSelectAnswer(intermediate, ctx),
+      answers: persistMultiSelectAnswer(
+        intermediate,
+        ctx,
+        state.answers.get(state.currentTab)?.custom,
+      ),
     },
     effects: [],
   };
 };
 
+const customTextHandler: Handler<"custom_text"> = (state, action, ctx) => ({
+  state: {
+    ...state,
+    answers: persistMultiSelectAnswer(state, ctx, action.text),
+  },
+  effects: [],
+});
+
 const multiConfirmHandler: Handler<"multi_confirm"> = (state, action, ctx) => {
   const q = ctx.questions[state.currentTab];
   if (!q) return { state, effects: [] };
   const answers = new Map(state.answers);
-  answers.set(state.currentTab, {
-    questionIndex: state.currentTab,
-    question: q.question,
-    kind: "multi",
-    answer: null,
-    selected: action.selected,
-  });
-  const synced: QuestionnaireState = {
-    ...state,
-    answers,
-    multiSelectChecked: syncMultiSelectFromAnswers(
-      answers,
-      ctx.questions,
-      state.currentTab,
+  answers.set(
+    state.currentTab,
+    buildMultiSelectAnswer(
+      state,
+      q,
+      state.answers.get(state.currentTab)?.custom,
     ),
-  };
+  );
+  const next: QuestionnaireState = { ...state, answers };
   if (action.autoAdvanceTab !== undefined)
-    return switchTabResult(synced, action.autoAdvanceTab, ctx);
-  return doneFor(synced, ctx, false);
-};
-
-const focusOptionsHandler: Handler<"focus_options"> = (state, action, ctx) => {
-  const items = ctx.itemsByTab[state.currentTab] ?? [];
-  const focused = items[action.optionIndex];
-  const inputMode = focused
-    ? ROW_INTENT_META[focused.kind].activatesInputMode
-    : false;
-  const next: QuestionnaireState = {
-    ...state,
-    chatFocused: false,
-    optionIndex: action.optionIndex,
-    inputMode,
-  };
-  return {
-    state: next,
-    effects: inputMode ? [] : [{ kind: "clear_input_buffer" }],
-  };
+    return switchTabResult(next, action.autoAdvanceTab, ctx);
+  return doneFor(next, ctx, false);
 };
 
 const HANDLERS: { [K in QuestionnaireAction["kind"]]: Handler<K> } = {
@@ -537,14 +478,13 @@ const HANDLERS: { [K in QuestionnaireAction["kind"]]: Handler<K> } = {
   confirm: confirmHandler,
   toggle: toggleHandler,
   multi_confirm: multiConfirmHandler,
+  custom_text: customTextHandler,
   cancel: (s, _a, c) => doneFor(s, c, true),
   submit: (s, _a, c) => doneFor(s, c, false),
   submit_nav: (s, a) => ({
     state: { ...s, submitChoiceIndex: a.nextIndex },
     effects: [],
   }),
-  focus_chat: (s) => ({ state: { ...s, chatFocused: true }, effects: [] }),
-  focus_options: focusOptionsHandler,
   toggle_collapsed: (s) => ({
     state: { ...s, collapsed: !s.collapsed },
     effects: [],
@@ -580,7 +520,6 @@ function initialState(): QuestionnaireState {
     currentTab: 0,
     optionIndex: 0,
     inputMode: false,
-    chatFocused: false,
     answers: new Map(),
     multiSelectChecked: new Set(),
     submitChoiceIndex: 0,
@@ -672,6 +611,10 @@ export class QuestionnaireSession {
   private handleIgnoreInline(data: string): void {
     if (!this.state.inputMode) return;
     this.inlineInput.handleInput(data);
+    if (this.questions[this.state.currentTab]?.multiSelect) {
+      this.commit({ kind: "custom_text", text: this.inlineInput.getValue() });
+      return;
+    }
     this.viewAdapter.apply(this.state);
   }
 
@@ -691,10 +634,6 @@ export class QuestionnaireSession {
   }
 
   private currentItem(): WrappingSelectItem | undefined {
-    if (this.state.chatFocused)
-      return { kind: "chat", label: sentinelLabel("chat") };
-    const arr = this.itemsByTab[this.state.currentTab] ?? [];
-    if (this.state.optionIndex < arr.length) return arr[this.state.optionIndex];
-    return { kind: "chat", label: sentinelLabel("chat") };
+    return this.itemsByTab[this.state.currentTab]?.[this.state.optionIndex];
   }
 }

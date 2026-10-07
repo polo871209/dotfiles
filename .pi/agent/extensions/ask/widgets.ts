@@ -13,10 +13,31 @@ const graphemeSegmenter = new Intl.Segmenter(undefined, {
   granularity: "grapheme",
 });
 
+function wrapInlineInput(
+  buffer: string,
+  cursorOffset: number | undefined,
+  contentWidth: number,
+): string[] {
+  const offset =
+    cursorOffset !== undefined &&
+    cursorOffset >= 0 &&
+    cursorOffset <= buffer.length
+      ? cursorOffset
+      : buffer.length;
+  const before = buffer.slice(0, offset);
+  const [firstGrapheme] = graphemeSegmenter.segment(buffer.slice(offset));
+  const rawAt = firstGrapheme ? firstGrapheme.segment : "";
+  const unbreakableCursorCell = "\u00a0";
+  const atCursor =
+    rawAt === "" || rawAt === " " ? unbreakableCursorCell : rawAt;
+  const after = buffer.slice(offset + rawAt.length);
+  const raw = `${before}${CURSOR_MARKER}\x1b[7m${atCursor}\x1b[27m${after}`;
+  return wrapTextWithAnsi(raw, contentWidth);
+}
+
 export type WrappingSelectItem =
   | { kind: "option"; label: string; description?: string }
   | { kind: "other"; label: string; description?: string }
-  | { kind: "chat"; label: string; description?: string }
   | { kind: "next"; label: string; description?: string };
 
 export interface WrappingSelectTheme {
@@ -184,21 +205,11 @@ class WrappingSelect implements Component {
     continuationPrefix: string,
     contentWidth: number,
   ): string[] {
-    const buffer = this.inputBuffer;
-    const requested = this.inputCursorOffset;
-    const offset =
-      requested !== undefined && requested >= 0 && requested <= buffer.length
-        ? requested
-        : buffer.length;
-    const before = buffer.slice(0, offset);
-    const [firstGrapheme] = graphemeSegmenter.segment(buffer.slice(offset));
-    const rawAt = firstGrapheme ? firstGrapheme.segment : "";
-    const unbreakableCursorCell = "\u00a0";
-    const atCursor =
-      rawAt === "" || rawAt === " " ? unbreakableCursorCell : rawAt;
-    const after = buffer.slice(offset + rawAt.length);
-    const raw = `${before}${CURSOR_MARKER}\x1b[7m${atCursor}\x1b[27m${after}`;
-    const wrapped = wrapTextWithAnsi(raw, contentWidth);
+    const wrapped = wrapInlineInput(
+      this.inputBuffer,
+      this.inputCursorOffset,
+      contentWidth,
+    );
     return wrapped.map((segment, index) => {
       const prefix = index === 0 ? rowPrefix : continuationPrefix;
       return this.theme.selectedText(`${prefix}${segment}`);
@@ -296,6 +307,7 @@ const MS_CONTINUATION_INDENT = "  ";
 
 export interface MultiSelectViewProps {
   rows: ReadonlyArray<{ checked: boolean; active: boolean }>;
+  other: { active: boolean; text: string; cursorOffset?: number };
   nextActive: boolean;
   nextLabel: string;
 }
@@ -309,6 +321,7 @@ export class MultiSelectView {
   ) {
     this.props = {
       rows: [],
+      other: { active: false, text: "" },
       nextActive: false,
       nextLabel: sentinelLabel("next"),
     };
@@ -321,100 +334,99 @@ export class MultiSelectView {
   invalidate(): void {}
 
   render(width: number): string[] {
+    return this.layout(width).lines;
+  }
+
+  focusedItemRowRange(width: number): [number, number] {
+    return this.layout(width).focused ?? [0, 0];
+  }
+
+  naturalHeight(width: number): number {
+    return this.layout(width).lines.length;
+  }
+
+  private layout(width: number): {
+    lines: string[];
+    focused?: [number, number];
+  } {
     const lines: string[] = [];
-    const prefixWidth = this.prefixVisibleWidth();
-    const contentWidth = Math.max(1, width - prefixWidth);
+    let focused: [number, number] | undefined;
+    const push = (active: boolean, rowLines: string[]) => {
+      if (active) focused = [lines.length, lines.length + rowLines.length];
+      lines.push(...rowLines);
+    };
+    const contentWidth = Math.max(1, width - this.prefixVisibleWidth());
+
     for (let i = 0; i < this.question.options.length; i++) {
       const opt = this.question.options[i];
       const row = this.props.rows[i];
       if (!opt || !row) continue;
-      const pointer = row.active
-        ? this.theme.fg("accent", MS_ACTIVE_POINTER)
-        : MS_INACTIVE_POINTER;
-      const box = row.checked
-        ? this.theme.fg("accent", MS_CHECKED)
-        : this.theme.fg("muted", MS_UNCHECKED);
       const label = truncateToWidth(opt.label, contentWidth, "…");
       const styledLabel = row.active ? this.theme.fg("accent", label) : label;
-      const line = `${pointer}${box}${MS_BOX_LABEL_GAP}${styledLabel}`;
-      lines.push(truncateToWidth(line, width, ""));
+      const rowLines = [
+        truncateToWidth(
+          `${this.rowPrefix(row.active, row.checked)}${styledLabel}`,
+          width,
+          "",
+        ),
+      ];
       if (opt.description) {
         for (const segment of wrapTextWithAnsi(opt.description, contentWidth)) {
-          lines.push(MS_CONTINUATION_INDENT + this.theme.fg("muted", segment));
+          rowLines.push(
+            MS_CONTINUATION_INDENT + this.theme.fg("muted", segment),
+          );
         }
       }
+      push(row.active, rowLines);
     }
+
+    push(this.props.other.active, this.renderOtherRow(width, contentWidth));
+
     const nextPointer = this.props.nextActive
       ? this.theme.fg("accent", MS_ACTIVE_POINTER)
       : MS_INACTIVE_POINTER;
     const nextLabel = this.props.nextActive
       ? this.theme.fg("accent", this.props.nextLabel)
       : this.props.nextLabel;
-    lines.push(truncateToWidth(`${nextPointer}${nextLabel}`, width, ""));
-    return lines;
+    push(this.props.nextActive, [
+      truncateToWidth(`${nextPointer}${nextLabel}`, width, ""),
+    ]);
+
+    return { lines, focused };
   }
 
-  focusedItemRowRange(width: number): [number, number] {
-    const contentWidth = Math.max(1, width - this.prefixVisibleWidth());
-    let row = 0;
-    for (let i = 0; i < this.question.options.length; i++) {
-      const opt = this.question.options[i];
-      const r = this.props.rows[i];
-      if (!opt || !r) continue;
-      const itemHeight =
-        1 +
-        (opt.description
-          ? wrapTextWithAnsi(opt.description, contentWidth).length
-          : 0);
-      if (r.active) return [row, row + itemHeight];
-      row += itemHeight;
+  private renderOtherRow(width: number, contentWidth: number): string[] {
+    const { active, text, cursorOffset } = this.props.other;
+    const prefix = this.rowPrefix(active, text.trim().length > 0);
+    if (active) {
+      const continuation = " ".repeat(this.prefixVisibleWidth());
+      return wrapInlineInput(text, cursorOffset, contentWidth).map(
+        (segment, index) =>
+          (index === 0 ? prefix : continuation) +
+          this.theme.fg("accent", segment),
+      );
     }
-    if (this.props.nextActive) return [row, row + 1];
-    return [0, 0];
+    const label =
+      text.trim().length > 0
+        ? truncateToWidth(text, contentWidth, "…")
+        : this.theme.fg("dim", sentinelLabel("other"));
+    return [truncateToWidth(`${prefix}${label}`, width, "")];
   }
 
-  naturalHeight(width: number): number {
-    const contentWidth = Math.max(1, width - this.prefixVisibleWidth());
-    let total = 0;
-    for (const opt of this.question.options) {
-      if (!opt) continue;
-      total += 1;
-      if (opt.description)
-        total += wrapTextWithAnsi(opt.description, contentWidth).length;
-    }
-    return total + 1;
+  private rowPrefix(active: boolean, checked: boolean): string {
+    const pointer = active
+      ? this.theme.fg("accent", MS_ACTIVE_POINTER)
+      : MS_INACTIVE_POINTER;
+    const box = checked
+      ? this.theme.fg("accent", MS_CHECKED)
+      : this.theme.fg("muted", MS_UNCHECKED);
+    return `${pointer}${box}${MS_BOX_LABEL_GAP}`;
   }
 
   private prefixVisibleWidth(): number {
     return visibleWidth(
       `${MS_INACTIVE_POINTER}${MS_UNCHECKED}${MS_BOX_LABEL_GAP}`,
     );
-  }
-}
-
-interface ChatRowViewProps {
-  focused: boolean;
-}
-
-export class ChatRowView implements Component {
-  private readonly select: WrappingSelect;
-
-  constructor(item: WrappingSelectItem, theme: WrappingSelectTheme) {
-    this.select = new WrappingSelect([item], 1, theme);
-  }
-
-  setProps(props: ChatRowViewProps): void {
-    this.select.setFocused(props.focused);
-  }
-
-  handleInput(_data: string): void {}
-
-  invalidate(): void {
-    this.select.invalidate();
-  }
-
-  render(width: number): string[] {
-    return this.select.render(width);
   }
 }
 

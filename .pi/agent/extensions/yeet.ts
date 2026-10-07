@@ -6,9 +6,13 @@ import { Box, Text } from "@earendil-works/pi-tui";
 import { sideChannelWithLoader } from "./shared/llm";
 import { barWidget } from "./shared/widget";
 
+const MAX_BODY_LINES = 2;
+
 const MSG_PROMPT = `
+Write a tiny Conventional Commits message for the diff. The code is the source of truth and the reader has it, so the message names the change and never describes the code.
+
 ## Input authority
-Write a Conventional Commits message for the diff. Keep it terse and exact: no fluff, why over what. The diff is the only source of truth for WHAT changed; base the subject and body entirely on it. The user hint, when present, arrives as a \`User hint:\` line and carries intent: it can pick which change leads, set the scope, or give non-obvious rationale for the body. Obey it for emphasis, but never let it add, rename, or overstate a change the diff does not contain. If the hint points at something absent from the diff, ignore that part and write the message from the diff alone.
+The diff alone decides WHAT changed. A \`User hint:\` line, when present, carries intent: it can pick which change leads, set the scope, or give the WHY. Never let it add, rename, or overstate a change the diff does not contain, and ignore any part that points at something absent from the diff.
 
 ## Rank the changes first
 Before writing, decide which single change a reader cares about. A user hint that names a priority wins: the change it points to is top-ranked, even when another hunk looks larger. Otherwise rank hunks by impact: behavior change beats new capability beats refactor beats rename, formatting, comment, import, version bump, or generated file. Diff size and file order do not decide rank; a one-line behavior change outranks a 300-line mechanical edit. The top-ranked change owns the subject, and the rest stay out of the message unless they break something.
@@ -16,17 +20,15 @@ Before writing, decide which single change a reader cares about. A user hint tha
 ## Subject
 Format: \`<type>(<scope>): <subject>\` where type ∈ {feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert}; scope is optional. Never write the \`!\` breaking-change marker. State the top-ranked change, never a side detail and never a vague umbrella such as \`update files\` or \`various fixes\`. Use imperative mood (\`add\`, \`fix\` — not \`added\`, \`adds\`), lowercase, ≤50 chars when possible (hard cap 72), no trailing period, and do not restate a file name already named by the scope.
 
-## Body
-Default to no body. Write one only for non-obvious WHY, a security fix, a data migration, or a revert; those cases ALWAYS get a body. Hard cap: 3 bullets, each one line under 72 chars. Never restate the subject, never list files or functions the diff already shows, never narrate what the code does, and never mention side changes that the reader can skip. If a bullet only repeats the code, delete it. Put one blank line after the subject and use \`-\` rather than \`*\`.
+Match the type and scope vocabulary of the recent commit subjects, and reuse an existing scope for the same area.
 
-## Footers
-Put optional footers one blank line after the body. Use \`Token: value\` or \`Token #value\`; replace spaces with \`-\` in tokens (for example \`Reviewed-by\`, \`Refs: #123\`, \`Closes #42\`). Never write a \`BREAKING CHANGE\` footer. Match recent commit subjects' established type/scope vocabulary and phrasing; reuse an existing scope for the same area.
+## Body
+Default: subject only. Add a body only when the WHY is invisible in the diff, for example an external constraint, the cause of a bug, or the impact of an incompatible change. Hard cap: ${MAX_BODY_LINES} \`-\` bullet lines, each under 72 chars, after one blank line. Lines past the cap are dropped. Never list files, functions, or side changes, and never narrate what the code does. If a line repeats something the diff shows, delete it.
 
 ## Forbidden output
-Do not mark the commit as breaking in any form: no \`!\` before the colon, no \`BREAKING CHANGE\` footer, and no \`breaking\` wording in the subject. An incompatible change is still written as a plain \`feat\`, \`fix\`, or \`refactor\`; the body explains the impact. Do not write a preamble, restated instructions, reasoning, or analysis before the message. Do not write \`this commit\`, \`I\`, \`we\`, \`now\`, \`currently\`, \`as requested by\`, emoji, or AI attribution. Do not begin with \"Looking at the diff, I need to understand...\". Do not use fences.
+No breaking-change marker in any form: no \`!\` before the colon, no \`BREAKING CHANGE\` footer, no \`breaking\` in the subject. No footers. No preamble, reasoning, or fences, and do not begin with "Looking at the diff, I need to understand...". Do not write \`this commit\`, \`I\`, \`we\`, \`now\`, \`currently\`, \`as requested by\`, emoji, or AI attribution.
 
-## Completion/output condition
-Return the raw commit message itself, starting with the Conventional Commits subject and containing no surrounding commentary.`;
+Return the raw commit message, starting with the subject line.`;
 
 const YEET_MSG_TYPE = "yeet-marker";
 const YEET_WIDGET_KEY = "yeet-progress";
@@ -275,10 +277,17 @@ export default function (pi: ExtensionAPI) {
     const subjectIndex = lines.findIndex((l) => subjectLineRe.test(l.trim()));
     const trimmedMessage =
       subjectIndex > 0 ? lines.slice(subjectIndex).join("\n") : message;
-    const cleanMessage = trimmedMessage
+    const [subject = "", ...bodyLines] = trimmedMessage
       .replace(/^\s*(?:subject|title|commit(?:\s*message)?|message):\s*/i, "")
       .replace(/^["'`]+|["'`]+$/g, "")
-      .trim();
+      .trim()
+      .split("\n");
+    const body = bodyLines
+      .filter((line) => line.trim())
+      .slice(0, MAX_BODY_LINES);
+    const cleanMessage = body.length
+      ? [subject, "", ...body].join("\n")
+      : subject;
     if (!cleanMessage) {
       showProgress(2, true);
       ctx.ui.notify("/yeet: empty commit message", "error");
@@ -305,7 +314,6 @@ export default function (pi: ExtensionAPI) {
       return;
     }
     const sha = (await git("rev-parse", "--short", "HEAD")).out;
-    const subject = cleanMessage.split("\n")[0];
 
     await pushAndReport(sha, subject);
   };
