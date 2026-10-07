@@ -14,7 +14,6 @@ require('which-key').setup {
     delay = 200,
     spec = {
         { '<leader><leader>', group = 'Ask pi', mode = 'x' },
-        { '<leader>R', group = '[R]est (http)', mode = { 'n', 'x' } },
         { '<leader>g', group = '[G]it', mode = { 'n', 'x' } },
         { '<leader>p', group = 'vim [P]ack' },
         { '<leader>s', group = '[S]earch' },
