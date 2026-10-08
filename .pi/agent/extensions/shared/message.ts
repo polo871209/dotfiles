@@ -1,8 +1,4 @@
 import type { Message } from "@earendil-works/pi-ai";
-import {
-  convertToLlm,
-  type ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
 
 export function extractText(content: unknown): string {
   if (typeof content === "string") return content;
@@ -62,12 +58,4 @@ export function collectTextMessages(
     while (messages[0]?.role === "assistant") messages.shift();
   }
   return { messages, userTurns };
-}
-
-export function modelVisibleEntries(
-  sessionManager: ExtensionContext["sessionManager"],
-): Array<{ type: "message"; message: Message }> {
-  return convertToLlm(sessionManager.buildSessionProjection().messages).map(
-    (message) => ({ type: "message", message }),
-  );
 }

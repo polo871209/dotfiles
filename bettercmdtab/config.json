@@ -11,6 +11,11 @@
       "bundleID" : "net.whatsapp.WhatsApp",
       "hide" : "always",
       "ignore" : "never"
+    },
+    {
+      "bundleID" : "dev.kdrag0n.MacVirt",
+      "hide" : "dontHide",
+      "ignore" : "never"
     }
   ],
   "boldSelectedLabel" : false,

@@ -1,12 +1,32 @@
 import type {
   ExtensionAPI,
   ExtensionContext,
+  Theme,
 } from "@earendil-works/pi-coding-agent";
-import { Box, Text } from "@earendil-works/pi-tui";
+import { Box, Container, Text } from "@earendil-works/pi-tui";
 import { sideChannelWithLoader } from "./shared/llm";
-import { barWidget } from "./shared/widget";
 
 const MAX_BODY_LINES = 2;
+
+function barWidget(lines: string[]) {
+  return (_tui: unknown, theme: Theme) => {
+    const container = new Container();
+    const build = () => {
+      container.clear();
+      lines.forEach((line, i) => {
+        const color = i === 0 ? "customMessageLabel" : "customMessageText";
+        container.addChild(new Text(theme.fg(color, `▎ ${line}`), 1, 0));
+      });
+    };
+    build();
+    const invalidate = container.invalidate.bind(container);
+    container.invalidate = () => {
+      build();
+      invalidate();
+    };
+    return container;
+  };
+}
 
 const MSG_PROMPT = `
 Write a tiny Conventional Commits message for the diff. The code is the source of truth and the reader has it, so the message names the change and never describes the code.
@@ -35,12 +55,7 @@ const YEET_WIDGET_KEY = "yeet-progress";
 const PUSH_TIMEOUT_MS = 120_000;
 const HOOK_TIMEOUT_MS = 600_000;
 
-
 export default function (pi: ExtensionAPI) {
-  pi.on("before_agent_start", async (_event, ctx) => {
-    ctx.ui.setWidget(YEET_WIDGET_KEY, undefined);
-  });
-
   pi.registerMessageRenderer(YEET_MSG_TYPE, (message, _opts, theme) => {
     const box = new Box(1, 1, (t) => theme.bg("customMessageBg", t));
     box.addChild(
@@ -53,7 +68,7 @@ export default function (pi: ExtensionAPI) {
     return box;
   });
 
-  const runYeet = async (
+  const commitAndPush = async (
     args: string,
     ctx: ExtensionContext,
   ): Promise<void> => {
@@ -74,7 +89,7 @@ export default function (pi: ExtensionAPI) {
       "commit",
       "push",
     ];
-    const showProgress = (active: number, failed = false) => {
+    const showProgress = (active: number) => {
       ctx.ui.setWidget(
         YEET_WIDGET_KEY,
         barWidget([
@@ -83,7 +98,7 @@ export default function (pi: ExtensionAPI) {
             index < active
               ? `✓ ${step}`
               : index === active
-                ? `${failed ? "✗" : "→"} ${step}`
+                ? `→ ${step}`
                 : `○ ${step}`,
           ),
         ]),
@@ -126,12 +141,7 @@ export default function (pi: ExtensionAPI) {
               .filter(Boolean)
               .join(" | ") || "(no output)"
           }`;
-      if (!push.ok) {
-        showProgress(4, true);
-        ctx.ui.notify(`/yeet: ${pushNote}`, "error");
-      } else {
-        ctx.ui.setWidget(YEET_WIDGET_KEY, undefined);
-      }
+      if (!push.ok) ctx.ui.notify(`/yeet: ${pushNote}`, "error");
 
       pi.sendMessage(
         {
@@ -170,7 +180,6 @@ export default function (pi: ExtensionAPI) {
     showProgress(0);
     const add = await git("add", "-A", "--", ".", ...EXCLUDE);
     if (!add.ok) {
-      showProgress(0, true);
       ctx.ui.notify(`/yeet: git add failed: ${add.err}`, "error");
       return;
     }
@@ -186,7 +195,6 @@ export default function (pi: ExtensionAPI) {
     if (!unstaged.ok) {
       const restage = await git("add", "-A", "--", ".", ...EXCLUDE);
       if (!restage.ok) {
-        showProgress(1, true);
         ctx.ui.notify(`/yeet: git add failed: ${restage.err}`, "error");
         return;
       }
@@ -198,7 +206,6 @@ export default function (pi: ExtensionAPI) {
       ]);
     }
     if (!hook.ok) {
-      showProgress(1, true);
       const detail = [hook.stdout, hook.stderr]
         .map((s) => s.trim())
         .filter(Boolean)
@@ -262,7 +269,6 @@ export default function (pi: ExtensionAPI) {
     });
 
     if (!message) {
-      showProgress(2, true);
       ctx.ui.notify("/yeet cancelled", "info");
       return;
     }
@@ -289,7 +295,6 @@ export default function (pi: ExtensionAPI) {
       ? [subject, "", ...body].join("\n")
       : subject;
     if (!cleanMessage) {
-      showProgress(2, true);
       ctx.ui.notify("/yeet: empty commit message", "error");
       return;
     }
@@ -297,7 +302,6 @@ export default function (pi: ExtensionAPI) {
     showProgress(3);
     const commit = await git("commit", "--no-verify", "-m", cleanMessage);
     if (!commit.ok) {
-      showProgress(3, true);
       const detail = [commit.stdout, commit.stderr]
         .map((s) => s.trim())
         .filter(Boolean)
@@ -316,6 +320,14 @@ export default function (pi: ExtensionAPI) {
     const sha = (await git("rev-parse", "--short", "HEAD")).out;
 
     await pushAndReport(sha, subject);
+  };
+
+  const runYeet = async (args: string, ctx: ExtensionContext) => {
+    try {
+      await commitAndPush(args, ctx);
+    } finally {
+      ctx.ui.setWidget(YEET_WIDGET_KEY, undefined);
+    }
   };
 
   pi.registerCommand("yeet", {

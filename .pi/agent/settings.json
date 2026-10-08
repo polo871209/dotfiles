@@ -12,7 +12,7 @@
   },
   "quietStartup": true,
   "collapseChangelog": true,
-  "lastChangelogVersion": "1.0.4",
+  "lastChangelogVersion": "1.1.0",
   "showCacheMissNotices": false,
   "warnings": {
     "anthropicExtraUsage": false
@@ -20,10 +20,10 @@
   "compaction": {
     "modelOverrides": {
       "anthropic/claude-opus-5-5": {
-        "reserveTokens": 650000
+        "reserveTokens": 700000
       },
       "anthropic/claude-sonnet-5-5": {
-        "reserveTokens": 650000
+        "reserveTokens": 700000
       }
     }
   },

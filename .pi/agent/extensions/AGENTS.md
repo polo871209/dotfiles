@@ -37,13 +37,13 @@ Work that outlives its tool call, such as a background subagent run, writes a st
 
 ### Cleaner context
 
-- **`btw.ts`** — answers quick side questions without adding them to main history.
 - **`skill-packs.ts`** — enables Lark/Feishu or Google Workspace skills only when requested.
 - **`folder-context.ts`** — loads scoped agent instructions when files are touched and refreshes them after edits.
 
 ### Workflow shortcuts
 
 - **`go.ts`** — resumes an interrupted or stalled agent turn.
+- **`tickets.ts`** — holds queued follow-up messages as reorderable tickets in a side panel and sends the first one on `/next`, compacting large context first.
 - **`yeet.ts`** — validates, generates Conventional Commits with Sonnet 5.5, and pushes current changes with progress.
 - **`copy.ts`** — copies a selected code block or the session transcript.
 - **`usage.ts`** — reports Claude Pro/Max subscription usage and quota reset times on request.

@@ -17,10 +17,9 @@ Work as a peer. When a premise or plan is wrong, say so and name the fix. After 
 - Default: write no comment. If our own code needs a comment to be understood, change the code instead: rename, extract, or add a type until the behavior is obvious.
 - Keep only these comments, one line each where possible:
   - A license or legal header, or a link to the source of code copied or adapted from another project, which credits the author and lets a later reader compare against upstream.
-  - The WHY for behavior forced by something we cannot change, such as a vendor, platform, protocol, or external dependency.
+  - The WHY for behavior forced by something we cannot change, such as a vendor, platform, protocol, or external dependency. Link the issue or RFC if one exists.
   - A formatter directive such as `// prettier-ignore`, or a lint suppression for a rule that is faulty, pedantic, or style-only.
   - A doc comment that defines a public API contract.
-  - An issue or RFC link that explains a constraint the code cannot express.
 - Never suppress a type check or a lint rule that catches real bugs or protects correctness or safety. Fix the code.
 - For a constraint such as "do not remove" or "talk to X before changing", first change the code so the constraint no longer exists. If it cannot go, encode it as a type, runtime check, test, or lint rule, because a comment does not enforce it.
 - If you are not sure that a keep applies, delete the comment. `IMPORTANT`, `do not remove`, and long justifications are not proof.
