@@ -73,7 +73,7 @@ export function sentinelsToAppend(question: QuestionData): SentinelKind[] {
 
 const OptionSchema = Type.Object({
   label: Type.String({
-    description: `Display text for the option (1-5 words, aim for ≤${MAX_LABEL_LENGTH} chars); over-long labels are auto-truncated, never rejected. If recommending one, put it first and append "(Recommended)". Reserved labels: "Other", "Type something.", "Next".`,
+    description: `Display text for the option (1-5 words, aim for ≤${MAX_LABEL_LENGTH} chars). If recommending one, put it first and append "(Recommended)". Reserved labels: "Other", "Type something.", "Next".`,
   }),
   description: Type.String({
     description:
@@ -87,10 +87,10 @@ const QuestionSchema = Type.Object({
       'The complete question to ask the user. Should be clear, specific, and end with a question mark. Example: "Which library should we use for date formatting?" If multiSelect is true, phrase it accordingly, e.g. "Which features do you want to enable?"',
   }),
   header: Type.String({
-    description: `Very short chip/tag shown next to the question (aim for ≤${MAX_HEADER_LENGTH} chars). Examples: "Auth method", "Library", "Approach". Over-long headers are auto-truncated, never rejected.`,
+    description: `Very short chip/tag shown next to the question (aim for ≤${MAX_HEADER_LENGTH} chars). Examples: "Auth method", "Library", "Approach".`,
   }),
   options: Type.Array(OptionSchema, {
-    description: `Available choices (soft limit ${MIN_OPTIONS}-${MAX_OPTIONS}; extras are dropped). Every question gets a free-text row, so a question with one authored option remains usable. Keep choices distinct unless multiSelect is enabled.`,
+    description: `Available choices (soft limit ${MIN_OPTIONS}-${MAX_OPTIONS}). Every question gets a free-text row, so a question with one authored option remains usable. Keep choices distinct unless multiSelect is enabled.`,
   }),
   multiSelect: Type.Optional(
     Type.Boolean({
@@ -103,7 +103,7 @@ const QuestionSchema = Type.Object({
 
 export const QuestionParamsSchema = Type.Object({
   questions: Type.Array(QuestionSchema, {
-    description: `Questions to ask the user (soft limit ${MAX_QUESTIONS} — extra ones are dropped)`,
+    description: `Questions to ask the user (soft limit ${MAX_QUESTIONS})`,
   }),
 });
 

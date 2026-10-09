@@ -2,9 +2,14 @@ import { execFile, spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { promisify, stripVTControlCharacters } from "node:util";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { JsonObject } from "@earendil-works/pi-ai";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { boolProbabilities, findJev } from "./shared/jev";
 
 const SUCCESS_TAIL = 10;
 const FAILURE_TAIL = 30;
@@ -61,7 +66,7 @@ function collapseRuns(lines: string[]): string[] {
 
 const execFileAsync = promisify(execFile);
 
-async function gitState(cwd: string): Promise<object | null> {
+async function gitState(cwd: string): Promise<JsonObject | null> {
   const git = async (args: string[]) =>
     (await execFileAsync("git", args, { cwd, timeout: 2_000 })).stdout;
   try {
@@ -92,48 +97,36 @@ async function gitState(cwd: string): Promise<object | null> {
 }
 
 async function scoreDestructive(
+  ctx: ExtensionContext,
   command: string,
-  cwd: string,
   signal?: AbortSignal,
 ): Promise<number | null> {
-  const apiKey = process.env.TYPESAFE_API_KEY?.trim();
-  if (!apiKey) return null;
+  const jev = await findJev(ctx);
+  if (!jev) return null;
+  const cwd = ctx.cwd;
   const git = await gitState(cwd);
-  try {
-    const timeout = AbortSignal.timeout(5_000);
-    const res = await fetch("https://api.typesafe.ai/v1/systemone", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "jev-latest",
-        state: { cwd, command, ...(git ? { git } : {}) },
-        questions: {
-          destructive: {
-            type: "noul",
-            instructions:
-              "Is the shell command in `command` destructive? `git.paths` lists the paths under `git.root` that are untracked, ignored, or have uncommitted changes, and any other path there is committed and clean unless `git.unlistedPaths` is set. If `git` is absent, no file has a copy in git.",
-            criteria: {
-              true: "Running it can lose data that has no other copy, or change state beyond this machine: it deletes or overwrites untracked files, files with uncommitted changes, ignored files that no build or install regenerates, or files outside `cwd`; rewrites or discards git history or uncommitted work; pushes, publishes, deploys, or migrates; writes to a database, cluster, or cloud account; runs Docker against a remote host through `--context`, `-H`, or `DOCKER_HOST`; or pipes a remote script into a shell.",
-              false:
-                "It only reads, builds, tests, lints, formats, installs dependencies, or commits locally, or it deletes or overwrites only committed files with no uncommitted changes, which git restores, or ignored build output, dependency folders, caches, or logs, which a build or install regenerates; or it builds, runs, stops, removes, or prunes containers, images, volumes, or networks on the local Docker daemon, even with `-v` or `--volumes`, because the user accepts losing local Docker state.",
-            },
+  const probabilities = await boolProbabilities(
+    ctx,
+    jev,
+    {
+      state: { cwd, command, ...(git ? { git } : {}) },
+      questions: {
+        destructive: {
+          type: "bool",
+          instructions:
+            "Is the shell command in `command` destructive? `git.paths` lists the paths under `git.root` that are untracked, ignored, or have uncommitted changes, and any other path there is committed and clean unless `git.unlistedPaths` is set. If `git` is absent, no file has a copy in git.",
+          criteria: {
+            true: "Running it can lose data that has no other copy, or change state beyond this machine: it deletes or overwrites untracked files, files with uncommitted changes, ignored files that no build or install regenerates, or files outside `cwd`; rewrites or discards git history or uncommitted work; pushes, publishes, deploys, or migrates; writes to a database, cluster, or cloud account; runs Docker against a remote host through `--context`, `-H`, or `DOCKER_HOST`; or pipes a remote script into a shell.",
+            false:
+              "It only reads, builds, tests, lints, formats, installs dependencies, or commits locally, or it deletes or overwrites only committed files with no uncommitted changes, which git restores, or ignored build output, dependency folders, caches, or logs, which a build or install regenerates; or it builds, runs, stops, removes, or prunes containers, images, volumes, or networks on the local Docker daemon, even with `-v` or `--volumes`, because the user accepts losing local Docker state.",
           },
         },
-      }),
-      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-    });
-    if (!res.ok) return null;
-    const payload = (await res.json()) as {
-      answers?: { destructive?: { noul?: number } };
-    };
-    const noul = payload.answers?.destructive?.noul;
-    return typeof noul === "number" ? noul : null;
-  } catch {
-    return null;
-  }
+      },
+    },
+    5_000,
+    signal,
+  );
+  return probabilities?.destructive ?? null;
 }
 
 let dialogQueue: Promise<unknown> = Promise.resolve();
@@ -167,7 +160,6 @@ export default function (pi: ExtensionAPI) {
     description:
       "Default tool for shell commands. Runs the command with its output kept out of context and returns one verdict line (exit, duration, line count) plus the last lines, or the `filter` matches with line numbers. " +
       "The verdict names the log file only when output was left out; read it with offset or grep it. " +
-      "A command judged destructive runs only after the user approves it. " +
       "Use bash instead only when you need the full output of a short command, such as `git diff`. " +
       "WRONG: bash `npm test`, thousands of lines in context. RIGHT: quiet_run `npm test`.",
     promptSnippet:
@@ -227,7 +219,7 @@ export default function (pi: ExtensionAPI) {
         content: [{ type: "text", text: "checking command with Jev…" }],
         details: {},
       });
-      const risk = await scoreDestructive(command, cwd, signal);
+      const risk = await scoreDestructive(ctx, command, signal);
       if (risk !== null && risk >= DESTRUCTIVE_FLOOR) {
         const score = risk.toFixed(2);
         const approved =

@@ -1,9 +1,15 @@
-import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
+import type { ClassifierBoolQuestion } from "@earendil-works/pi-ai";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+  Theme,
+} from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
 import TurndownService from "turndown";
+import { boolProbabilities, findJev, type JevModel } from "./shared/jev";
 import { lookup as dnsLookup } from "node:dns/promises";
 import net from "node:net";
 import { execFile } from "node:child_process";
@@ -31,9 +37,6 @@ import {
 const EXA_MCP_URL = "https://mcp.exa.ai/mcp";
 const PARALLEL_MCP_URL = "https://search.parallel.ai/mcp";
 const EXA_TEXT_CHARS = 1_500;
-const TYPESAFE_URL = "https://api.typesafe.ai/v1/systemone";
-const TYPESAFE_MODEL = "jev-latest";
-const RERANK_TIMEOUT_MS = 8_000;
 const RERANK_SNIPPET_CHARS = 600;
 const RERANK_MAX_CANDIDATES = 10;
 // Measured 2026-01 over 4 queries: pages that answered scored 0.54-0.98 and
@@ -617,17 +620,16 @@ async function runSearch(
 }
 
 async function scoreCandidates(
+  ctx: ExtensionContext,
+  jev: JevModel,
   query: string,
   candidates: SearchResult[],
   signal?: AbortSignal,
 ): Promise<Array<number | null> | null> {
-  const apiKey = process.env.TYPESAFE_API_KEY?.trim();
-  if (!apiKey) return null;
-
-  const questions: Record<string, unknown> = {};
+  const questions: Record<string, ClassifierBoolQuestion> = {};
   candidates.forEach((_, i) => {
     questions[`c${i}`] = {
-      type: "noul",
+      type: "bool",
       instructions: `Does the search result at \`candidates[${i}]\` answer \`query\`?`,
       criteria: {
         true: "The page is about the query's subject and its text carries the specific facts, documentation, or code the query asks for.",
@@ -637,58 +639,45 @@ async function scoreCandidates(
     };
   });
 
-  try {
-    const timeout = AbortSignal.timeout(RERANK_TIMEOUT_MS);
-    const res = await fetch(TYPESAFE_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
+  const probabilities = await boolProbabilities(
+    ctx,
+    jev,
+    {
+      state: {
+        query,
+        candidates: candidates.map((r) => ({
+          title: r.title,
+          url: r.url,
+          text: r.content.slice(0, RERANK_SNIPPET_CHARS),
+        })),
       },
-      body: JSON.stringify({
-        model: TYPESAFE_MODEL,
-        state: {
-          query,
-          candidates: candidates.map((r) => ({
-            title: r.title,
-            url: r.url,
-            text: r.content.slice(0, RERANK_SNIPPET_CHARS),
-          })),
-        },
-        questions,
-      }),
-      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
-    });
-    if (!res.ok) return null;
-    const payload = (await res.json()) as {
-      answers?: Record<string, { noul?: number }>;
-    };
-    if (!payload.answers) return null;
-    const scores = candidates.map((_, i) => {
-      const noul = payload.answers?.[`c${i}`]?.noul;
-      return typeof noul === "number" ? noul : null;
-    });
-    return scores.some((s) => s !== null) ? scores : null;
-  } catch {
-    return null;
-  }
+      questions,
+    },
+    8_000,
+    signal,
+  );
+  if (!probabilities) return null;
+  const scores = candidates.map((_, i) => probabilities[`c${i}`] ?? null);
+  return scores.some((s) => s !== null) ? scores : null;
 }
 
 async function rerankResults(
+  ctx: ExtensionContext,
+  jev: JevModel | undefined,
   query: string,
   results: SearchResult[],
   signal?: AbortSignal,
 ): Promise<SearchResult[]> {
-  if (results.length < 2) return results;
+  if (!jev || results.length < 2) return results;
   const candidates = results.slice(0, RERANK_MAX_CANDIDATES);
-  const scores = await scoreCandidates(query, candidates, signal);
+  const scores = await scoreCandidates(ctx, jev, query, candidates, signal);
   if (!scores) return results;
 
   const scored = candidates
-    .map((result, i) => ({ result, i, noul: scores[i] }))
-    .sort((a, b) => (b.noul ?? 0) - (a.noul ?? 0) || a.i - b.i);
+    .map((result, i) => ({ result, i, score: scores[i] }))
+    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || a.i - b.i);
   const kept = scored.filter(
-    (s, rank) => rank < RERANK_MIN_KEEP || (s.noul ?? 0) >= RERANK_FLOOR,
+    (s, rank) => rank < RERANK_MIN_KEEP || (s.score ?? 0) >= RERANK_FLOOR,
   );
   return kept.map((s) => s.result);
 }
@@ -1526,8 +1515,7 @@ const searchParameters = Type.Object({
       minimum: 1,
       maximum: 10,
       default: 5,
-      description:
-        "Keep the default of 5 unless the task needs breadth; results that do not answer the query are dropped either way.",
+      description: "Keep the default of 5 unless the task needs breadth.",
     }),
   ),
 });
@@ -1605,7 +1593,7 @@ export default function (pi: ExtensionAPI) {
         }),
       ),
     }),
-    async execute(_callId, params, signal) {
+    async execute(_callId, params, signal, _onUpdate, ctx) {
       const queryList = (
         Array.isArray(params.queries)
           ? params.queries
@@ -1632,8 +1620,8 @@ export default function (pi: ExtensionAPI) {
         10,
       );
 
-      const canRerank = !!process.env.TYPESAFE_API_KEY?.trim();
-      const fetchCount = canRerank
+      const jev = await findJev(ctx);
+      const fetchCount = jev
         ? Math.min(numResults * 2, RERANK_MAX_CANDIDATES)
         : numResults;
 
@@ -1645,7 +1633,7 @@ export default function (pi: ExtensionAPI) {
             signal,
           );
           const ranked = (
-            await rerankResults(query, dedupResults(results), signal)
+            await rerankResults(ctx, jev, query, dedupResults(results), signal)
           ).slice(0, numResults);
           return {
             query,

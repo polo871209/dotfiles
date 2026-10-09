@@ -409,7 +409,7 @@ export const lspTool = defineTool({
     "Use references before rename or a signature change to find every caller; rename applies and saves immediately across affected files.",
     "Prefer document_symbols to reading a whole file when locating a member or understanding structure.",
     "diagnostics with no file/files scans the capped workspace; post-edit diagnostics are automatic, so use this only on explicit request or a reported error.",
-    "Use restart when results look stale or the server seems wedged (missing diagnostics after config/dependency changes, repeated timeouts); it kills and respawns nvim, so retry the failed call once afterwards.",
+    "Use restart when results look stale or the server seems wedged (missing diagnostics after config/dependency changes, repeated timeouts), then retry the failed call once.",
   ],
   parameters: Type.Object({
     action: Type.Union(
@@ -465,7 +465,9 @@ export const lspTool = defineTool({
     ),
     errors: Type.Optional(Type.Number()),
     warns: Type.Optional(Type.Number()),
-    files: Type.Optional(Type.Number({ description: "Files a rename touched" })),
+    files: Type.Optional(
+      Type.Number({ description: "Files a rename touched" }),
+    ),
     truncated: Type.Optional(Type.Boolean()),
   }),
   async execute(_id, params, signal, onUpdate, ctx) {
@@ -512,4 +514,3 @@ async function dispatch(
   }
   return err(`LSP error: unknown action "${p.action}"`);
 }
-

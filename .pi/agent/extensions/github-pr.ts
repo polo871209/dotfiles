@@ -233,7 +233,7 @@ const params = Type.Object({
   diff: Type.Optional(
     Type.Boolean({
       description:
-        "Include the unified diff. Default FALSE — the PR branch is usually checked out locally, so read files directly. Set true only when the code isn't reachable locally. Capped at 48KB.",
+        "Include the unified diff. Default FALSE — the PR branch is usually checked out locally, so read files directly. Set true only when the code isn't reachable locally.",
     }),
   ),
   includeBots: Type.Optional(

@@ -59,7 +59,7 @@ export default function (pi: ExtensionAPI) {
       watch: Type.Optional(
         Type.Boolean({
           description:
-            "Show the tab in front while it runs and leave it open afterward. Omit it to run in a background tab that closes at the end. Set it only when the user asks to watch.",
+            "Show the tab in front while it runs. Set it only when the user asks to watch.",
         }),
       ),
     }),
