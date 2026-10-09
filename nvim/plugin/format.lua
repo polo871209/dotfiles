@@ -67,6 +67,7 @@ require('conform').setup {
         proto = { 'buf' },
         python = { 'ruff_fix', 'ruff_format', 'ruff_organize_imports' },
         sql = { 'sqlfluff' },
+        swift = { 'swiftlint', lsp_format = 'last' },
         tf = { 'terraform_fmt' },
         typescript = biome_or_prettier,
         typescriptreact = biome_or_prettier,
@@ -85,6 +86,12 @@ require('conform').setup {
         },
         sqlfluff = {
             require_cwd = false,
+        },
+        -- With --use-stdin, SwiftLint prints nothing when there is nothing to fix, so it edits a temp file instead.
+        swiftlint = {
+            stdin = false,
+            args = { 'lint', '--fix', '--quiet', '--no-cache', '$FILENAME' },
+            cwd = function(_, ctx) return vim.fs.root(ctx.buf, '.swiftlint.yml') or ctx.dirname end,
         },
     },
 }

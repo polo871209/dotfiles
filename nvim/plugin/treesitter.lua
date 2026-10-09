@@ -37,6 +37,7 @@ require('tree-sitter-manager').setup {
         'scss',
         'sql',
         'starlark',
+        'swift',
         'terraform',
         'toml',
         'tsx',

@@ -71,11 +71,45 @@ lint.linters.zlint = {
     end,
 }
 
+local swiftlint_sev = {
+    Error = vim.diagnostic.severity.ERROR,
+    Warning = vim.diagnostic.severity.WARN,
+}
+-- Replaces nvim-lint's swiftlint, which caches the first .swiftlint.yml it finds for the whole session.
+-- SwiftLint reads the configuration from its working directory when linting stdin.
+lint.linters.swiftlint = function()
+    return {
+        cmd = 'swiftlint',
+        stdin = true,
+        args = { 'lint', '--use-stdin', '--quiet', '--reporter', 'json' },
+        cwd = vim.fs.root(0, '.swiftlint.yml') or vim.fs.dirname(vim.api.nvim_buf_get_name(0)),
+        stream = 'stdout',
+        ignore_exitcode = true,
+        parser = function(output, _)
+            local diagnostics = {}
+            local ok, decoded = pcall(vim.json.decode, output)
+            if not ok or type(decoded) ~= 'table' then return diagnostics end
+            for _, v in ipairs(decoded) do
+                table.insert(diagnostics, {
+                    source = 'swiftlint',
+                    code = v.rule_id,
+                    message = v.reason,
+                    lnum = v.line - 1,
+                    col = type(v.character) == 'number' and v.character - 1 or 0,
+                    severity = swiftlint_sev[v.severity] or vim.diagnostic.severity.WARN,
+                })
+            end
+            return diagnostics
+        end,
+    }
+end
+
 lint.linters_by_ft = {
     dockerfile = { 'hadolint' },
     go = { 'golangcilint', 'semgrep' },
     python = { 'ruff', 'semgrep' },
     sql = { 'sqlfluff' },
+    swift = { 'swiftlint' },
     terraform = { 'tflint' },
     typescript = { 'eslint_d', 'semgrep' },
     typescriptreact = { 'eslint_d', 'semgrep' },
