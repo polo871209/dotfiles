@@ -5,12 +5,11 @@ import { callLua, type Lane, loadLuaOnce } from "../nvim";
 import type { DriverResult } from "./types";
 
 const FEEDBACK_LUA = path.join(import.meta.dirname, "..", "feedback.lua");
-const LOG_FILE = path.join(os.tmpdir(), "pi-lsp-feedback.log");
 
 const logDriver = (msg: string) => {
   try {
     fs.appendFileSync(
-      LOG_FILE,
+      path.join(os.tmpdir(), "pi-lsp-feedback.log"),
       `[${new Date().toISOString()}] ${msg}\n`,
       "utf8",
     );
@@ -27,15 +26,8 @@ export const ensureFeedbackLoaded = async (
     feedbackSrc = { mtimeMs, src: fs.readFileSync(FEEDBACK_LUA, "utf8") };
   await loadLuaOnce(cwd, "feedback", feedbackSrc.src, lane);
 };
-
-const PER_FILE_BUDGET_MS = 5_500;
-const BASE_TIMEOUT_MS = 3_000;
-const MAX_PASS_MS = 30_000;
 const nvimCallTimeoutMs = (fileCount: number): number =>
-  Math.min(
-    BASE_TIMEOUT_MS + Math.max(1, fileCount) * PER_FILE_BUDGET_MS,
-    MAX_PASS_MS,
-  );
+  Math.min(3_000 + Math.max(1, fileCount) * 5_500, 30_000);
 export const MAX_FILE_BYTES = 64 * 1024;
 
 export const runDriver = async (
@@ -46,14 +38,11 @@ export const runDriver = async (
   try {
     await ensureFeedbackLoaded(cwd);
     const timeoutSignal = AbortSignal.timeout(nvimCallTimeoutMs(files.length));
-    const combined = signal
-      ? AbortSignal.any([signal, timeoutSignal])
-      : timeoutSignal;
     return await callLua<DriverResult>(
       cwd,
       "return PiFeedback.run(...)",
       [files],
-      combined,
+      signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal,
       undefined,
       "main",
     );
@@ -64,7 +53,6 @@ export const runDriver = async (
 };
 
 const INLINE_TIMEOUT_MS = 1_500;
-const INLINE_LUA_FORMAT_MS = 1_200;
 const INLINE_MARGIN_MS = 100;
 export const formatFile = async (
   file: string,
@@ -88,7 +76,7 @@ export const formatFile = async (
     const res = await callLua<{ formatted: string[] }>(
       cwd,
       "return PiFeedback.format(...)",
-      [[file], Math.min(INLINE_LUA_FORMAT_MS, remaining - INLINE_MARGIN_MS)],
+      [[file], Math.min(1_200, remaining - INLINE_MARGIN_MS)],
       deadline,
       undefined,
       "inline",

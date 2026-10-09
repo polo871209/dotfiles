@@ -15,16 +15,6 @@ const SUCCESS_TAIL = 10;
 const FAILURE_TAIL = 30;
 // 100 lines of this width stay under pi's 50KB tool-result cap.
 const MAX_LINE_CHARS = 300;
-// Measured 2026-01 on 50 labeled commands in fixture repos (clean, dirty, no git):
-// reads, builds, tests, installs, and deleting ignored output scored
-// 0.02-0.57; lost work, pushes, publishes, deploys, and writes outside cwd
-// scored 0.75-0.99. Three safe commands still get a dialog: `find -delete` on
-// ignored logs 0.71, `rm -rf` on committed clean `src` 0.75, and
-// `git reset --hard` on a clean tree 0.82. Local Docker removals and prunes
-// score 0.08-0.51, and Docker against a remote host or registry 0.82-0.96.
-// Re-measure before moving the floor.
-const DESTRUCTIVE_FLOOR = 0.65;
-
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
@@ -55,7 +45,7 @@ function clip(line: string): string {
 
 function collapseRuns(lines: string[]): string[] {
   const out: string[] = [];
-  for (let i = 0; i < lines.length; ) {
+  for (let i = 0; i < lines.length;) {
     let j = i + 1;
     while (j < lines.length && lines[j] === lines[i]) j++;
     out.push(j - i > 1 ? `${lines[i]}  (×${j - i})` : lines[i]!);
@@ -64,11 +54,9 @@ function collapseRuns(lines: string[]): string[] {
   return out;
 }
 
-const execFileAsync = promisify(execFile);
-
 async function gitState(cwd: string): Promise<JsonObject | null> {
   const git = async (args: string[]) =>
-    (await execFileAsync("git", args, { cwd, timeout: 2_000 })).stdout;
+    (await promisify(execFile)("git", args, { cwd, timeout: 2_000 })).stdout;
   try {
     const [root, status] = await Promise.all([
       git(["rev-parse", "--show-toplevel"]),
@@ -105,28 +93,31 @@ async function scoreDestructive(
   if (!jev) return null;
   const cwd = ctx.cwd;
   const git = await gitState(cwd);
-  const probabilities = await boolProbabilities(
-    ctx,
-    jev,
-    {
-      state: { cwd, command, ...(git ? { git } : {}) },
-      questions: {
-        destructive: {
-          type: "bool",
-          instructions:
-            "Is the shell command in `command` destructive? `git.paths` lists the paths under `git.root` that are untracked, ignored, or have uncommitted changes, and any other path there is committed and clean unless `git.unlistedPaths` is set. If `git` is absent, no file has a copy in git.",
-          criteria: {
-            true: "Running it can lose data that has no other copy, or change state beyond this machine: it deletes or overwrites untracked files, files with uncommitted changes, ignored files that no build or install regenerates, or files outside `cwd`; rewrites or discards git history or uncommitted work; pushes, publishes, deploys, or migrates; writes to a database, cluster, or cloud account; runs Docker against a remote host through `--context`, `-H`, or `DOCKER_HOST`; or pipes a remote script into a shell.",
-            false:
-              "It only reads, builds, tests, lints, formats, installs dependencies, or commits locally, or it deletes or overwrites only committed files with no uncommitted changes, which git restores, or ignored build output, dependency folders, caches, or logs, which a build or install regenerates; or it builds, runs, stops, removes, or prunes containers, images, volumes, or networks on the local Docker daemon, even with `-v` or `--volumes`, because the user accepts losing local Docker state.",
+  return (
+    (
+      await boolProbabilities(
+        ctx,
+        jev,
+        {
+          state: { cwd, command, ...(git ? { git } : {}) },
+          questions: {
+            destructive: {
+              type: "bool",
+              instructions:
+                "Is the shell command in `command` destructive? `git.paths` lists the paths under `git.root` that are untracked, ignored, or have uncommitted changes, and any other path there is committed and clean unless `git.unlistedPaths` is set. If `git` is absent, no file has a copy in git.",
+              criteria: {
+                true: "Running it can lose data that has no other copy, or change state beyond this machine: it deletes or overwrites untracked files, files with uncommitted changes, ignored files that no build or install regenerates, or files outside `cwd`; rewrites or discards git history or uncommitted work; pushes, publishes, deploys, or migrates; writes to a database, cluster, or cloud account; runs Docker against a remote host through `--context`, `-H`, or `DOCKER_HOST`; or pipes a remote script into a shell.",
+                false:
+                  "It only reads, builds, tests, lints, formats, installs dependencies, or commits locally, or it deletes or overwrites only committed files with no uncommitted changes, which git restores, or ignored build output, dependency folders, caches, or logs, which a build or install regenerates; or it builds, runs, stops, removes, or prunes containers, images, volumes, or networks on the local Docker daemon, even with `-v` or `--volumes`, because the user accepts losing local Docker state.",
+              },
+            },
           },
         },
-      },
-    },
-    5_000,
-    signal,
+        5_000,
+        signal,
+      )
+    )?.destructive ?? null
   );
-  return probabilities?.destructive ?? null;
 }
 
 let dialogQueue: Promise<unknown> = Promise.resolve();
@@ -220,9 +211,17 @@ export default function (pi: ExtensionAPI) {
         details: {},
       });
       const risk = await scoreDestructive(ctx, command, signal);
-      if (risk !== null && risk >= DESTRUCTIVE_FLOOR) {
+      // Measured 2026-01 on 50 labeled commands in fixture repos (clean, dirty, no git):
+      // reads, builds, tests, installs, and deleting ignored output scored
+      // 0.02-0.57; lost work, pushes, publishes, deploys, and writes outside cwd
+      // scored 0.75-0.99. Three safe commands still get a dialog: `find -delete` on
+      // ignored logs 0.71, `rm -rf` on committed clean `src` 0.75, and
+      // `git reset --hard` on a clean tree 0.82. Local Docker removals and prunes
+      // score 0.08-0.51, and Docker against a remote host or registry 0.82-0.96.
+      // Re-measure before moving the floor.
+      if (risk !== null && risk >= 0.65) {
         const score = risk.toFixed(2);
-        const approved =
+        if (!(
           ctx.hasUI &&
           (await queueDialog(() =>
             ctx.ui.confirm(
@@ -230,13 +229,14 @@ export default function (pi: ExtensionAPI) {
               `${command}\n\ncwd: ${cwd}\n\nRun it?`,
               { signal },
             ),
-          ));
-        if (!approved) {
-          const why = ctx.hasUI
-            ? "the user declined to run it"
-            : "no user is present to approve it";
+          ))
+        )) {
           throw new Error(
-            `quiet_run: blocked. Jev scored the command destructive (${score}) and ${why}. Do not run it through bash or another tool. Show the command to the user and wait for their decision.`,
+            `quiet_run: blocked. Jev scored the command destructive (${score}) and ${
+              ctx.hasUI
+                ? "the user declined to run it"
+                : "no user is present to approve it"
+            }. Do not run it through bash or another tool. Show the command to the user and wait for their decision.`,
           );
         }
       }
@@ -265,7 +265,6 @@ export default function (pi: ExtensionAPI) {
       const keep = params.tail ?? FAILURE_TAIL;
       // pi previews the first 10 lines of a partial result: 1 header + 9.
       const LIVE_LINES = 9;
-      const ringSize = Math.max(keep, LIVE_LINES);
       const ring: string[] = [];
       const hits: string[] = [];
       let hitCount = 0;
@@ -278,7 +277,7 @@ export default function (pi: ExtensionAPI) {
         for (const line of clean) {
           lineCount++;
           ring.push(line);
-          if (ring.length > ringSize) ring.shift();
+          if (ring.length > Math.max(keep, LIVE_LINES)) ring.shift();
           if (matcher?.test(line)) {
             hitCount++;
             hits.push(`${lineCount}: ${line}`);
@@ -361,8 +360,7 @@ export default function (pi: ExtensionAPI) {
               : `exit=${code}`;
       const failed = verdict !== "exit=0";
       const n = params.tail ?? (failed ? FAILURE_TAIL : SUCCESS_TAIL);
-      const source = matcher ? hits : ring;
-      const shown = n > 0 ? source.slice(-n) : [];
+      const shown = n > 0 ? (matcher ? hits : ring).slice(-n) : [];
 
       const body = matcher
         ? [
@@ -374,18 +372,23 @@ export default function (pi: ExtensionAPI) {
         shown.length < lineCount ||
         shown.some((l) => l.length > MAX_LINE_CHARS);
       if (!hidden) fs.rmSync(logPath, { force: true });
-
-      const head = [
-        verdict,
-        formatDuration(Date.now() - startedAt),
-        lineCount === 0
-          ? "no output"
-          : `${lineCount} line${lineCount === 1 ? "" : "s"}`,
-        ...(hidden ? [`log ${path.relative(cwd, logPath)}`] : []),
-      ].join(" · ");
-      const text = [head, ...body].join("\n");
       return {
-        content: [{ type: "text", text }],
+        content: [
+          {
+            type: "text",
+            text: [
+              [
+                verdict,
+                formatDuration(Date.now() - startedAt),
+                lineCount === 0
+                  ? "no output"
+                  : `${lineCount} line${lineCount === 1 ? "" : "s"}`,
+                ...(hidden ? [`log ${path.relative(cwd, logPath)}`] : []),
+              ].join(" · "),
+              ...body,
+            ].join("\n"),
+          },
+        ],
         details: {},
         structuredContent: {
           verdict,

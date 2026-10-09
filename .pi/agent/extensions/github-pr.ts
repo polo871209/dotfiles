@@ -9,25 +9,25 @@ import { Type } from "typebox";
 import { run } from "./shared/exec";
 
 const MAX_DIFF_BYTES = 48 * 1024;
-const MAX_BODY_BYTES = 6 * 1024;
 // truncateHead applies a 2000-line cap by default. These two budgets are
 // byte-only, so disable the line limit rather than add a second one.
 const NO_LINE_CAP = Number.MAX_SAFE_INTEGER;
-
-const BOT_LOGINS = new Set([
-  "coderabbitai",
-  "dependabot",
-  "github-actions",
-  "codecov",
-  "sonarcloud",
-  "sonarqube",
-]);
 
 function isBot(login: string, typename?: string): boolean {
   if (typename === "Bot") return true;
   const l = login.toLowerCase();
   if (l.endsWith("[bot]")) return true;
-  if (BOT_LOGINS.has(l)) return true;
+  if (
+    [
+      "coderabbitai",
+      "dependabot",
+      "github-actions",
+      "codecov",
+      "sonarcloud",
+      "sonarqube",
+    ].includes(l)
+  )
+    return true;
   return l.includes("coderabbit") || l.includes("sonarqube");
 }
 
@@ -46,7 +46,7 @@ function cleanBody(body: string): string {
   b = b.replace(/<!--[\s\S]*?-->/g, "");
   b = b.replace(/\n{3,}/g, "\n\n").trim();
   const r = truncateHead(b, {
-    maxBytes: MAX_BODY_BYTES,
+    maxBytes: 6 * 1024,
     maxLines: NO_LINE_CAP,
   });
   return r.truncated ? `${r.content}\n…[body truncated]` : r.content;
@@ -84,11 +84,6 @@ query($owner:String!,$repo:String!,$number:Int!){
       } }
     }
   }
-}`;
-
-const RESOLVE_MUTATION = `
-mutation($id:ID!){
-  resolveReviewThread(input:{threadId:$id}){ thread{ id isResolved } }
 }`;
 
 const RESOLVE_CONCURRENCY = 4;
@@ -145,16 +140,17 @@ async function resolveThreads(
   let threads: Thread[];
   let unseen = 0;
   try {
-    const data = JSON.parse(gql.stdout) as {
-      data: {
-        repository: {
-          pullRequest: {
-            reviewThreads: { totalCount: number; nodes: Thread[] };
+    const all = (
+      JSON.parse(gql.stdout) as {
+        data: {
+          repository: {
+            pullRequest: {
+              reviewThreads: { totalCount: number; nodes: Thread[] };
+            };
           };
         };
-      };
-    };
-    const all = data.data.repository.pullRequest.reviewThreads;
+      }
+    ).data.repository.pullRequest.reviewThreads;
     unseen = Math.max(0, all.totalCount - all.nodes.length);
     threads = all.nodes.filter((t) => !t.isResolved);
   } catch {
@@ -177,23 +173,27 @@ async function resolveThreads(
   for (let i = 0; i < threads.length; i += RESOLVE_CONCURRENCY) {
     if (signal?.aborted) break;
     const batch = threads.slice(i, i + RESOLVE_CONCURRENCY);
-    const results = await Promise.all(
-      batch.map((t) =>
-        run(
-          "gh",
-          [
-            "api",
-            "graphql",
-            "-f",
-            `query=${RESOLVE_MUTATION}`,
-            "-f",
-            `id=${t.id}`,
-          ],
-          signal,
+    (
+      await Promise.all(
+        batch.map((t) =>
+          run(
+            "gh",
+            [
+              "api",
+              "graphql",
+              "-f",
+              `query=${`
+mutation($id:ID!){
+  resolveReviewThread(input:{threadId:$id}){ thread{ id isResolved } }
+}`}`,
+              "-f",
+              `id=${t.id}`,
+            ],
+            signal,
+          ),
         ),
-      ),
-    );
-    results.forEach((r, j) => {
+      )
+    ).forEach((r, j) => {
       const t = batch[j];
       const loc = `${t.path}${t.line ? `:${t.line}` : ""}`;
       if (r.code === 0) done.push(loc);
@@ -209,13 +209,14 @@ async function resolveThreads(
   for (const f of failed) out.push(`- ⚠️ ${f}`);
   if (skipped) out.push(`- ⏹ ${skipped} not attempted: aborted`);
   if (unseenNote) out.push(unseenNote);
-  const summary =
-    `PR #${num} · resolved ${done.length} thread(s)` +
-    (failed.length ? ` · ${failed.length} failed` : "") +
-    (skipped ? ` · ${skipped} skipped` : "");
   return {
     content: [{ type: "text" as const, text: out.join("\n") }],
-    details: { summary },
+    details: {
+      summary:
+        `PR #${num} · resolved ${done.length} thread(s)` +
+        (failed.length ? ` · ${failed.length} failed` : "") +
+        (skipped ? ` · ${skipped} skipped` : ""),
+    },
     ...(failed.length || skipped ? { isError: true } : {}),
   };
 }
@@ -279,8 +280,11 @@ export default function (pi: ExtensionAPI) {
     promptSnippet:
       "Fetch PR metadata, failing checks, review threads, or a diff",
     renderResult(result, _options, theme: Theme) {
-      const s = result.details?.summary ?? "github_pr";
-      return new Text(theme.fg("dim", `  ${s}`), 0, 0);
+      return new Text(
+        theme.fg("dim", `  ${result.details?.summary ?? "github_pr"}`),
+        0,
+        0,
+      );
     },
     description:
       "Fetch a GitHub PR (URL or number) as signal-only markdown: metadata, description, changed files, failing checks, and unresolved review threads. Use instead of `gh pr view`. Pass `select` to fetch just one section, or `action: resolve` to resolve every open review thread after a fix.",
@@ -312,9 +316,6 @@ export default function (pi: ExtensionAPI) {
       const repoArgs = repo ? ["--repo", repo] : [];
       const ownerRepo = repo ?? "";
 
-      const metaFields =
-        "number,title,state,isDraft,baseRefName,headRefName,author,body,labels,additions,deletions,changedFiles,url,mergeable,reviewDecision,files,statusCheckRollup";
-
       let glOwner = "";
       let glRepo = "";
       if (ownerRepo.includes("/")) {
@@ -345,7 +346,14 @@ export default function (pi: ExtensionAPI) {
       const [meta, diff, gql] = await Promise.all([
         run(
           "gh",
-          ["pr", "view", String(num), ...repoArgs, "--json", metaFields],
+          [
+            "pr",
+            "view",
+            String(num),
+            ...repoArgs,
+            "--json",
+            "number,title,state,isDraft,baseRefName,headRefName,author,body,labels,additions,deletions,changedFiles,url,mergeable,reviewDecision,files,statusCheckRollup",
+          ],
           signal,
           ctx.cwd,
         ),
@@ -419,19 +427,13 @@ export default function (pi: ExtensionAPI) {
       };
 
       const out: string[] = [];
-      const wantHeader = !select;
-      const wantChecks = !select || select === "checks";
-      const wantFiles = !select || select === "files";
       const wantComments = !select || select === "comments";
-      const wantDiffSection = !select || select === "diff";
 
-      if (wantHeader) {
-        const draft = m.isDraft ? " (draft)" : "";
+      if (!select) {
         out.push(`# PR #${m.number}: ${m.title}`);
         out.push(`${m.url}`);
-        const dec = m.reviewDecision ? `, ${m.reviewDecision}` : "";
         out.push(
-          `**${m.state}${draft}** · \`${m.baseRefName}\` ← \`${m.headRefName}\` · @${m.author?.login ?? "?"} · ${m.mergeable}${dec}`,
+          `**${m.state}${m.isDraft ? " (draft)" : ""}** · \`${m.baseRefName}\` ← \`${m.headRefName}\` · @${m.author?.login ?? "?"} · ${m.mergeable}${m.reviewDecision ? `, ${m.reviewDecision}` : ""}`,
         );
         out.push(
           `+${fmt(m.additions)} / −${fmt(m.deletions)} across ${m.changedFiles} file(s)` +
@@ -444,33 +446,40 @@ export default function (pi: ExtensionAPI) {
         if (body) out.push(`\n## Description\n${body}`);
       }
 
-      const rollup = wantChecks ? (m.statusCheckRollup ?? []) : [];
+      const rollup =
+        !select || select === "checks" ? (m.statusCheckRollup ?? []) : [];
       if (rollup.length) {
         const norm = rollup.map((c) => ({
           name: c.name || c.context || "check",
           status: (c.conclusion || c.state || "").toUpperCase(),
         }));
-        const passing = norm.filter((c) =>
-          ["SUCCESS", "NEUTRAL", "SKIPPED", "SKIPPING"].includes(c.status),
-        );
         const bad = norm.filter(
           (c) =>
             !["SUCCESS", "NEUTRAL", "SKIPPED", "SKIPPING"].includes(c.status),
         );
         const counts: Record<string, number> = {};
         for (const c of norm) counts[c.status] = (counts[c.status] || 0) + 1;
-        const summary = Object.entries(counts)
-          .map(([k, v]) => `${v} ${k.toLowerCase()}`)
-          .join(", ");
-        out.push(`\n## Checks (${summary})`);
+        out.push(
+          `\n## Checks (${Object.entries(counts)
+            .map(([k, v]) => `${v} ${k.toLowerCase()}`)
+            .join(", ")})`,
+        );
         if (bad.length) {
           for (const c of bad) out.push(`- ⚠️ ${c.name}: ${c.status}`);
         } else {
-          out.push(`- all ${passing.length} passing/skipped`);
+          out.push(
+            `- all ${
+              norm.filter((c) =>
+                ["SUCCESS", "NEUTRAL", "SKIPPED", "SKIPPING"].includes(
+                  c.status,
+                ),
+              ).length
+            } passing/skipped`,
+          );
         }
       }
 
-      if (wantFiles && m.files?.length) {
+      if ((!select || select === "files") && m.files?.length) {
         out.push(`\n## Files`);
         for (const f of m.files) {
           out.push(
@@ -483,17 +492,18 @@ export default function (pi: ExtensionAPI) {
       let nThreads = 0;
       if (wantComments && gql.code === 0 && gql.stdout) {
         try {
-          const data = JSON.parse(gql.stdout) as {
-            data: {
-              repository: {
-                pullRequest: {
-                  comments: { totalCount: number; nodes: IssueComment[] };
-                  reviewThreads: { totalCount: number; nodes: Thread[] };
+          const pr = (
+            JSON.parse(gql.stdout) as {
+              data: {
+                repository: {
+                  pullRequest: {
+                    comments: { totalCount: number; nodes: IssueComment[] };
+                    reviewThreads: { totalCount: number; nodes: Thread[] };
+                  };
                 };
               };
-            };
-          };
-          const pr = data.data.repository.pullRequest;
+            }
+          ).data.repository.pullRequest;
 
           const comments = pr.comments.nodes.filter(
             (c) =>
@@ -518,11 +528,12 @@ export default function (pi: ExtensionAPI) {
           if (threads.length) {
             out.push(`\n## Review comments (unresolved)`);
             for (const t of threads) {
-              const loc = `\`${t.path}\`${t.line ? `:${t.line}` : ""}`;
-              const flags =
-                (t.isResolved ? " [resolved]" : "") +
-                (t.isOutdated ? " [outdated]" : "");
-              out.push(`\n${loc}${flags}`);
+              out.push(
+                `\n${`\`${t.path}\`${t.line ? `:${t.line}` : ""}`}${
+                  (t.isResolved ? " [resolved]" : "") +
+                  (t.isOutdated ? " [outdated]" : "")
+                }`,
+              );
               for (const c of t.comments.nodes) {
                 out.push(
                   `- **@${c.author?.login ?? "?"}**: ${stripHtmlComments(c.body)}`,
@@ -549,28 +560,36 @@ export default function (pi: ExtensionAPI) {
         );
       }
 
-      if (wantDiffSection && wantDiff && diff.code === 0 && diff.stdout) {
+      if (
+        (!select || select === "diff") &&
+        wantDiff &&
+        diff.code === 0 &&
+        diff.stdout
+      ) {
         const cut = truncateHead(diff.stdout, {
           maxBytes: MAX_DIFF_BYTES,
           maxLines: NO_LINE_CAP,
         });
-        const d = cut.content;
-        const note = cut.truncated
-          ? `\n…[diff truncated at ${formatSize(MAX_DIFF_BYTES)} of ${formatSize(cut.totalBytes)} — read files for full context]`
-          : "";
-        out.push(`\n## Diff\n\`\`\`diff\n${d}\n\`\`\`${note}`);
+        out.push(
+          `\n## Diff\n\`\`\`diff\n${cut.content}\n\`\`\`${
+            cut.truncated
+              ? `\n…[diff truncated at ${formatSize(MAX_DIFF_BYTES)} of ${formatSize(cut.totalBytes)} — read files for full context]`
+              : ""
+          }`,
+        );
       }
-
-      const parts = [
-        m.state.toLowerCase(),
-        `${m.changedFiles} files`,
-        nThreads ? `${nThreads} review comment(s)` : null,
-        nComments ? `${nComments} comment(s)` : null,
-      ].filter(Boolean);
-      const summary = `PR #${m.number} · ${parts.join(" · ")}`;
       return {
         content: [{ type: "text" as const, text: out.join("\n") }],
-        details: { summary },
+        details: {
+          summary: `PR #${m.number} · ${[
+            m.state.toLowerCase(),
+            `${m.changedFiles} files`,
+            nThreads ? `${nThreads} review comment(s)` : null,
+            nComments ? `${nComments} comment(s)` : null,
+          ]
+            .filter(Boolean)
+            .join(" · ")}`,
+        },
       };
     },
   });

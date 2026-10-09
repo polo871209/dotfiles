@@ -22,19 +22,25 @@ const extractCodeBlocks = (text: string): Block[] => {
       i++;
       continue;
     }
-    const indent = open[1].length;
     const fence = open[2];
-    const lang = sanitizeLang(open[3].trim().split(/\s+/)[0] ?? "");
-    const close = new RegExp(`^ *${fence[0]}{${fence.length},}\\s*$`);
     const codeLines: string[] = [];
     let j = i + 1;
-    while (j < lines.length && !close.test(lines[j])) {
+    while (
+      j < lines.length &&
+      !new RegExp(`^ *${fence[0]}{${fence.length},}\\s*$`).test(lines[j])
+    ) {
       const line = lines[j];
-      const lead = line.length - line.trimStart().length;
-      codeLines.push(line.slice(Math.min(indent, lead)));
+      codeLines.push(
+        line.slice(
+          Math.min(open[1].length, line.length - line.trimStart().length),
+        ),
+      );
       j++;
     }
-    blocks.push({ lang, code: codeLines.join("\n") });
+    blocks.push({
+      lang: sanitizeLang(open[3].trim().split(/\s+/)[0] ?? ""),
+      code: codeLines.join("\n"),
+    });
     i = j + 1;
   }
   return blocks;
@@ -47,11 +53,12 @@ const truncate = (text: string, limit = 60): string => {
 };
 
 const previewText = (text: string): string => {
-  const first = text
-    .split("\n")
-    .map((l) => l.trim())
-    .find(Boolean);
-  return truncate(first ?? "(empty)");
+  return truncate(
+    text
+      .split("\n")
+      .map((l) => l.trim())
+      .find(Boolean) ?? "(empty)",
+  );
 };
 
 const lineCount = (text: string): number =>
@@ -147,11 +154,10 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify("Session is empty", "warning");
         return;
       }
-      const turns = (text.match(/^## /gm) ?? []).length;
       await copyWithNotify(
         ctx,
         text,
-        `session (${turns} turns, ${text.length} chars)`,
+        `session (${(text.match(/^## /gm) ?? []).length} turns, ${text.length} chars)`,
       );
     },
   });

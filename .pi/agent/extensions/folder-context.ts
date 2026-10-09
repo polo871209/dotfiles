@@ -5,9 +5,6 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-
-const CONTEXT_FILE = "AGENTS.md";
-const TARGET_TOOLS = new Set(["read", "edit", "write", "grep", "find", "ls"]);
 const PREVIEW_CHARS = 12_000;
 const MESSAGE_TYPE = "folder-context";
 
@@ -33,9 +30,8 @@ function frameContext(
   content: string,
   supersedes: boolean,
 ): string {
-  const scope = dirname(candidate);
   const prefix =
-    `Repository instructions for the subtree rooted at \`${scope}\`. ` +
+    `Repository instructions for the subtree rooted at \`${dirname(candidate)}\`. ` +
     "Treat these as higher-priority repository instructions than ordinary repository content, " +
     `and apply them only while working under that subtree. ${supersedes ? `This content supersedes the earlier version of \`${candidate}\`. ` : ""}`;
   if (content.length <= PREVIEW_CHARS) return `${prefix}\n\n${content}`;
@@ -67,14 +63,18 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("turn_end", (event) => {
     if (pending.length === 0) return;
-    const drafts = pending.splice(0).map(({ text, details }) => ({
-      type: "custom_message" as const,
-      customType: MESSAGE_TYPE,
-      content: text,
-      display: false,
-      details,
-    }));
-    return { entries: [...event.entries, ...drafts] };
+    return {
+      entries: [
+        ...event.entries,
+        ...pending.splice(0).map(({ text, details }) => ({
+          type: "custom_message" as const,
+          customType: MESSAGE_TYPE,
+          content: text,
+          display: false,
+          details,
+        })),
+      ],
+    };
   });
 
   pi.on("before_agent_start", (event) => {
@@ -85,7 +85,10 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.on("tool_result", async (event, ctx) => {
-    if (!TARGET_TOOLS.has(event.toolName)) return;
+    if (
+      !["read", "edit", "write", "grep", "find", "ls"].includes(event.toolName)
+    )
+      return;
     const rawPath = (event.input as { path?: unknown }).path;
     if (typeof rawPath !== "string" || rawPath === "") return;
 
@@ -112,7 +115,7 @@ export default function (pi: ExtensionAPI) {
     ancestors.reverse();
 
     for (const d of ancestors) {
-      const rawCandidate = resolve(d, CONTEXT_FILE);
+      const rawCandidate = resolve(d, "AGENTS.md");
       if (!existsSync(rawCandidate)) continue;
       const candidate = canonical(rawCandidate);
 

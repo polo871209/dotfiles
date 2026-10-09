@@ -9,35 +9,23 @@ import {
   type SideChannelOpts,
 } from "./shared/llm";
 
-const NAME_PROVIDER = "anthropic";
-const NAME_MODEL = "claude-haiku-4-5";
-
-const RENAME_AFTER_USER_TURNS = 3;
-const MAX_NAME_LEN = 60;
-const MAX_CONTEXT_MESSAGES = 12;
-const RENAME_TIMEOUT_MS = 20_000;
-const SYSTEM_PROMPT =
-  "You name chat sessions. Reply with ONLY a short title (max 6 words, " +
-  "no quotes, no punctuation at end, no trailing period). Describe the " +
-  "user's overall task or topic. Plain text only.";
-
 function normalizeName(raw: string): string {
   return raw
     .replace(/^["'`]+|["'`]+$/g, "")
     .replace(/[.!?,;:]+$/g, "")
     .replace(/\s+/g, " ")
     .trim()
-    .slice(0, MAX_NAME_LEN);
+    .slice(0, 60);
 }
 
 function buildCall(ctx: ExtensionContext): {
   opts: SideChannelOpts;
   userTurns: number;
 } {
-  const model = ctx.modelRegistry.find(NAME_PROVIDER, NAME_MODEL);
+  const model = ctx.modelRegistry.find("anthropic", "claude-haiku-4-5");
   const { messages, userTurns } = collectTextMessages(
     ctx.sessionManager.getBranch(),
-    MAX_CONTEXT_MESSAGES,
+    12,
   );
   messages.push({
     role: "user",
@@ -51,7 +39,10 @@ function buildCall(ctx: ExtensionContext): {
   });
   return {
     opts: {
-      systemPrompt: SYSTEM_PROMPT,
+      systemPrompt:
+        "You name chat sessions. Reply with ONLY a short title (max 6 words, " +
+        "no quotes, no punctuation at end, no trailing period). Describe the " +
+        "user's overall task or topic. Plain text only.",
       messages,
       join: " ",
       model:
@@ -77,13 +68,13 @@ export default function (pi: ExtensionAPI) {
     }
 
     const { opts, userTurns } = buildCall(ctx);
-    if (userTurns <= RENAME_AFTER_USER_TURNS) return;
+    if (userTurns <= 3) return;
 
     inFlight.add(sessionFile);
     try {
       const result = await sideChannelComplete(ctx, {
         ...opts,
-        signal: AbortSignal.timeout(RENAME_TIMEOUT_MS),
+        signal: AbortSignal.timeout(20_000),
       });
       if (!result.ok) return;
       const name = normalizeName(result.text);

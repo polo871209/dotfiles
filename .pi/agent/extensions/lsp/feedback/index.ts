@@ -13,14 +13,9 @@ import {
   runDriver,
 } from "./driver";
 import { changeNote } from "./diff";
-
-const MAX_REPAIR_FOLLOWUPS = 2;
-const TRACKED_TOOLS = new Set(["edit", "write"]);
-
-const GIT_WALK_MAX_DEPTH = 8;
 const isRebasing = (cwd: string): boolean => {
   let dir = cwd;
-  for (let i = 0; i < GIT_WALK_MAX_DEPTH; i++) {
+  for (let i = 0; i < 8; i++) {
     const gitDir = path.join(dir, ".git");
     if (fs.existsSync(gitDir)) {
       return (
@@ -55,35 +50,36 @@ const isScratchPath = (abs: string): boolean => {
   })();
   return SKIP_PREFIXES.some((p) => abs.startsWith(p) || real.startsWith(p));
 };
-
-const IGNORED_SEGMENTS = new Set([
-  "node_modules",
-  "dist",
-  "build",
-  "out",
-  "target",
-  "vendor",
-  "coverage",
-  ".next",
-  ".nuxt",
-  ".turbo",
-  ".cache",
-  ".venv",
-  "venv",
-  "__pycache__",
-  ".git",
-]);
 const isIgnoredPath = (abs: string, cwd: string): boolean => {
   const rel = path.relative(cwd, abs);
   if (!rel || rel.startsWith("..")) return false;
-  return rel.split(path.sep).some((seg) => IGNORED_SEGMENTS.has(seg));
+  return rel
+    .split(path.sep)
+    .some((seg) =>
+      [
+        "node_modules",
+        "dist",
+        "build",
+        "out",
+        "target",
+        "vendor",
+        "coverage",
+        ".next",
+        ".nuxt",
+        ".turbo",
+        ".cache",
+        ".venv",
+        "venv",
+        "__pycache__",
+        ".git",
+      ].includes(seg),
+    );
 };
 
 const extractPath = (input: unknown): string | undefined => {
   if (!input || typeof input !== "object") return;
-  const i = input as Record<string, unknown>;
   for (const k of ["path", "file_path", "filePath", "filename", "file"]) {
-    const v = i[k];
+    const v = (input as Record<string, unknown>)[k];
     if (typeof v === "string" && v) return v;
   }
 };
@@ -142,7 +138,7 @@ export function registerFeedback(pi: ExtensionAPI): void {
   pi.on("tool_result", async (event, ctx) => {
     if (event.isError) return;
 
-    if (!TRACKED_TOOLS.has(event.toolName)) return;
+    if (!["edit", "write"].includes(event.toolName)) return;
     const p = extractPath(event.input);
     if (!p) return;
     const note = await processFile(toAbs(p, ctx.cwd), ctx.cwd);
@@ -152,7 +148,7 @@ export function registerFeedback(pi: ExtensionAPI): void {
 
   pi.on("agent_before_settle", async (event, ctx) => {
     if (event.outcome !== "completed") return;
-    if (touched.size === 0 || repairFollowups >= MAX_REPAIR_FOLLOWUPS) return;
+    if (touched.size === 0 || repairFollowups >= 2) return;
     const projectCwd = ctx.cwd;
     if (isRebasing(projectCwd)) return;
     const result = await runDriver(Array.from(touched), projectCwd, ctx.signal);
@@ -170,9 +166,6 @@ export function registerFeedback(pi: ExtensionAPI): void {
       return;
     }
     repairFollowups++;
-    const diagnostics = sortDiagnostics(result.diagnostics)
-      .map((d) => formatDiagLine(d, projectCwd))
-      .join("\n");
     return {
       entries: [
         ...event.entries,
@@ -181,7 +174,9 @@ export function registerFeedback(pi: ExtensionAPI): void {
           customType: "lsp-feedback-diagnostics",
           content:
             "Deterministic LSP feedback still reports diagnostics across the files touched in this task. Fix them, then finish the task. Do not delegate this repair.\n" +
-            diagnostics,
+            sortDiagnostics(result.diagnostics)
+              .map((d) => formatDiagLine(d, projectCwd))
+              .join("\n"),
           display: false,
         },
       ],

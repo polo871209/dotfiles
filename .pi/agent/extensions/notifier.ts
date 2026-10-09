@@ -5,7 +5,6 @@ import { writeFileSync } from "node:fs";
 import * as path from "node:path";
 
 const IS_SUBAGENT = process.env.PI_IS_SUBAGENT === "1";
-const SOUND_PATH = "/System/Library/Sounds/Glass.aiff";
 const ESC = "\x1b";
 const BEL = "\x07";
 
@@ -36,15 +35,17 @@ const execFileP = (
 
 const getFrontmostPid = async (): Promise<number | null> => {
   try {
-    const out = await execFileP(
-      "osascript",
-      [
-        "-e",
-        'tell application "System Events" to get unix id of first application process whose frontmost is true',
-      ],
-      2500,
+    const pid = parseInt(
+      await execFileP(
+        "osascript",
+        [
+          "-e",
+          'tell application "System Events" to get unix id of first application process whose frontmost is true',
+        ],
+        2500,
+      ),
+      10,
     );
-    const pid = parseInt(out, 10);
     return Number.isFinite(pid) ? pid : null;
   } catch {
     return null;
@@ -52,15 +53,13 @@ const getFrontmostPid = async (): Promise<number | null> => {
 };
 
 let psCache: { at: number; parents: Map<number, number> } | null = null;
-const PS_TTL_MS = 2000;
 
 const getParentMap = async (): Promise<Map<number, number>> => {
   const now = Date.now();
-  if (psCache && now - psCache.at < PS_TTL_MS) return psCache.parents;
+  if (psCache && now - psCache.at < 2000) return psCache.parents;
   const parents = new Map<number, number>();
   try {
-    const out = await execP("ps -eo pid=,ppid=", 1500);
-    for (const line of out.split("\n")) {
+    for (const line of (await execP("ps -eo pid=,ppid=", 1500)).split("\n")) {
       const parts = line.trim().split(/\s+/);
       if (parts.length === 2) {
         parents.set(parseInt(parts[0], 10), parseInt(parts[1], 10));
@@ -89,22 +88,25 @@ const getAncestorPids = async (startPid: number): Promise<Set<number>> => {
 const getOurSessionClientPids = async (): Promise<number[]> => {
   try {
     const pane = process.env.TMUX_PANE;
-    const sessArgs = pane
-      ? ["display-message", "-t", pane, "-p", "#{session_name}"]
-      : ["display-message", "-p", "#{session_name}"];
-    const ourSession = await execFileP("tmux", sessArgs);
-    const out = await execFileP("tmux", [
-      "list-clients",
-      "-F",
-      "#{client_pid} #{client_session}",
-    ]);
+    const ourSession = await execFileP(
+      "tmux",
+      pane
+        ? ["display-message", "-t", pane, "-p", "#{session_name}"]
+        : ["display-message", "-p", "#{session_name}"],
+    );
     const pids: number[] = [];
-    for (const line of out.split("\n")) {
+    for (const line of (
+      await execFileP("tmux", [
+        "list-clients",
+        "-F",
+        "#{client_pid} #{client_session}",
+      ])
+    ).split("\n")) {
       const idx = line.indexOf(" ");
       if (idx < 0) continue;
       const pid = parseInt(line.slice(0, idx), 10);
-      const sess = line.slice(idx + 1).trim();
-      if (Number.isFinite(pid) && sess === ourSession) pids.push(pid);
+      if (Number.isFinite(pid) && line.slice(idx + 1).trim() === ourSession)
+        pids.push(pid);
     }
     return pids;
   } catch {
@@ -116,14 +118,15 @@ const isTmuxPaneActive = async (): Promise<boolean> => {
   const pane = process.env.TMUX_PANE;
   if (!pane) return true;
   try {
-    const out = await execFileP("tmux", [
-      "display-message",
-      "-t",
-      pane,
-      "-p",
-      "#{session_attached} #{window_active} #{pane_active}",
-    ]);
-    const [attached, win, p] = out.split(" ");
+    const [attached, win, p] = (
+      await execFileP("tmux", [
+        "display-message",
+        "-t",
+        pane,
+        "-p",
+        "#{session_attached} #{window_active} #{pane_active}",
+      ])
+    ).split(" ");
     return attached === "1" && win === "1" && p === "1";
   } catch {
     return true;
@@ -138,8 +141,7 @@ const isTerminalFocused = async (): Promise<boolean> => {
     if (clientPids.length === 0) return false;
     let frontIsOurClient = false;
     for (const pid of clientPids) {
-      const ancestors = await getAncestorPids(pid);
-      if (ancestors.has(front)) {
+      if ((await getAncestorPids(pid)).has(front)) {
         frontIsOurClient = true;
         break;
       }
@@ -186,8 +188,6 @@ const notifySeq = (title: string, body: string): string =>
   );
 const titleSeq = (title: string): string =>
   wrapPassthrough(`${ESC}]0;${sanitizeOsc(title)}${BEL}`);
-
-const GHOSTTY_TITLE_SETTLE_MS = 300;
 let lastGhosttyTitle: string | null = null;
 const delay = (ms: number): Promise<void> =>
   new Promise((r) => setTimeout(r, ms));
@@ -197,14 +197,15 @@ const isPaneVisible = async (): Promise<boolean> => {
   const pane = process.env.TMUX_PANE;
   if (!pane) return true;
   try {
-    const out = await execFileP("tmux", [
-      "display-message",
-      "-t",
-      pane,
-      "-p",
-      "#{session_attached} #{window_active}",
-    ]);
-    const [attached, win] = out.split(" ");
+    const [attached, win] = (
+      await execFileP("tmux", [
+        "display-message",
+        "-t",
+        pane,
+        "-p",
+        "#{session_attached} #{window_active}",
+      ])
+    ).split(" ");
     return attached === "1" && win === "1";
   } catch {
     return false;
@@ -215,15 +216,16 @@ const getVisiblePaneTty = async (): Promise<string | null> => {
   const pane = process.env.TMUX_PANE;
   if (!pane) return null;
   try {
-    const out = await execFileP("tmux", [
-      "list-panes",
-      "-s",
-      "-t",
-      pane,
-      "-F",
-      "#{pane_tty} #{session_attached} #{window_active} #{pane_active}",
-    ]);
-    for (const line of out.split("\n")) {
+    for (const line of (
+      await execFileP("tmux", [
+        "list-panes",
+        "-s",
+        "-t",
+        pane,
+        "-F",
+        "#{pane_tty} #{session_attached} #{window_active} #{pane_active}",
+      ])
+    ).split("\n")) {
       const [tty, attached, win, paneActive] = line.trim().split(" ");
       if (attached === "1" && win === "1" && paneActive === "1" && tty) {
         return tty;
@@ -244,7 +246,7 @@ const trySendGhostty = async (
       if (lastGhosttyTitle !== project) {
         write(titleSeq(project));
         lastGhosttyTitle = project;
-        await delay(GHOSTTY_TITLE_SETTLE_MS);
+        await delay(300);
       }
       write(notifySeq(APP_TITLE, body));
     };
@@ -279,7 +281,12 @@ const sendOsascript = async (title: string, message: string): Promise<void> => {
 };
 
 const playSound = (): void => {
-  execFile("afplay", [SOUND_PATH], { timeout: 5000 }, () => {});
+  execFile(
+    "afplay",
+    ["/System/Library/Sounds/Glass.aiff"],
+    { timeout: 5000 },
+    () => {},
+  );
 };
 
 let windowStatusChain: Promise<void> = Promise.resolve();

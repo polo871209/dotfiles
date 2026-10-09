@@ -9,10 +9,6 @@ import {
 import type { QuestionData } from "./schema";
 import { sentinelLabel } from "./schema";
 
-const graphemeSegmenter = new Intl.Segmenter(undefined, {
-  granularity: "grapheme",
-});
-
 function wrapInlineInput(
   buffer: string,
   cursorOffset: number | undefined,
@@ -24,15 +20,14 @@ function wrapInlineInput(
     cursorOffset <= buffer.length
       ? cursorOffset
       : buffer.length;
-  const before = buffer.slice(0, offset);
-  const [firstGrapheme] = graphemeSegmenter.segment(buffer.slice(offset));
+  const [firstGrapheme] = new Intl.Segmenter(undefined, {
+    granularity: "grapheme",
+  }).segment(buffer.slice(offset));
   const rawAt = firstGrapheme ? firstGrapheme.segment : "";
-  const unbreakableCursorCell = "\u00a0";
-  const atCursor =
-    rawAt === "" || rawAt === " " ? unbreakableCursorCell : rawAt;
-  const after = buffer.slice(offset + rawAt.length);
-  const raw = `${before}${CURSOR_MARKER}\x1b[7m${atCursor}\x1b[27m${after}`;
-  return wrapTextWithAnsi(raw, contentWidth);
+  return wrapTextWithAnsi(
+    `${buffer.slice(0, offset)}${CURSOR_MARKER}\x1b[7m${rawAt === "" || rawAt === " " ? "\u00a0" : rawAt}\x1b[27m${buffer.slice(offset + rawAt.length)}`,
+    contentWidth,
+  );
 }
 
 export type WrappingSelectItem =
@@ -112,8 +107,14 @@ class WrappingSelect implements Component {
     for (let i = startIndex; i < endIndex; i++) {
       const item = this.items[i];
       if (!item) continue;
-      const isActive = i === this.selectedIndex && this.focused;
-      lines.push(...this.renderItem(item, i, isActive, width));
+      lines.push(
+        ...this.renderItem(
+          item,
+          i,
+          i === this.selectedIndex && this.focused,
+          width,
+        ),
+      );
     }
 
     if (this.hasItemsOutsideWindow(startIndex, endIndex)) {
@@ -133,8 +134,12 @@ class WrappingSelect implements Component {
     for (let i = startIndex; i < endIndex; i++) {
       const item = this.items[i];
       if (!item) continue;
-      const isActive = i === this.selectedIndex && this.focused;
-      const itemRowCount = this.renderItem(item, i, isActive, width).length;
+      const itemRowCount = this.renderItem(
+        item,
+        i,
+        i === this.selectedIndex && this.focused,
+        width,
+      ).length;
       if (i === this.selectedIndex) return [row, row + itemRowCount];
       row += itemRowCount;
     }
@@ -142,13 +147,17 @@ class WrappingSelect implements Component {
   }
 
   private computeVisibleWindow(): { startIndex: number; endIndex: number } {
-    const half = Math.floor(this.maxVisible / 2);
     const startIndex = Math.max(
       0,
-      Math.min(this.selectedIndex - half, this.items.length - this.maxVisible),
+      Math.min(
+        this.selectedIndex - Math.floor(this.maxVisible / 2),
+        this.items.length - this.maxVisible,
+      ),
     );
-    const endIndex = Math.min(startIndex + this.maxVisible, this.items.length);
-    return { startIndex, endIndex };
+    return {
+      startIndex,
+      endIndex: Math.min(startIndex + this.maxVisible, this.items.length),
+    };
   }
 
   private hasItemsOutsideWindow(startIndex: number, endIndex: number): boolean {
@@ -179,18 +188,16 @@ class WrappingSelect implements Component {
     }
 
     const isConfirmed = index === this.confirmedIndex;
-    const label = isConfirmed
-      ? `${this.confirmedLabelOverride ?? item.label}${WrappingSelect.CONFIRMED_MARK}`
-      : item.label;
-    const applySelectedStyle = isActive || isConfirmed;
 
     return [
       ...this.renderLabelBlock(
-        label,
+        isConfirmed
+          ? `${this.confirmedLabelOverride ?? item.label}${WrappingSelect.CONFIRMED_MARK}`
+          : item.label,
         rowPrefix,
         continuationPrefix,
         contentWidth,
-        applySelectedStyle,
+        isActive || isConfirmed,
       ),
       ...this.renderDescriptionBlock(
         item.description,
@@ -205,14 +212,14 @@ class WrappingSelect implements Component {
     continuationPrefix: string,
     contentWidth: number,
   ): string[] {
-    const wrapped = wrapInlineInput(
+    return wrapInlineInput(
       this.inputBuffer,
       this.inputCursorOffset,
       contentWidth,
-    );
-    return wrapped.map((segment, index) => {
-      const prefix = index === 0 ? rowPrefix : continuationPrefix;
-      return this.theme.selectedText(`${prefix}${segment}`);
+    ).map((segment, index) => {
+      return this.theme.selectedText(
+        `${index === 0 ? rowPrefix : continuationPrefix}${segment}`,
+      );
     });
   }
 
@@ -223,10 +230,8 @@ class WrappingSelect implements Component {
     contentWidth: number,
     applySelectedStyle: boolean,
   ): string[] {
-    const wrapped = wrapTextWithAnsi(label, contentWidth);
-    return wrapped.map((segment, index) => {
-      const prefix = index === 0 ? rowPrefix : continuationPrefix;
-      const line = `${prefix}${segment}`;
+    return wrapTextWithAnsi(label, contentWidth).map((segment, index) => {
+      const line = `${index === 0 ? rowPrefix : continuationPrefix}${segment}`;
       return applySelectedStyle ? this.theme.selectedText(line) : line;
     });
   }
@@ -237,14 +242,11 @@ class WrappingSelect implements Component {
     contentWidth: number,
   ): string[] {
     if (!description) return [];
-    const wrapped = wrapTextWithAnsi(description, contentWidth);
-    return wrapped.map(
+    return wrapTextWithAnsi(description, contentWidth).map(
       (segment) => `${continuationPrefix}${this.theme.description(segment)}`,
     );
   }
 }
-
-const MAX_VISIBLE_OPTIONS = 10;
 
 export interface OptionListViewProps {
   selectedIndex: number;
@@ -261,11 +263,7 @@ export class OptionListView {
     items: readonly WrappingSelectItem[],
     theme: WrappingSelectTheme,
   ) {
-    this.select = new WrappingSelect(
-      items,
-      Math.min(items.length, MAX_VISIBLE_OPTIONS),
-      theme,
-    );
+    this.select = new WrappingSelect(items, Math.min(items.length, 10), theme);
   }
 
   setProps(props: OptionListViewProps): void {
@@ -300,10 +298,8 @@ export const MULTI_SUBMIT_LABEL = "Submit";
 
 const MS_ACTIVE_POINTER = "→ ";
 const MS_INACTIVE_POINTER = "  ";
-const MS_CHECKED = "[✔]";
 const MS_UNCHECKED = "[ ]";
 const MS_BOX_LABEL_GAP = " ";
-const MS_CONTINUATION_INDENT = "  ";
 
 export interface MultiSelectViewProps {
   rows: ReadonlyArray<{ checked: boolean; active: boolean }>;
@@ -362,34 +358,36 @@ export class MultiSelectView {
       const row = this.props.rows[i];
       if (!opt || !row) continue;
       const label = truncateToWidth(opt.label, contentWidth, "…");
-      const styledLabel = row.active ? this.theme.fg("accent", label) : label;
       const rowLines = [
         truncateToWidth(
-          `${this.rowPrefix(row.active, row.checked)}${styledLabel}`,
+          `${this.rowPrefix(row.active, row.checked)}${row.active ? this.theme.fg("accent", label) : label}`,
           width,
           "",
         ),
       ];
       if (opt.description) {
         for (const segment of wrapTextWithAnsi(opt.description, contentWidth)) {
-          rowLines.push(
-            MS_CONTINUATION_INDENT + this.theme.fg("muted", segment),
-          );
+          rowLines.push("  " + this.theme.fg("muted", segment));
         }
       }
       push(row.active, rowLines);
     }
 
     push(this.props.other.active, this.renderOtherRow(width, contentWidth));
-
-    const nextPointer = this.props.nextActive
-      ? this.theme.fg("accent", MS_ACTIVE_POINTER)
-      : MS_INACTIVE_POINTER;
-    const nextLabel = this.props.nextActive
-      ? this.theme.fg("accent", this.props.nextLabel)
-      : this.props.nextLabel;
     push(this.props.nextActive, [
-      truncateToWidth(`${nextPointer}${nextLabel}`, width, ""),
+      truncateToWidth(
+        `${
+          this.props.nextActive
+            ? this.theme.fg("accent", MS_ACTIVE_POINTER)
+            : MS_INACTIVE_POINTER
+        }${
+          this.props.nextActive
+            ? this.theme.fg("accent", this.props.nextLabel)
+            : this.props.nextLabel
+        }`,
+        width,
+        "",
+      ),
     ]);
 
     return { lines, focused };
@@ -399,28 +397,33 @@ export class MultiSelectView {
     const { active, text, cursorOffset } = this.props.other;
     const prefix = this.rowPrefix(active, text.trim().length > 0);
     if (active) {
-      const continuation = " ".repeat(this.prefixVisibleWidth());
       return wrapInlineInput(text, cursorOffset, contentWidth).map(
         (segment, index) =>
-          (index === 0 ? prefix : continuation) +
+          (index === 0 ? prefix : " ".repeat(this.prefixVisibleWidth())) +
           this.theme.fg("accent", segment),
       );
     }
-    const label =
-      text.trim().length > 0
-        ? truncateToWidth(text, contentWidth, "…")
-        : this.theme.fg("dim", sentinelLabel("other"));
-    return [truncateToWidth(`${prefix}${label}`, width, "")];
+    return [
+      truncateToWidth(
+        `${prefix}${
+          text.trim().length > 0
+            ? truncateToWidth(text, contentWidth, "…")
+            : this.theme.fg("dim", sentinelLabel("other"))
+        }`,
+        width,
+        "",
+      ),
+    ];
   }
 
   private rowPrefix(active: boolean, checked: boolean): string {
-    const pointer = active
-      ? this.theme.fg("accent", MS_ACTIVE_POINTER)
-      : MS_INACTIVE_POINTER;
-    const box = checked
-      ? this.theme.fg("accent", MS_CHECKED)
-      : this.theme.fg("muted", MS_UNCHECKED);
-    return `${pointer}${box}${MS_BOX_LABEL_GAP}`;
+    return `${
+      active ? this.theme.fg("accent", MS_ACTIVE_POINTER) : MS_INACTIVE_POINTER
+    }${
+      checked
+        ? this.theme.fg("accent", "[✔]")
+        : this.theme.fg("muted", MS_UNCHECKED)
+    }${MS_BOX_LABEL_GAP}`;
   }
 
   private prefixVisibleWidth(): number {
@@ -454,32 +457,27 @@ export class TabBar implements Component {
   render(width: number): string[] {
     const pieces: string[] = [" ← "];
     for (const tab of this.props.tabs) {
-      const box = tab.answered ? "■" : "□";
-      const rawSeg = ` ${box} ${tab.label} `;
-      const styled = tab.active
-        ? this.theme.bg("selectedBg", this.theme.fg("text", rawSeg))
-        : this.theme.fg(tab.answered ? "success" : "muted", rawSeg);
-      pieces.push(styled);
+      const rawSeg = ` ${tab.answered ? "■" : "□"} ${tab.label} `;
+      pieces.push(
+        tab.active
+          ? this.theme.bg("selectedBg", this.theme.fg("text", rawSeg))
+          : this.theme.fg(tab.answered ? "success" : "muted", rawSeg),
+      );
       pieces.push(" ");
     }
     const submitText = " ✓ Submit ";
-    const submitStyled = this.props.submit.active
-      ? this.theme.bg("selectedBg", this.theme.fg("text", submitText))
-      : this.theme.fg(
-          this.props.submit.allAnswered ? "success" : "dim",
-          submitText,
-        );
-    pieces.push(submitStyled);
+    pieces.push(
+      this.props.submit.active
+        ? this.theme.bg("selectedBg", this.theme.fg("text", submitText))
+        : this.theme.fg(
+            this.props.submit.allAnswered ? "success" : "dim",
+            submitText,
+          ),
+    );
     pieces.push(" →");
     return [truncateToWidth(pieces.join(""), width, ""), ""];
   }
 }
-
-const SUBMIT_LABEL = "Submit answers";
-const CANCEL_LABEL = "Cancel";
-
-const SP_ACTIVE_POINTER = "→ ";
-const SP_INACTIVE_POINTER = "  ";
 
 export interface SubmitPickerProps {
   rows: ReadonlyArray<{ active: boolean }>;
@@ -507,13 +505,17 @@ export class SubmitPicker implements Component {
   render(width: number): string[] {
     const lines: string[] = [];
     for (let i = 0; i < 2; i++) {
-      const text = i === 0 ? SUBMIT_LABEL : CANCEL_LABEL;
+      const text = i === 0 ? "Submit answers" : "Cancel";
       const active = this.props.rows[i]?.active ?? false;
-      const pointer = active ? SP_ACTIVE_POINTER : SP_INACTIVE_POINTER;
-      const label = active
-        ? this.theme.fg("accent", text)
-        : this.theme.fg("text", text);
-      lines.push(truncateToWidth(`${pointer}${label}`, width, ""));
+      lines.push(
+        truncateToWidth(
+          `${active ? "→ " : "  "}${
+            active ? this.theme.fg("accent", text) : this.theme.fg("text", text)
+          }`,
+          width,
+          "",
+        ),
+      );
     }
     return lines;
   }

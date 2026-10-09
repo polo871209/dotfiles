@@ -24,8 +24,6 @@ interface PendingRun {
   onAbort?: () => void;
 }
 
-const INTERRUPT_GRACE_MS = 2000;
-
 interface VenvInfo {
   dir: string;
   python: string;
@@ -36,8 +34,9 @@ const PYTHON_VERSION = "3.14";
 
 function venvPythonMinor(dir: string): string | null {
   try {
-    const cfg = fs.readFileSync(path.join(dir, "pyvenv.cfg"), "utf-8");
-    const m = cfg.match(/^version(?:_info)?\s*=\s*(\d+\.\d+)/m);
+    const m = fs
+      .readFileSync(path.join(dir, "pyvenv.cfg"), "utf-8")
+      .match(/^version(?:_info)?\s*=\s*(\d+\.\d+)/m);
     return m ? m[1]! : null;
   } catch {
     return null;
@@ -61,9 +60,8 @@ function ensureVenv(): VenvInfo {
       },
     );
     if (r.status !== 0) {
-      const err = r.stderr?.toString() ?? "";
       throw new Error(
-        `failed to create pi-eval venv at ${dir}: ${err || `exit ${r.status}`} (is \`uv\` installed?)`,
+        `failed to create pi-eval venv at ${dir}: ${(r.stderr?.toString() ?? "") || `exit ${r.status}`} (is \`uv\` installed?)`,
       );
     }
   }
@@ -87,22 +85,24 @@ export class PyKernel {
   #ready: Promise<void>;
 
   constructor(opts: PyKernelOptions) {
-    const runnerPath = path.join(import.meta.dirname, "runner.py");
     const venv = ensureVenv();
-    const python = opts.python ?? venv.python;
-    this.#proc = spawn(python, ["-u", runnerPath], {
-      cwd: opts.cwd,
-      stdio: ["pipe", "pipe", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        PYTHONUNBUFFERED: "1",
-        PI_EVAL_BRIDGE_URL: opts.bridgeUrl,
-        PI_EVAL_BRIDGE_TOKEN: opts.bridgeToken,
-        PI_EVAL_BRIDGE_SESSION: opts.bridgeSession,
-        PI_EVAL_VENV_PYTHON: venv.python,
-        VIRTUAL_ENV: venv.dir,
+    this.#proc = spawn(
+      opts.python ?? venv.python,
+      ["-u", path.join(import.meta.dirname, "runner.py")],
+      {
+        cwd: opts.cwd,
+        stdio: ["pipe", "pipe", "pipe", "pipe"],
+        env: {
+          ...process.env,
+          PYTHONUNBUFFERED: "1",
+          PI_EVAL_BRIDGE_URL: opts.bridgeUrl,
+          PI_EVAL_BRIDGE_TOKEN: opts.bridgeToken,
+          PI_EVAL_BRIDGE_SESSION: opts.bridgeSession,
+          PI_EVAL_VENV_PYTHON: venv.python,
+          VIRTUAL_ENV: venv.dir,
+        },
       },
-    });
+    );
 
     const eventStream = this.#proc.stdio[3] as NodeJS.ReadableStream | null;
     if (!eventStream) throw new Error("python kernel: fd 3 unavailable");
@@ -136,9 +136,8 @@ export class PyKernel {
       });
       this.#proc.once("exit", (code, signal) => {
         this.#closed = true;
-        const reason = code === null ? `signal ${signal}` : `code ${code}`;
         for (const pending of this.#pending.values()) {
-          pending.result.error ??= `python kernel exited with ${reason} mid-run${crashNote()}`;
+          pending.result.error ??= `python kernel exited with ${code === null ? `signal ${signal}` : `code ${code}`} mid-run${crashNote()}`;
           this.#finalize(pending);
         }
         this.#pending.clear();
@@ -218,25 +217,24 @@ export class PyKernel {
       this.#proc.kill("SIGINT");
     } catch {}
     pending.escalation = setTimeout(() => {
-      const label =
-        reason === "aborted"
-          ? "aborted"
-          : `timed out after ${pending.timeoutSec}s`;
       pending.result[reason === "aborted" ? "aborted" : "timedOut"] = true;
       pending.result.error =
         pending.result.error ??
-        `cell ${label} (interrupt ignored; kernel killed, state lost)`;
+        `cell ${
+          reason === "aborted"
+            ? "aborted"
+            : `timed out after ${pending.timeoutSec}s`
+        } (interrupt ignored; kernel killed, state lost)`;
       this.#pending.delete(pending.id);
       this.dispose();
       this.#finalize(pending);
-    }, INTERRUPT_GRACE_MS);
+    }, 2000);
   }
 
   #send(req: KernelRequest): void {
-    const line = JSON.stringify(req) + "\n";
     try {
       if (!this.#proc.stdin) throw new Error("kernel stdin unavailable");
-      this.#proc.stdin.write(line);
+      this.#proc.stdin.write(JSON.stringify(req) + "\n");
     } catch (err) {
       this.#closed = true;
       const pending = this.#pending.get(req.id);

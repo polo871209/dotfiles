@@ -80,7 +80,6 @@ const KEYBIND_UP = "tui.select.up";
 const KEYBIND_DOWN = "tui.select.down";
 const KEYBIND_CONFIRM = "tui.select.confirm";
 const KEYBIND_CANCEL = "tui.select.cancel";
-const SPACE_KEY = " ";
 
 function wrapTab(index: number, total: number): number {
   if (total <= 0) return 0;
@@ -213,9 +212,15 @@ function routeKey(
     const tab = tabSwitchAction(data, state, runtime);
     if (tab) return tab;
     if (kb.matches(data, KEYBIND_UP) || kb.matches(data, KEYBIND_DOWN)) {
-      const delta = kb.matches(data, KEYBIND_DOWN) ? 1 : -1;
-      const next = wrapTab(state.submitChoiceIndex + delta, 2);
-      return { kind: "submit_nav", nextIndex: (next === 1 ? 1 : 0) as 0 | 1 };
+      return {
+        kind: "submit_nav",
+        nextIndex: (wrapTab(
+          state.submitChoiceIndex + (kb.matches(data, KEYBIND_DOWN) ? 1 : -1),
+          2,
+        ) === 1
+          ? 1
+          : 0) as 0 | 1,
+      };
     }
     if (kb.matches(data, KEYBIND_CONFIRM)) {
       return state.submitChoiceIndex === 1
@@ -237,7 +242,7 @@ function routeKey(
   if (q.multiSelect) {
     const focusedKind = runtime.currentItem?.kind;
     const focusedMeta = focusedKind ? ROW_INTENT_META[focusedKind] : undefined;
-    if (data === SPACE_KEY) {
+    if (data === " ") {
       if (focusedMeta?.blocksMultiToggle) return { kind: "ignore" };
       return { kind: "toggle", index: state.optionIndex };
     }
@@ -300,10 +305,10 @@ function syncMultiSelectFromAnswers(
 ): ReadonlySet<number> {
   const q = questions[tab];
   if (!q?.multiSelect) return new Set();
-  const labels = answers.get(tab)?.selected ?? [];
   const indices = new Set<number>();
   for (let i = 0; i < q.options.length; i++) {
-    if (labels.includes(q.options[i]!.label)) indices.add(i);
+    if ((answers.get(tab)?.selected ?? []).includes(q.options[i]!.label))
+      indices.add(i);
   }
   return indices;
 }
@@ -313,15 +318,14 @@ function buildMultiSelectAnswer(
   q: QuestionData,
   custom: string | undefined,
 ): QuestionAnswer {
-  const selected = q.options
-    .filter((_, i) => state.multiSelectChecked.has(i))
-    .map((o) => o.label);
   return {
     questionIndex: state.currentTab,
     question: q.question,
     kind: "multi",
     answer: null,
-    selected,
+    selected: q.options
+      .filter((_, i) => state.multiSelectChecked.has(i))
+      .map((o) => o.label),
     ...(custom && custom.trim().length > 0 ? { custom } : {}),
   };
 }
@@ -346,19 +350,21 @@ function switchTabResult(
   nextTab: number,
   ctx: ApplyContext,
 ): ApplyResult {
-  const transitioned: QuestionnaireState = {
-    ...state,
-    currentTab: nextTab,
-    optionIndex: 0,
-    inputMode: false,
-    submitChoiceIndex: 0,
-    multiSelectChecked: syncMultiSelectFromAnswers(
-      state.answers,
-      ctx.questions,
-      nextTab,
-    ),
+  return {
+    state: {
+      ...state,
+      currentTab: nextTab,
+      optionIndex: 0,
+      inputMode: false,
+      submitChoiceIndex: 0,
+      multiSelectChecked: syncMultiSelectFromAnswers(
+        state.answers,
+        ctx.questions,
+        nextTab,
+      ),
+    } satisfies QuestionnaireState,
+    effects: [],
   };
-  return { state: transitioned, effects: [] };
 }
 
 function doneFor(
@@ -383,122 +389,116 @@ type Handler<K extends QuestionnaireAction["kind"]> = (
   ctx: ApplyContext,
 ) => ApplyResult;
 
-const navHandler: Handler<"nav"> = (state, action, ctx) => {
-  const items = ctx.itemsByTab[state.currentTab] ?? [];
-  const item = items[action.nextIndex];
-  const inputMode = item
-    ? ROW_INTENT_META[item.kind].activatesInputMode
-    : false;
-  const next: QuestionnaireState = {
-    ...state,
-    optionIndex: action.nextIndex,
-    inputMode,
-  };
-  if (!inputMode)
-    return { state: next, effects: [{ kind: "clear_input_buffer" }] };
-  const prior = state.answers.get(state.currentTab);
-  const priorText =
-    prior?.kind === "custom"
-      ? prior.answer
-      : prior?.kind === "multi"
-        ? prior.custom
-        : undefined;
-  if (typeof priorText === "string") {
-    return {
-      state: next,
-      effects: [{ kind: "set_input_buffer", value: priorText }],
-    };
-  }
-  return { state: next, effects: [] };
-};
-
-const tabSwitchHandler: Handler<"tab_switch"> = (state, action, ctx) =>
-  switchTabResult(state, action.nextTab, ctx);
-
-const confirmHandler: Handler<"confirm"> = (state, action, ctx) => {
-  const answer = action.answer;
-  const answers = new Map(state.answers);
-  answers.set(answer.questionIndex, answer);
-  const next: QuestionnaireState = { ...state, answers };
-  if (action.autoAdvanceTab !== undefined)
-    return switchTabResult(next, action.autoAdvanceTab, ctx);
-  return doneFor(next, ctx, false);
-};
-
-const toggleHandler: Handler<"toggle"> = (state, action, ctx) => {
-  const checked = new Set(state.multiSelectChecked);
-  if (checked.has(action.index)) checked.delete(action.index);
-  else checked.add(action.index);
-  const intermediate: QuestionnaireState = {
-    ...state,
-    multiSelectChecked: checked,
-  };
-  return {
-    state: {
-      ...intermediate,
-      answers: persistMultiSelectAnswer(
-        intermediate,
-        ctx,
-        state.answers.get(state.currentTab)?.custom,
-      ),
-    },
-    effects: [],
-  };
-};
-
-const customTextHandler: Handler<"custom_text"> = (state, action, ctx) => ({
-  state: {
-    ...state,
-    answers: persistMultiSelectAnswer(state, ctx, action.text),
-  },
-  effects: [],
-});
-
-const multiConfirmHandler: Handler<"multi_confirm"> = (state, action, ctx) => {
-  const q = ctx.questions[state.currentTab];
-  if (!q) return { state, effects: [] };
-  const answers = new Map(state.answers);
-  answers.set(
-    state.currentTab,
-    buildMultiSelectAnswer(
-      state,
-      q,
-      state.answers.get(state.currentTab)?.custom,
-    ),
-  );
-  const next: QuestionnaireState = { ...state, answers };
-  if (action.autoAdvanceTab !== undefined)
-    return switchTabResult(next, action.autoAdvanceTab, ctx);
-  return doneFor(next, ctx, false);
-};
-
-const HANDLERS: { [K in QuestionnaireAction["kind"]]: Handler<K> } = {
-  nav: navHandler,
-  tab_switch: tabSwitchHandler,
-  confirm: confirmHandler,
-  toggle: toggleHandler,
-  multi_confirm: multiConfirmHandler,
-  custom_text: customTextHandler,
-  cancel: (s, _a, c) => doneFor(s, c, true),
-  submit: (s, _a, c) => doneFor(s, c, false),
-  submit_nav: (s, a) => ({
-    state: { ...s, submitChoiceIndex: a.nextIndex },
-    effects: [],
-  }),
-  toggle_collapsed: (s) => ({
-    state: { ...s, collapsed: !s.collapsed },
-    effects: [],
-  }),
-  ignore: (s) => ({ state: s, effects: [] }),
-};
-
 export function reduce(
   state: QuestionnaireState,
   action: QuestionnaireAction,
   ctx: ApplyContext,
 ): ApplyResult {
-  const handler = HANDLERS[action.kind] as Handler<typeof action.kind>;
-  return handler(state, action as never, ctx);
+  return (
+    (
+      {
+        nav: ((state, action, ctx) => {
+          const item = (ctx.itemsByTab[state.currentTab] ?? [])[
+            action.nextIndex
+          ];
+          const inputMode = item
+            ? ROW_INTENT_META[item.kind].activatesInputMode
+            : false;
+          const next: QuestionnaireState = {
+            ...state,
+            optionIndex: action.nextIndex,
+            inputMode,
+          };
+          if (!inputMode)
+            return { state: next, effects: [{ kind: "clear_input_buffer" }] };
+          const prior = state.answers.get(state.currentTab);
+          const priorText =
+            prior?.kind === "custom"
+              ? prior.answer
+              : prior?.kind === "multi"
+                ? prior.custom
+                : undefined;
+          if (typeof priorText === "string") {
+            return {
+              state: next,
+              effects: [{ kind: "set_input_buffer", value: priorText }],
+            };
+          }
+          return { state: next, effects: [] };
+        }) satisfies Handler<"nav">,
+        tab_switch: ((state, action, ctx) =>
+          switchTabResult(
+            state,
+            action.nextTab,
+            ctx,
+          )) satisfies Handler<"tab_switch">,
+        confirm: ((state, action, ctx) => {
+          const answer = action.answer;
+          const answers = new Map(state.answers);
+          answers.set(answer.questionIndex, answer);
+          const next: QuestionnaireState = { ...state, answers };
+          if (action.autoAdvanceTab !== undefined)
+            return switchTabResult(next, action.autoAdvanceTab, ctx);
+          return doneFor(next, ctx, false);
+        }) satisfies Handler<"confirm">,
+        toggle: ((state, action, ctx) => {
+          const checked = new Set(state.multiSelectChecked);
+          if (checked.has(action.index)) checked.delete(action.index);
+          else checked.add(action.index);
+          const intermediate: QuestionnaireState = {
+            ...state,
+            multiSelectChecked: checked,
+          };
+          return {
+            state: {
+              ...intermediate,
+              answers: persistMultiSelectAnswer(
+                intermediate,
+                ctx,
+                state.answers.get(state.currentTab)?.custom,
+              ),
+            },
+            effects: [],
+          };
+        }) satisfies Handler<"toggle">,
+        multi_confirm: ((state, action, ctx) => {
+          const q = ctx.questions[state.currentTab];
+          if (!q) return { state, effects: [] };
+          const answers = new Map(state.answers);
+          answers.set(
+            state.currentTab,
+            buildMultiSelectAnswer(
+              state,
+              q,
+              state.answers.get(state.currentTab)?.custom,
+            ),
+          );
+          const next: QuestionnaireState = { ...state, answers };
+          if (action.autoAdvanceTab !== undefined)
+            return switchTabResult(next, action.autoAdvanceTab, ctx);
+          return doneFor(next, ctx, false);
+        }) satisfies Handler<"multi_confirm">,
+        custom_text: ((state, action, ctx) => ({
+          state: {
+            ...state,
+            answers: persistMultiSelectAnswer(state, ctx, action.text),
+          },
+          effects: [],
+        })) satisfies Handler<"custom_text">,
+        cancel: (s, _a, c) => doneFor(s, c, true),
+        submit: (s, _a, c) => doneFor(s, c, false),
+        submit_nav: (s, a) => ({
+          state: { ...s, submitChoiceIndex: a.nextIndex },
+          effects: [],
+        }),
+        toggle_collapsed: (s) => ({
+          state: { ...s, collapsed: !s.collapsed },
+          effects: [],
+        }),
+        ignore: (s) => ({ state: s, effects: [] }),
+      } satisfies { [K in QuestionnaireAction["kind"]]: Handler<K> }
+    )[action.kind] as Handler<typeof action.kind>
+  )(state, action as never, ctx);
 }
 
 interface QuestionnaireSessionConfig {
@@ -561,10 +561,8 @@ export class QuestionnaireSession {
 
     this.inlineInput = built.inlineInput;
     this.viewAdapter = built.adapter;
-
-    const theme = config.theme;
     const collapsedRender = (_width: number): string[] => [
-      theme.fg("dim", ` ${COLLAPSED_HINT} `),
+      config.theme.fg("dim", ` ${COLLAPSED_HINT} `),
     ];
 
     this.component = {

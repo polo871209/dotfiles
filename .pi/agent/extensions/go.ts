@@ -39,17 +39,20 @@ const sessions = sessionRegistry();
 
 type RunLoop = (messages: AgentMessage[]) => Promise<void>;
 
-const isAbandoned = (m: AgentMessage): boolean =>
-  m.role === "assistant" &&
-  (m.stopReason === "aborted" || m.stopReason === "error");
-
 function omitAbandoned(session: AgentSession): void {
   const { entries } = session.sessionManager.buildSessionProjection();
   let omitted = false;
   for (let i = entries.length - 1; i >= 0; i--) {
     const { sourceEntry, messages } = entries[i]!;
     if (messages.length === 0) continue;
-    if (!messages.every(isAbandoned)) break;
+    if (
+      !messages.every(
+        (m: AgentMessage): boolean =>
+          m.role === "assistant" &&
+          (m.stopReason === "aborted" || m.stopReason === "error"),
+      )
+    )
+      break;
     session.sessionManager.appendContextEdit(sourceEntry.id, null);
     omitted = true;
   }
@@ -62,9 +65,8 @@ function omitAbandoned(session: AgentSession): void {
 async function resume(session: AgentSession, run: RunLoop): Promise<void> {
   const agent = session.agent;
   const shadowed = Object.prototype.hasOwnProperty.call(agent, "prompt");
-  const original = agent.prompt;
   const restore = () => {
-    if (shadowed) agent.prompt = original;
+    if (shadowed) agent.prompt = agent.prompt;
     else delete (agent as Partial<typeof agent>).prompt;
   };
   agent.prompt = () => {

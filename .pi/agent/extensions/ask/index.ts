@@ -16,8 +16,6 @@ import {
 import { buildItemsForQuestion, QuestionnaireSession } from "./session";
 import type { WrappingSelectItem } from "./widgets";
 
-const ERROR_NO_UI = "Error: UI not available (running in non-interactive mode)";
-
 function capItems<T>(items: T[], max: number): T[] {
   return items.length > max ? items.slice(0, max) : items;
 }
@@ -58,14 +56,12 @@ function clampArguments(args: unknown): QuestionParams {
   } as QuestionParams;
 }
 
-const DESCRIPTION =
-  "Ask an interactive user to choose when a request needs a decision among multiple valid readings or directions. Call in the same turn ambiguity appears, not after prose; do not use when available tools can determine the facts.";
-
 function registerAskUserQuestionTool(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "ask_user_question",
     label: "Ask User Question",
-    description: DESCRIPTION,
+    description:
+      "Ask an interactive user to choose when a request needs a decision among multiple valid readings or directions. Call in the same turn ambiguity appears, not after prose; do not use when available tools can determine the facts.",
     promptSnippet: "Structured choice dialog",
     parameters: QuestionParamsSchema,
     prepareArguments: clampArguments,
@@ -79,11 +75,14 @@ function registerAskUserQuestionTool(pi: ExtensionAPI): void {
       // RPC reports hasUI but its ui.custom() returns undefined at once.
       if (ctx.mode !== "tui")
         return {
-          ...buildToolResult(ERROR_NO_UI, {
-            answers: [],
-            cancelled: true,
-            error: "no_ui",
-          }),
+          ...buildToolResult(
+            "Error: UI not available (running in non-interactive mode)",
+            {
+              answers: [],
+              cancelled: true,
+              error: "no_ui",
+            },
+          ),
           isError: true,
         };
 
@@ -99,10 +98,6 @@ function registerAskUserQuestionTool(pi: ExtensionAPI): void {
         };
       }
 
-      const itemsByTab: WrappingSelectItem[][] = typed.questions.map((q) =>
-        buildItemsForQuestion(q),
-      );
-
       let onAbort: (() => void) | undefined;
       const result = await ctx.ui.custom<QuestionnaireResult>(
         (tui, theme, _kb, done) => {
@@ -113,7 +108,9 @@ function registerAskUserQuestionTool(pi: ExtensionAPI): void {
             tui,
             theme,
             params: typed,
-            itemsByTab,
+            itemsByTab: typed.questions.map((q) =>
+              buildItemsForQuestion(q),
+            ) satisfies WrappingSelectItem[][],
             done,
           }).component;
         },

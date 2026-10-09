@@ -12,11 +12,9 @@ export async function findJev(
   ctx: ExtensionContext,
 ): Promise<JevModel | undefined> {
   try {
-    const available = await ctx.modelRegistry.getAvailableOfType(
-      "classifier",
-      "typesafe",
-    );
-    return available.find((model) => model.id === "jev-latest");
+    return (
+      await ctx.modelRegistry.getAvailableOfType("classifier", "typesafe")
+    ).find((model) => model.id === "jev-latest");
   } catch {
     return undefined;
   }

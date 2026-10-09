@@ -55,9 +55,10 @@ export default function (pi: ExtensionAPI) {
     description:
       "Kill the shared nvim daemons (all pi sessions) and start fresh on next use.",
     handler: async (_args, ctx) => {
-      const killed = await restartDaemons();
       ctx.ui.notify(
-        killed ? "nvim daemons killed" : "no nvim daemon running",
+        (await restartDaemons())
+          ? "nvim daemons killed"
+          : "no nvim daemon running",
         "info",
       );
     },

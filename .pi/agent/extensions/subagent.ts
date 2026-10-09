@@ -61,10 +61,6 @@ const THINKING_LEVELS: Record<ThinkingLevel, true> = {
 const isThinkingLevel = (value: unknown): value is ThinkingLevel =>
   typeof value === "string" && Object.hasOwn(THINKING_LEVELS, value);
 
-const SUBAGENT_MODEL_BY_PROVIDER: Record<string, string> = {
-  anthropic: "anthropic/claude-sonnet-5-5",
-};
-
 interface Progress {
   id?: string;
   agent: string;
@@ -94,10 +90,9 @@ const MAX_TRACKED_RUNS = 50;
 
 function pruneRunsStore(): void {
   if (runsStore.size <= MAX_TRACKED_RUNS) return;
-  const finished = [...runsStore.values()]
+  for (const r of [...runsStore.values()]
     .filter((r) => r.progress.status !== "running")
-    .sort((a, b) => a.progress.startedAt - b.progress.startedAt);
-  for (const r of finished) {
+    .sort((a, b) => a.progress.startedAt - b.progress.startedAt)) {
     if (runsStore.size <= MAX_TRACKED_RUNS) break;
     runsStore.delete(r.id);
   }
@@ -174,14 +169,12 @@ function interruptedValue(run: RunEntry): Static<typeof RunValueSchema> {
   };
 }
 
-const RESULT_BLOCK_RE = /```result-json\s*\n([\s\S]*?)\n```/g;
-
 function extractResultBlock(
   text: string,
   id: string,
 ): { text: string; captured: boolean } {
   let hit: { value: unknown; index: number } | undefined;
-  for (const m of text.matchAll(RESULT_BLOCK_RE)) {
+  for (const m of text.matchAll(/```result-json\s*\n([\s\S]*?)\n```/g)) {
     try {
       hit = { value: JSON.parse(m[1]!), index: m.index };
     } catch {}
@@ -252,12 +245,10 @@ const manageValue = (v: Static<typeof ManageValueSchema>): JsonValue =>
 
 const AGENTS_DIR = path.join(getAgentDir(), "agents");
 const MAX_OUTPUT_BYTES = 32 * 1024;
-const UPDATE_INTERVAL_MS = 150;
 const TASK_PREVIEW_MAX = 140;
 const FORBIDDEN_TOOLS = new Set(["ask_user_question", "subagent"]);
 const DEFAULT_MAX_DURATION_MS = 3_600_000;
 const DEFAULT_WAIT_TIMEOUT_MS = DEFAULT_MAX_DURATION_MS + 60_000;
-const TMUX_POLL_MS = 500;
 
 const execFileAsync = promisify(execFile);
 
@@ -323,9 +314,14 @@ async function rebalancePanel(): Promise<void> {
     ]),
   );
   if (!Number.isFinite(totalHeight) || totalHeight <= 0) return;
-  const share = Math.floor(totalHeight / panel.length);
   for (const id of panel.slice(0, -1)) {
-    await tmuxRun(["resize-pane", "-t", id, "-y", String(share)]);
+    await tmuxRun([
+      "resize-pane",
+      "-t",
+      id,
+      "-y",
+      String(Math.floor(totalHeight / panel.length)),
+    ]);
   }
 }
 
@@ -336,42 +332,43 @@ async function acquirePanelSlot(
   return withPanelLock(async () => {
     await prunePanel();
     const anchor = panelSlot.ids.at(-1);
-    const args = anchor
-      ? [
-          "split-window",
-          "-d",
-          "-v",
-          "-c",
-          cwd,
-          "-t",
-          anchor,
-          "-P",
-          "-F",
-          "#{pane_id}",
-          "--",
-          "zsh",
-          "-lc",
-          shCmd,
-        ]
-      : [
-          "split-window",
-          "-d",
-          "-h",
-          "-p",
-          "25",
-          "-c",
-          cwd,
-          "-t",
-          process.env.TMUX_PANE!,
-          "-P",
-          "-F",
-          "#{pane_id}",
-          "--",
-          "zsh",
-          "-lc",
-          shCmd,
-        ];
-    const paneId = await tmuxOut(args);
+    const paneId = await tmuxOut(
+      anchor
+        ? [
+            "split-window",
+            "-d",
+            "-v",
+            "-c",
+            cwd,
+            "-t",
+            anchor,
+            "-P",
+            "-F",
+            "#{pane_id}",
+            "--",
+            "zsh",
+            "-lc",
+            shCmd,
+          ]
+        : [
+            "split-window",
+            "-d",
+            "-h",
+            "-p",
+            "25",
+            "-c",
+            cwd,
+            "-t",
+            process.env.TMUX_PANE!,
+            "-P",
+            "-F",
+            "#{pane_id}",
+            "--",
+            "zsh",
+            "-lc",
+            shCmd,
+          ],
+    );
     if (paneId) panelSlot.ids.push(paneId);
     await rebalancePanel();
     return paneId || undefined;
@@ -395,12 +392,16 @@ function expandToolPatterns(patterns: string[], allNames: string[]): string[] {
       if (!FORBIDDEN_TOOLS.has(p)) out.add(p);
       continue;
     }
-    const re = new RegExp(
-      "^" + p.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") + "$",
-    );
     for (const n of allNames) {
       if (FORBIDDEN_TOOLS.has(n)) continue;
-      if (re.test(n)) out.add(n);
+      if (
+        new RegExp(
+          "^" +
+            p.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") +
+            "$",
+        ).test(n)
+      )
+        out.add(n);
     }
   }
   return [...out];
@@ -425,12 +426,6 @@ function loadAgents(): AgentConfig[] {
       typeof frontmatter.description !== "string"
     )
       continue;
-    const tools = (
-      typeof frontmatter.tools === "string" ? frontmatter.tools : ""
-    )
-      .split(",")
-      .map((t) => t.trim())
-      .filter((t) => t.length > 0);
     const { model, thinking } = frontmatter;
     if (model !== undefined && typeof model !== "string")
       throw new Error(`${entry}: model must be a string`);
@@ -442,7 +437,10 @@ function loadAgents(): AgentConfig[] {
       name: frontmatter.name,
       description: frontmatter.description,
       hidden: frontmatter.hidden === true,
-      tools,
+      tools: (typeof frontmatter.tools === "string" ? frontmatter.tools : "")
+        .split(",")
+        .map((t) => t.trim())
+        .filter((t) => t.length > 0),
       appendPrompt: body.trim(),
       model,
       thinking,
@@ -454,9 +452,7 @@ function loadAgents(): AgentConfig[] {
 const formatDuration = (ms: number): string => {
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  const m = Math.floor(ms / 60_000);
-  const s = Math.floor((ms % 60_000) / 1000);
-  return `${m}m${s}s`;
+  return `${Math.floor(ms / 60_000)}m${Math.floor((ms % 60_000) / 1000)}s`;
 };
 
 const headTruncate = (s: string, maxBytes: number): string => {
@@ -549,14 +545,28 @@ const statusIcon = (theme: Theme, p: Progress): string => {
 
 const renderCallComponent = (args: SubagentArgs, theme: Theme) => {
   const c = new Container();
-  const head = `${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("text", args.agent)}`;
-  c.addChild(new Text(head, 0, 0));
+  c.addChild(
+    new Text(
+      `${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("text", args.agent)}`,
+      0,
+      0,
+    ),
+  );
   const firstLine = args.task.split("\n", 1)[0] ?? "";
-  const taskPreview =
-    firstLine.length > TASK_PREVIEW_MAX
-      ? firstLine.slice(0, TASK_PREVIEW_MAX - 1) + "…"
-      : firstLine + (args.task.includes("\n") ? " …" : "");
-  c.addChild(new Text(theme.fg("dim", `task: ${taskPreview}`), 0, 0));
+  c.addChild(
+    new Text(
+      theme.fg(
+        "dim",
+        `task: ${
+          firstLine.length > TASK_PREVIEW_MAX
+            ? firstLine.slice(0, TASK_PREVIEW_MAX - 1) + "…"
+            : firstLine + (args.task.includes("\n") ? " …" : "")
+        }`,
+      ),
+      0,
+      0,
+    ),
+  );
   return c;
 };
 
@@ -567,10 +577,16 @@ const renderProgressComponent = (
   expanded: boolean,
 ) => {
   const c = new Container();
-  const icon = statusIcon(theme, p);
-  const model = theme.fg("dim", ` (${p.model})`);
-  const header = `${icon} ${theme.fg("toolTitle", theme.bold(p.agent))}${model} ${theme.fg("dim", "—")} ${theme.fg("dim", formatDuration(p.durationMs))}`;
-  c.addChild(new Text(fitLine(header, width), 0, 0));
+  c.addChild(
+    new Text(
+      fitLine(
+        `${statusIcon(theme, p)} ${theme.fg("toolTitle", theme.bold(p.agent))}${theme.fg("dim", ` (${p.model})`)} ${theme.fg("dim", "—")} ${theme.fg("dim", formatDuration(p.durationMs))}`,
+        width,
+      ),
+      0,
+      0,
+    ),
+  );
 
   if (p.lastMessage && p.status === "running") {
     c.addChild(new Spacer(1));
@@ -590,8 +606,16 @@ const renderProgressComponent = (
       c.addChild(new Markdown(p.output, 0, 0, getMarkdownTheme()));
     } else {
       const lines = p.output.split("\n").length;
-      const hint = `  ${lines} line${lines === 1 ? "" : "s"} (${keyText("app.tools.expand")} to expand)`;
-      c.addChild(new Text(theme.fg("dim", hint), 0, 0));
+      c.addChild(
+        new Text(
+          theme.fg(
+            "dim",
+            `  ${lines} line${lines === 1 ? "" : "s"} (${keyText("app.tools.expand")} to expand)`,
+          ),
+          0,
+          0,
+        ),
+      );
     }
   }
 
@@ -656,20 +680,6 @@ const manageParams = () =>
     ),
   });
 
-const ACTION_ALIASES: Record<string, ManageAction> = {
-  list: "wait",
-  status: "wait",
-  transcript: "result",
-  output: "result",
-  log: "result",
-  logs: "result",
-  tail: "result",
-  peek: "result",
-  view: "result",
-  kill: "stop",
-  message: "steer",
-};
-
 type ManageAction = "wait" | "result" | "steer" | "stop";
 
 type ManageArgs = {
@@ -682,11 +692,10 @@ type ManageArgs = {
 
 const formatRunLine = (r: RunRecord): string => {
   const p = r.progress;
-  const dur = formatDuration(
-    p.status === "running" ? Date.now() - p.startedAt : p.durationMs,
-  );
   const msg = p.status === "running" ? p.lastMessage : (p.error ?? "");
-  return `${r.id}  [${p.status}]  ${p.agent}  ${dur}${msg ? `  — ${msg}` : ""}`;
+  return `${r.id}  [${p.status}]  ${p.agent}  ${formatDuration(
+    p.status === "running" ? Date.now() - p.startedAt : p.durationMs,
+  )}${msg ? `  — ${msg}` : ""}`;
 };
 
 const runPayload = (
@@ -763,9 +772,8 @@ async function runInTmux(
   if (model) parts.push(`--model '${model.replaceAll("'", "'\\''")}'`);
   if (thinking) parts.push(`--thinking ${thinking}`);
   parts.push(`"$(cat '${taskFile}')"`);
-  const shCmd = parts.join(" ");
 
-  const paneId = await acquirePanelSlot(cwd, shCmd);
+  const paneId = await acquirePanelSlot(cwd, parts.join(" "));
   if (!paneId) {
     cleanupFiles();
     progress.status = "failed";
@@ -832,7 +840,7 @@ async function runInTmux(
       break;
     }
 
-    await sleep(TMUX_POLL_MS);
+    await sleep(500);
   }
 
   progress.durationMs = Date.now() - progress.startedAt;
@@ -973,14 +981,6 @@ export default function (pi: ExtensionAPI) {
 
   const agents = loadAgents();
   if (agents.length === 0) return;
-  const byName = new Map(agents.map((a) => [a.name, a]));
-  const agentList = agents
-    .filter((a) => !a.hidden)
-    .map((a) => {
-      const summary = a.description.replace(/\s+/g, " ").trim();
-      return `  ${a.name}: ${summary.length > 140 ? `${summary.slice(0, 137)}…` : summary}`;
-    })
-    .join("\n");
 
   const params = buildParams(agents);
 
@@ -997,7 +997,13 @@ export default function (pi: ExtensionAPI) {
       "Delegate work that needs its own context to an isolated agent",
     description:
       `Delegate work that needs a context of its own to an isolated agent. Do the rest in the main thread. Independent calls run in parallel.\n\n` +
-      `Routes:\n${agentList}\n\n` +
+      `Routes:\n${agents
+        .filter((a) => !a.hidden)
+        .map((a) => {
+          const summary = a.description.replace(/\s+/g, " ").trim();
+          return `  ${a.name}: ${summary.length > 140 ? `${summary.slice(0, 137)}…` : summary}`;
+        })
+        .join("\n")}\n\n` +
       "For a compact hand-back, tell the subagent to end with a fenced ```result-json ... ``` block: a background run's wait returns it, and subagent_manage (action: result, path) pulls one field.",
     parameters: params,
     outputSchema: RunValueSchema,
@@ -1023,7 +1029,7 @@ export default function (pi: ExtensionAPI) {
 
     async execute(_toolCallId, rawParams, signal, onUpdate, ctx) {
       const args = rawParams as SubagentArgs;
-      const agent = byName.get(args.agent);
+      const agent = agents.find((a) => a.name === args.agent);
       if (!agent) {
         return {
           content: [{ type: "text", text: `Unknown agent: ${args.agent}` }],
@@ -1031,15 +1037,15 @@ export default function (pi: ExtensionAPI) {
           isError: true,
         };
       }
-
-      const parentModel = ctx.model
-        ? `${ctx.model.provider}/${ctx.model.id}`
-        : undefined;
       const model =
         agent.model ??
-        (ctx.model && SUBAGENT_MODEL_BY_PROVIDER[ctx.model.provider]) ??
-        parentModel;
-      const thinking = agent.thinking ?? pi.getThinkingLevel();
+        (ctx.model &&
+          (
+            {
+              anthropic: "anthropic/claude-sonnet-5-5",
+            } satisfies Record<string, string>
+          )[ctx.model.provider]) ??
+        (ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined);
 
       const target = `sub-${agent.name}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
       const progress = initialProgress(agent, args.task, model ?? "default");
@@ -1063,24 +1069,21 @@ export default function (pi: ExtensionAPI) {
         status: "running",
       } satisfies RunEntry);
 
-      const pushNow = () => {
-        progress.durationMs = Date.now() - progress.startedAt;
-        onUpdate?.({
-          content: [{ type: "text", text: "" }],
-          details: { ...progress },
-        });
-      };
-      const push = throttle(pushNow, UPDATE_INTERVAL_MS);
-
       const runPromise = runInTmux(
         pi,
         agent,
         args.task,
         model,
-        thinking,
+        agent.thinking ?? pi.getThinkingLevel(),
         ctx.cwd,
         progress,
-        push,
+        throttle(() => {
+          progress.durationMs = Date.now() - progress.startedAt;
+          onUpdate?.({
+            content: [{ type: "text", text: "" }],
+            details: { ...progress },
+          });
+        }, 150),
         controller.signal,
         target,
         record,
@@ -1153,7 +1156,21 @@ export default function (pi: ExtensionAPI) {
       });
 
       const action =
-        ACTION_ALIASES[String(rawAction).toLowerCase()] ?? rawAction;
+        (
+          {
+            list: "wait",
+            status: "wait",
+            transcript: "result",
+            output: "result",
+            log: "result",
+            logs: "result",
+            tail: "result",
+            peek: "result",
+            view: "result",
+            kill: "stop",
+            message: "steer",
+          } satisfies Record<string, ManageAction>
+        )[String(rawAction).toLowerCase()] ?? rawAction;
       if (!MANAGE_ACTIONS.includes(action)) {
         return fail(
           `subagent_manage: unknown action '${String(rawAction)}'. Valid: ${MANAGE_ACTIONS.join(", ")}.`,
@@ -1220,46 +1237,48 @@ export default function (pi: ExtensionAPI) {
           outcome: "finished",
         };
         let timer: ReturnType<typeof setTimeout> | undefined;
-        const guard = new Promise<void>((resolve) => {
-          timer = setTimeout(() => {
-            state.outcome = "timeout";
-            resolve();
-          }, timeoutMs);
-          signal?.addEventListener(
-            "abort",
-            () => {
-              state.outcome = "aborted";
-              resolve();
-            },
-            { once: true },
-          );
-        });
         await Promise.race([
           Promise.all(records.map((r) => r.settled ?? Promise.resolve())),
-          guard,
+          new Promise<void>((resolve) => {
+            timer = setTimeout(() => {
+              state.outcome = "timeout";
+              resolve();
+            }, timeoutMs);
+            signal?.addEventListener(
+              "abort",
+              () => {
+                state.outcome = "aborted";
+                resolve();
+              },
+              { once: true },
+            );
+          }),
         ]);
         if (timer) clearTimeout(timer);
-
-        const blocks = records
-          .map((r) =>
-            r.progress.status === "running"
-              ? formatRunLine(r)
-              : `${formatRunLine(r)}\n${runPayload(r.id, transcriptOf(r))}`,
-          )
-          .concat(
-            interrupted.map(
-              (r) => `${r.id}  [interrupted]  ${r.agent}\n${INTERRUPTED_ERROR}`,
-            ),
-          );
-        const head =
-          state.outcome === "timeout"
-            ? `Wait timed out after ${formatDuration(timeoutMs)}. The runs below keep going.`
-            : state.outcome === "aborted"
-              ? "Wait cancelled. The runs below keep going."
-              : `All ${records.length} run${records.length === 1 ? "" : "s"} finished; output below.`;
         return {
           content: [
-            { type: "text", text: `${head}\n\n${blocks.join("\n\n")}` },
+            {
+              type: "text",
+              text: `${
+                state.outcome === "timeout"
+                  ? `Wait timed out after ${formatDuration(timeoutMs)}. The runs below keep going.`
+                  : state.outcome === "aborted"
+                    ? "Wait cancelled. The runs below keep going."
+                    : `All ${records.length} run${records.length === 1 ? "" : "s"} finished; output below.`
+              }\n\n${records
+                .map((r) =>
+                  r.progress.status === "running"
+                    ? formatRunLine(r)
+                    : `${formatRunLine(r)}\n${runPayload(r.id, transcriptOf(r))}`,
+                )
+                .concat(
+                  interrupted.map(
+                    (r) =>
+                      `${r.id}  [interrupted]  ${r.agent}\n${INTERRUPTED_ERROR}`,
+                  ),
+                )
+                .join("\n\n")}`,
+            },
           ],
           details: undefined,
           structuredContent: manageValue({
@@ -1279,13 +1298,12 @@ export default function (pi: ExtensionAPI) {
       }
 
       if (action === "result") {
-        const wanted = id
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean);
         const blocks: string[] = [];
         const values: Static<typeof RunValueSchema>[] = [];
-        for (const runId of wanted) {
+        for (const runId of id
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean)) {
           const run = runsStore.get(runId);
           if (!run) {
             if (resultStore.has(runId)) {
@@ -1362,7 +1380,7 @@ export default function (pi: ExtensionAPI) {
       // Bracketed paste keeps newlines as text. Typed with send-keys, the
       // first newline would submit a partial message.
       const buffer = `pi-steer-${id}`;
-      const pasted =
+      if (!(
         (await tmuxRun(["set-buffer", "-b", buffer, "--", message])) &&
         (await tmuxRun([
           "paste-buffer",
@@ -1372,8 +1390,8 @@ export default function (pi: ExtensionAPI) {
           buffer,
           "-t",
           record.paneId,
-        ]));
-      if (!pasted) {
+        ]))
+      )) {
         return fail(`subagent_manage: tmux could not paste into run "${id}".`);
       }
       await tmuxRun(["send-keys", "-t", record.paneId, "Enter"]);

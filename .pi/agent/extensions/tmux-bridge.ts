@@ -22,8 +22,10 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 function socketPathForPane(paneId: string): string {
-  const safe = paneId.replace(/[^a-zA-Z0-9_-]/g, "_");
-  return path.join(os.tmpdir(), `pi-tmux-pane-${safe}-${process.pid}.sock`);
+  return path.join(
+    os.tmpdir(),
+    `pi-tmux-pane-${paneId.replace(/[^a-zA-Z0-9_-]/g, "_")}-${process.pid}.sock`,
+  );
 }
 
 function removeDeadSockets(paneId: string): void {
@@ -85,13 +87,11 @@ function formatFileSnapshot(f: FilePayload): string {
   const srcLines = f.content.split(/\r?\n/);
   const from = Math.max(Math.floor(f.sline), 1);
   const to = from + srcLines.length - 1;
-  const total = f.total && Math.floor(f.total) >= to ? Math.floor(f.total) : to;
-  const numbered = srcLines
-    .map((line, i) => `${from + i}${GUTTER_SEP}${line}`)
-    .join("\n");
   return (
-    `${displayPath(f.path)} lines ${from}-${to} of ${total}. The "<n>${GUTTER_SEP}" gutter is line numbers, not file content.\n` +
-    `\`\`\`${f.ft ?? ""}\n${numbered}\n\`\`\``
+    `${displayPath(f.path)} lines ${from}-${to} of ${f.total && Math.floor(f.total) >= to ? Math.floor(f.total) : to}. The "<n>${GUTTER_SEP}" gutter is line numbers, not file content.\n` +
+    `\`\`\`${f.ft ?? ""}\n${srcLines
+      .map((line, i) => `${from + i}${GUTTER_SEP}${line}`)
+      .join("\n")}\n\`\`\``
   );
 }
 
@@ -117,13 +117,18 @@ export default function (pi: ExtensionAPI) {
     SNAPSHOT_MESSAGE_TYPE,
     (message, { expanded, outputPad }, theme) => {
       const details = message.details;
-      const label = details ? snapshotLabel(details) : "file snapshot";
-      const body =
-        expanded && typeof message.content === "string"
-          ? `\n${message.content}`
-          : "";
       const box = new Box(outputPad, 0, (t) => theme.bg("customMessageBg", t));
-      box.addChild(new Text(`${theme.fg("dim", label)}${body}`, 0, 0));
+      box.addChild(
+        new Text(
+          `${theme.fg("dim", details ? snapshotLabel(details) : "file snapshot")}${
+            expanded && typeof message.content === "string"
+              ? `\n${message.content}`
+              : ""
+          }`,
+          0,
+          0,
+        ),
+      );
       return box;
     },
   );
@@ -136,7 +141,6 @@ export default function (pi: ExtensionAPI) {
   let currentCtx: ExtensionContext | undefined;
 
   type Ack = { ok: true; delivered: string } | { ok: false; error: string };
-  const VALID_MODES = new Set(["steer", "followUp", "nextTurn"]);
 
   const handleLine = (line: string): Ack => {
     const trimmed = line.trim();
@@ -158,7 +162,10 @@ export default function (pi: ExtensionAPI) {
     }
 
     const requested =
-      payload.mode && VALID_MODES.has(payload.mode) ? payload.mode : undefined;
+      payload.mode &&
+      ["steer", "followUp", "nextTurn"].includes(payload.mode)
+        ? payload.mode
+        : undefined;
     const idle = currentCtx?.isIdle() ?? true;
 
     try {
@@ -175,13 +182,15 @@ export default function (pi: ExtensionAPI) {
           );
           return { ok: true, delivered: `${where} pasted into the editor` };
         }
-        const message = {
-          customType: SNAPSHOT_MESSAGE_TYPE,
-          content,
-          display: true,
-          details: { path: f.path, sline: f.sline, eline: f.eline },
-        };
-        pi.sendMessage<SnapshotDetails>(message, { deliverAs: requested });
+        pi.sendMessage<SnapshotDetails>(
+          {
+            customType: SNAPSHOT_MESSAGE_TYPE,
+            content,
+            display: true,
+            details: { path: f.path, sline: f.sline, eline: f.eline },
+          },
+          { deliverAs: requested },
+        );
         return {
           ok: true,
           delivered:
@@ -231,13 +240,12 @@ export default function (pi: ExtensionAPI) {
     }
     currentCtx = ctx;
     removeDeadSockets(paneId);
-    const MAX_BUF = 2 * 1024 * 1024;
     server = net.createServer((socket: net.Socket) => {
       let buf = "";
       socket.setEncoding("utf8");
       socket.on("data", (chunk: string) => {
         buf += chunk;
-        if (buf.length > MAX_BUF) {
+        if (buf.length > 2 * 1024 * 1024) {
           currentCtx?.ui.notify(
             "tmux-bridge: oversize line dropped",
             "warning",

@@ -67,12 +67,15 @@ export async function sideChannelComplete(
     if (response.stopReason === "error") {
       return { ok: false, reason: "error", error: response.errorMessage };
     }
-    const text = response.content
-      .filter((c): c is { type: "text"; text: string } => c.type === "text")
-      .map((c) => c.text)
-      .join(opts.join ?? "\n")
-      .trim();
-    return { ok: true, text, usage: response.usage };
+    return {
+      ok: true,
+      text: response.content
+        .filter((c): c is { type: "text"; text: string } => c.type === "text")
+        .map((c) => c.text)
+        .join(opts.join ?? "\n")
+        .trim(),
+      usage: response.usage,
+    };
   } catch (e) {
     return {
       ok: false,

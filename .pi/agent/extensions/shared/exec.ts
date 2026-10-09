@@ -9,19 +9,19 @@ interface ExecResult {
   code: number;
 }
 
-const DEFAULT_TIMEOUT_MS = 120_000;
-
 export function run(
   cmd: string,
   args: string[],
   signal?: AbortSignal,
   cwd?: string,
-  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+  timeoutMs: number = 120_000,
 ): Promise<ExecResult> {
   const timeout = AbortSignal.timeout(timeoutMs);
-  const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { cwd, signal: combined });
+    const child = spawn(cmd, args, {
+      cwd,
+      signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+    });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (d: Buffer) => (stdout += d.toString()));

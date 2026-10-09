@@ -8,26 +8,17 @@ import { attach, type NeovimClient } from "neovim";
 import { surviveReload } from "../shared/reload";
 
 const DRIVER_PATH = path.join(import.meta.dirname, "driver.lua");
-const DAEMON_PATH = path.join(import.meta.dirname, "daemon.lua");
 const LOG_FILE = path.join(os.tmpdir(), "pi-lsp.log");
-const LOG_TTL_MS = 24 * 60 * 60 * 1000;
 
 // Derive from $HOME only. Any env input (TMPDIR, XDG_RUNTIME_DIR) can differ
 // between processes and split the daemon pool. Keep it short: unix socket
 // paths cap around 104 bytes.
 const RUNTIME_DIR = path.join(os.homedir(), ".cache", "pi-lsp");
 
-const CONNECT_TIMEOUT_MS = 2_000;
-const SPAWN_TIMEOUT_MS = 25_000;
-const SPAWN_POLL_MS = 100;
-const BUSY_RETRY_MS = 40;
-const LOAD_TIMEOUT_MS = 20_000;
-const LOCK_STALE_MS = 60_000;
-
 const log = (msg: string) => {
   try {
-    const stale = fs.statSync(LOG_FILE).mtimeMs < Date.now() - LOG_TTL_MS;
-    if (stale) fs.rmSync(LOG_FILE, { force: true });
+    if (fs.statSync(LOG_FILE).mtimeMs < Date.now() - 24 * 60 * 60 * 1000)
+      fs.rmSync(LOG_FILE, { force: true });
   } catch {}
   try {
     fs.appendFileSync(
@@ -62,8 +53,7 @@ const laneAborts: Record<Lane, AbortController> = {
 
 const socketPath = (lane: Lane) => path.join(RUNTIME_DIR, `${lane}.sock`);
 const lockPath = (lane: Lane) => path.join(RUNTIME_DIR, `${lane}.lock`);
-
-const exitHook = surviveReload("__piLspExitHook", () => {
+surviveReload("__piLspExitHook", () => {
   const hook: { disconnect?: () => void } = {};
   process.on("exit", () => {
     try {
@@ -71,8 +61,7 @@ const exitHook = surviveReload("__piLspExitHook", () => {
     } catch {}
   });
   return hook;
-});
-exitHook.disconnect = () => disconnectNvim();
+}).disconnect = () => disconnectNvim();
 
 const connect = (lane: Lane): Promise<net.Socket | null> =>
   new Promise((resolve) => {
@@ -87,7 +76,7 @@ const connect = (lane: Lane): Promise<net.Socket | null> =>
         resolve(null);
       }
     };
-    socket.setTimeout(CONNECT_TIMEOUT_MS, () => settle(false));
+    socket.setTimeout(2_000, () => settle(false));
     socket.once("connect", () => settle(true));
     socket.once("error", () => settle(false));
   });
@@ -107,8 +96,12 @@ const openSession = async (
       lane,
     },
   );
-  const epoch = String(await client.lua("return vim.g.pi_daemon_epoch", []));
-  const session: NvimSession = { socket, client, epoch, dead: false };
+  const session: NvimSession = {
+    socket,
+    client,
+    epoch: String(await client.lua("return vim.g.pi_daemon_epoch", [])),
+    dead: false,
+  };
   const drop = () => {
     session.dead = true;
     if (sessions[lane] === session) {
@@ -131,8 +124,8 @@ const takeSpawnLock = (lane: Lane): boolean => {
     return true;
   } catch {
     try {
-      const age = Date.now() - fs.statSync(lockPath(lane)).mtimeMs;
-      if (age < LOCK_STALE_MS) return false;
+      if (Date.now() - fs.statSync(lockPath(lane)).mtimeMs < 60_000)
+        return false;
       fs.rmSync(lockPath(lane), { recursive: true, force: true });
       fs.mkdirSync(lockPath(lane));
       return true;
@@ -153,7 +146,7 @@ const spawnDaemon = (lane: Lane, cwd: string): void => {
       "--listen",
       socketPath(lane),
       "--cmd",
-      `luafile ${DAEMON_PATH.replace(/ /g, "\\ ")}`,
+      `luafile ${path.join(import.meta.dirname, "daemon.lua").replace(/ /g, "\\ ")}`,
     ],
     { cwd, detached: true, stdio: "ignore", env: process.env },
   );
@@ -162,11 +155,11 @@ const spawnDaemon = (lane: Lane, cwd: string): void => {
 };
 
 const waitForDaemon = async (lane: Lane): Promise<net.Socket | null> => {
-  const deadline = Date.now() + SPAWN_TIMEOUT_MS;
+  const deadline = Date.now() + 25_000;
   while (Date.now() < deadline) {
     const socket = await connect(lane);
     if (socket) return socket;
-    await new Promise((r) => setTimeout(r, SPAWN_POLL_MS));
+    await new Promise((r) => setTimeout(r, 100));
   }
   return null;
 };
@@ -251,11 +244,13 @@ export const disconnectNvim = (): void => {
 
 const withTimeout = async <T>(p: Promise<T>, ms: number): Promise<T | null> => {
   let timer: NodeJS.Timeout;
-  const guard = new Promise<null>((resolve) => {
-    timer = setTimeout(() => resolve(null), ms);
-  });
   try {
-    return await Promise.race([p.catch(() => null), guard]);
+    return await Promise.race([
+      p.catch(() => null),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), ms);
+      }),
+    ]);
   } finally {
     clearTimeout(timer!);
   }
@@ -329,7 +324,7 @@ const callGuarded = async <T>(
     if (aborted()) throw new Error("aborted");
     const res = await client.lua(guarded(code), args as never);
     if (!isBusy(res)) return res as T;
-    await new Promise((r) => setTimeout(r, BUSY_RETRY_MS));
+    await new Promise((r) => setTimeout(r, 40));
   }
 };
 
@@ -348,17 +343,16 @@ export const callLua = async <T = unknown>(
     ? AbortSignal.any([signal, laneAborts[lane].signal])
     : laneAborts[lane].signal;
   if (combined.aborted) throw new Error("aborted");
-  const exec = enqueue(lane, () => {
-    if (combined.aborted) throw new Error("aborted");
-    return callGuarded<T>(client, code, args, () => combined.aborted);
-  });
   return new Promise<T>((resolve, reject) => {
     const onAbort = () => {
       combined.removeEventListener("abort", onAbort);
       reject(new Error("aborted"));
     };
     combined.addEventListener("abort", onAbort, { once: true });
-    exec.then(
+    enqueue(lane, () => {
+      if (combined.aborted) throw new Error("aborted");
+      return callGuarded<T>(client, code, args, () => combined.aborted);
+    }).then(
       (v) => {
         combined.removeEventListener("abort", onAbort);
         resolve(v);
@@ -371,9 +365,6 @@ export const callLua = async <T = unknown>(
   });
 };
 
-const DRIVER_CAP_BASE_MS = 15_000;
-const DRIVER_CAP_PER_FILE_MS = 8_000;
-
 export const callDriver = async <T = unknown>(
   cwd: string,
   fn: string,
@@ -382,14 +373,16 @@ export const callDriver = async <T = unknown>(
   onProgress?: ProgressFn,
 ): Promise<T> => {
   await ensureDriverLoaded(cwd, onProgress);
-  const fileCount = Array.isArray(args[0]) ? Math.max(1, args[0].length) : 1;
   const timeoutSignal = AbortSignal.timeout(
-    DRIVER_CAP_BASE_MS + fileCount * DRIVER_CAP_PER_FILE_MS,
+    15_000 + (Array.isArray(args[0]) ? Math.max(1, args[0].length) : 1) * 8_000,
   );
-  const combined = signal
-    ? AbortSignal.any([signal, timeoutSignal])
-    : timeoutSignal;
-  return callLua<T>(cwd, `return PiLsp.${fn}(...)`, args, combined, onProgress);
+  return callLua<T>(
+    cwd,
+    `return PiLsp.${fn}(...)`,
+    args,
+    signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal,
+    onProgress,
+  );
 };
 
 const loadedHere = new Set<string>();
@@ -407,9 +400,8 @@ export const loadLuaOnce = async (
   const cacheKey = `${lane}:${epoch}:${key}:${hash}`;
   if (loadedHere.has(cacheKey)) return;
   const flag = `pi_lua_${key}`;
-  const current = await client.lua(`return vim.g[...]`, [flag] as never);
-  if (current !== hash) {
-    const deadline = AbortSignal.timeout(LOAD_TIMEOUT_MS);
+  if ((await client.lua(`return vim.g[...]`, [flag] as never)) !== hash) {
+    const deadline = AbortSignal.timeout(20_000);
     await callGuarded(client, src, [], () => deadline.aborted);
     await client.lua(`local k, v = ...; vim.g[k] = v`, [flag, hash] as never);
   }

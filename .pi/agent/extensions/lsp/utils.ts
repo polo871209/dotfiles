@@ -44,15 +44,19 @@ export async function withDriver<R extends DriverErr>(
   ) => { text: string; details?: Record<string, unknown> },
   errorPrefix = "LSP error",
 ): Promise<AgentToolResult<unknown>> {
-  const progress = (text: string) =>
-    onUpdate?.({ content: [{ type: "text", text }], details: {} });
   let res: R;
   try {
-    res = await callDriver<R>(ctx.cwd, driverFn, args, signal, progress);
+    res = await callDriver<R>(ctx.cwd, driverFn, args, signal, (text: string) =>
+      onUpdate?.({ content: [{ type: "text", text }], details: {} }),
+    );
   } catch (e) {
-    const reason = e instanceof Error ? e.message : String(e);
     return {
-      content: [{ type: "text", text: `${errorPrefix}: ${reason}` }],
+      content: [
+        {
+          type: "text",
+          text: `${errorPrefix}: ${e instanceof Error ? e.message : String(e)}`,
+        },
+      ],
       details: { success: false },
       isError: true,
     };
@@ -99,13 +103,6 @@ export interface Diag {
   message: string;
 }
 
-const SEV_TAG: Record<Severity, string> = {
-  error: "error",
-  warn: "warn ",
-  info: "info ",
-  hint: "hint ",
-};
-
 const SEV_RANK: Record<Severity, number> = {
   error: 0,
   warn: 1,
@@ -123,11 +120,19 @@ export const sortDiagnostics = <D extends Diag>(diags: D[]): D[] =>
   });
 
 export const formatDiagLine = (d: Diag, cwd: string): string => {
-  const loc = displayPath(d.file, cwd);
   const src = d.source
     ? `${d.source}${d.code ? `(${d.code})` : ""}`
     : (d.code ?? "");
-  return `  ${loc}:${d.line}:${d.col}  ${SEV_TAG[d.severity]}  ${src ? `${src}: ` : ""}${d.message.replace(/\s+/g, " ").trim()}`;
+  return `  ${displayPath(d.file, cwd)}:${d.line}:${d.col}  ${
+    (
+      {
+        error: "error",
+        warn: "warn ",
+        info: "info ",
+        hint: "hint ",
+      } satisfies Record<Severity, string>
+    )[d.severity]
+  }  ${src ? `${src}: ` : ""}${d.message.replace(/\s+/g, " ").trim()}`;
 };
 
 export const formatLocations = (
@@ -138,8 +143,9 @@ export const formatLocations = (
   if (locations.length === 0) return `No ${label} found`;
   const lines: string[] = [`Found ${locations.length} ${label}:`];
   for (const loc of locations) {
-    const rel = displayPath(loc.file, cwd);
-    lines.push(`  ${rel}:${loc.line}:${loc.col}  ${loc.context}`);
+    lines.push(
+      `  ${displayPath(loc.file, cwd)}:${loc.line}:${loc.col}  ${loc.context}`,
+    );
   }
   return lines.join("\n");
 };

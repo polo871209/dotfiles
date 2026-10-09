@@ -35,115 +35,26 @@ import {
 } from "node:path";
 
 const EXA_MCP_URL = "https://mcp.exa.ai/mcp";
-const PARALLEL_MCP_URL = "https://search.parallel.ai/mcp";
 const EXA_TEXT_CHARS = 1_500;
-const RERANK_SNIPPET_CHARS = 600;
 const RERANK_MAX_CANDIDATES = 10;
-// Measured 2026-01 over 4 queries: pages that answered scored 0.54-0.98 and
-// the rest 0.12-0.33. Before moving the floor, log scoreCandidates scores for
-// real queries.
-const RERANK_FLOOR = 0.35;
-const RERANK_MIN_KEEP = 3;
-const REQUEST_TIMEOUT_MS = 20_000;
 const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
-const MAX_CONTENT_CHARS = 15_000;
 const MAX_REDIRECTS = 5;
-const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
-const BINARY_CONTENT_TYPES = /^(image|audio|video|font)\//i;
-const UNSUPPORTED_CONTENT_TYPES = new Set([
-  "application/octet-stream",
-  "application/zip",
-  "application/pdf",
-  "application/gzip",
-  "application/x-tar",
-  "application/x-7z-compressed",
-]);
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 // Per-mode, because one hardcoded text/html value made mode:"raw" against
 // api.github.com fail with HTTP 415. Both keep a */* tail so a server that
 // negotiates strictly still answers.
 const ACCEPT_HTML = "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8";
-const ACCEPT_RAW = "application/json,text/plain;q=0.9,*/*;q=0.8";
 
 const DUCKDUCKGO_URL = "https://html.duckduckgo.com/html/";
-const SEARCH_RETRY_DELAY_MS = 500;
-
-const EXTRACT_CACHE_TTL_MS = 5 * 60_000;
-const EXTRACT_CACHE_MAX_ENTRIES = 16;
-const EXTRACT_CACHE_MAX_CHARS = 2_000_000;
 
 const GH_TIMEOUT_MS = 20_000;
-const MAX_ISSUE_COMMENTS = 30;
 const MAX_ISSUE_COMMENT_CHARS = 4_000;
 
 const GITHUB_CLONE_DIR = join(tmpdir(), `pi-github-repos-${process.pid}`);
-const CLONE_TIMEOUT_MS = 30_000;
 const MAX_TREE_ENTRIES = 200;
 const MAX_FILE_CHARS = 30_000;
-const NON_CODE_SEGMENTS = new Set([
-  "issues",
-  "pull",
-  "pulls",
-  "discussions",
-  "releases",
-  "wiki",
-  "actions",
-  "settings",
-  "security",
-  "projects",
-  "compare",
-  "commits",
-  "tags",
-  "branches",
-  "network",
-  "forks",
-]);
-const NOISE_DIRS = new Set([
-  "node_modules",
-  "vendor",
-  ".next",
-  "dist",
-  "build",
-  "__pycache__",
-  ".venv",
-  "venv",
-  ".git",
-]);
-const BINARY_EXTENSIONS = new Set([
-  ".png",
-  ".jpg",
-  ".jpeg",
-  ".gif",
-  ".ico",
-  ".webp",
-  ".svg",
-  ".mp4",
-  ".mp3",
-  ".zip",
-  ".gz",
-  ".pdf",
-  ".woff",
-  ".woff2",
-  ".ttf",
-  ".exe",
-  ".dll",
-  ".so",
-  ".dylib",
-]);
-
-const YOUTUBE_HOSTS = new Set([
-  "youtube.com",
-  "www.youtube.com",
-  "m.youtube.com",
-  "music.youtube.com",
-  "youtu.be",
-  "www.youtu.be",
-]);
-const YOUTUBE_PATH_PREFIXES = ["shorts", "embed", "live", "v"];
-const YOUTUBE_ID = /^[A-Za-z0-9_-]{11}$/;
 const YT_DLP_TIMEOUT_MS = 90_000;
-const YT_PREFERRED_SUB_LANGS = "en-orig,en,en-US,en-GB";
 
 function disableMarkdownEscaping(service: TurndownService): void {
   service.escape = (text: string) => text;
@@ -179,7 +90,7 @@ async function mapLimit<T, R>(
 }
 
 function withTimeout(signal: AbortSignal | undefined): AbortSignal {
-  const timeout = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+  const timeout = AbortSignal.timeout(20_000);
   return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
@@ -187,8 +98,7 @@ function withTimeout(signal: AbortSignal | undefined): AbortSignal {
 // trailing dotted-quad. Needed because a textual prefix test cannot see
 // through normalization: Node rewrites ::ffff:127.0.0.1 as ::ffff:7f00:1.
 function parseIPv6Groups(addr: string): number[] | null {
-  const bare = addr.split("%")[0];
-  const halves = bare.split("::");
+  const halves = addr.split("%")[0].split("::");
   if (halves.length > 2) return null;
 
   const parseHalf = (part: string): number[] | null => {
@@ -228,9 +138,7 @@ function isPrivateAddress(addr: string): boolean {
 
   const groups = parseIPv6Groups(addr.toLowerCase());
   if (!groups) return false;
-  const mapped =
-    groups.slice(0, 5).every((g) => g === 0) && groups[5] === 0xffff;
-  if (mapped) {
+  if (groups.slice(0, 5).every((g) => g === 0) && groups[5] === 0xffff) {
     const [g6, g7] = groups.slice(6);
     return isPrivateAddress(`${g6 >> 8}.${g6 & 0xff}.${g7 >> 8}.${g7 & 0xff}`);
   }
@@ -249,10 +157,9 @@ async function assertSafeUrl(rawUrl: string): Promise<URL> {
   if (hostname === "localhost" || hostname.endsWith(".localhost")) {
     throw new Error(`Blocked internal hostname: ${hostname}`);
   }
-  const addresses = net.isIP(hostname)
+  for (const addr of net.isIP(hostname)
     ? [hostname]
-    : (await dnsLookup(hostname, { all: true })).map((a) => a.address);
-  for (const addr of addresses) {
+    : (await dnsLookup(hostname, { all: true })).map((a) => a.address)) {
     if (isPrivateAddress(addr))
       throw new Error(`Blocked internal address: ${addr}`);
   }
@@ -271,7 +178,7 @@ async function fetchSafely(
       redirect: "manual",
       signal: withTimeout(signal),
     });
-    if (!REDIRECT_STATUSES.has(res.status))
+    if (![301, 302, 303, 307, 308].includes(res.status))
       return { res, finalUrl: current.toString() };
     const location = res.headers.get("location");
     if (!location) return { res, finalUrl: current.toString() };
@@ -367,37 +274,41 @@ async function exaAdvancedSearch(
   numResults: number,
   signal?: AbortSignal,
 ): Promise<SearchResult[]> {
-  const text = await callMcpTool(
-    `${EXA_MCP_URL}?tools=web_search_advanced_exa`,
-    "Exa",
-    "web_search_advanced_exa",
-    {
-      query,
-      numResults,
-      type: "auto",
-      textMaxCharacters: EXA_TEXT_CHARS,
-      enableHighlights: true,
-      highlightsNumSentences: 2,
-    },
-    signal,
-  );
-  const payload = JSON.parse(text) as {
-    results?: Array<{
-      url?: string;
-      title?: string;
-      text?: string;
-      highlights?: string[];
-    }>;
-  };
-  const results = (payload.results ?? [])
+  const results = (
+    (
+      JSON.parse(
+        await callMcpTool(
+          `${EXA_MCP_URL}?tools=web_search_advanced_exa`,
+          "Exa",
+          "web_search_advanced_exa",
+          {
+            query,
+            numResults,
+            type: "auto",
+            textMaxCharacters: EXA_TEXT_CHARS,
+            enableHighlights: true,
+            highlightsNumSentences: 2,
+          },
+          signal,
+        ),
+      ) as {
+        results?: Array<{
+          url?: string;
+          title?: string;
+          text?: string;
+          highlights?: string[];
+        }>;
+      }
+    ).results ?? []
+  )
     .map((r): SearchResult => {
-      const highlights = Array.isArray(r.highlights)
-        ? r.highlights.join(" … ")
-        : "";
       return {
         title: r.title?.trim() ?? "",
         url: r.url?.trim() ?? "",
-        content: [highlights, r.text?.trim()]
+        content: [
+          Array.isArray(r.highlights) ? r.highlights.join(" … ") : "",
+          r.text?.trim(),
+        ]
           .filter(Boolean)
           .join("\n")
           .trim()
@@ -415,19 +326,18 @@ async function exaBasicSearch(
   numResults: number,
   signal?: AbortSignal,
 ): Promise<SearchResult[]> {
-  const text = await callMcpTool(
-    EXA_MCP_URL,
-    "Exa",
-    "web_search_exa",
-    { query, numResults },
-    signal,
-  );
-
-  const blocks = text.split(/(?=^Title: )/m).filter((b) => b.trim());
-  const results = blocks
+  const results = (
+    await callMcpTool(
+      EXA_MCP_URL,
+      "Exa",
+      "web_search_exa",
+      { query, numResults },
+      signal,
+    )
+  )
+    .split(/(?=^Title: )/m)
+    .filter((b) => b.trim())
     .map((block): SearchResult => {
-      const title = block.match(/^Title: (.+)/m)?.[1]?.trim() ?? "";
-      const url = block.match(/^URL: (.+)/m)?.[1]?.trim() ?? "";
       const textStart = block.indexOf("\nText: ");
       let content = "";
       if (textStart >= 0) {
@@ -441,7 +351,11 @@ async function exaBasicSearch(
         .replace(/\n---\s*$/, "")
         .trim()
         .slice(0, EXA_TEXT_CHARS);
-      return { title, url, content };
+      return {
+        title: block.match(/^Title: (.+)/m)?.[1]?.trim() ?? "",
+        url: block.match(/^URL: (.+)/m)?.[1]?.trim() ?? "",
+        content,
+      };
     })
     .filter((r) => r.url);
   if (results.length === 0)
@@ -454,23 +368,29 @@ async function parallelSearch(
   numResults: number,
   signal?: AbortSignal,
 ): Promise<SearchResult[]> {
-  const text = await callMcpTool(
-    PARALLEL_MCP_URL,
-    "Parallel",
-    "web_search",
-    { objective: query, search_queries: [query] },
-    signal,
-  );
-  const payload = JSON.parse(text) as {
-    results?: Array<{ url?: string; title?: string; excerpts?: string[] }>;
-  };
-  const results = (payload.results ?? [])
+  const results = (
+    (
+      JSON.parse(
+        await callMcpTool(
+          "https://search.parallel.ai/mcp",
+          "Parallel",
+          "web_search",
+          { objective: query, search_queries: [query] },
+          signal,
+        ),
+      ) as {
+        results?: Array<{ url?: string; title?: string; excerpts?: string[] }>;
+      }
+    ).results ?? []
+  )
     .map((r): SearchResult => {
-      const excerpts = Array.isArray(r.excerpts) ? r.excerpts : [];
       return {
         title: r.title?.trim() ?? "",
         url: r.url?.trim() ?? "",
-        content: excerpts.join("\n").trim().slice(0, EXA_TEXT_CHARS),
+        content: (Array.isArray(r.excerpts) ? r.excerpts : [])
+          .join("\n")
+          .trim()
+          .slice(0, EXA_TEXT_CHARS),
       };
     })
     .filter((r) => r.url)
@@ -536,9 +456,8 @@ function dedupKey(raw: string): { page: string; query: string } {
       if (/^(utm_|gclid|fbclid|mc_|ref$|source$)/i.test(key))
         url.searchParams.delete(key);
     }
-    const path = url.pathname.replace(/\/+$/, "");
     return {
-      page: `${url.hostname.replace(/^www\./i, "").toLowerCase()}${path}`,
+      page: `${url.hostname.replace(/^www\./i, "").toLowerCase()}${url.pathname.replace(/\/+$/, "")}`,
       query: url.search,
     };
   } catch {
@@ -575,30 +494,21 @@ function isTransient(err: unknown): boolean {
   );
 }
 
-// Order measured 2026-01 over 3 queries, median snippet per result: Exa ~4000
-// chars, Parallel 1500, DuckDuckGo 150-300. Exa is also the least reliable (a
-// 20s timeout on one query), hence the chain.
-const SEARCH_PROVIDERS: Array<{
-  name: string;
-  run: (
-    query: string,
-    numResults: number,
-    signal?: AbortSignal,
-  ) => Promise<SearchResult[]>;
-}> = [
-  { name: "exa", run: exaAdvancedSearch },
-  { name: "exa-basic", run: exaBasicSearch },
-  { name: "parallel", run: parallelSearch },
-  { name: "duckduckgo", run: duckDuckGoSearch },
-];
-
 async function runSearch(
   query: string,
   numResults: number,
   signal?: AbortSignal,
 ): Promise<{ results: SearchResult[]; provider: string }> {
   const failures: string[] = [];
-  for (const [index, provider] of SEARCH_PROVIDERS.entries()) {
+  // Order measured 2026-01 over 3 queries, median snippet per result: Exa ~4000
+  // chars, Parallel 1500, DuckDuckGo 150-300. Exa is also the least reliable (a
+  // 20s timeout on one query), hence the chain.
+  for (const [index, provider] of [
+    { name: "exa", run: exaAdvancedSearch },
+    { name: "exa-basic", run: exaBasicSearch },
+    { name: "parallel", run: parallelSearch },
+    { name: "duckduckgo", run: duckDuckGoSearch },
+  ].entries()) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         return {
@@ -608,7 +518,7 @@ async function runSearch(
       } catch (err) {
         if (signal?.aborted) throw err;
         if (index === 0 && attempt === 0 && isTransient(err)) {
-          await sleep(SEARCH_RETRY_DELAY_MS + Math.floor(Math.random() * 250));
+          await sleep(500 + Math.floor(Math.random() * 250));
           continue;
         }
         failures.push(`${provider.name}: ${errMsg(err)}`);
@@ -648,7 +558,7 @@ async function scoreCandidates(
         candidates: candidates.map((r) => ({
           title: r.title,
           url: r.url,
-          text: r.content.slice(0, RERANK_SNIPPET_CHARS),
+          text: r.content.slice(0, 600),
         })),
       },
       questions,
@@ -672,14 +582,16 @@ async function rerankResults(
   const candidates = results.slice(0, RERANK_MAX_CANDIDATES);
   const scores = await scoreCandidates(ctx, jev, query, candidates, signal);
   if (!scores) return results;
-
-  const scored = candidates
-    .map((result, i) => ({ result, i, score: scores[i] }))
-    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || a.i - b.i);
-  const kept = scored.filter(
-    (s, rank) => rank < RERANK_MIN_KEEP || (s.score ?? 0) >= RERANK_FLOOR,
+  return (
+    candidates
+      .map((result, i) => ({ result, i, score: scores[i] }))
+      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || a.i - b.i)
+      // Measured 2026-01 over 4 queries: pages that answered scored 0.54-0.98 and
+      // the rest 0.12-0.33. Before moving the floor, log scoreCandidates scores for
+      // real queries.
+      .filter((s, rank) => rank < 3 || (s.score ?? 0) >= 0.35)
+      .map((s) => s.result)
   );
-  return kept.map((s) => s.result);
 }
 
 async function readBoundedText(
@@ -721,7 +633,7 @@ function sliceWithContinuation(
 } {
   const totalChars = content.length;
   const start = Math.min(Math.max(offset, 0), totalChars);
-  let end = Math.min(start + MAX_CONTENT_CHARS, totalChars);
+  let end = Math.min(start + 15_000, totalChars);
   if (end < totalChars) {
     const minBreak = start + Math.floor((end - start) * 0.9);
     const lastNewline = content.lastIndexOf("\n", end);
@@ -786,7 +698,9 @@ async function fetchReadable(
   const { res, finalUrl } = await fetchSafely(
     url,
     signal,
-    mode === "raw" ? ACCEPT_RAW : ACCEPT_HTML,
+    mode === "raw"
+      ? "application/json,text/plain;q=0.9,*/*;q=0.8"
+      : ACCEPT_HTML,
   );
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
 
@@ -800,8 +714,15 @@ async function fetchReadable(
   const contentType = res.headers.get("content-type") ?? "";
   const baseType = contentType.split(";")[0].trim().toLowerCase();
   if (
-    BINARY_CONTENT_TYPES.test(baseType) ||
-    UNSUPPORTED_CONTENT_TYPES.has(baseType)
+    /^(image|audio|video|font)\//i.test(baseType) ||
+    [
+      "application/octet-stream",
+      "application/zip",
+      "application/pdf",
+      "application/gzip",
+      "application/x-tar",
+      "application/x-7z-compressed",
+    ].includes(baseType)
   ) {
     throw new Error(`Unsupported content type: ${baseType || "unknown"}`);
   }
@@ -838,7 +759,17 @@ function parseYouTubeVideoId(rawUrl: string): string | null {
   } catch {
     return null;
   }
-  if (!YOUTUBE_HOSTS.has(url.hostname.toLowerCase())) return null;
+  if (
+    ![
+      "youtube.com",
+      "www.youtube.com",
+      "m.youtube.com",
+      "music.youtube.com",
+      "youtu.be",
+      "www.youtu.be",
+    ].includes(url.hostname.toLowerCase())
+  )
+    return null;
 
   const segments = url.pathname.split("/").filter(Boolean);
   const candidates: Array<string | undefined> = [
@@ -846,11 +777,14 @@ function parseYouTubeVideoId(rawUrl: string): string | null {
   ];
   if (url.hostname.toLowerCase().endsWith("youtu.be"))
     candidates.push(segments[0]);
-  if (segments.length >= 2 && YOUTUBE_PATH_PREFIXES.includes(segments[0]))
+  if (
+    segments.length >= 2 &&
+    ["shorts", "embed", "live", "v"].includes(segments[0])
+  )
     candidates.push(segments[1]);
 
   for (const candidate of candidates) {
-    if (candidate && YOUTUBE_ID.test(candidate)) return candidate;
+    if (candidate && /^[A-Za-z0-9_-]{11}$/.test(candidate)) return candidate;
   }
   return null;
 }
@@ -950,10 +884,10 @@ async function downloadSubtitleFile(
     YT_DLP_TIMEOUT_MS,
     signal,
   );
-  const files = readdirSync(dir)
+  const best = readdirSync(dir)
     .filter((f) => f.endsWith(".vtt"))
-    .sort();
-  const best = files.sort((a, b) => a.length - b.length)[0];
+    .sort()
+    .sort((a, b) => a.length - b.length)[0];
   return best ? join(dir, best) : null;
 }
 
@@ -1022,7 +956,7 @@ async function fetchYouTubeTranscript(
     let subtitleFile = await downloadSubtitleFile(
       dir,
       videoId,
-      YT_PREFERRED_SUB_LANGS,
+      "en-orig,en,en-US,en-GB",
       signal,
     );
     if (!subtitleFile) {
@@ -1042,20 +976,20 @@ async function fetchYouTubeTranscript(
     if (!transcript) throw new Error("subtitle track was empty");
 
     const info = readVideoMetadata(dir);
-    const title =
-      typeof info.title === "string" ? info.title : `YouTube ${videoId}`;
-    const header = [
-      typeof info.channel === "string" ? `Channel: ${info.channel}` : null,
-      typeof info.duration_string === "string"
-        ? `Duration: ${info.duration_string}`
-        : null,
-      `Transcript language: ${subtitleFile.match(/\.([A-Za-z0-9_-]+)\.vtt$/)?.[1] ?? "unknown"}`,
-      "Timestamps removed.",
-    ]
-      .filter(Boolean)
-      .join("\n");
 
-    return { title, content: `${header}\n\n${transcript}` };
+    return {
+      title: typeof info.title === "string" ? info.title : `YouTube ${videoId}`,
+      content: `${[
+        typeof info.channel === "string" ? `Channel: ${info.channel}` : null,
+        typeof info.duration_string === "string"
+          ? `Duration: ${info.duration_string}`
+          : null,
+        `Transcript language: ${subtitleFile.match(/\.([A-Za-z0-9_-]+)\.vtt$/)?.[1] ?? "unknown"}`,
+        "Timestamps removed.",
+      ]
+        .filter(Boolean)
+        .join("\n")}\n\n${transcript}`,
+    };
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -1083,7 +1017,27 @@ function parseGitHubUrl(rawUrl: string): GitHubUrlInfo | null {
   if (segments.length < 2) return null;
   const owner = segments[0];
   const repo = segments[1].replace(/\.git$/, "");
-  if (NON_CODE_SEGMENTS.has(segments[2]?.toLowerCase())) return null;
+  if (
+    [
+      "issues",
+      "pull",
+      "pulls",
+      "discussions",
+      "releases",
+      "wiki",
+      "actions",
+      "settings",
+      "security",
+      "projects",
+      "compare",
+      "commits",
+      "tags",
+      "branches",
+      "network",
+      "forks",
+    ].includes(segments[2]?.toLowerCase())
+  )
+    return null;
 
   if (segments.length === 2)
     return { owner, repo, refIsFullSha: false, type: "root" };
@@ -1134,7 +1088,7 @@ function execGitClone(args: string[], signal?: AbortSignal): Promise<void> {
       "git",
       args,
       {
-        timeout: CLONE_TIMEOUT_MS,
+        timeout: 30_000,
         env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "echo" },
       },
       (err) => (err ? reject(err) : resolve()),
@@ -1186,16 +1140,43 @@ async function cloneGitHubRepo(
 function resolveWithinRepo(root: string, rel: string): string | null {
   const normalizedRoot = resolvePath(root);
   const candidate = resolvePath(normalizedRoot, rel);
-  const prefix = normalizedRoot.endsWith(pathSep)
-    ? normalizedRoot
-    : normalizedRoot + pathSep;
-  if (candidate !== normalizedRoot && !candidate.startsWith(prefix))
+  if (
+    candidate !== normalizedRoot &&
+    !candidate.startsWith(
+      normalizedRoot.endsWith(pathSep)
+        ? normalizedRoot
+        : normalizedRoot + pathSep,
+    )
+  )
     return null;
   return candidate;
 }
 
 function isBinaryFile(path: string): boolean {
-  if (BINARY_EXTENSIONS.has(extname(path).toLowerCase())) return true;
+  if (
+    [
+      ".png",
+      ".jpg",
+      ".jpeg",
+      ".gif",
+      ".ico",
+      ".webp",
+      ".svg",
+      ".mp4",
+      ".mp3",
+      ".zip",
+      ".gz",
+      ".pdf",
+      ".woff",
+      ".woff2",
+      ".ttf",
+      ".exe",
+      ".dll",
+      ".so",
+      ".dylib",
+    ].includes(extname(path).toLowerCase())
+  )
+    return true;
   try {
     const fd = openSync(path, "r");
     const buf = Buffer.alloc(512);
@@ -1230,7 +1211,19 @@ function buildRepoTree(root: string): string {
         continue;
       }
       if (stat.isDirectory()) {
-        if (NOISE_DIRS.has(item)) {
+        if (
+          [
+            "node_modules",
+            "vendor",
+            ".next",
+            "dist",
+            "build",
+            "__pycache__",
+            ".venv",
+            "venv",
+            ".git",
+          ].includes(item)
+        ) {
           entries.push(`${relPath}/ [skipped]`);
           continue;
         }
@@ -1287,12 +1280,11 @@ function describeGithubPath(root: string, info: GitHubUrlInfo): string {
 
   const stat = statSync(target);
   if (stat.isDirectory()) {
-    const items = readdirSync(target)
-      .sort()
-      .filter((i) => i !== ".git");
     lines.push(`## ${path || "/"}`);
     lines.push(
-      items
+      readdirSync(target)
+        .sort()
+        .filter((i) => i !== ".git")
         .map((i) => {
           const s = statSync(join(target, i));
           return s.isDirectory() ? `  ${i}/` : `  ${i} (${s.size}B)`;
@@ -1367,14 +1359,12 @@ async function fetchGitHubIssue(
     body?: string | null;
     pull_request?: unknown;
   };
-
-  const kind = issue.pull_request ? "Pull request" : "Issue";
   const labels = (issue.labels ?? [])
     .map((l) => l.name)
     .filter(Boolean)
     .join(", ");
   const lines = [
-    `${kind} ${ref.owner}/${ref.repo}#${issue.number}: ${issue.title}`,
+    `${issue.pull_request ? "Pull request" : "Issue"} ${ref.owner}/${ref.repo}#${issue.number}: ${issue.title}`,
     `State: ${issue.state}${issue.state_reason ? ` (${issue.state_reason})` : ""}`,
     `Author: ${issue.user?.login ?? "unknown"}`,
     labels ? `Labels: ${labels}` : null,
@@ -1386,7 +1376,7 @@ async function fetchGitHubIssue(
   if ((issue.comments ?? 0) > 0) {
     const { stdout: commentsJson } = await execCapture(
       "gh",
-      ["api", `${base}/comments?per_page=${MAX_ISSUE_COMMENTS}`],
+      ["api", `${base}/comments?per_page=${30}`],
       GH_TIMEOUT_MS,
       signal,
     );
@@ -1452,12 +1442,14 @@ async function fetchOne(
   const gh = mode === "raw" ? null : parseGitHubUrl(url);
   if (gh && !gh.refIsFullSha) {
     try {
-      const root = await cloneGitHubRepo(gh.owner, gh.repo, gh.ref, signal);
       return {
         title: gh.path
           ? `${gh.owner}/${gh.repo} - ${gh.path}`
           : `${gh.owner}/${gh.repo}`,
-        content: describeGithubPath(root, gh),
+        content: describeGithubPath(
+          await cloneGitHubRepo(gh.owner, gh.repo, gh.ref, signal),
+          gh,
+        ),
       };
     } catch {
       // fall through to HTML fetch below
@@ -1481,7 +1473,7 @@ async function fetchOneCached(
 ): Promise<{ title: string; content: string }> {
   const key = `${mode}:${url}`;
   const hit = extractCache.get(key);
-  if (hit && Date.now() - hit.storedAt < EXTRACT_CACHE_TTL_MS) {
+  if (hit && Date.now() - hit.storedAt < 5 * 60_000) {
     extractCache.delete(key);
     extractCache.set(key, hit);
     return { title: hit.title, content: hit.content };
@@ -1489,9 +1481,9 @@ async function fetchOneCached(
   extractCache.delete(key);
 
   const extracted = await fetchOne(url, signal, mode);
-  if (extracted.content.length <= EXTRACT_CACHE_MAX_CHARS) {
+  if (extracted.content.length <= 2_000_000) {
     extractCache.set(key, { ...extracted, storedAt: Date.now() });
-    while (extractCache.size > EXTRACT_CACHE_MAX_ENTRIES) {
+    while (extractCache.size > 16) {
       const oldest = extractCache.keys().next().value;
       if (oldest === undefined) break;
       extractCache.delete(oldest);
@@ -1501,40 +1493,6 @@ async function fetchOneCached(
 }
 
 const nonEmptyText = Type.String({ minLength: 1 });
-const searchQueries = Type.Array(nonEmptyText, {
-  minItems: 1,
-  description: "Varied queries for broad research.",
-});
-// Root must be a plain Type.Object: pi-ai sends Anthropic only the root
-// `properties`, so an Intersect or Union root reaches the model as `{}`.
-const searchParameters = Type.Object({
-  query: Type.Optional(nonEmptyText),
-  queries: Type.Optional(searchQueries),
-  numResults: Type.Optional(
-    Type.Number({
-      minimum: 1,
-      maximum: 10,
-      default: 5,
-      description: "Keep the default of 5 unless the task needs breadth.",
-    }),
-  ),
-});
-const fetchUrls = Type.Array(nonEmptyText, {
-  minItems: 1,
-  description: "URLs to fetch in one call.",
-});
-const fetchParameters = Type.Object({
-  url: Type.Optional(nonEmptyText),
-  urls: Type.Optional(fetchUrls),
-  mode: Type.Optional(
-    Type.Union([Type.Literal("readable"), Type.Literal("raw")], {
-      default: "readable",
-      description:
-        'Use "raw" for the unprocessed body when the target is JSON or the extraction looks wrong.',
-    }),
-  ),
-  offset: Type.Optional(Type.Number({ minimum: 0, default: 0 })),
-});
 
 function errorLine(
   name: string,
@@ -1542,9 +1500,14 @@ function errorLine(
   theme: Theme,
 ): Text {
   const text = result.content.find((c) => c.type === "text")?.text ?? "";
-  const line =
-    text.split("\n").find((l) => /error/i.test(l)) ?? text.split("\n")[0];
-  return new Text(theme.fg("error", `  ${name} — ${line ?? "failed"}`), 0, 0);
+  return new Text(
+    theme.fg(
+      "error",
+      `  ${name} — ${text.split("\n").find((l) => /error/i.test(l)) ?? text.split("\n")[0] ?? "failed"}`,
+    ),
+    0,
+    0,
+  );
 }
 
 export default function (pi: ExtensionAPI) {
@@ -1566,8 +1529,7 @@ export default function (pi: ExtensionAPI) {
     renderResult(result, _options, theme: Theme, context) {
       if (context.isError) return errorLine("web_search", result, theme);
       const d = result.details as
-        | { queries?: string[]; totalResults?: number }
-        | undefined;
+        { queries?: string[]; totalResults?: number } | undefined;
       return new Text(
         theme.fg(
           "dim",
@@ -1577,7 +1539,25 @@ export default function (pi: ExtensionAPI) {
         0,
       );
     },
-    parameters: searchParameters,
+    // Root must be a plain Type.Object: pi-ai sends Anthropic only the root
+    // `properties`, so an Intersect or Union root reaches the model as `{}`.
+    parameters: Type.Object({
+      query: Type.Optional(nonEmptyText),
+      queries: Type.Optional(
+        Type.Array(nonEmptyText, {
+          minItems: 1,
+          description: "Varied queries for broad research.",
+        }),
+      ),
+      numResults: Type.Optional(
+        Type.Number({
+          minimum: 1,
+          maximum: 10,
+          default: 5,
+          description: "Keep the default of 5 unless the task needs breadth.",
+        }),
+      ),
+    }),
     outputSchema: Type.Object({
       queries: Type.Array(
         Type.Object({
@@ -1621,23 +1601,25 @@ export default function (pi: ExtensionAPI) {
       );
 
       const jev = await findJev(ctx);
-      const fetchCount = jev
-        ? Math.min(numResults * 2, RERANK_MAX_CANDIDATES)
-        : numResults;
 
       const queryResults = await mapLimit(queryList, 4, async (query) => {
         try {
           const { results, provider } = await runSearch(
             query,
-            fetchCount,
+            jev ? Math.min(numResults * 2, RERANK_MAX_CANDIDATES) : numResults,
             signal,
           );
-          const ranked = (
-            await rerankResults(ctx, jev, query, dedupResults(results), signal)
-          ).slice(0, numResults);
           return {
             query,
-            results: ranked,
+            results: (
+              await rerankResults(
+                ctx,
+                jev,
+                query,
+                dedupResults(results),
+                signal,
+              )
+            ).slice(0, numResults),
             provider,
             error: null as string | null,
           };
@@ -1653,11 +1635,9 @@ export default function (pi: ExtensionAPI) {
 
       let output = "";
       let totalResults = 0;
-      const fellBack = queryResults.some((r) => r.provider === "duckduckgo");
-      if (fellBack)
+      if (queryResults.some((r) => r.provider === "duckduckgo"))
         output +=
           "Note: fallback search for at least one query. Snippets are shorter than usual, so fetch a result before concluding.\n\n";
-      const seen = new Map<string, Set<string>>();
       const structured: {
         query: string;
         results: { title: string; url: string; content: string }[];
@@ -1670,7 +1650,7 @@ export default function (pi: ExtensionAPI) {
           output += `0 results (error: ${error})\n\n`;
           continue;
         }
-        const results = dedupResults(raw, seen);
+        const results = dedupResults(raw, new Map<string, Set<string>>());
         structured.push({
           query,
           results: results.map(({ title, url, content }) => ({
@@ -1733,7 +1713,23 @@ export default function (pi: ExtensionAPI) {
         0,
       );
     },
-    parameters: fetchParameters,
+    parameters: Type.Object({
+      url: Type.Optional(nonEmptyText),
+      urls: Type.Optional(
+        Type.Array(nonEmptyText, {
+          minItems: 1,
+          description: "URLs to fetch in one call.",
+        }),
+      ),
+      mode: Type.Optional(
+        Type.Union([Type.Literal("readable"), Type.Literal("raw")], {
+          default: "readable",
+          description:
+            'Use "raw" for the unprocessed body when the target is JSON or the extraction looks wrong.',
+        }),
+      ),
+      offset: Type.Optional(Type.Number({ minimum: 0, default: 0 })),
+    }),
     outputSchema: Type.Object({
       pages: Type.Array(
         Type.Object({
@@ -1766,16 +1762,22 @@ export default function (pi: ExtensionAPI) {
           isError: true,
         };
       }
-      const mode = params.mode === "raw" ? "raw" : "readable";
-      const offset = Math.max(Math.floor(params.offset ?? 0), 0);
 
       const results = await mapLimit(urlList, 3, async (url) => {
         try {
-          const { title, content } = await fetchOneCached(url, signal, mode);
+          const { title, content } = await fetchOneCached(
+            url,
+            signal,
+            params.mode === "raw" ? "raw" : "readable",
+          );
           return {
             url,
             title,
-            content: withContinuationFooter(content, offset, url),
+            content: withContinuationFooter(
+              content,
+              Math.max(Math.floor(params.offset ?? 0), 0),
+              url,
+            ),
             error: null as string | null,
           };
         } catch (err) {
@@ -1783,16 +1785,19 @@ export default function (pi: ExtensionAPI) {
         }
       });
 
-      const output = results
-        .map((r) =>
-          r.error
-            ? `## ${r.url}\nError: ${r.error}`
-            : `## ${r.title}\n${r.url}\n\n${r.content}`,
-        )
-        .join("\n\n---\n\n");
-
       return {
-        content: [{ type: "text", text: output }],
+        content: [
+          {
+            type: "text",
+            text: results
+              .map((r) =>
+                r.error
+                  ? `## ${r.url}\nError: ${r.error}`
+                  : `## ${r.title}\n${r.url}\n\n${r.content}`,
+              )
+              .join("\n\n---\n\n"),
+          },
+        ],
         details: { urls: urlList, ok: results.filter((r) => !r.error).length },
         structuredContent: { pages: results },
         ...(results.every((r) => r.error) ? { isError: true } : {}),

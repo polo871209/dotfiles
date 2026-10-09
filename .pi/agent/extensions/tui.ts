@@ -19,21 +19,20 @@ import {
 } from "@earendil-works/pi-tui";
 
 const SGR_RESET = "\x1b[0m";
-const BORDER =
-  /^(?:\x1b\[[0-9;]*m)*(?:─+|[↑↓]\s*\d+\s*more)(?:\x1b\[[0-9;]*m)*$/;
 
 const colorInputLine = (line: string, theme: PiTheme) => {
-  if (BORDER.test(line)) return line;
+  if (
+    /^(?:\x1b\[[0-9;]*m)*(?:─+|[↑↓]\s*\d+\s*more)(?:\x1b\[[0-9;]*m)*$/.test(
+      line,
+    )
+  )
+    return line;
   const input = theme.getFgAnsi("text");
   return `${input}${line.replaceAll(SGR_RESET, `${SGR_RESET}${input}`)}${SGR_RESET}`;
 };
 
-const OVERLAY_BG = "\x1b[48;2;60;56;54m";
-
 const wrapWithBg = (line: string, width: number, bg: string): string => {
-  const re = line.replaceAll(SGR_RESET, `${SGR_RESET}${bg}`);
-  const filler = " ".repeat(Math.max(0, width - visibleWidth(line)));
-  return `${bg}${re}${filler}${SGR_RESET}`;
+  return `${bg}${line.replaceAll(SGR_RESET, `${SGR_RESET}${bg}`)}${" ".repeat(Math.max(0, width - visibleWidth(line)))}${SGR_RESET}`;
 };
 
 // Structural view of pi-tui's SelectList. `renderItem` and
@@ -94,11 +93,16 @@ class DropdownOverlay implements Component {
 
   render(width: number): string[] {
     if (!isAutocompleteOpen(this.editor)) return [];
-    const list = this.editor.autocompleteList as SelectListLike;
-    const bg =
-      this.editor.getTheme?.().getBgAnsi("userMessageBg") ?? OVERLAY_BG;
-    return this.renderList(list, width).map((line) =>
-      wrapWithBg(line, width, bg),
+    return this.renderList(
+      this.editor.autocompleteList as SelectListLike,
+      width,
+    ).map((line) =>
+      wrapWithBg(
+        line,
+        width,
+        this.editor.getTheme?.().getBgAnsi("userMessageBg") ??
+          "\x1b[48;2;60;56;54m",
+      ),
     );
   }
 
@@ -125,11 +129,8 @@ class DropdownOverlay implements Component {
     else if (selected >= top + maxVisible) top = selected - maxVisible + 1;
     top = Math.max(0, Math.min(top, count - maxVisible));
     this.viewport.top = top;
-
-    const end = Math.min(top + maxVisible, count);
-    const primaryColumnWidth = list.getPrimaryColumnWidth();
     const lines: string[] = [];
-    for (let i = top; i < end; i++) {
+    for (let i = top; i < Math.min(top + maxVisible, count); i++) {
       const item = items[i];
       if (!item) continue;
       lines.push(
@@ -140,14 +141,15 @@ class DropdownOverlay implements Component {
           item.description
             ? normalizeToSingleLine(item.description)
             : undefined,
-          primaryColumnWidth,
+          list.getPrimaryColumnWidth(),
         ),
       );
     }
     if (count > maxVisible) {
-      const scrollText = `  (${selected + 1}/${count})`;
       lines.push(
-        list.theme.scrollInfo(truncateToWidth(scrollText, width - 2, "")),
+        list.theme.scrollInfo(
+          truncateToWidth(`  (${selected + 1}/${count})`, width - 2, ""),
+        ),
       );
     }
     return lines;
@@ -159,10 +161,9 @@ class DropdownOverlay implements Component {
     if (event.type === "wheel") return list.handleMouse?.(event);
     if (event.button !== "left") return undefined;
     if (event.type !== "press" && event.type !== "click") return undefined;
-    const items = list.filteredItems;
-    const top = this.viewport?.list === list ? this.viewport.top : 0;
-    const index = top + event.y;
-    const item = items?.[index];
+    const index =
+      (this.viewport?.list === list ? this.viewport.top : 0) + event.y;
+    const item = list.filteredItems?.[index];
     if (!item || event.y >= (list.maxVisible ?? 0)) return { handled: true };
     list.setSelectedIndex?.(index);
     if (event.type === "click") list.onSelect?.(item);
@@ -171,8 +172,6 @@ class DropdownOverlay implements Component {
 
   invalidate() {}
 }
-
-const FOOTER_ROWS = 1;
 
 const syncOverlay = (editor: EditorWithOverlay, editorHeight: number) => {
   const tui = editor.tui;
@@ -196,7 +195,7 @@ const syncOverlay = (editor: EditorWithOverlay, editorHeight: number) => {
     editor.__overlay = s;
   }
 
-  s.opts.offsetY = -(FOOTER_ROWS + editorHeight);
+  s.opts.offsetY = -(1 + editorHeight);
   s.opts.maxHeight = (editor.autocompleteMaxVisible ?? 5) + 1;
 
   if (isAutocompleteOpen(editor)) {
@@ -228,7 +227,6 @@ class ThemedEditor extends CustomEditor {
   }
 
   render(width: number): string[] {
-    const theme = this.getTheme();
     // autocompleteState is private in pi-tui, hence the cast.
     const self = this as unknown as EditorWithOverlay;
     const state = self.autocompleteState;
@@ -244,7 +242,7 @@ class ThemedEditor extends CustomEditor {
       lines = super.render(width);
     }
     syncOverlay(self, lines.length);
-    return lines.map((line) => colorInputLine(line, theme));
+    return lines.map((line) => colorInputLine(line, this.getTheme()));
   }
 }
 
@@ -291,11 +289,13 @@ const installWorking = (pi: ExtensionAPI) => {
     const started = Date.now();
     const tick = () => {
       const s = Math.round((Date.now() - started) / 1000);
-      const elapsed =
-        s < 60
-          ? `${s}s`
-          : `${Math.floor(s / 60)}m${(s % 60).toString().padStart(2, "0")}s`;
-      ctx.ui.setWorkingMessage(`working · ${elapsed}`);
+      ctx.ui.setWorkingMessage(
+        `working · ${
+          s < 60
+            ? `${s}s`
+            : `${Math.floor(s / 60)}m${(s % 60).toString().padStart(2, "0")}s`
+        }`,
+      );
     };
     tick();
     timer = setInterval(tick, 1000);
@@ -341,8 +341,7 @@ const installFooter = (pi: ExtensionAPI) => {
         if (ctx.model?.reasoning) {
           const lvl = String(pi.getThinkingLevel() ?? "off");
           thinkingText = lvl === "off" ? "thinking off" : lvl;
-          const cap = lvl.charAt(0).toUpperCase() + lvl.slice(1);
-          thinkingKey = `thinking${cap}`;
+          thinkingKey = `thinking${lvl.charAt(0).toUpperCase() + lvl.slice(1)}`;
         }
 
         const usage = ctx.getContextUsage?.();
@@ -352,13 +351,17 @@ const installFooter = (pi: ExtensionAPI) => {
             : "";
 
         if (process.env.PI_IS_SUBAGENT === "1") {
-          const subLeft = [
-            usageText,
-            thinkingText ? `${modelName} • ${thinkingText}` : modelName,
-          ]
-            .filter(Boolean)
-            .join("   ");
-          return [theme.fg("dim", subLeft)];
+          return [
+            theme.fg(
+              "dim",
+              [
+                usageText,
+                thinkingText ? `${modelName} • ${thinkingText}` : modelName,
+              ]
+                .filter(Boolean)
+                .join("   "),
+            ),
+          ];
         }
 
         const statuses = footerData.getExtensionStatuses();
@@ -380,33 +383,33 @@ const installFooter = (pi: ExtensionAPI) => {
         ]
           .filter(Boolean)
           .join("   ");
-        const modelColored = thinkingKey
-          ? `${theme.fg("dim", `${modelName} • `)}${theme.fg(thinkingKey as never, thinkingText)}`
-          : theme.fg("dim", modelName);
         const dimLeft =
           theme.fg("dim", `${pwd}   `) +
           (usageText ? theme.fg("dim", `${usageText}   `) : "") +
-          modelColored +
+          (thinkingKey
+            ? `${theme.fg("dim", `${modelName} • `)}${theme.fg(thinkingKey as never, thinkingText)}`
+            : theme.fg("dim", modelName)) +
           (larkColored ? `   ${larkColored}` : "") +
           (gwsColored ? `   ${gwsColored}` : "");
 
         const sessionName = ctx.sessionManager.getSessionName?.() ?? "";
         const rightPlain = sessionName;
-        const rightColored = theme.fg("dim", sessionName);
 
         const lw = visibleWidth(leftPlain);
         const rw = visibleWidth(rightPlain);
         let line: string;
         if (lw + 2 + rw <= width) {
-          line = dimLeft + " ".repeat(width - lw - rw) + rightColored;
+          line =
+            dimLeft +
+            " ".repeat(width - lw - rw) +
+            theme.fg("dim", sessionName);
         } else if (lw < width) {
           const avail = width - lw - 2;
           const truncR =
             avail > 0 ? truncateToWidth(rightPlain, avail, "") : "";
-          const truncRw = visibleWidth(truncR);
           line =
             dimLeft +
-            " ".repeat(Math.max(0, width - lw - truncRw)) +
+            " ".repeat(Math.max(0, width - lw - visibleWidth(truncR))) +
             theme.fg("dim", truncR);
         } else {
           line = theme.fg("dim", truncateToWidth(leftPlain, width, "..."));

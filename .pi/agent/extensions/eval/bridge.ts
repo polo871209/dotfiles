@@ -93,10 +93,15 @@ async function handleRequest(
     send(res, 200, { ok: false, error: `no active session: ${body.session}` });
     return;
   }
-  const signal = currentSignals.get(body.session);
   try {
-    const value = await handler(body.name, body.args, signal);
-    send(res, 200, { ok: true, value });
+    send(res, 200, {
+      ok: true,
+      value: await handler(
+        body.name,
+        body.args,
+        currentSignals.get(body.session),
+      ),
+    });
   } catch (err) {
     send(res, 200, {
       ok: false,

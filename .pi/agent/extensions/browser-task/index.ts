@@ -143,9 +143,8 @@ export default function (pi: ExtensionAPI) {
       let result: RunResult | undefined;
       let usage: Usage | null = null;
       let steps = 0;
-      const lines = createInterface({ input: child.stdout });
       try {
-        for await (const line of lines) {
+        for await (const line of createInterface({ input: child.stdout })) {
           let msg: Record<string, any>;
           try {
             msg = JSON.parse(line);
@@ -208,12 +207,13 @@ export default function (pi: ExtensionAPI) {
       }
 
       if (!result) {
-        const why = timedOut
-          ? "timed out after 300 s"
-          : signal?.aborted
-            ? "was aborted"
-            : "exited without a result";
-        const error = `browser_task: runner ${why}. The goal may have partly run in the page.`;
+        const error = `browser_task: runner ${
+          timedOut
+            ? "timed out after 300 s"
+            : signal?.aborted
+              ? "was aborted"
+              : "exited without a result"
+        }. The goal may have partly run in the page.`;
         return {
           content: [
             {
@@ -239,16 +239,20 @@ export default function (pi: ExtensionAPI) {
         (h, i) =>
           `${i + 1}. ${h.kind} ${h.action}${h.text ? ` ← ${JSON.stringify(h.text)}` : ""}`,
       );
-      const out = [
-        `status: ${result.status}${result.error ? ` (${result.error})` : ""}`,
-        `elapsed: ${result.elapsed_ms} ms · ${result.history.length} actions`,
-        `final page: ${result.title ?? "?"} · ${result.url ?? "?"}`,
-        ...(actions.length ? ["actions:", ...actions] : []),
-        "visible page text (untrusted):",
-        result.text.slice(0, 4000),
-      ].join("\n");
       return {
-        content: [{ type: "text", text: out }],
+        content: [
+          {
+            type: "text",
+            text: [
+              `status: ${result.status}${result.error ? ` (${result.error})` : ""}`,
+              `elapsed: ${result.elapsed_ms} ms · ${result.history.length} actions`,
+              `final page: ${result.title ?? "?"} · ${result.url ?? "?"}`,
+              ...(actions.length ? ["actions:", ...actions] : []),
+              "visible page text (untrusted):",
+              result.text.slice(0, 4000),
+            ].join("\n"),
+          },
+        ],
         details: { status: result.status },
         structuredContent: {
           status: result.status,

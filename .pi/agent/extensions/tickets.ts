@@ -15,8 +15,6 @@ import {
 } from "@earendil-works/pi-tui";
 
 const ENTRY_TYPE = "tickets";
-const COMPACT_ABOVE_TOKENS = 300_000;
-const PANEL_MIN_TERMINAL_WIDTH = 100;
 
 type Snapshot = { tickets: string[] };
 
@@ -148,8 +146,7 @@ class TicketPanel implements Component {
     const inner = Math.max(1, width - 4);
     const row = (content: string) => {
       const fitted = truncateToWidth(content, inner);
-      const pad = " ".repeat(Math.max(0, inner - visibleWidth(fitted)));
-      return `${border("│")} ${fitted}${pad} ${border("│")}`;
+      return `${border("│")} ${fitted}${" ".repeat(Math.max(0, inner - visibleWidth(fitted)))} ${border("│")}`;
     };
 
     const title = ` Tickets ${tickets.length} `;
@@ -161,12 +158,16 @@ class TicketPanel implements Component {
     if (tickets.length === 0) lines.push(row(th.fg("dim", "empty")));
     tickets.forEach((ticket, i) => {
       const selected = focused && i === this.cursor;
-      const marker = selected ? th.fg("accent", "›") : " ";
       const label = `${i + 1}. ${oneLine(ticket)}`;
-      const text = selected
-        ? th.fg("accent", label)
-        : th.fg(i === 0 ? "text" : "muted", label);
-      lines.push(row(`${marker}${text}`));
+      lines.push(
+        row(
+          `${selected ? th.fg("accent", "›") : " "}${
+            selected
+              ? th.fg("accent", label)
+              : th.fg(i === 0 ? "text" : "muted", label)
+          }`,
+        ),
+      );
     });
     if (focused) {
       lines.push(row(th.fg("dim", "↑↓ select  ⇧↑↓ move  t top")));
@@ -199,38 +200,36 @@ export default function tickets(pi: ExtensionAPI): void {
     ui?.notify(`Ticket ${queue.length} queued`, "info");
   };
 
-  const actions = {
-    move(from: number, to: number) {
-      const [ticket] = queue.splice(from, 1);
-      queue.splice(to, 0, ticket!);
-      changed();
-    },
-    remove(index: number) {
-      queue.splice(index, 1);
-      changed();
-    },
-    async edit(index: number) {
-      const before = queue[index];
-      if (before === undefined || !ui) return;
-      panel?.blur();
-      const after = (
-        await ui.editor(`Edit ticket ${index + 1}`, before)
-      )?.trim();
-      if (after && queue[index] === before) {
-        queue[index] = after;
-        changed();
-      }
-      panel?.focus();
-    },
-  };
-
   // pi-tui returns focus to whatever held it when the overlay opened, so managing reopens it from the editor.
   const openPanel = (ctx: ExtensionContext, manage: boolean) => {
     if (ctx.mode !== "tui") return;
     closePanel();
     void ctx.ui.custom<void>(
       (tui, theme, _keybindings, done) => {
-        const opened = new TicketPanel(tui, theme, () => queue, actions);
+        const opened = new TicketPanel(tui, theme, () => queue, {
+          move(from: number, to: number) {
+            const [ticket] = queue.splice(from, 1);
+            queue.splice(to, 0, ticket!);
+            changed();
+          },
+          remove(index: number) {
+            queue.splice(index, 1);
+            changed();
+          },
+          async edit(index: number) {
+            const before = queue[index];
+            if (before === undefined || !ui) return;
+            panel?.blur();
+            const after = (
+              await ui.editor(`Edit ticket ${index + 1}`, before)
+            )?.trim();
+            if (after && queue[index] === before) {
+              queue[index] = after;
+              changed();
+            }
+            panel?.focus();
+          },
+        });
         panel = opened;
         closePanel = () => {
           closePanel = () => {};
@@ -249,7 +248,7 @@ export default function tickets(pi: ExtensionAPI): void {
           nonCapturing: true,
           visible: (termWidth) =>
             (panel?.managing ?? false) ||
-            (queue.length > 0 && termWidth >= PANEL_MIN_TERMINAL_WIDTH),
+            (queue.length > 0 && termWidth >= 100),
         },
         onHandle: (handle) => {
           if (!panel) return;
@@ -275,7 +274,7 @@ export default function tickets(pi: ExtensionAPI): void {
       return;
     }
     const tokens = ctx.getContextUsage()?.tokens ?? 0;
-    if (tokens > COMPACT_ABOVE_TOKENS) {
+    if (tokens > 300_000) {
       ctx.ui.notify(
         `Context is ${Math.round(tokens / 1000)}k tokens. Compacting before the next ticket.`,
         "info",

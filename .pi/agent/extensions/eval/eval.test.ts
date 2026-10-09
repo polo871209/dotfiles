@@ -24,11 +24,6 @@ afterEach(() => {
   for (const reg of registrations.splice(0)) reg.unregister();
 });
 
-const doubleHandler = async (name: string, args: unknown) => {
-  if (name === "double") return Number((args as { x: number }).x) * 2;
-  throw new Error("unknown");
-};
-
 async function makeKernel<K>(
   Cls: new (opts: {
     bridgeUrl: string;
@@ -36,7 +31,10 @@ async function makeKernel<K>(
     bridgeSession: string;
   }) => K,
 ): Promise<K> {
-  const reg = await register(doubleHandler);
+  const reg = await register(async (name: string, args: unknown) => {
+    if (name === "double") return Number((args as { x: number }).x) * 2;
+    throw new Error("unknown");
+  });
   return new Cls({
     bridgeUrl: reg.url,
     bridgeToken: reg.token,
@@ -47,12 +45,16 @@ async function makeKernel<K>(
 describe("bridge", () => {
   it("rejects requests without a valid bearer token", async () => {
     const reg = await register(async () => "never reached");
-    const res = await fetch(`${reg.url}/v1/tool`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session: reg.session, name: "x", args: {} }),
-    });
-    assert.equal(res.status, 403);
+    assert.equal(
+      (
+        await fetch(`${reg.url}/v1/tool`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session: reg.session, name: "x", args: {} }),
+        })
+      ).status,
+      403,
+    );
     reg.unregister();
   });
 
@@ -60,19 +62,20 @@ describe("bridge", () => {
     const reg = await register(async (name, args) => ({
       echoed: { name, args },
     }));
-    const res = await fetch(`${reg.url}/v1/tool`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${reg.token}`,
-      },
-      body: JSON.stringify({
-        session: reg.session,
-        name: "ping",
-        args: { a: 1 },
-      }),
-    });
-    const body = (await res.json()) as { ok: boolean; value: unknown };
+    const body = (await (
+      await fetch(`${reg.url}/v1/tool`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${reg.token}`,
+        },
+        body: JSON.stringify({
+          session: reg.session,
+          name: "ping",
+          args: { a: 1 },
+        }),
+      })
+    ).json()) as { ok: boolean; value: unknown };
     assert.equal(body.ok, true);
     assert.deepEqual(body.value, { echoed: { name: "ping", args: { a: 1 } } });
     reg.unregister();
@@ -82,15 +85,16 @@ describe("bridge", () => {
     const reg = await register(async () => {
       throw new Error("boom");
     });
-    const res = await fetch(`${reg.url}/v1/tool`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${reg.token}`,
-      },
-      body: JSON.stringify({ session: reg.session, name: "x", args: {} }),
-    });
-    const body = (await res.json()) as { ok: boolean; error?: string };
+    const body = (await (
+      await fetch(`${reg.url}/v1/tool`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${reg.token}`,
+        },
+        body: JSON.stringify({ session: reg.session, name: "x", args: {} }),
+      })
+    ).json()) as { ok: boolean; error?: string };
     assert.equal(body.ok, false);
     assert.match(body.error ?? "", /boom/);
     reg.unregister();
@@ -137,15 +141,14 @@ describe("public eval tool", () => {
     const registered: any[] = [];
     const handlers = new Map<string, (...args: any[]) => unknown>();
     const flags = new Map<string, unknown>();
-    const fakePi = {
+    EvalExtension({
       registerTool: (definition: unknown) => registered.push(definition),
       on: (event: string, handler: (...args: any[]) => unknown) =>
         handlers.set(event, handler),
       registerFlag: (name: string, options: { default?: unknown }) =>
         flags.set(name, options.default),
       getFlag: (name: string) => flags.get(name),
-    };
-    EvalExtension(fakePi as never);
+    } as never);
     const shutdown = () => handlers.get("session_shutdown")?.();
     extensionCleanups.add(shutdown);
     return { definition: registered[0]!, shutdown };
@@ -171,11 +174,14 @@ describe("public eval tool", () => {
       "title",
     ]);
     for (const field of ["cells", "code", "title", "timeout", "reset"]) {
-      const schemaField =
-        field === "cells"
-          ? schema.properties.cells
-          : cellSchema.properties[field];
-      assert.equal(typeof schemaField.description, "string");
+      assert.equal(
+        typeof (
+          field === "cells"
+            ? schema.properties.cells
+            : cellSchema.properties[field]
+        ).description,
+        "string",
+      );
     }
     shutdown();
   });
@@ -196,12 +202,16 @@ describe("public eval tool", () => {
       },
     };
     const read = { name: "read", description: "read" };
-    const mcp = {
-      name: "mcp__jira__search",
-      description: "Search Jira.\nMore.",
-    };
-    const lazy = { name: "lazy_tool", description: "Deferred." };
-    const callable = [bash, read, definition, mcp, lazy];
+    const callable = [
+      bash,
+      read,
+      definition,
+      {
+        name: "mcp__jira__search",
+        description: "Search Jira.\nMore.",
+      },
+      { name: "lazy_tool", description: "Deferred." },
+    ];
     const text = definition.prepareLoadout({
       declared: [bash, read, definition],
       callable,
@@ -224,22 +234,30 @@ describe("public eval tool", () => {
 
   it("persists multi-cell state and supports public reset", async () => {
     const { definition, shutdown } = makeTool();
-    const result = await definition.execute(
-      "public-persistence",
-      { cells: [{ code: "x = 41" }, { code: "x + 1" }] },
-      undefined,
-      undefined,
-      ctx,
+    assert.match(
+      (
+        await definition.execute(
+          "public-persistence",
+          { cells: [{ code: "x = 41" }, { code: "x + 1" }] },
+          undefined,
+          undefined,
+          ctx,
+        )
+      ).content[0].text,
+      /=> 42/,
     );
-    assert.match(result.content[0].text, /=> 42/);
-    const reset = await definition.execute(
-      "public-reset",
-      { cells: [{ reset: true, code: "'x' in globals()" }] },
-      undefined,
-      undefined,
-      ctx,
+    assert.match(
+      (
+        await definition.execute(
+          "public-reset",
+          { cells: [{ reset: true, code: "'x' in globals()" }] },
+          undefined,
+          undefined,
+          ctx,
+        )
+      ).content[0].text,
+      /=> false/,
     );
-    assert.match(reset.content[0].text, /=> false/);
     shutdown();
   });
 
@@ -256,22 +274,30 @@ describe("public eval tool", () => {
         ],
       },
     } as never;
-    const fresh = await definition.execute(
-      "restart-note",
-      { cells: [{ code: "1" }] },
-      undefined,
-      undefined,
-      earlier,
+    assert.match(
+      (
+        await definition.execute(
+          "restart-note",
+          { cells: [{ code: "1" }] },
+          undefined,
+          undefined,
+          earlier,
+        )
+      ).content[0].text,
+      /kernel restarted/,
     );
-    assert.match(fresh.content[0].text, /kernel restarted/);
-    const warm = await definition.execute(
-      "restart-note-warm",
-      { cells: [{ code: "2" }] },
-      undefined,
-      undefined,
-      earlier,
+    assert.doesNotMatch(
+      (
+        await definition.execute(
+          "restart-note-warm",
+          { cells: [{ code: "2" }] },
+          undefined,
+          undefined,
+          earlier,
+        )
+      ).content[0].text,
+      /kernel restarted/,
     );
-    assert.doesNotMatch(warm.content[0].text, /kernel restarted/);
     shutdown();
   });
 
@@ -320,8 +346,7 @@ describe("public eval tool", () => {
     assert.ok(Buffer.byteLength(out) <= 50 * 1024);
     const saved = lines.details.fullOutputPath as string;
     assert.ok(out.includes(saved));
-    const full = await readFile(saved, "utf8");
-    assert.match(full, /^line 2500$/m);
+    assert.match(await readFile(saved, "utf8"), /^line 2500$/m);
     await rm(saved);
     shutdown();
   });
@@ -337,14 +362,18 @@ describe("public eval tool", () => {
     );
     assert.equal(crashed.isError, true);
     assert.match(crashed.content[0].text, /kernel exited/);
-    const recovered = await definition.execute(
-      "public-crash-recovery",
-      { cells: [{ code: "6 * 7" }] },
-      undefined,
-      undefined,
-      ctx,
+    assert.match(
+      (
+        await definition.execute(
+          "public-crash-recovery",
+          { cells: [{ code: "6 * 7" }] },
+          undefined,
+          undefined,
+          ctx,
+        )
+      ).content[0].text,
+      /=> 42/,
     );
-    assert.match(recovered.content[0].text, /=> 42/);
     shutdown();
   });
 
@@ -362,14 +391,18 @@ describe("public eval tool", () => {
     assert.equal(failed.isError, true);
     assert.match(failed.content[0].text, /Cell 1 failed.*ValueError/s);
     assert.ok(failed.details);
-    const after = await definition.execute(
-      "public-error-check",
-      { cells: [{ code: "'marker' in globals()" }] },
-      undefined,
-      undefined,
-      ctx,
+    assert.match(
+      (
+        await definition.execute(
+          "public-error-check",
+          { cells: [{ code: "'marker' in globals()" }] },
+          undefined,
+          undefined,
+          ctx,
+        )
+      ).content[0].text,
+      /=> false/,
     );
-    assert.match(after.content[0].text, /=> false/);
     shutdown();
   });
 
@@ -406,26 +439,27 @@ describe("public eval tool", () => {
         return { isError: false, result: { content: text(`echo:${args.v}`) } };
       },
     } as never;
-    const result = await definition.execute(
-      "public-nested",
-      {
-        cells: [
-          { code: "tool.bash({'command': 'false'})['exit_code']" },
-          { code: "tool.echo(v=1)" },
-          {
-            code: "r = parallel([('echo', {'v': 2}), ('echo', {'fail': True}), ('echo', {'v': 3})])\n[x if isinstance(x, str) else type(x).__name__ + ':' + str(x) for x in r]",
-          },
-          {
-            code: "names = tool.list(); ('eval' in names, 'echo' in names, 'grep' in names)",
-          },
-          { code: "tool.describe(name='echo')['output_schema']" },
-        ],
-      },
-      undefined,
-      undefined,
-      toolCtx,
-    );
-    const out = result.content[0].text;
+    const out = (
+      await definition.execute(
+        "public-nested",
+        {
+          cells: [
+            { code: "tool.bash({'command': 'false'})['exit_code']" },
+            { code: "tool.echo(v=1)" },
+            {
+              code: "r = parallel([('echo', {'v': 2}), ('echo', {'fail': True}), ('echo', {'v': 3})])\n[x if isinstance(x, str) else type(x).__name__ + ':' + str(x) for x in r]",
+            },
+            {
+              code: "names = tool.list(); ('eval' in names, 'echo' in names, 'grep' in names)",
+            },
+            { code: "tool.describe(name='echo')['output_schema']" },
+          ],
+        },
+        undefined,
+        undefined,
+        toolCtx,
+      )
+    ).content[0].text;
     assert.match(out, /\[1\][\s\S]*=> 3/);
     assert.match(out, /=> echo:1/);
     assert.match(out, /"echo:2",\s*"RuntimeError:nope",\s*"echo:3"/);
@@ -469,42 +503,42 @@ describe("PyKernel", () => {
   });
 
   it("runs a cell and captures the last expression value", async () => {
-    const k = await make();
-    const r = await k.run("2 + 2", 5, undefined);
+    const r = await (await make()).run("2 + 2", 5, undefined);
     assert.equal(r.value, 4);
     assert.equal(r.error, null);
   });
 
   it("captures stdout from print()", async () => {
-    const k = await make();
-    const r = await k.run("print('hello world')", 5, undefined);
-    assert.equal(r.stdout, "hello world\n");
+    assert.equal(
+      (await (await make()).run("print('hello world')", 5, undefined)).stdout,
+      "hello world\n",
+    );
   });
 
   it("persists state across cells", async () => {
     const k = await make();
     await k.run("x = 41", 5, undefined);
-    const r = await k.run("x + 1", 5, undefined);
-    assert.equal(r.value, 42);
+    assert.equal((await k.run("x + 1", 5, undefined)).value, 42);
   });
 
   it("captures errors as traceback strings", async () => {
-    const k = await make();
-    const r = await k.run("1/0", 5, undefined);
+    const r = await (await make()).run("1/0", 5, undefined);
     assert.equal(r.value, null);
     assert.match(r.error ?? "", /ZeroDivisionError/);
   });
 
   it("calls back into the host via tool.<name>(args)", async () => {
-    const k = await make();
-    const r = await k.run("tool.double({'x': 21})", 5, undefined);
-    assert.equal(r.value, 42);
+    assert.equal(
+      (await (await make()).run("tool.double({'x': 21})", 5, undefined)).value,
+      42,
+    );
   });
 
   it("invokes onProgress as stdout streams", async () => {
-    const k = await make();
     const chunks: string[] = [];
-    await k.run(
+    await (
+      await make()
+    ).run(
       "import sys, time\nfor i in range(3):\n    print(i, flush=True)\n",
       5,
       undefined,
@@ -517,8 +551,10 @@ describe("PyKernel", () => {
   it("marks a crashed kernel dead", async () => {
     const k = await make();
     assert.equal(k.alive, true);
-    const dead = await k.run("import os; os._exit(0)", 5, undefined);
-    assert.match(dead.error ?? "", /exited with code 0 mid-run/);
+    assert.match(
+      (await k.run("import os; os._exit(0)", 5, undefined)).error ?? "",
+      /exited with code 0 mid-run/,
+    );
     assert.equal(k.alive, false);
   });
 
@@ -529,8 +565,7 @@ describe("PyKernel", () => {
     assert.equal(r.timedOut, true);
     assert.match(r.error ?? "", /kernel state preserved/);
     assert.equal(k.alive, true);
-    const after = await k.run("marker", 5, undefined);
-    assert.equal(after.value, 123);
+    assert.equal((await k.run("marker", 5, undefined)).value, 123);
   });
 
   it("escalates to kill when the interrupt is ignored", async () => {
@@ -549,15 +584,14 @@ describe("PyKernel", () => {
     const k = await make();
     await k.run("marker = 123", 5, undefined);
     const ac = new AbortController();
-    const running = k.run(
+    setTimeout(() => ac.abort(), 100);
+    const r = await k.run(
       "import time\ntime.sleep(60)",
       30,
       undefined,
       undefined,
       ac.signal,
     );
-    setTimeout(() => ac.abort(), 100);
-    const r = await running;
     assert.equal(r.aborted, true);
     assert.equal(r.timedOut, undefined);
     assert.match(r.error ?? "", /aborted/);
@@ -566,8 +600,7 @@ describe("PyKernel", () => {
   });
 
   it("serializes non-finite values as a fallback", async () => {
-    const k = await make();
-    const r = await k.run("float('nan')", 5, undefined);
+    const r = await (await make()).run("float('nan')", 5, undefined);
     assert.equal(r.error, null);
     assert.equal(r.value, "nan");
   });

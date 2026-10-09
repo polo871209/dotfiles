@@ -31,19 +31,10 @@ import {
   type WrappingSelectItem,
   type WrappingSelectTheme,
 } from "./widgets";
-
-const HINT_PART_ENTER = "Enter to select";
-const HINT_PART_NAV = "↑/↓ to navigate";
-const HINT_PART_TOGGLE = "Space to toggle";
-const HINT_PART_TAB = "Tab to switch questions";
 const HINT_PART_CANCEL = "Esc to cancel";
-const HINT_PART_COLLAPSE = "Ctrl+] to collapse";
-const HINT_PART_EXPAND = "Ctrl+] to expand";
-export const COLLAPSED_HINT = [HINT_PART_EXPAND, HINT_PART_CANCEL].join(" · ");
-const REVIEW_HEADING = "Review your answers";
-const READY_PROMPT = "Ready to submit your answers?";
-const INCOMPLETE_WARNING_PREFIX =
-  "⚠ Answer remaining questions before submitting:";
+export const COLLAPSED_HINT = ["Ctrl+] to expand", HINT_PART_CANCEL].join(
+  " · ",
+);
 
 function tabLabel(q: QuestionData, i: number): string {
   return q.header && q.header.length > 0 ? q.header : `Q${i + 1}`;
@@ -53,11 +44,11 @@ function buildHintText(
   question: QuestionData | undefined,
   isMulti: boolean,
 ): string {
-  const parts: string[] = [HINT_PART_ENTER, HINT_PART_NAV];
-  if (question?.multiSelect === true) parts.push(HINT_PART_TOGGLE);
-  if (isMulti) parts.push(HINT_PART_TAB);
+  const parts: string[] = ["Enter to select", "↑/↓ to navigate"];
+  if (question?.multiSelect === true) parts.push("Space to toggle");
+  if (isMulti) parts.push("Tab to switch questions");
   parts.push(HINT_PART_CANCEL);
-  parts.push(HINT_PART_COLLAPSE);
+  parts.push("Ctrl+] to collapse");
   return parts.join(" · ");
 }
 
@@ -96,8 +87,7 @@ function selectConfirmedIndicator(
 function getInputCursorOffset(input: Input): number | undefined {
   const raw = (input as unknown as { cursor?: unknown }).cursor;
   if (typeof raw !== "number" || !Number.isSafeInteger(raw)) return undefined;
-  const value = input.getValue();
-  if (raw < 0 || raw > value.length) return undefined;
+  if (raw < 0 || raw > input.getValue().length) return undefined;
   return raw;
 }
 
@@ -128,9 +118,8 @@ class OneLineClippedText implements Component {
   ) {}
 
   render(width: number): string[] {
-    const pad = " ".repeat(this.paddingLeft);
     return [
-      pad +
+      " ".repeat(this.paddingLeft) +
         truncateToWidth(
           this.text,
           Math.max(0, width - this.paddingLeft),
@@ -184,9 +173,9 @@ class QuestionTabStrategy implements TabContentStrategy {
   }
 
   bodyComponent(state: DialogState): Component {
-    const question = this.config.questions[state.currentTab];
     const mso = this.config.tabsByIndex[state.currentTab]?.multiSelect;
-    if (question?.multiSelect === true && mso) return mso;
+    if (this.config.questions[state.currentTab]?.multiSelect === true && mso)
+      return mso;
     return this.config.getActiveOptionList();
   }
 
@@ -195,13 +184,15 @@ class QuestionTabStrategy implements TabContentStrategy {
   }
 
   footerRows(state: DialogState): Component[] {
-    const question = this.config.questions[state.currentTab];
     return [
       new Spacer(1),
       new OneLineClippedText(
         this.config.theme.fg(
           "dim",
-          buildHintText(question, this.config.isMulti),
+          buildHintText(
+            this.config.questions[state.currentTab],
+            this.config.isMulti,
+          ),
         ),
         1,
       ),
@@ -212,9 +203,8 @@ class QuestionTabStrategy implements TabContentStrategy {
     width: number,
     state: DialogState,
   ): [number, number] | undefined {
-    const question = this.config.questions[state.currentTab];
     const mso = this.config.tabsByIndex[state.currentTab]?.multiSelect;
-    if (question?.multiSelect === true && mso)
+    if (this.config.questions[state.currentTab]?.multiSelect === true && mso)
       return mso.focusedItemRowRange(width);
     return this.config.getActiveOptionList().focusedItemRowRange(width);
   }
@@ -234,7 +224,9 @@ class SubmitTabStrategy implements TabContentStrategy {
   headingRows(_state: DialogState): Component[] {
     return [
       new Text(
-        this.config.theme.bold(this.config.theme.fg("accent", REVIEW_HEADING)),
+        this.config.theme.bold(
+          this.config.theme.fg("accent", "Review your answers"),
+        ),
         1,
         0,
       ),
@@ -245,16 +237,21 @@ class SubmitTabStrategy implements TabContentStrategy {
   bodyComponent(state: DialogState): Component {
     const c = new Container();
     for (let i = 0; i < this.config.questions.length; i++) {
-      const q = this.config.questions[i]!;
       const a = state.answers.get(i);
       if (!a) continue;
-      const answerText = formatAnswerScalar(a);
       c.addChild(
-        new Text(this.config.theme.fg("muted", ` ● ${tabLabel(q, i)}`), 1, 0),
+        new Text(
+          this.config.theme.fg(
+            "muted",
+            ` ● ${tabLabel(this.config.questions[i]!, i)}`,
+          ),
+          1,
+          0,
+        ),
       );
       c.addChild(
         new Text(
-          `   ${this.config.theme.fg("muted", "→")} ${this.config.theme.fg("text", answerText)}`,
+          `   ${this.config.theme.fg("muted", "→")} ${this.config.theme.fg("text", formatAnswerScalar(a))}`,
           1,
           0,
         ),
@@ -273,16 +270,18 @@ class SubmitTabStrategy implements TabContentStrategy {
       if (!state.answers.has(i))
         missing.push(tabLabel(this.config.questions[i]!, i));
     }
-    const promptText =
-      missing.length === 0
-        ? this.config.theme.fg("muted", READY_PROMPT)
-        : this.config.theme.fg(
-            "warning",
-            `${INCOMPLETE_WARNING_PREFIX} ${missing.join(", ")}`,
-          );
     const out: Component[] = [
       new Spacer(1),
-      new Text(promptText, 1, 0),
+      new Text(
+        missing.length === 0
+          ? this.config.theme.fg("muted", "Ready to submit your answers?")
+          : this.config.theme.fg(
+              "warning",
+              `${"⚠ Answer remaining questions before submitting:"} ${missing.join(", ")}`,
+            ),
+        1,
+        0,
+      ),
       new Spacer(1),
     ];
     if (this.config.submitPicker) {
@@ -318,10 +317,6 @@ interface DialogConfig {
   getCurrentBodyHeight: (width: number) => number;
   getTerminalRows: () => number;
 }
-
-const OVERFLOW_UP = "↑";
-const OVERFLOW_DOWN = "↓";
-const OVERFLOW_BOTH = "↕";
 
 class DialogView {
   private liveProps: DialogProps;
@@ -360,15 +355,14 @@ class DialogView {
 
   render(width: number): string[] {
     const state = this.liveProps.state;
-    const onSubmit =
-      this.config.isMulti && state.currentTab === this.config.questions.length;
     const strategy =
-      onSubmit && this.submitStrategy
+      this.config.isMulti &&
+      state.currentTab === this.config.questions.length &&
+      this.submitStrategy
         ? this.submitStrategy
         : this.questionStrategy;
 
     const headingRowCache = strategy.headingRows(state);
-    const headingCount = headingRowCache.length;
     const natural = this.buildContainerFromStrategy(
       strategy,
       headingRowCache,
@@ -409,14 +403,16 @@ class DialogView {
     const bodyRange = strategy.focusedItemRowRange(width, state);
     let scrollStart: number;
     if (bodyRange) {
-      const focusedRowInMiddle = headingCount + bodyRange[0];
-      const focusedHeight = bodyRange[1] - bodyRange[0];
-      const idealStart =
-        focusedRowInMiddle -
-        Math.floor(Math.max(0, availableMiddle - focusedHeight) / 2);
       scrollStart = Math.max(
         0,
-        Math.min(idealStart, middleRows - availableMiddle),
+        Math.min(
+          headingRowCache.length +
+            bodyRange[0] -
+            Math.floor(
+              Math.max(0, availableMiddle - (bodyRange[1] - bodyRange[0])) / 2,
+            ),
+          middleRows - availableMiddle,
+        ),
       );
     } else {
       scrollStart = 0;
@@ -430,14 +426,14 @@ class DialogView {
     const hasUp = scrollStart > 0;
     const hasDown = scrollStart + availableMiddle < middleRows;
     if (hasUp && hasDown && scrollableMiddle.length === 1) {
-      scrollableMiddle[0] = this.config.theme.fg("dim", OVERFLOW_BOTH);
+      scrollableMiddle[0] = this.config.theme.fg("dim", "↕");
     } else {
       if (hasUp && scrollableMiddle.length > 0)
-        scrollableMiddle[0] = this.config.theme.fg("dim", OVERFLOW_UP);
+        scrollableMiddle[0] = this.config.theme.fg("dim", "↑");
       if (hasDown && scrollableMiddle.length > 0) {
         scrollableMiddle[scrollableMiddle.length - 1] = this.config.theme.fg(
           "dim",
-          OVERFLOW_DOWN,
+          "↓",
         );
       }
     }
@@ -490,12 +486,14 @@ export class QuestionnairePropsAdapter {
     const totalQuestions = this.questions.length;
     const activeView: ActiveView = selectActiveView(state, totalQuestions);
     const tabIndex = selectActiveTabIndex(state.currentTab, totalQuestions);
-    const activeOptionList =
-      this.tabsByIndex[tabIndex]?.optionList ?? this.tabsByIndex[0]!.optionList;
-    const inputBuffer = this.inlineInput.getValue();
     const inputCursorOffset = getInputCursorOffset(this.inlineInput);
 
-    this.dialog.setProps({ state, activeOptionList });
+    this.dialog.setProps({
+      state,
+      activeOptionList:
+        this.tabsByIndex[tabIndex]?.optionList ??
+        this.tabsByIndex[0]!.optionList,
+    });
 
     if (this.submitPicker) {
       const focused = activeView === "submit";
@@ -525,17 +523,16 @@ export class QuestionnairePropsAdapter {
     for (let i = 0; i < this.tabsByIndex.length; i++) {
       const tab = this.tabsByIndex[i]!;
       if (i === tabIndex) {
-        const items = this.itemsByTab[i] ?? [];
         const confirmed = selectConfirmedIndicator(
           this.questions,
           state.currentTab,
           state.answers,
-          items,
+          this.itemsByTab[i] ?? [],
         );
         tab.optionList.setProps({
           selectedIndex: state.optionIndex,
           focused: activeView === "options",
-          inputBuffer,
+          inputBuffer: this.inlineInput.getValue(),
           inputCursorOffset,
           ...(confirmed ? { confirmed } : {}),
         } satisfies OptionListViewProps);
@@ -575,19 +572,22 @@ export class QuestionnairePropsAdapter {
         active: focused && j === state.optionIndex,
       });
     }
-    const other =
-      focusedKind === "other"
-        ? {
-            active: true,
-            text: this.inlineInput.getValue(),
-            cursorOffset: inputCursorOffset,
-          }
-        : { active: false, text: state.answers.get(i)?.custom ?? "" };
-    const nextLabel =
-      i === this.questions.length - 1
-        ? MULTI_SUBMIT_LABEL
-        : ROW_INTENT_META.next.label;
-    return { rows, other, nextActive: focusedKind === "next", nextLabel };
+    return {
+      rows,
+      other:
+        focusedKind === "other"
+          ? {
+              active: true,
+              text: this.inlineInput.getValue(),
+              cursorOffset: inputCursorOffset,
+            }
+          : { active: false, text: state.answers.get(i)?.custom ?? "" },
+      nextActive: focusedKind === "next",
+      nextLabel:
+        i === this.questions.length - 1
+          ? MULTI_SUBMIT_LABEL
+          : ROW_INTENT_META.next.label,
+    };
   }
 
   invalidate(): void {
@@ -629,48 +629,30 @@ export function buildQuestionnaire(
     initialState,
     getCurrentTab,
   } = config;
-  const getTerminalRows = () => tui.terminal.rows;
-
-  const selectTheme: WrappingSelectTheme = {
-    selectedText: (s) => theme.fg("accent", s),
-    description: (s) => theme.fg("muted", s),
-    scrollInfo: (s) => theme.fg("dim", s),
-  };
 
   const inlineInput = new Input();
 
   const tabsByIndex: TabComponents[] = questions.map((question, index) => {
-    const optionList = new OptionListView(itemsByTab[index] ?? [], selectTheme);
+    const optionList = new OptionListView(itemsByTab[index] ?? [], {
+      selectedText: (s) => theme.fg("accent", s),
+      description: (s) => theme.fg("muted", s),
+      scrollInfo: (s) => theme.fg("dim", s),
+    } satisfies WrappingSelectTheme);
     const multiSelect = question.multiSelect
       ? new MultiSelectView(theme, question)
       : undefined;
-    const bodyHeight = (width: number): number =>
-      multiSelect
-        ? multiSelect.naturalHeight(width)
-        : optionList.naturalHeight(width);
-    return { optionList, multiSelect, bodyHeight };
+    return {
+      optionList,
+      multiSelect,
+      bodyHeight: (width: number): number =>
+        multiSelect
+          ? multiSelect.naturalHeight(width)
+          : optionList.naturalHeight(width),
+    };
   });
 
   const submitPicker = isMulti ? new SubmitPicker(theme) : undefined;
   const tabBar = isMulti ? new TabBar(theme) : undefined;
-
-  const getBodyHeight = (width: number): number => {
-    let max = 0;
-    for (const tab of tabsByIndex) {
-      const h = tab.bodyHeight(width);
-      if (h > max) max = h;
-    }
-    return Math.max(1, max);
-  };
-  const getCurrentBodyHeight = (width: number): number => {
-    const idx = Math.min(getCurrentTab(), tabsByIndex.length - 1);
-    return Math.max(0, tabsByIndex[idx]?.bodyHeight(width) ?? 0);
-  };
-
-  const initialTabIndex = selectActiveTabIndex(
-    initialState.currentTab,
-    questions.length,
-  );
   const dialog = new DialogView(
     {
       theme,
@@ -679,14 +661,30 @@ export function buildQuestionnaire(
       isMulti,
       tabsByIndex,
       submitPicker,
-      getBodyHeight,
-      getCurrentBodyHeight,
-      getTerminalRows,
+      getBodyHeight: (width: number): number => {
+        let max = 0;
+        for (const tab of tabsByIndex) {
+          const h = tab.bodyHeight(width);
+          if (h > max) max = h;
+        }
+        return Math.max(1, max);
+      },
+      getCurrentBodyHeight: (width: number): number => {
+        return Math.max(
+          0,
+          tabsByIndex[
+            Math.min(getCurrentTab(), tabsByIndex.length - 1)
+          ]?.bodyHeight(width) ?? 0,
+        );
+      },
+      getTerminalRows: () => tui.terminal.rows,
     },
     {
       state: initialState,
       activeOptionList:
-        tabsByIndex[initialTabIndex]?.optionList ?? tabsByIndex[0]!.optionList,
+        tabsByIndex[
+          selectActiveTabIndex(initialState.currentTab, questions.length)
+        ]?.optionList ?? tabsByIndex[0]!.optionList,
     },
   );
 

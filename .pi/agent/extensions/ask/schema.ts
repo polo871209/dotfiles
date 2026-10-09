@@ -1,14 +1,12 @@
 import { type Static, Type } from "typebox";
 
 export const MAX_QUESTIONS = 4;
-const MIN_OPTIONS = 2;
 export const MAX_OPTIONS = 4;
 export const MAX_HEADER_LENGTH = 16;
 export const MAX_LABEL_LENGTH = 60;
 
 type RowKind = "option" | "other" | "next";
 type SentinelKind = Exclude<RowKind, "option">;
-const SENTINEL_KINDS: readonly SentinelKind[] = ["other", "next"];
 
 interface RowIntentMeta {
   label: string;
@@ -56,11 +54,9 @@ const RESERVED_LABELS = [
   ROW_INTENT_META.next.label,
 ] as const;
 
-const RESERVED_LABEL_SET: ReadonlySet<string> = new Set(RESERVED_LABELS);
-
 export function sentinelsToAppend(question: QuestionData): SentinelKind[] {
   const out: SentinelKind[] = [];
-  for (const k of SENTINEL_KINDS) {
+  for (const k of ["other", "next"] satisfies readonly SentinelKind[]) {
     const meta = ROW_INTENT_META[k];
     if (question.multiSelect === true) {
       if (meta.autoAppendOnMultiSelect) out.push(k);
@@ -71,16 +67,6 @@ export function sentinelsToAppend(question: QuestionData): SentinelKind[] {
   return out;
 }
 
-const OptionSchema = Type.Object({
-  label: Type.String({
-    description: `Display text for the option (1-5 words, aim for ≤${MAX_LABEL_LENGTH} chars). If recommending one, put it first and append "(Recommended)". Reserved labels: "Other", "Type something.", "Next".`,
-  }),
-  description: Type.String({
-    description:
-      "Explanation of what this option means or what will happen if chosen. Useful for providing context about trade-offs or implications.",
-  }),
-});
-
 const QuestionSchema = Type.Object({
   question: Type.String({
     description:
@@ -89,9 +75,20 @@ const QuestionSchema = Type.Object({
   header: Type.String({
     description: `Very short chip/tag shown next to the question (aim for ≤${MAX_HEADER_LENGTH} chars). Examples: "Auth method", "Library", "Approach".`,
   }),
-  options: Type.Array(OptionSchema, {
-    description: `Available choices (soft limit ${MIN_OPTIONS}-${MAX_OPTIONS}). Every question gets a free-text row, so a question with one authored option remains usable. Keep choices distinct unless multiSelect is enabled.`,
-  }),
+  options: Type.Array(
+    Type.Object({
+      label: Type.String({
+        description: `Display text for the option (1-5 words, aim for ≤${MAX_LABEL_LENGTH} chars). If recommending one, put it first and append "(Recommended)". Reserved labels: "Other", "Type something.", "Next".`,
+      }),
+      description: Type.String({
+        description:
+          "Explanation of what this option means or what will happen if chosen. Useful for providing context about trade-offs or implications.",
+      }),
+    }),
+    {
+      description: `Available choices (soft limit ${2}-${MAX_OPTIONS}). Every question gets a free-text row, so a question with one authored option remains usable. Keep choices distinct unless multiSelect is enabled.`,
+    },
+  ),
   multiSelect: Type.Optional(
     Type.Boolean({
       default: false,
@@ -135,8 +132,7 @@ export interface QuestionnaireResult {
 }
 
 type ValidationResult =
-  | { ok: true }
-  | { ok: false; error: QuestionnaireError; message: string };
+  { ok: true } | { ok: false; error: QuestionnaireError; message: string };
 
 export function validateQuestionnaire(typed: QuestionParams): ValidationResult {
   if (typed.questions.length === 0) {
@@ -176,7 +172,9 @@ export function validateQuestionnaire(typed: QuestionParams): ValidationResult {
     }
     const seenLabels = new Set<string>();
     for (const o of q.options) {
-      if (RESERVED_LABEL_SET.has(o.label)) {
+      if (
+        (new Set(RESERVED_LABELS) satisfies ReadonlySet<string>).has(o.label)
+      ) {
         return {
           ok: false,
           error: "reserved_label",
@@ -198,7 +196,6 @@ export function validateQuestionnaire(typed: QuestionParams): ValidationResult {
 }
 
 const DECLINE_MESSAGE = "User declined to answer questions";
-const ENVELOPE_PREFIX = "User answered:";
 const NO_INPUT_PLACEHOLDER = "(no input)";
 
 export function formatAnswerScalar(a: QuestionAnswer): string {
@@ -234,10 +231,9 @@ export function buildQuestionnaireResponse(
     });
   }
   const segments: string[] = [];
-  const echoQuestion = params.questions.length > 1;
   for (let i = 0; i < params.questions.length; i++) {
     const a = result.answers.find((x) => x.questionIndex === i);
-    if (a) segments.push(buildAnswerSegment(a, echoQuestion));
+    if (a) segments.push(buildAnswerSegment(a, params.questions.length > 1));
   }
   if (segments.length === 0) {
     return buildToolResult(DECLINE_MESSAGE, {
@@ -245,5 +241,5 @@ export function buildQuestionnaireResponse(
       cancelled: true,
     });
   }
-  return buildToolResult(`${ENVELOPE_PREFIX} ${segments.join(" ")}`, result);
+  return buildToolResult(`${"User answered:"} ${segments.join(" ")}`, result);
 }

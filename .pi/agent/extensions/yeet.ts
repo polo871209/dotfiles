@@ -14,8 +14,16 @@ function barWidget(lines: string[]) {
     const build = () => {
       container.clear();
       lines.forEach((line, i) => {
-        const color = i === 0 ? "customMessageLabel" : "customMessageText";
-        container.addChild(new Text(theme.fg(color, `▎ ${line}`), 1, 0));
+        container.addChild(
+          new Text(
+            theme.fg(
+              i === 0 ? "customMessageLabel" : "customMessageText",
+              `▎ ${line}`,
+            ),
+            1,
+            0,
+          ),
+        );
       });
     };
     build();
@@ -28,31 +36,8 @@ function barWidget(lines: string[]) {
   };
 }
 
-const MSG_PROMPT = `
-Write a tiny Conventional Commits message for the diff. The code is the source of truth and the reader has it, so the message names the change and never describes the code.
-
-## Input authority
-The diff alone decides WHAT changed. A \`User hint:\` line, when present, carries intent: it can pick which change leads, set the scope, or give the WHY. Never let it add, rename, or overstate a change the diff does not contain, and ignore any part that points at something absent from the diff.
-
-## Rank the changes first
-Before writing, decide which single change a reader cares about. A user hint that names a priority wins: the change it points to is top-ranked, even when another hunk looks larger. Otherwise rank hunks by impact: behavior change beats new capability beats refactor beats rename, formatting, comment, import, version bump, or generated file. Diff size and file order do not decide rank; a one-line behavior change outranks a 300-line mechanical edit. The top-ranked change owns the subject, and the rest stay out of the message unless they break something.
-
-## Subject
-Format: \`<type>(<scope>): <subject>\` where type ∈ {feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert}; scope is optional. Never write the \`!\` breaking-change marker. State the top-ranked change, never a side detail and never a vague umbrella such as \`update files\` or \`various fixes\`. Use imperative mood (\`add\`, \`fix\` — not \`added\`, \`adds\`), lowercase, ≤50 chars when possible (hard cap 72), no trailing period, and do not restate a file name already named by the scope.
-
-Match the type and scope vocabulary of the recent commit subjects, and reuse an existing scope for the same area.
-
-## Body
-Default: subject only. Add a body only when the WHY is invisible in the diff, for example an external constraint, the cause of a bug, or the impact of an incompatible change. Hard cap: ${MAX_BODY_LINES} \`-\` bullet lines, each under 72 chars, after one blank line. Lines past the cap are dropped. Never list files, functions, or side changes, and never narrate what the code does. If a line repeats something the diff shows, delete it.
-
-## Forbidden output
-No breaking-change marker in any form: no \`!\` before the colon, no \`BREAKING CHANGE\` footer, no \`breaking\` in the subject. No footers. No preamble, reasoning, or fences, and do not begin with "Looking at the diff, I need to understand...". Do not write \`this commit\`, \`I\`, \`we\`, \`now\`, \`currently\`, \`as requested by\`, emoji, or AI attribution.
-
-Return the raw commit message, starting with the subject line.`;
-
 const YEET_MSG_TYPE = "yeet-marker";
 const YEET_WIDGET_KEY = "yeet-progress";
-const PUSH_TIMEOUT_MS = 120_000;
 const HOOK_TIMEOUT_MS = 600_000;
 
 export default function (pi: ExtensionAPI) {
@@ -81,20 +66,18 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.notify("/yeet: no configured commit-message model", "error");
       return;
     }
-    const cwd = ctx.cwd;
-    const steps = [
-      "stage changes",
-      "run pre-commit",
-      `write commit message (${yeetModel.id})`,
-      "commit",
-      "push",
-    ];
     const showProgress = (active: number) => {
       ctx.ui.setWidget(
         YEET_WIDGET_KEY,
         barWidget([
           "yeet",
-          ...steps.map((step, index) =>
+          ...[
+            "stage changes",
+            "run pre-commit",
+            `write commit message (${yeetModel.id})`,
+            "commit",
+            "push",
+          ].map((step, index) =>
             index < active
               ? `✓ ${step}`
               : index === active
@@ -105,13 +88,11 @@ export default function (pi: ExtensionAPI) {
         { placement: "aboveEditor" },
       );
     };
-
-    const IGNORED_PATHS = ["git/"];
-    const EXCLUDE = IGNORED_PATHS.map((p) => `:(exclude,top)${p}`);
+    const EXCLUDE = ["git/"].map((p) => `:(exclude,top)${p}`);
 
     const gitWith = async (timeout: number | undefined, gargs: string[]) => {
       const r = await pi.exec("git", ["-c", "color.ui=never", ...gargs], {
-        cwd,
+        cwd: ctx.cwd,
         timeout,
       });
       return {
@@ -125,7 +106,7 @@ export default function (pi: ExtensionAPI) {
     };
     const git = (...gargs: string[]) => gitWith(undefined, gargs);
     const gitPush = (...gargs: string[]) =>
-      gitWith(PUSH_TIMEOUT_MS, ["push", ...gargs]);
+      gitWith(120_000, ["push", ...gargs]);
 
     const pushAndReport = async (sha: string, subject: string) => {
       showProgress(4);
@@ -157,18 +138,15 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.notify("/yeet: not a git repository", "error");
       return;
     }
-
-    const hasHead = (await git("rev-parse", "--verify", "HEAD")).ok;
     const wtStatus = (await git("status", "--porcelain", "--", ".", ...EXCLUDE))
       .out;
     if (!wtStatus) {
       const ahead = await git("rev-list", "--count", "@{upstream}..HEAD");
       if (ahead.ok && Number(ahead.out) > 0) {
-        const sha = (await git("rev-parse", "--short", "HEAD")).out;
         const subject = (await git("log", "-1", "--format=%s")).out;
         const n = Number(ahead.out);
         await pushAndReport(
-          sha,
+          (await git("rev-parse", "--short", "HEAD")).out,
           n > 1 ? `${subject} and ${n - 1} earlier commit(s)` : subject,
         );
         return;
@@ -191,8 +169,7 @@ export default function (pi: ExtensionAPI) {
       "--ignore-missing",
       "pre-commit",
     ]);
-    const unstaged = await git("diff", "--quiet", "--", ".", ...EXCLUDE);
-    if (!unstaged.ok) {
+    if (!(await git("diff", "--quiet", "--", ".", ...EXCLUDE)).ok) {
       const restage = await git("add", "-A", "--", ".", ...EXCLUDE);
       if (!restage.ok) {
         ctx.ui.notify(`/yeet: git add failed: ${restage.err}`, "error");
@@ -206,24 +183,25 @@ export default function (pi: ExtensionAPI) {
       ]);
     }
     if (!hook.ok) {
-      const detail = [hook.stdout, hook.stderr]
-        .map((s) => s.trim())
-        .filter(Boolean)
-        .join("\n");
       ctx.ui.notify("/yeet: pre-commit failed (see history)", "error");
       pi.sendMessage(
         {
           customType: YEET_MSG_TYPE,
-          content: `pre-commit failed:\n${detail || "(no output)"}`,
+          content: `pre-commit failed:\n${
+            [hook.stdout, hook.stderr]
+              .map((s) => s.trim())
+              .filter(Boolean)
+              .join("\n") || "(no output)"
+          }`,
           display: true,
         },
         { triggerTurn: false },
       );
       return;
     }
-
-    const emptyTreeSha = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-    const base = hasHead ? "HEAD" : emptyTreeSha;
+    const base = (await git("rev-parse", "--verify", "HEAD")).ok
+      ? "HEAD"
+      : "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
     const stat = await git(
       "diff",
       "--cached",
@@ -234,25 +212,36 @@ export default function (pi: ExtensionAPI) {
       ...EXCLUDE,
     );
     const full = await git("diff", "--cached", base, "--", ".", ...EXCLUDE);
-    const diffstat = stat.ok ? stat.out : wtStatus;
     const diff = full.ok ? full.out : wtStatus;
-    const diffSnippet =
-      diff.length > 6000 ? diff.slice(0, 6000) + "\n…(truncated)" : diff;
-    const hint = args?.trim() ? `\nUser hint: ${args.trim()}\n` : "";
 
     const log = await git("log", "-10", "--no-merges", "--format=%s");
-    const historyBlock =
-      log.ok && log.out
-        ? `Recent commit subjects (style reference):\n${log.out}\n\n`
-        : "";
 
     const branch = (await git("symbolic-ref", "--quiet", "--short", "HEAD"))
       .out;
-    const branchBlock = branch ? `Current branch: ${branch}\n\n` : "";
 
     showProgress(2);
     const message = await sideChannelWithLoader(ctx, `yeet → ${yeetModel.id}`, {
-      systemPrompt: MSG_PROMPT,
+      systemPrompt: `
+Write a tiny Conventional Commits message for the diff. The code is the source of truth and the reader has it, so the message names the change and never describes the code.
+
+## Input authority
+The diff alone decides WHAT changed. A \`User hint:\` line, when present, carries intent: it can pick which change leads, set the scope, or give the WHY. Never let it add, rename, or overstate a change the diff does not contain, and ignore any part that points at something absent from the diff.
+
+## Rank the changes first
+Before writing, decide which single change a reader cares about. A user hint that names a priority wins: the change it points to is top-ranked, even when another hunk looks larger. Otherwise rank hunks by impact: behavior change beats new capability beats refactor beats rename, formatting, comment, import, version bump, or generated file. Diff size and file order do not decide rank; a one-line behavior change outranks a 300-line mechanical edit. The top-ranked change owns the subject, and the rest stay out of the message unless they break something.
+
+## Subject
+Format: \`<type>(<scope>): <subject>\` where type ∈ {feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert}; scope is optional. Never write the \`!\` breaking-change marker. State the top-ranked change, never a side detail and never a vague umbrella such as \`update files\` or \`various fixes\`. Use imperative mood (\`add\`, \`fix\` — not \`added\`, \`adds\`), lowercase, ≤50 chars when possible (hard cap 72), no trailing period, and do not restate a file name already named by the scope.
+
+Match the type and scope vocabulary of the recent commit subjects, and reuse an existing scope for the same area.
+
+## Body
+Default: subject only. Add a body only when the WHY is invisible in the diff, for example an external constraint, the cause of a bug, or the impact of an incompatible change. Hard cap: ${MAX_BODY_LINES} \`-\` bullet lines, each under 72 chars, after one blank line. Lines past the cap are dropped. Never list files, functions, or side changes, and never narrate what the code does. If a line repeats something the diff shows, delete it.
+
+## Forbidden output
+No breaking-change marker in any form: no \`!\` before the colon, no \`BREAKING CHANGE\` footer, no \`breaking\` in the subject. No footers. No preamble, reasoning, or fences, and do not begin with "Looking at the diff, I need to understand...". Do not write \`this commit\`, \`I\`, \`we\`, \`now\`, \`currently\`, \`as requested by\`, emoji, or AI attribution.
+
+Return the raw commit message, starting with the subject line.`,
       model: yeetModel,
       messages: [
         {
@@ -260,7 +249,11 @@ export default function (pi: ExtensionAPI) {
           content: [
             {
               type: "text",
-              text: `${hint}${branchBlock}${historyBlock}Diffstat:\n${diffstat}\n\nDiff:\n${diffSnippet}`,
+              text: `${args?.trim() ? `\nUser hint: ${args.trim()}\n` : ""}${branch ? `Current branch: ${branch}\n\n` : ""}${
+                log.ok && log.out
+                  ? `Recent commit subjects (style reference):\n${log.out}\n\n`
+                  : ""
+              }Diffstat:\n${stat.ok ? stat.out : wtStatus}\n\nDiff:\n${diff.length > 6000 ? diff.slice(0, 6000) + "\n…(truncated)" : diff}`,
             },
           ],
           timestamp: Date.now(),
@@ -272,18 +265,16 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.notify("/yeet cancelled", "info");
       return;
     }
-
-    const COMMIT_TYPES =
-      "feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert";
-    const subjectLineRe = new RegExp(
-      `^(?:${COMMIT_TYPES})(?:\\([\\w.-]+\\))?!?:\\s`,
-      "i",
-    );
     const lines = message.trim().split("\n");
-    const subjectIndex = lines.findIndex((l) => subjectLineRe.test(l.trim()));
-    const trimmedMessage =
-      subjectIndex > 0 ? lines.slice(subjectIndex).join("\n") : message;
-    const [subject = "", ...bodyLines] = trimmedMessage
+    const subjectIndex = lines.findIndex((l) =>
+      new RegExp(
+        `^(?:${"feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert"})(?:\\([\\w.-]+\\))?!?:\\s`,
+        "i",
+      ).test(l.trim()),
+    );
+    const [subject = "", ...bodyLines] = (
+      subjectIndex > 0 ? lines.slice(subjectIndex).join("\n") : message
+    )
       .replace(/^\s*(?:subject|title|commit(?:\s*message)?|message):\s*/i, "")
       .replace(/^["'`]+|["'`]+$/g, "")
       .trim()
@@ -302,24 +293,27 @@ export default function (pi: ExtensionAPI) {
     showProgress(3);
     const commit = await git("commit", "--no-verify", "-m", cleanMessage);
     if (!commit.ok) {
-      const detail = [commit.stdout, commit.stderr]
-        .map((s) => s.trim())
-        .filter(Boolean)
-        .join("\n");
       ctx.ui.notify("/yeet: commit failed (see history)", "error");
       pi.sendMessage(
         {
           customType: YEET_MSG_TYPE,
-          content: `commit failed:\n${detail || "(no output)"}`,
+          content: `commit failed:\n${
+            [commit.stdout, commit.stderr]
+              .map((s) => s.trim())
+              .filter(Boolean)
+              .join("\n") || "(no output)"
+          }`,
           display: true,
         },
         { triggerTurn: false },
       );
       return;
     }
-    const sha = (await git("rev-parse", "--short", "HEAD")).out;
 
-    await pushAndReport(sha, subject);
+    await pushAndReport(
+      (await git("rev-parse", "--short", "HEAD")).out,
+      subject,
+    );
   };
 
   const runYeet = async (args: string, ctx: ExtensionContext) => {

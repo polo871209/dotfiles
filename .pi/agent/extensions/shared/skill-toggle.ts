@@ -78,8 +78,11 @@ export function registerSkillToggle(
       return "cloned";
     }
     try {
-      const out = await git(["pull", "--ff-only"], cloneDir);
-      return out.includes("Already up to date") ? "up to date" : "updated";
+      return (await git(["pull", "--ff-only"], cloneDir)).includes(
+        "Already up to date",
+      )
+        ? "up to date"
+        : "updated";
     } catch {
       return "offline — using cached copy";
     }
@@ -107,8 +110,7 @@ export function registerSkillToggle(
       if (arg === "update") {
         ctx.ui.notify(`${label}: syncing…`, "info");
         try {
-          const outcome = await syncClone();
-          ctx.ui.notify(`${label}: ${outcome}`, "info");
+          ctx.ui.notify(`${label}: ${await syncClone()}`, "info");
         } catch (e) {
           ctx.ui.notify(
             `${name} update failed: ${e instanceof Error ? e.message : String(e)}`,

@@ -25,8 +25,6 @@ async function oauthToken(
   return { token };
 }
 
-const CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
-
 interface ClaudeBucket {
   utilization: number;
   resets_at: string;
@@ -61,14 +59,13 @@ function fmtLine(
   resetsAt: Date | string,
   theme: Theme,
 ): string {
-  const resetStr =
+  return `${name}\n${bar(pct, theme)} ${`${pct.toFixed(0)}%`.padStart(4)} used  (resets ${
     resetsAt instanceof Date
       ? Number.isNaN(resetsAt.getTime())
         ? String(resetsAt)
         : resetsAt.toLocaleString()
-      : resetsAt;
-  const pctStr = `${pct.toFixed(0)}%`.padStart(4);
-  return `${name}\n${bar(pct, theme)} ${pctStr} used  (resets ${resetStr})`;
+      : resetsAt
+  })`;
 }
 
 async function claudeUsageLines(ctx: ExtensionContext): Promise<string[]> {
@@ -77,7 +74,7 @@ async function claudeUsageLines(ctx: ExtensionContext): Promise<string[]> {
 
   let res: Response;
   try {
-    res = await fetch(CLAUDE_USAGE_URL, {
+    res = await fetch("https://api.anthropic.com/api/oauth/usage", {
       headers: {
         Authorization: `Bearer ${auth.token}`,
         "anthropic-beta": "oauth-2025-04-20",
@@ -123,11 +120,12 @@ async function claudeUsageLines(ctx: ExtensionContext): Promise<string[]> {
 
 export default function (pi: ExtensionAPI) {
   pi.registerCommand("usage", {
-    description:
-      "Show Claude Pro/Max subscription usage (5h + weekly quotas)",
+    description: "Show Claude Pro/Max subscription usage (5h + weekly quotas)",
     handler: async (_args, ctx) => {
-      const claude = await claudeUsageLines(ctx);
-      ctx.ui.notify(`Claude\n${claude.join("\n")}`, "info");
+      ctx.ui.notify(
+        `Claude\n${(await claudeUsageLines(ctx)).join("\n")}`,
+        "info",
+      );
     },
   });
 }

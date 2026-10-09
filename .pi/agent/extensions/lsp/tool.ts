@@ -24,74 +24,77 @@ import {
   type LspLocation,
 } from "./utils";
 
-const WORKSPACE_DIAG_MAX_FILES = 300;
-const WORKSPACE_DIAG_MAX_BYTES = 1_500_000;
-const SKIP_EXTS = new Set([
-  "png",
-  "jpg",
-  "jpeg",
-  "gif",
-  "webp",
-  "ico",
-  "svg",
-  "bmp",
-  "icns",
-  "woff",
-  "woff2",
-  "ttf",
-  "otf",
-  "eot",
-  "zip",
-  "tar",
-  "gz",
-  "bz2",
-  "xz",
-  "7z",
-  "rar",
-  "pdf",
-  "mp3",
-  "mp4",
-  "mov",
-  "wav",
-  "webm",
-  "lock",
-  "log",
-]);
-const SKIP_BASENAMES = new Set([
-  "package-lock.json",
-  "bun.lock",
-  "bun.lockb",
-  "yarn.lock",
-  "pnpm-lock.yaml",
-  "Cargo.lock",
-  "npm-shrinkwrap.json",
-]);
-
 async function listWorkspaceFiles(
   cwd: string,
   signal: AbortSignal | undefined,
 ): Promise<{ files: string[]; totalCandidates: number }> {
-  const res = await run(
-    "git",
-    ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-    signal,
-    cwd,
-  );
-  const all = res.stdout.split("\0").filter(Boolean);
-  const candidates = all.filter((rel) => {
-    const base = rel.split("/").pop() ?? rel;
-    if (SKIP_BASENAMES.has(base)) return false;
-    const ext = base.includes(".") ? base.split(".").pop()!.toLowerCase() : "";
-    if (SKIP_EXTS.has(ext)) return false;
-    return true;
-  });
+  const candidates = (
+    await run(
+      "git",
+      ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+      signal,
+      cwd,
+    )
+  ).stdout
+    .split("\0")
+    .filter(Boolean)
+    .filter((rel) => {
+      const base = rel.split("/").pop() ?? rel;
+      if (
+        [
+          "package-lock.json",
+          "bun.lock",
+          "bun.lockb",
+          "yarn.lock",
+          "pnpm-lock.yaml",
+          "Cargo.lock",
+          "npm-shrinkwrap.json",
+        ].includes(base)
+      )
+        return false;
+      if (
+        [
+          "png",
+          "jpg",
+          "jpeg",
+          "gif",
+          "webp",
+          "ico",
+          "svg",
+          "bmp",
+          "icns",
+          "woff",
+          "woff2",
+          "ttf",
+          "otf",
+          "eot",
+          "zip",
+          "tar",
+          "gz",
+          "bz2",
+          "xz",
+          "7z",
+          "rar",
+          "pdf",
+          "mp3",
+          "mp4",
+          "mov",
+          "wav",
+          "webm",
+          "lock",
+          "log",
+        ].includes(base.includes(".") ? base.split(".").pop()!.toLowerCase() : "")
+      )
+        return false;
+      return true;
+    });
   const files: string[] = [];
   for (const rel of candidates) {
-    if (files.length >= WORKSPACE_DIAG_MAX_FILES) break;
+    if (files.length >= 300) break;
     const abs = toAbs(rel, cwd);
     try {
       const st = fs.statSync(abs);
-      if (!st.isFile() || st.size > WORKSPACE_DIAG_MAX_BYTES) continue;
+      if (!st.isFile() || st.size > 1_500_000) continue;
     } catch {
       continue;
     }
@@ -111,11 +114,7 @@ type AnchorAction = (typeof ANCHOR_ACTIONS)[number];
 
 interface LspParams {
   action:
-    | AnchorAction
-    | "document_symbols"
-    | "diagnostics"
-    | "rename"
-    | "restart";
+    AnchorAction | "document_symbols" | "diagnostics" | "rename" | "restart";
   file?: string;
   files?: string[];
   line?: number;
@@ -176,22 +175,6 @@ interface StatusResult extends DriverErr {
   files?: StatusFile[];
 }
 
-const ANCHOR_LABEL: Record<AnchorAction, string> = {
-  hover: "hover",
-  definition: "definition(s)",
-  references: "reference(s)",
-  implementation: "implementation(s)",
-  type_definition: "type definition(s)",
-};
-
-const ANCHOR_DRIVER_FN: Record<AnchorAction, string> = {
-  hover: "hover",
-  definition: "definition",
-  references: "references",
-  implementation: "implementation",
-  type_definition: "type_definition",
-};
-
 async function runAnchor(
   action: AnchorAction,
   params: LspParams,
@@ -222,13 +205,35 @@ async function runAnchor(
 
   return withDriver<DriverLocResult>(
     ctx,
-    ANCHOR_DRIVER_FN[action],
+    (
+      {
+        hover: "hover",
+        definition: "definition",
+        references: "references",
+        implementation: "implementation",
+        type_definition: "type_definition",
+      } satisfies Record<AnchorAction, string>
+    )[action],
     [file, params.line, params.symbol ?? ""],
     signal,
     onUpdate,
     (res, cwd) => {
       const locs = res.locations ?? [];
-      const t = capText(formatLocations(locs, cwd, ANCHOR_LABEL[action]));
+      const t = capText(
+        formatLocations(
+          locs,
+          cwd,
+          (
+            {
+              hover: "hover",
+              definition: "definition(s)",
+              references: "reference(s)",
+              implementation: "implementation(s)",
+              type_definition: "type definition(s)",
+            } satisfies Record<AnchorAction, string>
+          )[action],
+        ),
+      );
       return {
         text: t.text,
         details: { count: locs.length, truncated: t.truncated },
@@ -259,9 +264,9 @@ async function runDocumentSymbols(
       }
       const lines = [`${syms.length} symbol(s) in ${displayPath(file, cwd)}:`];
       for (const s of syms) {
-        const indent = "  ".repeat(s.depth + 1);
-        const detail = s.detail ? `  ${s.detail}` : "";
-        lines.push(`${indent}${s.kind} ${s.name}${detail}  :${s.line}`);
+        lines.push(
+          `${"  ".repeat(s.depth + 1)}${s.kind} ${s.name}${s.detail ? `  ${s.detail}` : ""}  :${s.line}`,
+        );
       }
       return { text: cap(lines.join("\n")), details: { count: syms.length } };
     },
@@ -320,9 +325,8 @@ async function runRestart(
     onUpdate,
     (res) => {
       const files = res.files ?? [];
-      const prev = was ? "killed previous daemon" : "no daemon was running";
       return {
-        text: `LSP restarted (${prev}); fresh nvim ready with ${files.length} buffer(s).`,
+        text: `LSP restarted (${was ? "killed previous daemon" : "no daemon was running"}); fresh nvim ready with ${files.length} buffer(s).`,
         details: { restarted: was, buffers: files.length },
       };
     },
@@ -339,11 +343,10 @@ async function runDiagnostics(
   let files: string[];
   let workspaceNote = "";
 
-  const workspaceMode =
+  if (
     (!params.files || params.files.length === 0) &&
-    (!params.file || params.file === "*");
-
-  if (workspaceMode) {
+    (!params.file || params.file === "*")
+  ) {
     const { files: wsFiles, totalCandidates } = await listWorkspaceFiles(
       ctx.cwd,
       signal,

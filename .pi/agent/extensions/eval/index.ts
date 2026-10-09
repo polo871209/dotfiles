@@ -34,38 +34,41 @@ import { PyKernel } from "./py-kernel.ts";
 import type { CellResult } from "./types.ts";
 import { addUsage, sideChannelComplete } from "../shared/llm.ts";
 
-const Cell = Type.Object(
-  {
-    code: Type.String({
-      description:
-        "Python code to execute; final expression becomes cell value.",
-    }),
-    title: Type.Optional(
-      Type.String({ description: "Short label for this cell's result." }),
-    ),
-    timeout: Type.Optional(
-      Type.Number({
-        description: "Cell timeout in seconds; defaults to 30, range 1 to 600.",
-        minimum: 1,
-        maximum: 600,
-      }),
-    ),
-    reset: Type.Optional(
-      Type.Boolean({
-        description: "Start this cell in a fresh Python kernel and state.",
-      }),
-    ),
-  },
-  { additionalProperties: false },
-);
-
 const EvalParams = Type.Object(
   {
-    cells: Type.Array(Cell, {
-      description:
-        "Python cells run sequentially and stop after the first error.",
-      minItems: 1,
-    }),
+    cells: Type.Array(
+      Type.Object(
+        {
+          code: Type.String({
+            description:
+              "Python code to execute; final expression becomes cell value.",
+          }),
+          title: Type.Optional(
+            Type.String({ description: "Short label for this cell's result." }),
+          ),
+          timeout: Type.Optional(
+            Type.Number({
+              description:
+                "Cell timeout in seconds; defaults to 30, range 1 to 600.",
+              minimum: 1,
+              maximum: 600,
+            }),
+          ),
+          reset: Type.Optional(
+            Type.Boolean({
+              description:
+                "Start this cell in a fresh Python kernel and state.",
+            }),
+          ),
+        },
+        { additionalProperties: false },
+      ),
+      {
+        description:
+          "Python cells run sequentially and stop after the first error.",
+        minItems: 1,
+      },
+    ),
   },
   { additionalProperties: false },
 );
@@ -220,13 +223,10 @@ function bridgeHandler(state: SessionState): BridgeHandler {
         return result.text;
       }
       case "tree": {
-        const base = String(args.path ?? ".");
-        const maxDepth = Number(args.max_depth ?? 3);
-        const showHidden = Boolean(args.show_hidden ?? false);
-        const root = path.resolve(state.cwd, base);
+        const root = path.resolve(state.cwd, String(args.path ?? "."));
         const out: string[] = [path.basename(root) || root];
         async function walk(dir: string, depth: number, prefix: string) {
-          if (depth > maxDepth) return;
+          if (depth > Number(args.max_depth ?? 3)) return;
           let entries;
           try {
             entries = await fs.readdir(dir, { withFileTypes: true });
@@ -234,7 +234,10 @@ function bridgeHandler(state: SessionState): BridgeHandler {
             return;
           }
           entries = entries
-            .filter((e) => showHidden || !e.name.startsWith("."))
+            .filter(
+              (e) =>
+                Boolean(args.show_hidden ?? false) || !e.name.startsWith("."),
+            )
             .sort((a, b) => a.name.localeCompare(b.name));
           for (let i = 0; i < entries.length; i++) {
             const e = entries[i];
@@ -270,25 +273,28 @@ function formatCallLog(calls: ToolCallRecord[]): string {
   if (calls.length === 0) return "";
   const counts = new Map<string, number>();
   for (const call of calls) {
-    const status = call.status === "running" ? "interrupted" : call.status;
-    const key = `${call.name} (${status})`;
+    const key = `${call.name} (${call.status === "running" ? "interrupted" : call.status})`;
     counts.set(key, (counts.get(key) ?? 0) + 1);
   }
-  const list = [...counts]
+  return `Tool calls made before the failure (they are not undone): ${[
+    ...counts,
+  ]
     .map(([key, count]) => (count > 1 ? `${key} x${count}` : key))
-    .join(", ");
-  return `Tool calls made before the failure (they are not undone): ${list}.`;
+    .join(", ")}.`;
 }
 
 function ensureFallbacks(state: SessionState): Record<string, AgentTool<any>> {
   if (state.fallbacks) return state.fallbacks;
-  const tools = [
-    createReadTool(state.cwd),
-    createGrepTool(state.cwd),
-    createFindTool(state.cwd),
-    createLsTool(state.cwd),
-  ] as unknown as AgentTool<any>[];
-  state.fallbacks = Object.fromEntries(tools.map((tool) => [tool.name, tool]));
+  state.fallbacks = Object.fromEntries(
+    (
+      [
+        createReadTool(state.cwd),
+        createGrepTool(state.cwd),
+        createFindTool(state.cwd),
+        createLsTool(state.cwd),
+      ] as unknown as AgentTool<any>[]
+    ).map((tool) => [tool.name, tool]),
+  );
   return state.fallbacks;
 }
 
@@ -345,8 +351,9 @@ async function ensurePyKernel(state: SessionState): Promise<PyKernel> {
 }
 
 function formatResult(r: CellResult, idx: number): string {
-  const head = `[${idx + 1}]${r.title ? ` ${r.title}` : ""}${r.timedOut ? " TIMEOUT" : r.aborted ? " ABORTED" : ""}`;
-  const parts = [head];
+  const parts = [
+    `[${idx + 1}]${r.title ? ` ${r.title}` : ""}${r.timedOut ? " TIMEOUT" : r.aborted ? " ABORTED" : ""}`,
+  ];
   if (r.stdout) parts.push(r.stdout.trimEnd());
   if (r.stderr) parts.push(`stderr:\n${r.stderr.trimEnd()}`);
   for (const d of r.displays) {
@@ -409,7 +416,6 @@ async function boundFinal(
     maxBytes: maxBytes - head.outputBytes,
     maxLines: maxLines - head.outputLines,
   });
-  const omitted = head.totalBytes - head.outputBytes - tail.outputBytes;
   let fullOutputPath: string | undefined = path.join(
     os.tmpdir(),
     `pi-eval-${randomUUID()}.txt`,
@@ -422,19 +428,19 @@ async function boundFinal(
     fullOutputPath = undefined;
     saved = `Could not save the full output: ${err instanceof Error ? err.message : String(err)}.`;
   }
-  const note =
-    `[Output truncated: kept the first ${head.outputLines} and last ${tail.outputLines} ` +
-    `of ${head.totalLines} lines (${formatSize(head.totalBytes)}). ${saved}]`;
-  const text = [
-    summary,
-    head.content,
-    `[… ${formatSize(Math.max(0, omitted))} omitted …]`,
-    tail.content,
-    note,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-  return { text, ...(fullOutputPath ? { fullOutputPath } : {}) };
+  return {
+    text: [
+      summary,
+      head.content,
+      `[… ${formatSize(Math.max(0, head.totalBytes - head.outputBytes - tail.outputBytes))} omitted …]`,
+      tail.content,
+      `[Output truncated: kept the first ${head.outputLines} and last ${tail.outputLines} ` +
+        `of ${head.totalLines} lines (${formatSize(head.totalBytes)}). ${saved}]`,
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+    ...(fullOutputPath ? { fullOutputPath } : {}),
+  };
 }
 
 const DESCRIPTION = `Run persistent Python for iterative computation and orchestrating tool calls.
@@ -471,12 +477,12 @@ function schemaType(schema: unknown, depth = 0): string {
   if (type === "array") return `list[${schemaType(s.items, depth + 1)}]`;
   if (type === "object" || s.properties) {
     if (!s.properties || depth > 2) return "dict";
-    const required = new Set<string>(s.required ?? []);
-    const fields = Object.entries(s.properties).map(
-      ([key, value]) =>
-        `${key}${required.has(key) ? "" : "?"}: ${schemaType(value, depth + 1)}`,
-    );
-    return `{${fields.join(", ")}}`;
+    return `{${Object.entries(s.properties)
+      .map(
+        ([key, value]) =>
+          `${key}${(s.required ?? []).includes(key) ? "" : "?"}: ${schemaType(value, depth + 1)}`,
+      )
+      .join(", ")}}`;
   }
   return (
     (
@@ -498,8 +504,9 @@ function describeCallable(loadout: ToolLoadout): string {
       tool.name !== "eval" && loadout.getExposure(tool.name) !== "deferred",
   );
   const structured = tools.filter((tool) => tool.outputSchema);
-  const declaredNames = new Set(declared.map((tool) => tool.name));
-  const hidden = tools.filter((tool) => !declaredNames.has(tool.name));
+  const hidden = tools.filter(
+    (tool) => !declared.some((d) => d.name === tool.name),
+  );
   const sections = [DESCRIPTION];
   if (structured.length > 0) {
     sections.push(
@@ -545,7 +552,7 @@ export default function (pi: ExtensionAPI) {
   };
   let cleaned = false;
 
-  const cleanup = () => {
+  pi.on("session_shutdown", () => {
     if (cleaned) return;
     cleaned = true;
     state.py?.dispose();
@@ -554,9 +561,7 @@ export default function (pi: ExtensionAPI) {
     state.registration = null;
     state.fallbacks = null;
     state.ctx = null;
-  };
-
-  pi.on("session_shutdown", cleanup);
+  });
   pi.registerTool({
     name: "eval",
     label: "Eval",
@@ -614,15 +619,23 @@ export default function (pi: ExtensionAPI) {
       let failedCell: number | undefined;
 
       const emit = (status?: string, active?: CellResult) => {
-        const summary = `[${results.length}/${params.cells.length} cells]`;
-        const visible = active ? [...results, active] : results;
-        const output = visible.map((r, i) => formatResult(r, i)).join("\n\n");
-        const body =
-          [output, status].filter(Boolean).join("\n\n") || "running…";
         try {
           onUpdate?.({
             content: [
-              { type: "text" as const, text: boundOutput(summary, body) },
+              {
+                type: "text" as const,
+                text: boundOutput(
+                  `[${results.length}/${params.cells.length} cells]`,
+                  [
+                    (active ? [...results, active] : results)
+                      .map((r, i) => formatResult(r, i))
+                      .join("\n\n"),
+                    status,
+                  ]
+                    .filter(Boolean)
+                    .join("\n\n") || "running…",
+                ),
+              },
             ],
             details: details(
               results,
@@ -648,8 +661,9 @@ export default function (pi: ExtensionAPI) {
           emit(
             `[${i + 1}/${params.cells.length}]${cell.title ? ` ${cell.title}` : " cell"}`,
           );
-          const kernel = await ensurePyKernel(state);
-          const result = await kernel.run(
+          const result = await (
+            await ensurePyKernel(state)
+          ).run(
             cell.code,
             cell.timeout ?? 30,
             cell.title,
@@ -676,7 +690,6 @@ export default function (pi: ExtensionAPI) {
             : last?.timedOut
               ? `Cell ${failedCell + 1} timed out. ${ran}`
               : `Cell ${failedCell + 1} failed. ${ran}`;
-      const body = results.map((r, i) => formatResult(r, i)).join("\n\n");
       const { text, fullOutputPath } = await boundFinal(
         [
           stateLost
@@ -686,7 +699,7 @@ export default function (pi: ExtensionAPI) {
         ]
           .filter(Boolean)
           .join("\n"),
-        body,
+        results.map((r, i) => formatResult(r, i)).join("\n\n"),
       );
 
       const content: (
