@@ -1,10 +1,11 @@
 {
   "general": {
+    "launcherShortcut": "cmd+g",
     "showInMenuBar": false,
+    "automaticallyCheckForUpdates": false,
     "popToRootSeconds": 90,
     "escapeKeyBehavior": "navigateBackOrClose",
-    "autoSwitchInputSource": null,
-    "supportReminders": false
+    "autoSwitchInputSource": null
   },
   "appearance": {
     "theme": "system",
@@ -27,6 +28,7 @@
     "sensitivity": "medium"
   },
   "applications": {
+    "enabled": true,
     "searchScopes": [
       "/Applications",
       "/Applications/Utilities",
@@ -36,9 +38,31 @@
       "/System/Volumes/Preboot/Cryptexes/App/System/Applications",
       "/System/Library/CoreServices/Finder.app",
       "~/Applications"
-    ]
+    ],
+    "apps": {
+      "app.zen-browser.zen": {
+        "shortcut": "hyper+space",
+        "alias": null,
+        "showInLauncher": true
+      },
+      "com.mitchellh.ghostty": {
+        "shortcut": "hyper+j",
+        "alias": null,
+        "showInLauncher": true
+      }
+    }
+  },
+  "systemSettings": {
+    "enabled": true,
+    "panes": {}
+  },
+  "systemActions": {
+    "enabled": true,
+    "actions": {}
   },
   "commands": {
+    "builtInEnabled": true,
+    "builtIn": {},
     "enabled": false,
     "showInLauncher": true
   },
@@ -47,45 +71,47 @@
     "showInLauncher": true,
     "opensNewWindow": false,
     "selectionFallback": "ask",
-    "confirmsBeforeDelete": true
+    "confirmsBeforeDelete": true,
+    "commands": {}
   },
   "appleShortcuts": {
     "enabled": false
   },
-  "ai": {
-    "enabled": false,
-    "webSearch": false,
-    "systemPrompt": "",
-    "systemPromptEnabled": true,
-    "retentionDays": "forever",
-    "opensTo": "recent",
-    "newChatAfterMinutes": 5,
-    "toolRounds": 25
-  },
-  "quickActions": {
-    "targetLanguage": ""
-  },
-  "fileSearch": {
-    "enabled": false,
-    "scopes": [
-      "~"
-    ],
-    "ignorePatterns": []
+  "dictation": {
+    "mode": "toggle",
+    "shortcut": null,
+    "model": "redux",
+    "microphone": null,
+    "destination": "paste",
+    "adaptsCapitalization": true,
+    "releaseAfterMinutes": 1,
+    "language": null
   },
   "notes": {
     "enabled": true,
     "rendersMarkdown": true,
     "showsFormattingBar": true,
-    "folder": null
+    "folder": null,
+    "commands": {}
   },
   "snippets": {
     "showInLauncher": true,
-    "folder": null
+    "folder": null,
+    "commands": {}
   },
   "navigation": {
-    "enabled": false,
-    "menuSearchShowsAppleMenu": false,
-    "menuSearchDisabledApps": []
+    "enabled": true,
+    "menuSearchShowsAppleMenu": true,
+    "menuSearchDisabledApps": [],
+    "windowSwitcherShortcut": "cmd+tab",
+    "windowSwitcherExcludedApps": [],
+    "commands": {
+      "search-menu-items": {
+        "shortcut": null,
+        "alias": null,
+        "showInLauncher": false
+      }
+    }
   },
   "windowManagement": {
     "enabled": true,
@@ -131,9 +157,11 @@
       "previous-space": null,
       "next-space": null
     },
+    "aliases": {},
     "customSizes": [],
     "layouts": [],
-    "rooms": []
+    "rooms": [],
+    "commands": {}
   },
   "clipboard": {
     "enabled": true,
@@ -142,11 +170,19 @@
     "disabledApps": [
       "com.apple.keychainaccess",
       "com.apple.Passwords"
-    ]
+    ],
+    "commands": {
+      "clipboard-history": {
+        "shortcut": "cmd+b",
+        "alias": null,
+        "showInLauncher": true
+      }
+    }
   },
   "emoji": {
     "skinTone": "none",
-    "gridColumns": 8
+    "gridColumns": 8,
+    "commands": {}
   },
   "calendar": {
     "showInLauncher": true,
@@ -154,14 +190,13 @@
     "span": "todayAndTomorrow",
     "joinWindowMinutes": 5,
     "autoJoinConfirms": true,
+    "autoJoinNamedProvidersOnly": false,
     "meetingBrowser": null,
     "menuBar": "disabled",
     "menuBarUpcomingEvents": "today",
     "menuBarLinkedEventsOnly": true,
     "menuBarHidesWhenEmpty": false,
-    "hideCurrentEventAfterMinutes": "never"
-  },
-  "extensions": {
-    "showInLauncher": true
+    "hideCurrentEventAfterMinutes": "never",
+    "commands": {}
   }
 }
