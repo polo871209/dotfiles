@@ -52,6 +52,7 @@ Work that outlives its tool call, such as a background subagent run, writes a st
 ### Outside-pi surface
 
 - **`notifier.ts`** — reports agent status through desktop and terminal surfaces when attention is elsewhere.
+- **`caffeinate.ts`** — keeps the Mac from idle sleep while the agent actively works, for at most 100 minutes per run, and lets the display sleep.
 - **`tmux-bridge.ts`** — sends Nvim selections or diagnostics to Pi as a line-numbered snapshot of the selected lines.
 
 ### TUI taste

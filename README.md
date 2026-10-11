@@ -9,6 +9,7 @@
 - Version Manager: [mise](https://mise.jdx.dev/)
 - History: [Atuin](https://docs.atuin.sh/cli/)
 - Browser: [Zen](https://zen-browser.app/)
+- Utilities: [Nanocast](https://github.com/polo871209/nanocast)
 
 Everything else lives in the [Brewfile](Brewfile) and [mise config](mise/config.toml).
 

@@ -88,7 +88,18 @@ zstyle ':zle:edit-command-line' editor nvim -c 'set filetype=bash' -c 'let b:she
 bindkey -M vicmd 'v' edit-command-line
 
 # Aliases
-alias cafe="caffeinate -id weathr --hide-location"
+function cafe {
+  if (( $# == 0 )); then
+    caffeinate -id weathr --hide-location
+    return
+  fi
+  if [[ $1 != <1-> ]]; then
+    print -u2 "usage: cafe [minutes]"
+    return 1
+  fi
+  # weathr only restores the terminal on SIGINT, and caffeinate ignores -t when it runs a command.
+  caffeinate -id sh -c '(sleep "$1"; kill -INT $$) & exec weathr --hide-location' sh $(( $1 * 60 ))
+}
 alias gc="gcloud config configurations activate"
 alias k="kubectl"
 alias kctx="kubectx"

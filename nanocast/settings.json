@@ -18,7 +18,8 @@
   "hyperKey": {
     "key": "capsLock",
     "includesShift": true,
-    "quickPress": "none"
+    "quickPress": "none",
+    "secureInputCompatibility": false
   },
   "calculator": {
     "numberStyle": "system"
@@ -70,7 +71,7 @@
     "enabled": false,
     "showInLauncher": true,
     "opensNewWindow": false,
-    "selectionFallback": "ask",
+    "passesSelectedText": false,
     "confirmsBeforeDelete": true,
     "commands": {}
   },
@@ -101,7 +102,7 @@
   },
   "navigation": {
     "enabled": true,
-    "menuSearchShowsAppleMenu": true,
+    "menuSearchShowsAppleMenu": false,
     "menuSearchDisabledApps": [],
     "windowSwitcherShortcut": "cmd+tab",
     "windowSwitcherExcludedApps": [],
@@ -165,7 +166,7 @@
   },
   "clipboard": {
     "enabled": true,
-    "retentionDays": 365,
+    "retentionDays": 180,
     "defaultAction": "paste",
     "disabledApps": [
       "com.apple.keychainaccess",
@@ -174,6 +175,16 @@
     "commands": {
       "clipboard-history": {
         "shortcut": "cmd+b",
+        "alias": null,
+        "showInLauncher": true
+      }
+    }
+  },
+  "screenshot": {
+    "saveFolder": "~/Downloads",
+    "commands": {
+      "capture-screenshot": {
+        "shortcut": "hyper+x",
         "alias": null,
         "showInLauncher": true
       }
