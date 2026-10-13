@@ -134,6 +134,17 @@ nf() {
     [[ -d "$file" ]] && cd "$file" && nvim || nvim "$file"
 }
 
+# ff [dir]: live fsearch over the whole disk, or only inside dir. A picked file opens in nvim, and a picked folder becomes the cwd.
+ff() {
+    local scope=${1:+in:${1:A}}
+    local pick
+    pick=$(: | fzf --disabled --no-select-1 --prompt "${1:+${1:A} }> " \
+        --bind "change:reload:[[ -n {q} ]] && fsearch {q} '!node_modules/ !.git/ !.venv/ !__pycache__/' ${(q)scope} limit:200 2>/dev/null || true" \
+        --preview '[[ -d {} ]] && eza -a --icons --color=always {} || bat --color=always --style=numbers --line-range=:500 {}')
+    [[ -z "$pick" ]] && return
+    if [[ -d "$pick" ]]; then cd "$pick"; else nvim "$pick"; fi
+}
+
 sesh-sessions() {
   {
     exec </dev/tty

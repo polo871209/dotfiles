@@ -1,6 +1,7 @@
 local display = require 'picker.display'
 local float = require 'float'
 local frecency = require 'picker.frecency'
+local fsearch = require 'picker.fsearch'
 
 local ns = vim.api.nvim_create_namespace 'picker'
 
@@ -48,6 +49,7 @@ end
 --- prompt and no fuzzy filtering, for a fixed list the user only navigates
 ---@field kind ('file'|'grep')? display format
 ---@field live boolean? re-run produce per keystroke instead of fuzzy filtering
+---@field debounce_ms integer? wait this long after a keystroke before a live re-run
 ---@field frecency boolean? blend frecency into the match score
 ---@field preview boolean? set false to drop the preview pane entirely
 
@@ -69,7 +71,7 @@ end
 ---@field cwd string
 ---@field from_win integer
 ---@field tick integer? invalidates stdout from superseded jobs
----@field job vim.SystemObj?
+---@field job (vim.SystemObj|FsearchRequest)?
 ---@field timer uv.uv_timer_t?
 ---@field live_timer uv.uv_timer_t?
 ---@field list_buf integer
@@ -353,6 +355,18 @@ function Picker:spawn(cmd, on_line)
     end)
 end
 
+---@param req table
+---@param to_items fun(reply: table): PickerItem[]
+function Picker:request(req, to_items)
+    self:stop_job()
+    local tick = self.tick
+    self.job = fsearch.request(req, function(reply)
+        if self.closed or tick ~= self.tick then return end
+        self.job = nil
+        if reply then self:add(to_items(reply)) end
+    end)
+end
+
 function Picker:add(batch)
     local limit = self.opts.live and LIVE_LIMIT or nil
     if limit and #self.items + #batch >= limit then
@@ -416,7 +430,7 @@ function Picker:on_query()
         self.live_timer = timer
         timer:stop()
         timer:start(
-            LIVE_DEBOUNCE_MS,
+            self.opts.debounce_ms or LIVE_DEBOUNCE_MS,
             0,
             vim.schedule_wrap(function()
                 if not self.closed then self:reload_live() end

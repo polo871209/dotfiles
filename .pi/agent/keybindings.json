@@ -1,3 +1,4 @@
 {
+  "$schema": "https://pi.dev/schemas/keybindings.schema.json",
   "app.session.new": "ctrl+alt+l"
 }

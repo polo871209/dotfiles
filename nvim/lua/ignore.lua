@@ -48,6 +48,5 @@ M.files = {
 }
 
 M.names = vim.list_extend(vim.deepcopy(M.dirs), { 'lock.json', 'a.out', 'main' })
-M.patterns = vim.list_extend(vim.deepcopy(M.dirs), M.files)
 
 return M

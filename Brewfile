@@ -1,5 +1,5 @@
-tap "abue-ammar/tinycast", trusted: true
-tap "crmne/tap", trusted: true
+tap "abue-ammar/tinycast"
+tap "crmne/tap"
 tap "polo871209/nanocast", "https://github.com/polo871209/nanocast", trusted: true
 brew "cocoapods"
 brew "git"
@@ -30,7 +30,7 @@ cask "microsoft-teams"
 cask "polo871209/nanocast/nanocast"
 cask "obsidian"
 cask "orbstack"
-cask "crmne/tap/spotifast", trusted: true
+cask "spotifast"
 cask "zen"
 mas "LINE", id: 539883307
 mas "PDFgear", id: 6469021132

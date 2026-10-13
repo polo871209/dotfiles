@@ -23,6 +23,9 @@ opencode/package-lock.json
 *.log
 logs/
 
+# mise
+.mise.toml
+
 # macOS
 .AppleDouble
 .DS_Store

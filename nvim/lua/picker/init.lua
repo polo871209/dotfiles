@@ -1,5 +1,6 @@
 local Picker = require 'picker.core'
 local frecency = require 'picker.frecency'
+local fsearch = require 'picker.fsearch'
 local search = require 'picker.search'
 
 local M = {}
@@ -18,10 +19,19 @@ local function open_file(path, cwd, action, lnum, col)
     vim.cmd 'normal! zz'
 end
 
+---@return string? root real path of the cwd, when the cwd is in a git repo and the daemon is ready
+local function fsearch_root()
+    local cwd = vim.fn.getcwd()
+    -- fsearch hides gitignored files for at most 16 repos below a folder, so a folder of many repos leaks build output.
+    if not vim.fs.root(cwd, '.git') then return nil end
+    local root = vim.uv.fs_realpath(cwd) or cwd
+    return fsearch.ready(root) and root or nil
+end
+
 function M.smart()
     local list_cmd = search.files()
     if not list_cmd then
-        vim.notify('picker: needs fd or rg on PATH', vim.log.levels.ERROR)
+        vim.notify('picker: needs rg on PATH', vim.log.levels.ERROR)
         return
     end
     Picker.new({
@@ -65,16 +75,39 @@ end
 ---@param opts { hidden: boolean?, ignored: boolean? }?
 function M.grep(opts)
     opts = opts or {}
-    if not search.executable 'rg' then
-        vim.notify('picker: needs rg on PATH', vim.log.levels.ERROR)
+    local root = fsearch_root()
+    if not root and not search.executable 'rg' then
+        vim.notify('picker: needs fsearch or rg on PATH', vim.log.levels.ERROR)
         return
     end
     Picker.new({
         title = 'Grep',
         kind = 'grep',
         live = true,
+        debounce_ms = root and 0 or nil,
         confirm = function(item, action, cwd) open_file(item.file, cwd, action, item.lnum, item.col) end,
         produce = function(self, query)
+            if root then
+                self:request(search.fsearch_grep(query, root, opts), function(reply)
+                    local items = {}
+                    for _, file in ipairs(reply.files or {}) do
+                        local rel = vim.fs.relpath(root, file.path)
+                        if rel and not search.excluded(rel, opts.hidden) then
+                            for _, m in ipairs(file.matches) do
+                                items[#items + 1] = {
+                                    text = ('%s:%d:%s'):format(rel, m.line, m.text),
+                                    file = rel,
+                                    lnum = m.line,
+                                    col = m.col + 1,
+                                    line = m.text,
+                                }
+                            end
+                        end
+                    end
+                    return items
+                end)
+                return
+            end
             self:spawn(search.grep(query, opts), function(line)
                 -- --null terminates the path with NUL: path\0lnum:col:text
                 local file, rest = line:match '^([^%z]+)%z(.*)$'
