@@ -1,54 +1,147 @@
+import { isAbsolute, relative } from "node:path";
 import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { collectTextMessages } from "./shared/message";
+import { extractText } from "./shared/message";
 import {
   sideChannelComplete,
   sideChannelWithLoader,
   type SideChannelOpts,
 } from "./shared/llm";
 
-function normalizeName(raw: string): string {
-  return raw
-    .replace(/^["'`]+|["'`]+$/g, "")
-    .replace(/[.!?,;:]+$/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 60);
+const MAX_WORDS = 4;
+const MAX_CHARS = 40;
+const DANGLING_WORD =
+  /^(and|or|for|with|without|of|the|a|an|to|in|into|on|at|by|via|vs|from)$/i;
+
+interface FileEditCall {
+  type: "toolCall";
+  name: "edit" | "write";
+  arguments: { path: string };
 }
 
-function buildCall(ctx: ExtensionContext): {
-  opts: SideChannelOpts;
+function isFileEditCall(c: unknown): c is FileEditCall {
+  const call = c as Partial<FileEditCall> | null;
+  return (
+    call?.type === "toolCall" &&
+    (call.name === "edit" || call.name === "write") &&
+    typeof call.arguments?.path === "string"
+  );
+}
+
+function clip(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max)}…` : flat;
+}
+
+function cleanTitle(raw: string): string {
+  return (raw.trim().split("\n")[0] ?? "")
+    .replace(/^["'`*#\s]+|["'`*\s]+$/g, "")
+    .replace(/[.!?,;:]+$/, "")
+    .replace(/\s+/g, " ");
+}
+
+function fitsLimits(title: string): boolean {
+  return title.split(" ").length <= MAX_WORDS && title.length <= MAX_CHARS;
+}
+
+function capTitle(title: string): string {
+  const words = title.split(" ").filter(Boolean).slice(0, MAX_WORDS);
+  while (words.length > 1 && words.join(" ").length > MAX_CHARS) words.pop();
+  while (words.length > 1 && DANGLING_WORD.test(words.at(-1)!)) words.pop();
+  return words.join(" ");
+}
+
+async function finalTitle(
+  ctx: ExtensionContext,
+  digest: string,
+  reply: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const title = cleanTitle(reply);
+  if (fitsLimits(title)) return title;
+  const retry = await sideChannelComplete(ctx, {
+    ...nameRequest(
+      ctx,
+      `${digest}\n\nYour title "${title}" is too long. Name the same topic in ${MAX_WORDS} words or fewer, ${MAX_CHARS} characters at most.`,
+    ),
+    signal,
+  });
+  return capTitle(retry.ok ? cleanTitle(retry.text) : title);
+}
+
+function sessionDigest(ctx: ExtensionContext): {
+  text: string;
   userTurns: number;
 } {
-  const model = ctx.modelRegistry.find("anthropic", "claude-haiku-4-5");
-  const { messages, userTurns } = collectTextMessages(
-    ctx.sessionManager.getBranch(),
-    12,
-  );
-  messages.push({
-    role: "user",
-    content: [
+  const requests: string[] = [];
+  const edits = new Map<string, number>();
+  for (const entry of ctx.sessionManager.getBranch()) {
+    if (entry.type !== "message") continue;
+    const { role, content } = entry.message as {
+      role?: string;
+      content?: unknown;
+    };
+    if (role === "user") {
+      const text = extractText(content).trim();
+      if (text) requests.push(text);
+    } else if (role === "assistant" && Array.isArray(content)) {
+      for (const call of content.filter(isFileEditCall)) {
+        const path = call.arguments.path;
+        const rel = isAbsolute(path) ? relative(ctx.cwd, path) : path;
+        const shown = rel.startsWith("..") ? path : rel;
+        edits.set(shown, (edits.get(shown) ?? 0) + 1);
+      }
+    }
+  }
+
+  const [opening, ...later] = requests;
+  const sections = [`Opening request:\n${clip(opening ?? "", 2_000)}`];
+  if (later.length)
+    sections.push(
+      `Later requests, oldest first:\n${later
+        .slice(-10)
+        .map((r) => `- ${clip(r, 300)}`)
+        .join("\n")}`,
+    );
+  if (edits.size)
+    sections.push(
+      `Files edited most:\n${[...edits]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([path, count]) => `- ${path} (${count})`)
+        .join("\n")}`,
+    );
+  return { text: sections.join("\n\n"), userTurns: requests.length };
+}
+
+function nameRequest(ctx: ExtensionContext, text: string): SideChannelOpts {
+  const model = ctx.modelRegistry.find("anthropic", "claude-sonnet-5-5");
+  return {
+    systemPrompt: `You title coding-agent sessions with 2 to ${MAX_WORDS} words. Name the key topic: the one thing the session builds, fixes, or investigates. The opening request and the files edited most decide it. If later requests moved to a new topic, name the topic with the most requests and edits.
+
+Rules:
+- 2 to ${MAX_WORDS} words and ${MAX_CHARS} characters at most. Sentence case. No quotes, no final punctuation.
+- Drop words a reader can infer: "Slow unit tests", not "Slow unit tests on GitHub runner".
+- Name the concrete subject: the feature, file, tool, command, or error, with the project's own names.
+- One topic. Never join two topics with "and" or a comma.
+- No filler: session, discussion, help, improving, refinement, updates, various.
+
+Good: Worktree session switching | Auto-rename title quality | Kulala HTTP client setup | Subagent notification leak
+Bad: Pi session naming and rename command (two topics) | Claude Code Agent Refinement (vague) | Improving SYSTEM.md writing guidelines (filler)
+
+Reply with the title only.`,
+    messages: [
       {
-        type: "text",
-        text: "Give a short title for this session. Reply with the title only.",
+        role: "user",
+        content: [{ type: "text", text }],
+        timestamp: Date.now(),
       },
     ],
-    timestamp: Date.now(),
-  });
-  return {
-    opts: {
-      systemPrompt:
-        "You name chat sessions. Reply with ONLY a short title (max 6 words, " +
-        "no quotes, no punctuation at end, no trailing period). Describe the " +
-        "user's overall task or topic. Plain text only.",
-      messages,
-      join: " ",
-      model:
-        model && ctx.modelRegistry.hasConfiguredAuth(model) ? model : undefined,
-    },
-    userTurns,
+    join: " ",
+    model:
+      model && ctx.modelRegistry.hasConfiguredAuth(model) ? model : undefined,
   };
 }
 
@@ -67,17 +160,18 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    const { opts, userTurns } = buildCall(ctx);
+    const { text: digest, userTurns } = sessionDigest(ctx);
     if (userTurns <= 3) return;
 
     inFlight.add(sessionFile);
     try {
+      const signal = AbortSignal.timeout(40_000);
       const result = await sideChannelComplete(ctx, {
-        ...opts,
-        signal: AbortSignal.timeout(20_000),
+        ...nameRequest(ctx, digest),
+        signal,
       });
       if (!result.ok) return;
-      const name = normalizeName(result.text);
+      const name = await finalTitle(ctx, digest, result.text, signal);
       if (!name) return;
 
       if (ctx.sessionManager.getSessionFile() !== sessionFile) return;
@@ -130,7 +224,7 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      const { opts, userTurns } = buildCall(ctx);
+      const { text: digest, userTurns } = sessionDigest(ctx);
       if (userTurns === 0) {
         ctx.ui.notify("Nothing to name yet", "warning");
         return;
@@ -138,9 +232,13 @@ export default function (pi: ExtensionAPI) {
 
       if (sessionFile) inFlight.add(sessionFile);
       try {
-        const text = await sideChannelWithLoader(ctx, "Naming session", opts);
-        if (text === null) return;
-        const name = normalizeName(text);
+        const reply = await sideChannelWithLoader(
+          ctx,
+          "Naming session",
+          nameRequest(ctx, digest),
+        );
+        if (reply === null) return;
+        const name = await finalTitle(ctx, digest, reply);
         if (!name) {
           ctx.ui.notify("Model returned an empty name", "warning");
           return;

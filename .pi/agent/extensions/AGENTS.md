@@ -45,9 +45,10 @@ Work that outlives its tool call, such as a background subagent run, writes a st
 - **`go.ts`** — resumes an interrupted or stalled agent turn.
 - **`tickets.ts`** — holds queued follow-up messages as reorderable tickets in a side panel and sends the first one on `/next`, compacting large context first.
 - **`yeet.ts`** — validates, generates Conventional Commits with Sonnet 5.5, and pushes current changes with progress.
+- **`worktree.ts`** — moves the session into the git worktree of a branch, under `.worktree/` in the repo, on `/wt` or when the user asks the agent for a worktree, and on `/wt done` removes a clean worktree, keeps its branch, and moves the session back to the main checkout.
 - **`copy.ts`** — copies a selected code block or the session transcript.
 - **`usage.ts`** — reports Claude Pro/Max subscription usage and quota reset times on request.
-- **`auto-rename.ts`** — gives established sessions descriptive names.
+- **`auto-rename.ts`** — gives established sessions a title of at most four words that names their key topic.
 
 ### Outside-pi surface
 

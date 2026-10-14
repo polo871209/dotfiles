@@ -1,6 +1,6 @@
 // pi exposes no public "continue" from idle (every public path appends a
 // message), so this reaches the live AgentSession. Two internals remain:
-// the session lookup below and AgentSession._runAgentPrompt. Everything else
+// the session lookup below and AgentSession._startRun. Everything else
 // uses public API and follows pi's own auto-retry. A trailing aborted or
 // errored reply gets a context_edit omission, so it stays in raw history but
 // leaves model context for good, including after a resume.
@@ -37,7 +37,11 @@ function sessionRegistry(): WeakMap<object, AgentSession> {
 
 const sessions = sessionRegistry();
 
-type RunLoop = (messages: AgentMessage[]) => Promise<void>;
+type GoMessage = Extract<AgentMessage, { role: "custom" }>;
+type StartRun = (trigger: {
+  messageType: "custom";
+  message: GoMessage;
+}) => Promise<void>;
 
 function omitAbandoned(session: AgentSession): void {
   const { entries } = session.sessionManager.buildSessionProjection();
@@ -59,22 +63,33 @@ function omitAbandoned(session: AgentSession): void {
   if (omitted) session.refreshContext();
 }
 
-// _runAgentPrompt owns retries, compaction, agent_before_settle (lsp feedback)
-// and agent_settled (notifier, subagent result file). It opens with one
-// agent.prompt(messages) call, so swap that call for continue(), then restore.
-async function resume(session: AgentSession, run: RunLoop): Promise<void> {
+// _startRun owns retries, compaction, before_agent_start, agent_before_settle
+// (lsp feedback) and agent_settled (notifier, subagent result file). It needs a
+// starting message and hands it to one agent.prompt(messages) call. Strip that
+// marker there: forward what pi added (system prompt patch, nextTurn and
+// before_agent_start messages), or continue() when nothing is left.
+async function resume(session: AgentSession, start: StartRun): Promise<void> {
   const agent = session.agent;
+  const marker: GoMessage = {
+    role: "custom",
+    customType: "go",
+    content: [],
+    display: false,
+    timestamp: Date.now(),
+  };
   const shadowed = Object.prototype.hasOwnProperty.call(agent, "prompt");
+  const ownPrompt = agent.prompt;
   const restore = () => {
-    if (shadowed) agent.prompt = agent.prompt;
+    if (shadowed) agent.prompt = ownPrompt;
     else delete (agent as Partial<typeof agent>).prompt;
   };
-  agent.prompt = () => {
+  agent.prompt = ((input: AgentMessage | AgentMessage[]) => {
     restore();
-    return agent.continue();
-  };
+    const rest = [input].flat().filter((m) => m !== marker);
+    return rest.length > 0 ? agent.prompt(rest) : agent.continue();
+  }) as typeof agent.prompt;
   try {
-    await run.call(session, []);
+    await start.call(session, { messageType: "custom", message: marker });
   } finally {
     restore();
   }
@@ -90,11 +105,10 @@ async function go(ctx: ExtensionContext): Promise<void> {
     ctx.ui.notify("No live session found for /go", "warning");
     return;
   }
-  const run = (session as unknown as { _runAgentPrompt?: RunLoop })
-    ._runAgentPrompt;
-  if (typeof run !== "function") {
+  const start = (session as unknown as { _startRun?: StartRun })._startRun;
+  if (typeof start !== "function") {
     ctx.ui.notify(
-      "/go needs AgentSession._runAgentPrompt, which this pi version lacks",
+      "/go needs AgentSession._startRun, which this pi version lacks",
       "error",
     );
     return;
@@ -110,7 +124,7 @@ async function go(ctx: ExtensionContext): Promise<void> {
     return;
   }
   try {
-    await resume(session, run);
+    await resume(session, start);
   } catch (e) {
     ctx.ui.notify(`Retrigger failed: ${(e as Error).message}`, "error");
   }
