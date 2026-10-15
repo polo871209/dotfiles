@@ -67,17 +67,6 @@
     "enabled": false,
     "showInLauncher": true
   },
-  "quicklinks": {
-    "enabled": false,
-    "showInLauncher": true,
-    "opensNewWindow": false,
-    "passesSelectedText": false,
-    "confirmsBeforeDelete": true,
-    "commands": {}
-  },
-  "appleShortcuts": {
-    "enabled": false
-  },
   "dictation": {
     "mode": "toggle",
     "shortcut": null,
@@ -85,6 +74,7 @@
     "microphone": null,
     "destination": "paste",
     "adaptsCapitalization": true,
+    "liveInsertion": false,
     "releaseAfterMinutes": 1,
     "language": null
   },
@@ -92,11 +82,6 @@
     "enabled": true,
     "rendersMarkdown": true,
     "showsFormattingBar": true,
-    "folder": null,
-    "commands": {}
-  },
-  "snippets": {
-    "showInLauncher": true,
     "folder": null,
     "commands": {}
   },
@@ -168,10 +153,7 @@
     "enabled": true,
     "retentionDays": 180,
     "defaultAction": "paste",
-    "disabledApps": [
-      "com.apple.keychainaccess",
-      "com.apple.Passwords"
-    ],
+    "disabledApps": ["com.apple.keychainaccess", "com.apple.Passwords"],
     "commands": {
       "clipboard-history": {
         "shortcut": "cmd+b",
@@ -193,21 +175,6 @@
   "emoji": {
     "skinTone": "none",
     "gridColumns": 8,
-    "commands": {}
-  },
-  "calendar": {
-    "showInLauncher": true,
-    "launcherLimit": 5,
-    "span": "todayAndTomorrow",
-    "joinWindowMinutes": 5,
-    "autoJoinConfirms": true,
-    "autoJoinNamedProvidersOnly": false,
-    "meetingBrowser": null,
-    "menuBar": "disabled",
-    "menuBarUpcomingEvents": "today",
-    "menuBarLinkedEventsOnly": true,
-    "menuBarHidesWhenEmpty": false,
-    "hideCurrentEventAfterMinutes": "never",
     "commands": {}
   }
 }

@@ -13,7 +13,7 @@
   },
   "quietStartup": true,
   "collapseChangelog": true,
-  "lastChangelogVersion": "1.2.0",
+  "lastChangelogVersion": "1.3.0",
   "showCacheMissNotices": false,
   "warnings": {
     "anthropicExtraUsage": false
