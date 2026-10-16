@@ -206,17 +206,76 @@ try {
 } catch {}
 tocToggle.addEventListener("click", () => collapseToc(!document.body.classList.contains("toc-collapsed")));
 
-function reveal(line) {
-    let target;
-    for (const el of content.querySelectorAll("[data-sourcepos]")) {
-        if (parseInt(el.dataset.sourcepos, 10) > line) break;
-        target = el;
-    }
-    if (!target) return;
-    const box = target.getBoundingClientRect();
-    if (box.bottom < 0 || box.top > innerHeight)
-        target.scrollIntoView({ block: "center" });
+// Each rendered block with its source lines and page position, in document order.
+// cmark-gfm writes data-sourcepos as "startLine:startCol-endLine:endCol".
+function sourceLines(el) {
+    const [, start, end] = el.dataset.sourcepos.match(/^(\d+):\d+-(\d+):/);
+    return [Number(start), Number(end)];
 }
+
+function blocks() {
+    return [...content.querySelectorAll("[data-sourcepos]")].map((el) => {
+        const [start, end] = sourceLines(el);
+        const box = el.getBoundingClientRect();
+        return { start, end, top: box.top + scrollY, bottom: box.bottom + scrollY };
+    });
+}
+
+// Source lines and page offsets map linearly inside a block and inside the gap between two blocks.
+function lineToY(line) {
+    let prev;
+    let next;
+    for (const block of blocks()) {
+        if (block.start > line) {
+            next = block;
+            break;
+        }
+        prev = block;
+    }
+    if (!prev) return 0;
+    if (line <= prev.end)
+        return prev.top + ((line - prev.start) / (prev.end - prev.start + 1)) * (prev.bottom - prev.top);
+    if (!next) return prev.bottom;
+    return prev.bottom + ((line - prev.end - 1) / (next.start - prev.end - 1)) * (next.top - prev.bottom);
+}
+
+function yToLine(y) {
+    let prev;
+    let next;
+    for (const block of blocks()) {
+        if (block.top > y) {
+            next = block;
+            break;
+        }
+        prev = block;
+    }
+    if (!prev) return 1;
+    if (y < prev.bottom)
+        return Math.round(prev.start + ((y - prev.top) / (prev.bottom - prev.top)) * (prev.end - prev.start + 1));
+    if (!next) return prev.end;
+    return Math.round(prev.end + 1 + ((y - prev.bottom) / (next.top - prev.bottom)) * (next.start - prev.end - 1));
+}
+
+const contentTop = () => content.getBoundingClientRect().top + scrollY;
+
+// The scroll event that our own scrollTo causes must not go back to nvim, or the two sides chase each other.
+let syncedY;
+
+function syncTo(top) {
+    scrollTo(0, lineToY(top) - contentTop());
+    syncedY = scrollY;
+}
+
+let reportFrame;
+addEventListener("scroll", () => {
+    if (scrollY === syncedY) return;
+    cancelAnimationFrame(reportFrame);
+    reportFrame = requestAnimationFrame(() => {
+        const top = yToLine(scrollY + contentTop());
+        if (last) last[3] = top;
+        webkit.messageHandlers.scroll.postMessage({ path: currentPath, top });
+    });
+});
 
 let currentPath = "";
 let pendingAnchor;
@@ -251,9 +310,113 @@ function scrollToAnchor(hash) {
     return Boolean(target);
 }
 
+const commentBox = document.getElementById("comment");
+const commentLines = document.getElementById("comment-lines");
+const commentText = document.getElementById("comment-text");
+const commentStatus = document.getElementById("comment-status");
+const commentListeners = document.getElementById("comment-listeners");
+const toast = document.getElementById("toast");
+let commentTarget;
+let listeners;
+let lastSpace = -Infinity;
+let toastTimer;
+
+// The source lines of the blocks that hold the selection. A partly selected block counts whole.
+function selectedLines() {
+    const selection = getSelection();
+    if (selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    const block = (node) => (node instanceof Element ? node : node.parentElement)?.closest("[data-sourcepos]");
+    const first = block(range.startContainer);
+    const last = block(range.endContainer);
+    if (!first || !last || !content.contains(first) || !content.contains(last)) return;
+    const [sline] = sourceLines(first);
+    const [lastStart, lastEnd] = sourceLines(last);
+    // A triple-click selection ends at offset 0 of the next block, which holds none of the selected text.
+    const eline = range.endOffset === 0 && last !== first ? lastStart - 1 : lastEnd;
+    return { sline, eline: Math.max(sline, eline), box: range.getBoundingClientRect() };
+}
+
+function openComment() {
+    const lines = selectedLines();
+    if (!lines) return;
+    commentTarget = { path: currentPath, sline: lines.sline, eline: lines.eline };
+    commentLines.textContent = lines.sline === lines.eline ? `Line ${lines.sline}` : `Lines ${lines.sline}-${lines.eline}`;
+    commentStatus.textContent = "";
+    const column = content.getBoundingClientRect();
+    commentBox.style.top = `${lines.box.bottom + scrollY + 8}px`;
+    commentBox.style.left = `${column.left + scrollX}px`;
+    commentBox.style.width = `${column.width}px`;
+    commentBox.hidden = false;
+    commentText.focus();
+}
+
+function stopChoosing() {
+    listeners = undefined;
+    commentListeners.replaceChildren();
+    commentStatus.textContent = "";
+    commentText.readOnly = false;
+}
+
+function closeComment() {
+    if (listeners) stopChoosing();
+    commentText.blur();
+    commentBox.hidden = true;
+}
+
+function sendComment(target) {
+    const comment = commentText.value.trim();
+    if (!comment) return;
+    commentText.readOnly = true;
+    commentStatus.textContent = "Sending to pi…";
+    webkit.messageHandlers.comment.postMessage({ ...commentTarget, comment, target });
+}
+
+function pick(listener) {
+    listeners = undefined;
+    commentListeners.replaceChildren();
+    sendComment(listener.sock);
+}
+
+function showToast(text) {
+    clearTimeout(toastTimer);
+    toast.textContent = text;
+    toast.hidden = false;
+    toastTimer = setTimeout(() => (toast.hidden = true), 2500);
+}
+
+document.addEventListener("keydown", (event) => {
+    if (event.target === commentText || event.key !== " " || event.repeat) return;
+    if (event.metaKey || event.ctrlKey || event.altKey || !selectedLines()) return;
+    event.preventDefault();
+    if (event.timeStamp - lastSpace < 1000) {
+        lastSpace = -Infinity;
+        openComment();
+    } else lastSpace = event.timeStamp;
+});
+
+commentText.addEventListener("keydown", (event) => {
+    if (listeners) {
+        event.preventDefault();
+        if (event.key === "Escape") stopChoosing();
+        const matches = listeners.filter((listener) => listener.window === event.key);
+        if (matches.length === 1) pick(matches[0]);
+        return;
+    }
+    if (event.key === "Escape") {
+        event.preventDefault();
+        closeComment();
+    } else if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+        event.preventDefault();
+        if (!commentText.readOnly) sendComment();
+    }
+});
+commentText.addEventListener("focus", () => webkit.messageHandlers.editing.postMessage(true));
+commentText.addEventListener("blur", () => webkit.messageHandlers.editing.postMessage(false));
+
 window.mdview = {
-    async update(html, baseHref, path, line) {
-        last = [html, baseHref, path, line];
+    async update(html, baseHref, path, top) {
+        last = [html, baseHref, path, top];
         const switched = path !== currentPath;
         let restoredY;
         if (switched) {
@@ -279,12 +442,42 @@ window.mdview = {
         if (switched) scrollTo(0, 0);
         const place = () => {
             if (restoredY !== undefined) scrollTo(0, restoredY);
-            else if (!(anchor && scrollToAnchor(anchor))) reveal(line);
+            else if (!(anchor && scrollToAnchor(anchor))) syncTo(top);
         };
         place();
         await drawing;
         place();
         spy();
+    },
+    scroll(top) {
+        last[3] = top;
+        syncTo(top);
+    },
+    choose(choices) {
+        if (commentBox.hidden) return;
+        listeners = choices;
+        commentStatus.textContent = "Send to which pi? Press its tmux window number, or Esc to go back.";
+        commentListeners.replaceChildren(
+            ...choices.map((listener) => {
+                const button = document.createElement("button");
+                button.type = "button";
+                button.textContent = `${listener.window} ${listener.label}`;
+                // Keeps focus in the textarea, so the viewer's key shortcuts stay off.
+                button.addEventListener("mousedown", (event) => event.preventDefault());
+                button.addEventListener("click", () => pick(listener));
+                return button;
+            }),
+        );
+    },
+    sent(ok, info) {
+        commentText.readOnly = false;
+        if (!ok) {
+            commentStatus.textContent = `Not sent: ${info}`;
+            return;
+        }
+        commentText.value = "";
+        closeComment();
+        showToast(`pi: ${info}`);
     },
 };
 

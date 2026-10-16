@@ -19,17 +19,41 @@ app.mainMenu = menu
 
 let viewer = Viewer()
 
+@MainActor
+final class KeySequence {
+    private let keys: [String]
+    private var matched = 0
+    private var last = ContinuousClock.now
+
+    init(_ keys: String...) { self.keys = keys }
+
+    /// Returns true when `key` completes the sequence.
+    func feed(_ key: String) -> Bool {
+        let now = ContinuousClock.now
+        if now - last > .seconds(1) { matched = 0 }
+        last = now
+        matched = key == keys[matched] ? matched + 1 : key == keys[0] ? 1 : 0
+        guard matched == keys.count else { return false }
+        matched = 0
+        return true
+    }
+}
+
+// The same keys as the nvim mapping, with mapleader = " " from nvim/init.lua.
+let toggleKeys = KeySequence(" ", "t", "m")
+
 NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .otherMouseDown]) { event in
     let delta: Int?
     var quit = false
     var find = false
+    var toggled = false
     if event.type == .otherMouseDown {
         let backButton = 3, forwardButton = 4
         delta = [backButton: -1, forwardButton: 1][event.buttonNumber]
     } else {
         let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad, .function])
         let key = event.charactersIgnoringModifiers
-        let typing = event.window?.firstResponder is NSText
+        let typing = event.window?.firstResponder is NSText || MainActor.assumeIsolated { viewer.editing }
         if !typing, mods == .command, key == "[" || Int(event.keyCode) == kVK_LeftArrow {
             delta = -1
         } else if !typing, mods == .command, key == "]" || Int(event.keyCode) == kVK_RightArrow {
@@ -38,11 +62,14 @@ NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .otherMouseDown]) { event 
             delta = nil
             find = mods == .command && key == "f"
             quit = !typing && mods.isEmpty && (Int(event.keyCode) == kVK_Escape || key == "q")
+            toggled = !typing && mods.isEmpty && MainActor.assumeIsolated { toggleKeys.feed(key ?? "") }
         }
     }
-    guard delta != nil || quit || find else { return event }
+    guard delta != nil || quit || find || toggled else { return event }
     MainActor.assumeIsolated {
-        if let delta {
+        if toggled {
+            NSApp.terminate(nil)
+        } else if let delta {
             viewer.go(delta)
         } else if find {
             viewer.find.shown = true
@@ -66,6 +93,10 @@ Task.detached { [viewer] in
             }
             if let message = try? JSONDecoder().decode(Message.self, from: line) {
                 await viewer.show(message)
+            } else if let request = try? JSONDecoder().decode(Choose.self, from: line) {
+                await viewer.choose(request)
+            } else if let sent = try? JSONDecoder().decode(Sent.self, from: line) {
+                await viewer.sent(sent)
             }
             line.removeAll(keepingCapacity: true)
         }

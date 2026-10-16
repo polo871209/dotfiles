@@ -4,22 +4,31 @@ local DIR = vim.fn.stdpath 'config' .. '/mdview'
 local BIN = DIR .. '/.build/release/mdview'
 local DEBOUNCE_MS = 80
 
----@type { proc: vim.SystemObj, buf: integer, timer: uv.uv_timer_t, group: integer }?
+---@type { proc: vim.SystemObj, buf: integer, timer: uv.uv_timer_t, group: integer, scrolled: integer? }?
 local state
+
+---@param buf integer
+local function path(buf)
+    local name = vim.api.nvim_buf_get_name(buf)
+    return name ~= '' and name or vim.fn.getcwd() .. '/[No Name].md'
+end
+
+---@param buf integer
+---@return integer?
+local function window(buf)
+    local wins = vim.fn.win_findbuf(buf)
+    local current = vim.api.nvim_get_current_win()
+    return vim.tbl_contains(wins, current) and current or wins[1]
+end
 
 local function send()
     if not state or not vim.api.nvim_buf_is_valid(state.buf) then return end
     local buf = state.buf
-    local name = vim.api.nvim_buf_get_name(buf)
-    local line = 1
-    for _, win in ipairs(vim.fn.win_findbuf(buf)) do
-        line = vim.api.nvim_win_get_cursor(win)[1]
-        if win == vim.api.nvim_get_current_win() then break end
-    end
+    local win = window(buf)
     state.proc:write(vim.json.encode {
-        path = name ~= '' and name or vim.fn.getcwd() .. '/[No Name].md',
+        path = path(buf),
         text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), '\n'),
-        line = line,
+        top = win and vim.fn.line('w0', win) or 1,
     } .. '\n')
 end
 
@@ -41,12 +50,58 @@ end
 ---@param msg { open: string, anchor: string? }
 local function follow(msg)
     if not vim.uv.fs_stat(msg.open) then return vim.notify('mdview: no such file: ' .. msg.open, vim.log.levels.WARN) end
-    local win = state and vim.fn.win_findbuf(state.buf)[1] or 0
+    local win = state and window(state.buf) or 0
     vim.api.nvim_win_call(win, function()
         local ok, err = pcall(vim.cmd.edit, vim.fn.fnameescape(msg.open))
         if not ok then return vim.notify(err, vim.log.levels.ERROR) end
         local line = tonumber((msg.anchor or ''):match '^L(%d+)')
         if line then pcall(vim.api.nvim_win_set_cursor, 0, { line, 0 }) end
+    end)
+end
+
+---@param reply table
+local function to_viewer(reply)
+    if state then state.proc:write(vim.json.encode(reply) .. '\n') end
+end
+
+---@param msg { comment: string, path: string, sline: integer, eline: integer, target: string? }
+local function comment(msg)
+    local function reply(ok, info) to_viewer { sent = ok, info = info } end
+    if not state or path(state.buf) ~= msg.path or vim.api.nvim_buf_get_name(state.buf) == '' then
+        return reply(false, 'the previewed buffer has no file')
+    end
+    local pi = require 'pi'
+    local listeners, err = pi.listeners()
+    if not listeners then return reply(false, err) end
+    local wanted = msg.target or vim.b[state.buf].mdview_pi
+    local chosen = #listeners == 1 and listeners[1] or nil
+    for _, listener in ipairs(listeners) do
+        if listener.sock == wanted then chosen = listener end
+    end
+    if not chosen then return to_viewer { choose = listeners } end
+    vim.b[state.buf].mdview_pi = chosen.sock
+    local lines = vim.api.nvim_buf_get_lines(state.buf, 0, -1, false)
+    local eline = math.min(msg.eline, #lines)
+    pi.send_comment(chosen.sock, {
+        path = msg.path,
+        sline = msg.sline,
+        eline = eline,
+        ft = vim.bo[state.buf].filetype,
+        content = table.concat(lines, '\n', msg.sline, eline),
+        total = #lines,
+    }, msg.comment, reply)
+end
+
+---@param msg { path: string, top: integer }
+local function scroll(msg)
+    if not state or path(state.buf) ~= msg.path then return end
+    local win = window(state.buf)
+    if not win then return end
+    vim.api.nvim_win_call(win, function()
+        local delta = msg.top - vim.fn.line 'w0'
+        if delta == 0 then return end
+        state.scrolled = msg.top
+        vim.cmd(('normal! %d%s'):format(math.abs(delta), delta > 0 and '\5' or '\25'))
     end)
 end
 
@@ -60,7 +115,17 @@ local function start(buf)
             stdout = stdout .. (data or '')
             for line in stdout:gmatch '([^\n]*)\n' do
                 local ok, msg = pcall(vim.json.decode, line)
-                if ok then vim.schedule(function() follow(msg) end) end
+                if ok then
+                    vim.schedule(function()
+                        if msg.comment then
+                            comment(msg)
+                        elseif msg.top then
+                            scroll(msg)
+                        else
+                            follow(msg)
+                        end
+                    end)
+                end
             end
             stdout = stdout:match '[^\n]*$'
         end,
@@ -78,6 +143,15 @@ local function start(buf)
         group = group,
         callback = function(args)
             if args.buf == state.buf then schedule_send() end
+        end,
+    })
+    vim.api.nvim_create_autocmd('WinScrolled', {
+        group = group,
+        callback = function(args)
+            if args.buf ~= state.buf then return end
+            local scrolled = state.scrolled
+            state.scrolled = nil
+            if vim.fn.line('w0', tonumber(args.match)) ~= scrolled then schedule_send() end
         end,
     })
     vim.api.nvim_create_autocmd('BufEnter', {

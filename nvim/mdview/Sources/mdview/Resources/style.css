@@ -141,3 +141,68 @@ body.has-toc::after {
     font-family: var(--fontStack-monospace);
     white-space: pre-wrap;
 }
+
+#comment {
+    position: absolute;
+    z-index: 10;
+    padding: 8px;
+    border: 1px solid var(--borderColor-default);
+    border-radius: 6px;
+    background: var(--bgColor-default);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 20%);
+}
+
+#comment-lines,
+#comment-status {
+    color: var(--fgColor-muted);
+    font-size: 12px;
+}
+
+#comment-status:empty {
+    display: none;
+}
+
+#comment-text {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    margin: 4px 0;
+    padding: 6px 8px;
+    border: 1px solid var(--borderColor-default);
+    border-radius: 6px;
+    background: var(--bgColor-muted);
+    color: var(--fgColor-default);
+    font: inherit;
+    resize: vertical;
+}
+
+#comment-listeners button {
+    display: block;
+    width: 100%;
+    margin-top: 4px;
+    padding: 4px 8px;
+    border: 1px solid var(--borderColor-default);
+    border-radius: 6px;
+    background: var(--bgColor-muted);
+    color: var(--fgColor-default);
+    font: inherit;
+    font-size: 12px;
+    text-align: left;
+    cursor: pointer;
+}
+
+#comment-listeners button:hover {
+    border-color: var(--borderColor-accent-emphasis);
+}
+
+#toast {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 10;
+    padding: 6px 12px;
+    border-radius: 6px;
+    background: var(--bgColor-neutral-muted);
+    color: var(--fgColor-default);
+    font-size: 12px;
+}

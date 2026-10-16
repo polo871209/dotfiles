@@ -62,17 +62,17 @@ local function sockets_for_pane(pane_id)
     return found
 end
 
----@return table[] { pane_id, sock, window_index, window_name }
+---@return table[] { pane_id, sock, window, label }
 local function live_bridges()
     local fmt = '#{pane_id}\t#{window_index}\t#{window_name}'
     local r = vim.system({ 'tmux', 'list-panes', '-s', '-F', fmt }, { text = true, timeout = TIMEOUT }):wait()
     if r.code ~= 0 or not r.stdout then return {} end
     local out = {}
     for line in r.stdout:gmatch '[^\n]+' do
-        local pane_id, window_index, window_name = line:match '^([^\t]*)\t([^\t]*)\t(.*)$'
+        local pane_id, window, label = line:match '^([^\t]*)\t([^\t]*)\t(.*)$'
         if pane_id then
             for _, sock in ipairs(sockets_for_pane(pane_id)) do
-                table.insert(out, { pane_id = pane_id, sock = sock, window_index = window_index, window_name = window_name })
+                table.insert(out, { pane_id = pane_id, sock = sock, window = window, label = label })
             end
         end
     end
@@ -93,7 +93,7 @@ local function resolve_target(cb)
     if #live == 1 then return cb(live[1]) end
     vim.ui.select(live, {
         prompt = 'Send to which pi agent?',
-        format_item = function(p) return ('%s  %s'):format(p.window_index, p.window_name) end,
+        format_item = function(p) return ('%s %s'):format(p.window, p.label) end,
     }, function(choice) cb(choice) end)
 end
 
@@ -107,16 +107,20 @@ end
 ---@param obj table
 ---@param on_ack? fun(ok: boolean, info: string)
 local function send(sock, obj, on_ack)
+    local function fail(info)
+        notify('pi: ' .. info, vim.log.levels.ERROR)
+        if on_ack then on_ack(false, info) end
+    end
     local ok_encode, payload = pcall(vim.json.encode, obj)
-    if not ok_encode then return notify('pi: could not encode payload', vim.log.levels.ERROR) end
-    if #payload > MAX_PAYLOAD then return notify('pi: payload too large', vim.log.levels.ERROR) end
+    if not ok_encode then return fail 'could not encode payload' end
+    if #payload > MAX_PAYLOAD then return fail 'payload too large' end
 
     local pipe = vim.uv.new_pipe(false)
-    if not pipe then return notify('pi: could not open pipe', vim.log.levels.ERROR) end
+    if not pipe then return fail 'could not open pipe' end
     local timer = vim.uv.new_timer()
     if not timer then
         pipe:close()
-        return notify('pi: could not open timer', vim.log.levels.ERROR)
+        return fail 'could not open timer'
     end
     local finished = false
 
@@ -205,6 +209,30 @@ function M.send_selection()
             send(target.sock, { paste = ('Re: %s lines %d-%d. Read the file for full context.'):format(filepath, sline, eline) })
         end
         focus_pane(target.pane_id)
+    end)
+end
+
+--- The pi listeners in this tmux session, in tmux pane order.
+---@return { sock: string, window: string, label: string }[]?, string? error when there is no list
+function M.listeners()
+    if vim.env.TMUX == nil then return nil, 'nvim does not run inside tmux' end
+    local live = live_bridges()
+    if #live == 0 then return nil, 'no pi listener in this tmux session' end
+    return vim.tbl_map(function(p) return { sock = p.sock, window = p.window, label = p.label } end, live)
+end
+
+--- Sends a review comment on a file range to the pi listening on `sock`: the line-numbered
+--- snapshot of the range, then `comment` as a user message, which starts a turn or steers
+--- the running one. `on_done` runs on the main loop with pi's answer to the last request.
+---@param sock string
+---@param file { path: string, sline: integer, eline: integer, ft: string, content: string, total: integer }
+---@param comment string
+---@param on_done fun(ok: boolean, info: string)
+function M.send_comment(sock, file, comment, on_done)
+    local done = vim.schedule_wrap(on_done)
+    send(sock, { file = file, mode = 'steer' }, function(ok, info)
+        if not ok then return done(false, info) end
+        send(sock, { text = comment }, done)
     end)
 end
 

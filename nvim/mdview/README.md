@@ -1,6 +1,8 @@
 # mdview
 
-A read-only markdown viewer for nvim. It is a native macOS panel that uses the system WebKit, not a browser. `<leader>tm` in a markdown buffer opens and closes it.
+A read-only markdown viewer for nvim. It is a native macOS panel that uses the system WebKit, not a browser. `<leader>tm` in a markdown buffer opens and closes it. In the viewer, the same keys (Space t m) close it. The viewer shows the current markdown buffer, and the viewer and the nvim window scroll together, from either side.
+
+To send a review comment to pi, select text in the viewer and press Space Space. Type the comment and press Enter. pi gets a line-numbered snapshot of the selected source lines, then the comment, which starts a turn or steers the running one. If two or more pi run in the tmux session, the comment box lists them the way the tmux tabs show them, and you press the tmux window number. Later comments on the same buffer go to that pi without asking, until it stops. A partly selected block counts whole. This needs nvim inside tmux with a pi that loads `tmux-bridge.ts`.
 
 ## Build and test
 
@@ -13,7 +15,7 @@ just mdview test   # Swift tests for the parser options and the asset routes
 
 ## Where each part lives
 
-The nvim side is two files: `nvim/lua/mdview.lua` starts the process and streams the buffer, and `nvim/after/ftplugin/markdown.lua` sets the keymap. The viewer side is this directory.
+The nvim side is `nvim/lua/mdview.lua`, which starts the process and streams the buffer, and `nvim/after/ftplugin/markdown.lua`, which sets the keymap. Review comments go through `nvim/lua/pi.lua`, the same path as the visual-mode `<leader><leader>`. The viewer side is this directory.
 
 - `Sources/mdview/Protocol.swift` holds the JSON lines that pass between nvim and the viewer. Change both ends together.
 - `Sources/mdview/Viewer.swift` owns the panel, the `WebPage`, and link handling. `main.swift` sets up the app, the keys, and the stdin reader. `FileWatcher.swift` re-renders the page when the file content changes on disk, for example after an agent edit.

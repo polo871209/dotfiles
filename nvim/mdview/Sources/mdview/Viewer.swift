@@ -37,11 +37,16 @@ final class Viewer: NSObject, NSWindowDelegate {
     private var latest: Message?
     private var watcher: FileWatcher?
     let find = Find()
+    /// True while a text field in the page has focus, so key shortcuts must not fire.
+    private(set) var editing = false
 
     override init() {
         var config = WebPage.Configuration()
         config.urlSchemeHandlers[URLScheme("mdview")!] = Assets()
-        config.userContentController.add(Bridge(), name: "open")
+        let bridge = Bridge()
+        for name in ["open", "scroll", "comment", "editing"] {
+            config.userContentController.add(bridge, name: name)
+        }
         let page = WebPage(configuration: config, navigationDecider: Links())
         page.isInspectable = true
         self.page = page
@@ -56,6 +61,10 @@ final class Viewer: NSObject, NSWindowDelegate {
             defer: false
         )
         super.init()
+        bridge.scrolled = { [weak self] scroll in
+            if self?.latest?.path == scroll.path { self?.latest?.top = scroll.top }
+        }
+        bridge.editing = { [weak self] editing in self?.editing = editing }
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
         panel.isReleasedWhenClosed = false
@@ -77,10 +86,12 @@ final class Viewer: NSObject, NSWindowDelegate {
     }
 
     func show(_ message: Message) {
+        let scrollOnly = !busy && message.path == latest?.path && message.text == latest?.text
         latest = message
         if watcher?.path != message.path {
             watcher = FileWatcher(path: message.path) { [weak self] text in self?.reload(text) }
         }
+        if scrollOnly { return scroll(to: message.top) }
         pending = message
         guard !busy else { return }
         busy = true
@@ -93,13 +104,44 @@ final class Viewer: NSObject, NSWindowDelegate {
         }
     }
 
+    func choose(_ request: Choose) {
+        let listeners = request.choose.map { ["sock": $0.sock, "window": $0.window, "label": $0.label] }
+        Task {
+            do {
+                _ = try await page.callJavaScript("mdview.choose(listeners)", arguments: ["listeners": listeners])
+            } catch {
+                report(error)
+            }
+        }
+    }
+
+    func sent(_ result: Sent) {
+        Task {
+            do {
+                _ = try await page.callJavaScript("mdview.sent(ok, info)", arguments: ["ok": result.sent, "info": result.info])
+            } catch {
+                report(error)
+            }
+        }
+    }
+
+    private func scroll(to top: Int) {
+        Task {
+            do {
+                _ = try await page.callJavaScript("mdview.scroll(top)", arguments: ["top": top])
+            } catch {
+                report(error)
+            }
+        }
+    }
+
     private func reload(_ disk: String) {
         guard let latest else { return }
         // nvim sends the lines joined by \n, with no final newline. "\r\n" is one Character, so replace it first.
         var text = disk.replacing("\r\n", with: "\n")
         if text.hasSuffix("\n") { text.removeLast() }
         guard text != latest.text else { return }
-        show(Message(path: latest.path, text: text, line: latest.line))
+        show(Message(path: latest.path, text: text, top: latest.top))
     }
 
     private func render(_ message: Message) async {
@@ -114,8 +156,8 @@ final class Viewer: NSObject, NSWindowDelegate {
         if !base.hasSuffix("/") { base += "/" }
         do {
             _ = try await page.callJavaScript(
-                "mdview.update(html, base, path, line)",
-                arguments: ["html": Markdown.html(message.text), "base": base, "path": message.path, "line": message.line]
+                "mdview.update(html, base, path, top)",
+                arguments: ["html": Markdown.html(message.text), "base": base, "path": message.path, "top": message.top]
             )
         } catch {
             report(error)
@@ -146,9 +188,26 @@ private final class Panel: NSPanel {
 }
 
 private final class Bridge: NSObject, WKScriptMessageHandler {
+    var scrolled: (Scroll) -> Void = { _ in }
+    var editing: (Bool) -> Void = { _ in }
+
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        if message.name == "editing" {
+            return editing(message.body as? Bool ?? false)
+        }
         guard let body = message.body as? [String: Any], let path = body["path"] as? String else { return }
-        openInNvim(path)
+        switch message.name {
+        case "scroll":
+            guard let top = body["top"] as? Int else { return }
+            let scroll = Scroll(path: path, top: top)
+            scrolled(scroll)
+            toNvim(scroll)
+        case "comment":
+            guard let comment = body["comment"] as? String, let sline = body["sline"] as? Int, let eline = body["eline"] as? Int else { return }
+            toNvim(Comment(comment: comment, path: path, sline: sline, eline: eline, target: body["target"] as? String))
+        default:
+            toNvim(Open(open: path, anchor: nil))
+        }
     }
 }
 
@@ -161,7 +220,7 @@ private struct Links: WebPage.NavigationDeciding {
         case "http", "https", "mailto":
             NSWorkspace.shared.open(url)
         case "mdview" where url.host() == "file", "file":
-            openInNvim(url.path(percentEncoded: false), anchor: url.fragment(percentEncoded: false))
+            toNvim(Open(open: url.path(percentEncoded: false), anchor: url.fragment(percentEncoded: false)))
         default:
             break
         }
