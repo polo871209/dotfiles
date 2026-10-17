@@ -211,14 +211,6 @@ export default function (pi: ExtensionAPI) {
         details: {},
       });
       const risk = await scoreDestructive(ctx, command, signal);
-      // Measured 2026-01 on 50 labeled commands in fixture repos (clean, dirty, no git):
-      // reads, builds, tests, installs, and deleting ignored output scored
-      // 0.02-0.57; lost work, pushes, publishes, deploys, and writes outside cwd
-      // scored 0.75-0.99. Three safe commands still get a dialog: `find -delete` on
-      // ignored logs 0.71, `rm -rf` on committed clean `src` 0.75, and
-      // `git reset --hard` on a clean tree 0.82. Local Docker removals and prunes
-      // score 0.08-0.51, and Docker against a remote host or registry 0.82-0.96.
-      // Re-measure before moving the floor.
       if (risk !== null && risk >= 0.65) {
         const score = risk.toFixed(2);
         if (!(

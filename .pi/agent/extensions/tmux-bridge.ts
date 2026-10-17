@@ -68,9 +68,7 @@ type FilePayload = {
   sline: number;
   eline: number;
   ft?: string;
-  /** The selected lines only, starting at `sline`. */
   content: string;
-  /** Line count of the whole file, so the header can say what was left out. */
   total?: number;
 };
 

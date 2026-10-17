@@ -78,6 +78,21 @@
     "releaseAfterMinutes": 1,
     "language": null
   },
+  "fileSearch": {
+    "enabled": true,
+    "scopes": [
+      "~"
+    ],
+    "ignorePatterns": [],
+    "removedDefaultPatterns": [],
+    "showInLauncher": true,
+    "commands": {}
+  },
+  "fileTools": {
+    "enabled": true,
+    "commands": {},
+    "options": []
+  },
   "notes": {
     "enabled": true,
     "rendersMarkdown": true,
@@ -153,7 +168,10 @@
     "enabled": true,
     "retentionDays": 180,
     "defaultAction": "paste",
-    "disabledApps": ["com.apple.keychainaccess", "com.apple.Passwords"],
+    "disabledApps": [
+      "com.apple.keychainaccess",
+      "com.apple.Passwords"
+    ],
     "commands": {
       "clipboard-history": {
         "shortcut": "cmd+b",

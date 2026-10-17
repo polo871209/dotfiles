@@ -32,7 +32,6 @@ const isRebasing = (cwd: string): boolean => {
   return false;
 };
 
-// Skip throwaway scratch paths, including macOS $TMPDIR under /var/folders.
 const SKIP_PREFIXES = [
   "/tmp/",
   "/private/tmp/",

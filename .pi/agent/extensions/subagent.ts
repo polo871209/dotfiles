@@ -1231,27 +1231,16 @@ export default function (pi: ExtensionAPI) {
           timeoutSeconds && timeoutSeconds > 0
             ? timeoutSeconds * 1000
             : DEFAULT_WAIT_TIMEOUT_MS;
-        // Held in an object: TS narrows a plain `let` to its initializer and
-        // then rejects the comparisons below, since both writes are in callbacks.
-        const state: { outcome: "finished" | "timeout" | "aborted" } = {
-          outcome: "finished",
-        };
         let timer: ReturnType<typeof setTimeout> | undefined;
-        await Promise.race([
-          Promise.all(records.map((r) => r.settled ?? Promise.resolve())),
-          new Promise<void>((resolve) => {
-            timer = setTimeout(() => {
-              state.outcome = "timeout";
-              resolve();
-            }, timeoutMs);
-            signal?.addEventListener(
-              "abort",
-              () => {
-                state.outcome = "aborted";
-                resolve();
-              },
-              { once: true },
-            );
+        const outcome = await Promise.race([
+          Promise.all(records.map((r) => r.settled ?? Promise.resolve())).then(
+            () => "finished" as const,
+          ),
+          new Promise<"timeout" | "aborted">((resolve) => {
+            timer = setTimeout(() => resolve("timeout"), timeoutMs);
+            signal?.addEventListener("abort", () => resolve("aborted"), {
+              once: true,
+            });
           }),
         ]);
         if (timer) clearTimeout(timer);
@@ -1260,9 +1249,9 @@ export default function (pi: ExtensionAPI) {
             {
               type: "text",
               text: `${
-                state.outcome === "timeout"
+                outcome === "timeout"
                   ? `Wait timed out after ${formatDuration(timeoutMs)}. The runs below keep going.`
-                  : state.outcome === "aborted"
+                  : outcome === "aborted"
                     ? "Wait cancelled. The runs below keep going."
                     : `All ${records.length} run${records.length === 1 ? "" : "s"} finished; output below.`
               }\n\n${records
@@ -1282,7 +1271,7 @@ export default function (pi: ExtensionAPI) {
           ],
           details: undefined,
           structuredContent: manageValue({
-            outcome: state.outcome,
+            outcome,
             runs: [
               ...records.map((r) => runValue(r.progress)),
               ...interrupted.map(interruptedValue),
@@ -1380,18 +1369,20 @@ export default function (pi: ExtensionAPI) {
       // Bracketed paste keeps newlines as text. Typed with send-keys, the
       // first newline would submit a partial message.
       const buffer = `pi-steer-${id}`;
-      if (!(
-        (await tmuxRun(["set-buffer", "-b", buffer, "--", message])) &&
-        (await tmuxRun([
-          "paste-buffer",
-          "-p",
-          "-d",
-          "-b",
-          buffer,
-          "-t",
-          record.paneId,
-        ]))
-      )) {
+      if (
+        !(
+          (await tmuxRun(["set-buffer", "-b", buffer, "--", message])) &&
+          (await tmuxRun([
+            "paste-buffer",
+            "-p",
+            "-d",
+            "-b",
+            buffer,
+            "-t",
+            record.paneId,
+          ]))
+        )
+      ) {
         return fail(`subagent_manage: tmux could not paste into run "${id}".`);
       }
       await tmuxRun(["send-keys", "-t", record.paneId, "Enter"]);

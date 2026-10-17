@@ -3,6 +3,7 @@
   "defaultProvider": "anthropic",
   "defaultModel": "claude-opus-5-5",
   "defaultThinkingLevel": "high",
+  "defaultTools": ["+codemode"],
   "theme": "catppuccin-mocha",
   "tuiMode": "fullscreen",
   "fullscreenScrollbar": "hidden",

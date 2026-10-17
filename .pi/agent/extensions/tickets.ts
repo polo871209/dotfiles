@@ -28,7 +28,6 @@ function isSnapshot(
   );
 }
 
-// Snapshots are taken across all branches, so /tree navigation keeps the queue.
 function restoreQueue(ctx: ExtensionContext): string[] {
   const entries = ctx.sessionManager.getEntries();
   for (let i = entries.length - 1; i >= 0; i--) {

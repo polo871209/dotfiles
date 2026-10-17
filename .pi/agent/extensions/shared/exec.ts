@@ -1,6 +1,3 @@
-// Spawn a child process and collect stdout/stderr/exit code. Never rejects:
-// spawn errors resolve as code -1 with the message on stderr.
-
 import { spawn } from "node:child_process";
 
 interface ExecResult {

@@ -328,8 +328,6 @@ const callGuarded = async <T>(
   }
 };
 
-// Run arbitrary Lua in the shared nvim, racing against an abort signal.
-// Code should `return` a JSON-safe value (table, string, number, bool, nil).
 export const callLua = async <T = unknown>(
   cwd: string,
   code: string,

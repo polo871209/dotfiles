@@ -16,7 +16,7 @@ Personal agent harness built on [pi](https://github.com/earendil-works/pi): more
 
 Before changing Pi-native behavior, read directly relevant documentation in the installed `@earendil-works/pi-coding-agent` package and its explicitly required prerequisites. Stop once the relevant API and constraints are covered.
 
-Report a tool failure with a throw or `isError: true`. Pi ignores an `error` field on the result and shows the call as a success. A tool whose result is data declares `outputSchema` and returns `structuredContent`, because `eval` cells and codemode scripts receive that value instead of the text.
+Report a tool failure with a throw or `isError: true`. Pi ignores an `error` field on the result and shows the call as a success. A tool whose result is data declares `outputSchema` and returns `structuredContent`, because codemode scripts receive that value instead of the text.
 
 Declare `annotations` on every tool: `readOnlyHint` and `openWorldHint` always, plus `destructiveHint` and `idempotentHint` when the tool writes. For a tool with several actions, annotate the worst action. Set `readOnlyHint` or `idempotentHint` only when a rerun after a crash or retry repeats no side effect.
 
@@ -27,7 +27,6 @@ Work that outlives its tool call, such as a background subagent run, writes a st
 ### Bigger toolbox for the model
 
 - **`web-search.ts`** — searches or fetches one or many web targets for external research, ranking results most relevant first and dropping the ones that do not answer the query, returning GitHub links as local files or comment threads, and videos as transcripts.
-- **`eval/`** — runs persistent Python for iterative computation, bulk aggregation, and batched or parallel tool calls.
 - **`lsp/`** — provides symbol navigation and deterministic post-edit diagnostics and fixes for code work.
 - **`github-pr.ts`** — fetches concise PR metadata, failures, review threads, diffs, or a single section for PR analysis, and resolves all open review threads once the fixes land.
 - **`subagent.ts`** — delegates external research, read-only recon of the local repo, or a read-only parallel review to an isolated agent, with background control, compact structured results, and an interrupted status for runs that a pi restart cut off.
@@ -67,7 +66,6 @@ extensions/
 ├── node_modules → ../npm/node_modules
 ├── *.ts          single-file extensions
 ├── ask/          ask_user_question dialog
-├── eval/         persistent Python
 ├── lsp/          navigation and post-edit feedback
 └── shared/       shared extension utilities
 ```
