@@ -1,4 +1,4 @@
-import type { Api, Message, Model, Usage } from "@earendil-works/pi-ai";
+import type { Api, Message, Model } from "@earendil-works/pi-ai";
 import {
   BorderedLoader,
   type ExtensionContext,
@@ -8,14 +8,12 @@ export interface SideChannelOpts {
   systemPrompt: string;
   messages: Message[];
   signal?: AbortSignal;
-  // Joiner for multi-part text content. Defaults to "\n".
   join?: string;
-  // Defaults to the session model.
   model?: Model<Api>;
 }
 
 type SideChannelResult =
-  | { ok: true; text: string; usage: Usage }
+  | { ok: true; text: string }
   | { ok: false; reason: "no-model" | "aborted" | "error"; error?: string };
 
 export async function sideChannelWithLoader(
@@ -74,7 +72,6 @@ export async function sideChannelComplete(
         .map((c) => c.text)
         .join(opts.join ?? "\n")
         .trim(),
-      usage: response.usage,
     };
   } catch (e) {
     return {
@@ -83,28 +80,4 @@ export async function sideChannelComplete(
       error: e instanceof Error ? e.message : String(e),
     };
   }
-}
-
-export function addUsage(total: Usage | null, next: Usage): Usage {
-  if (!total) return structuredClone(next);
-  const optional = (a?: number, b?: number) =>
-    a === undefined && b === undefined ? undefined : (a ?? 0) + (b ?? 0);
-  const cacheWrite1h = optional(total.cacheWrite1h, next.cacheWrite1h);
-  const reasoning = optional(total.reasoning, next.reasoning);
-  return {
-    input: total.input + next.input,
-    output: total.output + next.output,
-    cacheRead: total.cacheRead + next.cacheRead,
-    cacheWrite: total.cacheWrite + next.cacheWrite,
-    ...(cacheWrite1h === undefined ? {} : { cacheWrite1h }),
-    ...(reasoning === undefined ? {} : { reasoning }),
-    totalTokens: total.totalTokens + next.totalTokens,
-    cost: {
-      input: total.cost.input + next.cost.input,
-      output: total.cost.output + next.cost.output,
-      cacheRead: total.cost.cacheRead + next.cost.cacheRead,
-      cacheWrite: total.cost.cacheWrite + next.cost.cacheWrite,
-      total: total.cost.total + next.cost.total,
-    },
-  };
 }

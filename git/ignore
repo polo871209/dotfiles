@@ -12,6 +12,7 @@ main
 # Agent
 **/.claude/settings.local.json
 .codegraph/
+mcp-auth.json
 .opencode/package-lock.json
 opencode/package-lock.json
 .worktree/

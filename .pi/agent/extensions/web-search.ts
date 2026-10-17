@@ -500,9 +500,6 @@ async function runSearch(
   signal?: AbortSignal,
 ): Promise<{ results: SearchResult[]; provider: string }> {
   const failures: string[] = [];
-  // Order measured 2026-01 over 3 queries, median snippet per result: Exa ~4000
-  // chars, Parallel 1500, DuckDuckGo 150-300. Exa is also the least reliable (a
-  // 20s timeout on one query), hence the chain.
   for (const [index, provider] of [
     { name: "exa", run: exaAdvancedSearch },
     { name: "exa-basic", run: exaBasicSearch },
@@ -582,16 +579,11 @@ async function rerankResults(
   const candidates = results.slice(0, RERANK_MAX_CANDIDATES);
   const scores = await scoreCandidates(ctx, jev, query, candidates, signal);
   if (!scores) return results;
-  return (
-    candidates
-      .map((result, i) => ({ result, i, score: scores[i] }))
-      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || a.i - b.i)
-      // Measured 2026-01 over 4 queries: pages that answered scored 0.54-0.98 and
-      // the rest 0.12-0.33. Before moving the floor, log scoreCandidates scores for
-      // real queries.
-      .filter((s, rank) => rank < 3 || (s.score ?? 0) >= 0.35)
-      .map((s) => s.result)
-  );
+  return candidates
+    .map((result, i) => ({ result, i, score: scores[i] }))
+    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || a.i - b.i)
+    .filter((s, rank) => rank < 3 || (s.score ?? 0) >= 0.35)
+    .map((s) => s.result);
 }
 
 async function readBoundedText(
@@ -1434,9 +1426,7 @@ async function fetchOne(
   if (issueRef) {
     try {
       return await fetchGitHubIssue(issueRef, signal);
-    } catch {
-      // gh missing, unauthenticated, or private repo: scrape the page instead.
-    }
+    } catch {}
   }
 
   const gh = mode === "raw" ? null : parseGitHubUrl(url);
@@ -1451,9 +1441,7 @@ async function fetchOne(
           gh,
         ),
       };
-    } catch {
-      // fall through to HTML fetch below
-    }
+    } catch {}
   }
   return fetchReadable(url, signal, mode);
 }
@@ -1529,7 +1517,8 @@ export default function (pi: ExtensionAPI) {
     renderResult(result, _options, theme: Theme, context) {
       if (context.isError) return errorLine("web_search", result, theme);
       const d = result.details as
-        { queries?: string[]; totalResults?: number } | undefined;
+        | { queries?: string[]; totalResults?: number }
+        | undefined;
       return new Text(
         theme.fg(
           "dim",

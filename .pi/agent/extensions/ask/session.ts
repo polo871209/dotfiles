@@ -389,7 +389,7 @@ type Handler<K extends QuestionnaireAction["kind"]> = (
   ctx: ApplyContext,
 ) => ApplyResult;
 
-export function reduce(
+function reduce(
   state: QuestionnaireState,
   action: QuestionnaireAction,
   ctx: ApplyContext,

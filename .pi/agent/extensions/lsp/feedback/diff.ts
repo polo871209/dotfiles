@@ -17,7 +17,7 @@ const unifiedDiff = (before: string, after: string): string | null => {
       encoding: "utf8",
       maxBuffer: 8 * 1024 * 1024,
     });
-    if (r.status !== 1 || !r.stdout) return null; // 0 = identical, >1 = error
+    if (r.status !== 1 || !r.stdout) return null;
     return r.stdout
       .split("\n")
       .filter((l) => !l.startsWith("--- ") && !l.startsWith("+++ "))

@@ -1,6 +1,4 @@
 #!/usr/bin/env node
-// Renders a Mermaid source with the same engine and width rule as the pi TUI, so a diagram
-// that overflows is caught here instead of degrading into raw source in the transcript.
 // Usage: node mermaid-fit.mjs diagram.mmd [--width N]   |   cat diagram.mmd | node mermaid-fit.mjs
 import { createRequire } from "node:module";
 import { execFileSync } from "node:child_process";
