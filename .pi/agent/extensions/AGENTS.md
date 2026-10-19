@@ -37,6 +37,7 @@ Work that outlives its tool call, such as a background subagent run, writes a st
 
 - **`skill-packs.ts`** — enables Lark/Feishu or Google Workspace skills only when requested.
 - **`folder-context.ts`** — loads scoped agent instructions when files are touched and refreshes them after edits.
+- **`btw.ts`** — answers a side question on `/btw` with the whole session as context, and keeps the exchange out of the main agent's context.
 
 ### Workflow shortcuts
 
