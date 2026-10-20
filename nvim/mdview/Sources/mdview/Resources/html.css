@@ -1,0 +1,82 @@
+/* Restyles any HTML file in the blog's look. :where() keeps these resets weaker than the rules below. */
+html,
+body {
+    background: var(--kw-bg) !important;
+    color: var(--kw-fg) !important;
+}
+
+body {
+    font-family: var(--kw-font) !important;
+    font-feature-settings:
+        "calt" 1,
+        "liga" 1;
+    -webkit-font-smoothing: antialiased;
+}
+
+:where(body :not(svg, svg *)) {
+    background-color: transparent !important;
+    border-color: var(--kw-border) !important;
+    box-shadow: none !important;
+    color: inherit !important;
+    font-family: inherit !important;
+}
+
+:is(h1, h2, h3) {
+    color: var(--kw-fg) !important;
+}
+
+:is(h4, h5, h6, blockquote, dt) {
+    color: var(--kw-fg-dim) !important;
+}
+
+:is(small, figcaption, caption, time, nav, aside, header p, footer) {
+    color: var(--kw-muted) !important;
+}
+
+a {
+    color: var(--kw-link) !important;
+}
+
+a:hover {
+    color: var(--kw-link-hov) !important;
+}
+
+:is(nav, aside) a {
+    color: var(--kw-muted) !important;
+}
+
+:is(nav, aside) a:hover {
+    color: var(--kw-fg) !important;
+}
+
+:not(pre) > :is(code, kbd, samp) {
+    background: var(--kw-bg-alt) !important;
+    border: 1px solid var(--kw-border) !important;
+    border-radius: 3px;
+    color: var(--kw-accent-2) !important;
+}
+
+pre {
+    background: var(--kw-bg-alt) !important;
+    border: 1px solid var(--kw-border) !important;
+    color: var(--kw-fg) !important;
+}
+
+th {
+    background: var(--kw-bg-soft) !important;
+}
+
+blockquote {
+    border-left: 2px solid var(--kw-accent) !important;
+}
+
+mark {
+    background: var(--kw-warn) !important;
+    color: var(--kw-bg) !important;
+}
+
+/* Inline diagrams are drawn for a light page. Inverting by 0.88 keeps their hues and turns white into the page background. */
+:is(figure, [role="img"]) > svg,
+svg[role="img"] {
+    filter: invert(0.88) hue-rotate(180deg);
+}

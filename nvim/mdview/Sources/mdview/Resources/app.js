@@ -2,7 +2,6 @@ import GithubSlugger from "mdview://app/vendor/github-slugger.js";
 
 const content = document.getElementById("content");
 const base = document.querySelector("base");
-const dark = matchMedia("(prefers-color-scheme: dark)");
 
 const highlighted = new Map();
 const diagrams = new Map();
@@ -10,27 +9,45 @@ const CACHE_LIMIT = 500;
 
 let mermaidReady;
 let diagramId = 0;
-let last;
 
 function remember(cache, key, value) {
     if (cache.size >= CACHE_LIMIT) cache.clear();
     cache.set(key, value);
 }
 
-function highlight(code) {
-    const lang = code.className.match(/language-(\S+)/)?.[1];
-    if (!lang || !hljs.getLanguage(lang)) return;
-    const key = `${lang}\0${code.textContent}`;
+const THEME = "kanagawa-wave";
+let shiki;
+
+function loadShiki() {
+    shiki ??= import("mdview://app/vendor/shiki/shiki.js").then(
+        async ({ bundledLanguages, createHighlighter, createJavaScriptRegexEngine }) => ({
+            bundledLanguages,
+            highlighter: await createHighlighter({
+                themes: [THEME],
+                langs: [],
+                engine: createJavaScriptRegexEngine(),
+            }),
+        }),
+    );
+    return shiki;
+}
+
+async function highlight(code) {
+    const lang = code.className.match(/language-(\S+)/)?.[1].toLowerCase();
+    if (!lang) return;
+    const text = code.textContent;
+    const key = `${lang}\0${text}`;
     let html = highlighted.get(key);
     if (html === undefined) {
-        html = hljs.highlight(code.textContent, {
-            language: lang,
-            ignoreIllegals: true,
-        }).value;
+        const { bundledLanguages, highlighter } = await loadShiki();
+        if (!Object.hasOwn(bundledLanguages, lang)) return;
+        await highlighter.loadLanguage(lang);
+        const rendered = document.createElement("template");
+        rendered.innerHTML = highlighter.codeToHtml(text, { lang, theme: THEME });
+        html = rendered.content.querySelector("code").innerHTML;
         remember(highlighted, key, html);
     }
     code.innerHTML = html;
-    code.classList.add("hljs");
 }
 
 async function importMermaid() {
@@ -41,20 +58,34 @@ async function importMermaid() {
         script.onerror = reject;
         document.head.append(script);
     });
-    themeMermaid();
+    mermaid.initialize({
+        startOnLoad: false,
+        suppressErrorRendering: true,
+        theme: "base",
+        themeVariables: {
+            darkMode: true,
+            useGradient: false,
+            dropShadow: "none",
+            fontFamily: "Fira Code, monospace",
+            background: "#1f1f28",
+            primaryColor: "#2a2a37",
+            primaryBorderColor: "#7e9cd8",
+            primaryTextColor: "#dcd7ba",
+            secondaryColor: "#223249",
+            tertiaryColor: "#16161d",
+            lineColor: "#c8c093",
+            clusterBkg: "#16161d",
+            clusterBorder: "#54546d",
+            edgeLabelBackground: "#1f1f28",
+            noteBkgColor: "#2a2a37",
+            noteBorderColor: "#dca561",
+        },
+    });
 }
 
 function loadMermaid() {
     mermaidReady ??= importMermaid();
     return mermaidReady;
-}
-
-function themeMermaid() {
-    mermaid.initialize({
-        startOnLoad: false,
-        suppressErrorRendering: true,
-        theme: dark.matches ? "dark" : "default",
-    });
 }
 
 function diagram(node, result, sourcepos) {
@@ -106,7 +137,7 @@ async function drawDiagrams(previous) {
 
 const ALERT = /^\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*/i;
 
-// cmark-gfm has no alert syntax. This emits GitHub's own markup, which github-markdown.css styles.
+// cmark-gfm has no alert syntax. This emits GitHub's own markup, which style.css styles.
 function alerts() {
     for (const quote of content.querySelectorAll("blockquote")) {
         const first = quote.firstElementChild;
@@ -127,7 +158,7 @@ function alerts() {
     }
 }
 
-// cmark-gfm emits bare checkboxes. GitHub adds these classes after rendering, and its stylesheet keys on them.
+// cmark-gfm emits bare checkboxes. GitHub adds these classes after rendering, and style.css keys on them.
 function taskLists() {
     for (const box of content.querySelectorAll("li > input[type=checkbox]")) {
         box.classList.add("task-list-item-checkbox");
@@ -272,12 +303,16 @@ addEventListener("scroll", () => {
     cancelAnimationFrame(reportFrame);
     reportFrame = requestAnimationFrame(() => {
         const top = yToLine(scrollY + contentTop());
-        if (last) last[3] = top;
         webkit.messageHandlers.scroll.postMessage({ path: currentPath, top });
     });
 });
 
 let currentPath = "";
+
+function setPath(path) {
+    currentPath = path;
+    document.documentElement.dataset.mdviewPath = path;
+}
 let pendingAnchor;
 let restoring;
 
@@ -310,113 +345,8 @@ function scrollToAnchor(hash) {
     return Boolean(target);
 }
 
-const commentBox = document.getElementById("comment");
-const commentLines = document.getElementById("comment-lines");
-const commentText = document.getElementById("comment-text");
-const commentStatus = document.getElementById("comment-status");
-const commentListeners = document.getElementById("comment-listeners");
-const toast = document.getElementById("toast");
-let commentTarget;
-let listeners;
-let lastSpace = -Infinity;
-let toastTimer;
-
-// The source lines of the blocks that hold the selection. A partly selected block counts whole.
-function selectedLines() {
-    const selection = getSelection();
-    if (selection.isCollapsed || !selection.rangeCount) return;
-    const range = selection.getRangeAt(0);
-    const block = (node) => (node instanceof Element ? node : node.parentElement)?.closest("[data-sourcepos]");
-    const first = block(range.startContainer);
-    const last = block(range.endContainer);
-    if (!first || !last || !content.contains(first) || !content.contains(last)) return;
-    const [sline] = sourceLines(first);
-    const [lastStart, lastEnd] = sourceLines(last);
-    // A triple-click selection ends at offset 0 of the next block, which holds none of the selected text.
-    const eline = range.endOffset === 0 && last !== first ? lastStart - 1 : lastEnd;
-    return { sline, eline: Math.max(sline, eline), box: range.getBoundingClientRect() };
-}
-
-function openComment() {
-    const lines = selectedLines();
-    if (!lines) return;
-    commentTarget = { path: currentPath, sline: lines.sline, eline: lines.eline };
-    commentLines.textContent = lines.sline === lines.eline ? `Line ${lines.sline}` : `Lines ${lines.sline}-${lines.eline}`;
-    commentStatus.textContent = "";
-    const column = content.getBoundingClientRect();
-    commentBox.style.top = `${lines.box.bottom + scrollY + 8}px`;
-    commentBox.style.left = `${column.left + scrollX}px`;
-    commentBox.style.width = `${column.width}px`;
-    commentBox.hidden = false;
-    commentText.focus();
-}
-
-function stopChoosing() {
-    listeners = undefined;
-    commentListeners.replaceChildren();
-    commentStatus.textContent = "";
-    commentText.readOnly = false;
-}
-
-function closeComment() {
-    if (listeners) stopChoosing();
-    commentText.blur();
-    commentBox.hidden = true;
-}
-
-function sendComment(target) {
-    const comment = commentText.value.trim();
-    if (!comment) return;
-    commentText.readOnly = true;
-    commentStatus.textContent = "Sending to pi…";
-    webkit.messageHandlers.comment.postMessage({ ...commentTarget, comment, target });
-}
-
-function pick(listener) {
-    listeners = undefined;
-    commentListeners.replaceChildren();
-    sendComment(listener.sock);
-}
-
-function showToast(text) {
-    clearTimeout(toastTimer);
-    toast.textContent = text;
-    toast.hidden = false;
-    toastTimer = setTimeout(() => (toast.hidden = true), 2500);
-}
-
-document.addEventListener("keydown", (event) => {
-    if (event.target === commentText || event.key !== " " || event.repeat) return;
-    if (event.metaKey || event.ctrlKey || event.altKey || !selectedLines()) return;
-    event.preventDefault();
-    if (event.timeStamp - lastSpace < 1000) {
-        lastSpace = -Infinity;
-        openComment();
-    } else lastSpace = event.timeStamp;
-});
-
-commentText.addEventListener("keydown", (event) => {
-    if (listeners) {
-        event.preventDefault();
-        if (event.key === "Escape") stopChoosing();
-        const matches = listeners.filter((listener) => listener.window === event.key);
-        if (matches.length === 1) pick(matches[0]);
-        return;
-    }
-    if (event.key === "Escape") {
-        event.preventDefault();
-        closeComment();
-    } else if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
-        event.preventDefault();
-        if (!commentText.readOnly) sendComment();
-    }
-});
-commentText.addEventListener("focus", () => webkit.messageHandlers.editing.postMessage(true));
-commentText.addEventListener("blur", () => webkit.messageHandlers.editing.postMessage(false));
-
 window.mdview = {
     async update(html, baseHref, path, top) {
-        last = [html, baseHref, path, top];
         const switched = path !== currentPath;
         let restoredY;
         if (switched) {
@@ -427,13 +357,15 @@ window.mdview = {
             } else history.replaceState({ path, y: 0 }, "");
             restoring = undefined;
         }
-        currentPath = path;
+        setPath(path);
         const anchor = switched && pendingAnchor?.path === path ? pendingAnchor.hash : "";
         if (switched) pendingAnchor = undefined;
         base.href = baseHref;
         const previous = [...content.querySelectorAll(".mermaid")];
         content.innerHTML = html;
-        content.querySelectorAll('pre > code[class*="language-"]:not(.language-mermaid)').forEach(highlight);
+        content
+            .querySelectorAll('pre > code[class*="language-"]:not(.language-mermaid)')
+            .forEach((code) => highlight(code).catch(console.error));
         alerts();
         taskLists();
         anchors();
@@ -449,35 +381,17 @@ window.mdview = {
         place();
         spy();
     },
+    visit(path) {
+        if (path === currentPath) return;
+        if (restoring?.path === path) restoring = undefined;
+        else if (currentPath) {
+            saveScroll();
+            history.pushState({ path, y: 0 }, "");
+        } else history.replaceState({ path, y: 0 }, "");
+        setPath(path);
+    },
     scroll(top) {
-        last[3] = top;
         syncTo(top);
-    },
-    choose(choices) {
-        if (commentBox.hidden) return;
-        listeners = choices;
-        commentStatus.textContent = "Send to which pi? Press its tmux window number, or Esc to go back.";
-        commentListeners.replaceChildren(
-            ...choices.map((listener) => {
-                const button = document.createElement("button");
-                button.type = "button";
-                button.textContent = `${listener.window} ${listener.label}`;
-                // Keeps focus in the textarea, so the viewer's key shortcuts stay off.
-                button.addEventListener("mousedown", (event) => event.preventDefault());
-                button.addEventListener("click", () => pick(listener));
-                return button;
-            }),
-        );
-    },
-    sent(ok, info) {
-        commentText.readOnly = false;
-        if (!ok) {
-            commentStatus.textContent = `Not sent: ${info}`;
-            return;
-        }
-        commentText.value = "";
-        closeComment();
-        showToast(`pi: ${info}`);
     },
 };
 
@@ -494,13 +408,4 @@ document.addEventListener("click", (event) => {
         return;
     }
     if (file) pendingAnchor = { path: file, hash: url.hash };
-});
-
-dark.addEventListener("change", async () => {
-    diagrams.clear();
-    if (mermaidReady) {
-        await mermaidReady;
-        themeMermaid();
-    }
-    if (last) window.mdview.update(...last);
 });

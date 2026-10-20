@@ -1,44 +1,272 @@
-/* Layout from the github-markdown-css README. */
-body.markdown-body {
+*,
+*::before,
+*::after {
     box-sizing: border-box;
+}
+
+body {
     min-width: 200px;
-    max-width: 980px;
+    max-width: 860px;
     margin: 0 auto;
-    padding: 32px 45px 64px;
+    padding: 32px 40px 64px;
+    background: var(--kw-bg);
+    color: var(--kw-fg);
+    font-family: var(--kw-font);
+    font-feature-settings:
+        "calt" 1,
+        "liga" 1;
+    font-size: 15px;
+    line-height: 1.8;
+    -webkit-font-smoothing: antialiased;
 }
 
-#content > :first-child {
-    margin-top: 0 !important;
-}
-
-#content > :last-child {
-    margin-bottom: 0 !important;
-}
-
-#content :is(h1, h2, h3, h4, h5, h6) {
-    scroll-margin-top: 24px;
-}
-
-#sidebar {
-    display: none;
-}
-
-body.markdown-body.has-toc {
+body.has-toc {
     display: grid;
     grid-template-columns: 180px minmax(0, 1fr);
     column-gap: 24px;
-    max-width: calc(980px + 204px);
+    max-width: calc(860px + 204px);
     padding-left: 12px;
 }
 
-body.markdown-body.has-toc.toc-collapsed {
+body.has-toc.toc-collapsed {
     grid-template-columns: 28px minmax(0, 1fr);
-    max-width: calc(980px + 52px);
+    max-width: calc(860px + 52px);
 }
 
-/* github-markdown.css adds clearfix pseudo-elements, and in a grid each one takes a cell. */
-body.has-toc::before,
-body.has-toc::after {
+#content {
+    min-width: 0;
+}
+
+#content > :first-child {
+    margin-top: 0;
+}
+
+#content > :last-child {
+    margin-bottom: 0;
+}
+
+/* Prose, from the blog's .prose rules. */
+a {
+    color: var(--kw-link);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    text-decoration-thickness: 1px;
+}
+
+a:hover {
+    color: var(--kw-link-hov);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+    line-height: 1.3;
+    scroll-margin-top: 24px;
+}
+
+h1 {
+    font-size: 1.5rem;
+    margin: 0 0 1.5rem;
+}
+
+h2 {
+    font-size: 1.2rem;
+    margin: 2.75rem 0 1rem;
+}
+
+h3 {
+    font-size: 1.05rem;
+    margin: 2rem 0 0.75rem;
+}
+
+h4,
+h5,
+h6 {
+    font-size: 0.95rem;
+    margin: 1.5rem 0 0.5rem;
+    color: var(--kw-fg-dim);
+}
+
+p,
+dl,
+details {
+    margin: 0 0 1.15rem;
+}
+
+ul,
+ol {
+    padding-left: 1.4rem;
+    margin: 0 0 1.15rem;
+}
+
+li {
+    margin: 0.3rem 0;
+}
+
+li > :is(ul, ol) {
+    margin-bottom: 0;
+}
+
+strong {
+    color: var(--kw-fg);
+}
+
+hr {
+    border: none;
+    border-top: 1px solid var(--kw-border);
+    margin: 2.5rem 0;
+}
+
+img,
+video {
+    max-width: 100%;
+    height: auto;
+}
+
+blockquote {
+    border-left: 2px solid var(--kw-accent);
+    margin: 1.25rem 0;
+    padding: 0.1rem 0 0.1rem 1rem;
+    color: var(--kw-fg-dim);
+}
+
+:not(pre) > code,
+kbd {
+    background: var(--kw-bg-alt);
+    border: 1px solid var(--kw-border);
+    padding: 0.05rem 0.35rem;
+    border-radius: 3px;
+    font-family: inherit;
+    font-size: 0.88em;
+    color: var(--kw-accent-2);
+}
+
+pre {
+    background: var(--kw-bg-alt);
+    border: 1px solid var(--kw-border);
+    border-radius: 6px;
+    padding: 1rem 1.1rem;
+    overflow-x: auto;
+    font-family: inherit;
+    font-size: 0.85rem;
+    line-height: 1.6;
+    margin: 1.25rem 0;
+}
+
+pre code {
+    font-family: inherit;
+    color: inherit;
+}
+
+table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    border-collapse: collapse;
+    margin: 1.25rem 0;
+    font-size: 0.9rem;
+}
+
+th,
+td {
+    border: 1px solid var(--kw-border);
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+}
+
+th {
+    background: var(--kw-bg-soft);
+}
+
+/* GitHub markup that app.js adds after cmark-gfm. */
+.markdown-alert {
+    background: var(--kw-bg-soft);
+    border-left: 2px solid var(--kw-accent);
+    padding: 0.75rem 1rem;
+    border-radius: 4px;
+    margin: 1.25rem 0;
+}
+
+.markdown-alert > :last-child {
+    margin-bottom: 0;
+}
+
+.markdown-alert-title {
+    margin-bottom: 0.4rem;
+    font-weight: 700;
+    color: var(--kw-accent);
+}
+
+.markdown-alert-tip {
+    border-left-color: var(--kw-accent-2);
+}
+
+.markdown-alert-tip .markdown-alert-title {
+    color: var(--kw-accent-2);
+}
+
+.markdown-alert-important {
+    border-left-color: var(--kw-violet);
+}
+
+.markdown-alert-important .markdown-alert-title {
+    color: var(--kw-violet);
+}
+
+.markdown-alert-warning {
+    border-left-color: var(--kw-warn);
+}
+
+.markdown-alert-warning .markdown-alert-title {
+    color: var(--kw-warn);
+}
+
+.markdown-alert-caution {
+    border-left-color: var(--kw-error);
+}
+
+.markdown-alert-caution .markdown-alert-title {
+    color: var(--kw-error);
+}
+
+.contains-task-list {
+    list-style: none;
+    padding-left: 0.2rem;
+}
+
+.task-list-item-checkbox {
+    margin: 0 0.5rem 0 0;
+    accent-color: var(--kw-accent-2);
+}
+
+.footnotes {
+    margin-top: 2.5rem;
+    border-top: 1px solid var(--kw-border);
+    font-size: 0.85rem;
+    color: var(--kw-fg-dim);
+}
+
+.mermaid {
+    display: flex;
+    justify-content: center;
+    margin: 1.5rem 0;
+    overflow: auto;
+}
+
+.mermaid.error {
+    display: block;
+    padding: 1rem;
+    border-radius: 6px;
+    background: var(--kw-bg-alt);
+    color: var(--kw-error);
+    white-space: pre-wrap;
+}
+
+/* Table of contents. */
+#sidebar {
     display: none;
 }
 
@@ -61,7 +289,7 @@ body.has-toc::after {
     border: 0;
     border-radius: 6px;
     background: none;
-    color: var(--fgColor-muted);
+    color: var(--kw-muted);
     font: inherit;
     font-size: 12px;
     font-weight: 600;
@@ -73,8 +301,8 @@ body.has-toc::after {
 }
 
 #toc-toggle:hover {
-    background: var(--bgColor-neutral-muted);
-    color: var(--fgColor-default);
+    background: var(--kw-bg-soft);
+    color: var(--kw-fg);
 }
 
 #toc {
@@ -93,7 +321,7 @@ body.has-toc::after {
     display: block;
     padding: 3px 8px;
     border-left: 2px solid transparent;
-    color: var(--fgColor-muted);
+    color: var(--kw-muted);
     text-decoration: none;
     white-space: nowrap;
     overflow: hidden;
@@ -109,100 +337,11 @@ body.has-toc::after {
 }
 
 #toc a:hover {
-    color: var(--fgColor-default);
+    color: var(--kw-fg);
 }
 
 #toc a.active {
-    border-left-color: var(--borderColor-accent-emphasis);
-    color: var(--fgColor-default);
+    border-left-color: var(--kw-accent-2);
+    color: var(--kw-accent-2);
     font-weight: 600;
-}
-
-.markdown-body code,
-.markdown-body tt,
-.markdown-body samp,
-.markdown-body pre {
-    font-size: calc(1em - 1px);
-}
-
-.markdown-body .mermaid {
-    display: flex;
-    justify-content: center;
-    margin-bottom: var(--base-size-16);
-    overflow: auto;
-}
-
-.markdown-body .mermaid.error {
-    display: block;
-    padding: var(--base-size-16);
-    border-radius: 6px;
-    background: var(--bgColor-muted);
-    color: var(--fgColor-danger);
-    font-family: var(--fontStack-monospace);
-    white-space: pre-wrap;
-}
-
-#comment {
-    position: absolute;
-    z-index: 10;
-    padding: 8px;
-    border: 1px solid var(--borderColor-default);
-    border-radius: 6px;
-    background: var(--bgColor-default);
-    box-shadow: 0 8px 24px rgb(0 0 0 / 20%);
-}
-
-#comment-lines,
-#comment-status {
-    color: var(--fgColor-muted);
-    font-size: 12px;
-}
-
-#comment-status:empty {
-    display: none;
-}
-
-#comment-text {
-    display: block;
-    box-sizing: border-box;
-    width: 100%;
-    margin: 4px 0;
-    padding: 6px 8px;
-    border: 1px solid var(--borderColor-default);
-    border-radius: 6px;
-    background: var(--bgColor-muted);
-    color: var(--fgColor-default);
-    font: inherit;
-    resize: vertical;
-}
-
-#comment-listeners button {
-    display: block;
-    width: 100%;
-    margin-top: 4px;
-    padding: 4px 8px;
-    border: 1px solid var(--borderColor-default);
-    border-radius: 6px;
-    background: var(--bgColor-muted);
-    color: var(--fgColor-default);
-    font: inherit;
-    font-size: 12px;
-    text-align: left;
-    cursor: pointer;
-}
-
-#comment-listeners button:hover {
-    border-color: var(--borderColor-accent-emphasis);
-}
-
-#toast {
-    position: fixed;
-    right: 16px;
-    bottom: 16px;
-    z-index: 10;
-    padding: 6px 12px;
-    border-radius: 6px;
-    background: var(--bgColor-neutral-muted);
-    color: var(--fgColor-default);
-    font-size: 12px;
 }

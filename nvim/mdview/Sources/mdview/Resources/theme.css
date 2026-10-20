@@ -1,0 +1,153 @@
+/* Kanagawa Wave and Fira Code, the same as /Users/polo/app/blog/src/styles/main.css. */
+@font-face {
+    font-family: "Fira Code";
+    src: url("mdview://app/vendor/FiraCode-VF.woff2") format("woff2-variations");
+    font-weight: 300 700;
+    font-style: normal;
+}
+
+:root {
+    color-scheme: dark;
+    --kw-bg: #1f1f28;
+    --kw-bg-soft: #2a2a37;
+    --kw-bg-alt: #16161d;
+    --kw-fg: #dcd7ba;
+    --kw-fg-dim: #c8c093;
+    --kw-muted: #727169;
+    --kw-border: #363646;
+    --kw-accent: #7e9cd8;
+    --kw-accent-2: #98bb6c;
+    --kw-link: #7fb4ca;
+    --kw-link-hov: #a3d4d5;
+    --kw-warn: #dca561;
+    --kw-error: #e46876;
+    --kw-violet: #957fb8;
+    --kw-font: "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* The copy button that copy.js adds to every code block. !important beats an HTML file's own CSS. */
+pre:has(> .mdview-copy) {
+    position: relative !important;
+}
+
+.mdview-copy {
+    position: absolute !important;
+    top: 8px !important;
+    right: 8px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 30px !important;
+    height: 30px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 1px solid var(--kw-border) !important;
+    border-radius: 6px !important;
+    background: var(--kw-bg-soft) !important;
+    color: var(--kw-muted) !important;
+    opacity: 0;
+    cursor: pointer;
+    user-select: none;
+    transition: opacity 0.15s;
+}
+
+pre:hover > .mdview-copy,
+.mdview-copy:focus-visible,
+.mdview-copy.copied {
+    opacity: 1;
+}
+
+.mdview-copy:hover {
+    border-color: var(--kw-accent) !important;
+    color: var(--kw-fg) !important;
+}
+
+.mdview-copy.copied {
+    border-color: var(--kw-accent-2) !important;
+    color: var(--kw-accent-2) !important;
+}
+
+.mdview-copy svg {
+    display: block !important;
+    fill: currentColor !important;
+}
+
+.mdview-copy .mdview-copy-done,
+.mdview-copy.copied .mdview-copy-idle {
+    display: none !important;
+}
+
+.mdview-copy.copied .mdview-copy-done {
+    display: block !important;
+}
+
+/* The comment box and toast that comment.js adds. They sit outside <body>, so they set their own font. */
+#mdview-comment,
+#mdview-toast {
+    z-index: 2147483647 !important;
+    margin: 0 !important;
+    border: 1px solid var(--kw-border) !important;
+    border-radius: 6px !important;
+    background: var(--kw-bg-soft) !important;
+    color: var(--kw-fg) !important;
+    font: 13px/1.5 var(--kw-font) !important;
+    text-align: left !important;
+}
+
+#mdview-comment {
+    position: absolute !important;
+    display: block !important;
+    box-sizing: border-box !important;
+    padding: 8px !important;
+    box-shadow: 0 8px 24px rgb(0 0 0 / 40%) !important;
+}
+
+#mdview-toast {
+    position: fixed !important;
+    right: 16px !important;
+    bottom: 16px !important;
+    padding: 6px 12px !important;
+    font-size: 12px !important;
+}
+
+#mdview-comment[hidden],
+#mdview-toast[hidden],
+#mdview-comment-status:empty {
+    display: none !important;
+}
+
+#mdview-comment-lines,
+#mdview-comment-status {
+    color: var(--kw-muted) !important;
+    font-size: 12px !important;
+}
+
+#mdview-comment-text,
+#mdview-comment-listeners button {
+    display: block !important;
+    box-sizing: border-box !important;
+    width: 100% !important;
+    border: 1px solid var(--kw-border) !important;
+    border-radius: 6px !important;
+    background: var(--kw-bg-alt) !important;
+    color: var(--kw-fg) !important;
+    font: inherit !important;
+    text-align: left !important;
+}
+
+#mdview-comment-text {
+    margin: 4px 0 !important;
+    padding: 6px 8px !important;
+    resize: vertical;
+}
+
+#mdview-comment-listeners button {
+    margin: 4px 0 0 !important;
+    padding: 4px 8px !important;
+    font-size: 12px !important;
+    cursor: pointer;
+}
+
+#mdview-comment-listeners button:hover {
+    border-color: var(--kw-accent) !important;
+}

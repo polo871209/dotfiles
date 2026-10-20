@@ -10,6 +10,12 @@ function M.prose()
     M.undo 'setl spell<'
 end
 
+function M.preview()
+    if vim.g.pi_agent or vim.fn.has 'mac' == 0 then return end
+    vim.keymap.set('n', '<leader>tm', function() require('mdview').toggle() end, { buffer = true, desc = '[T]oggle [M]dview preview' })
+    M.undo 'silent! nunmap <buffer> <leader>tm'
+end
+
 ---@class ft.IndentOpts
 ---@field width integer
 ---@field expandtab boolean? omit to leave 'expandtab' alone (gofmt keeps tabs)

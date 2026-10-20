@@ -1,15 +1,31 @@
 import Foundation
+import Synchronization
 import UniformTypeIdentifiers
 import WebKit
 
+final class DocumentRoot: Sendable {
+    private let value = Mutex<URL?>(nil)
+
+    var directory: URL? {
+        get { value.withLock { $0 } }
+        set { value.withLock { $0 = newValue } }
+    }
+}
+
 struct Assets: URLSchemeHandler {
+    /// Set for the HTML page, which may load any file under this directory.
+    /// Without it, as on the markdown page, only images load from disk.
+    var documentRoot: DocumentRoot?
+
     private static let imageTypes: Set<String> = ["png", "jpg", "jpeg", "gif", "svg", "webp", "avif", "heic", "ico", "bmp"]
     private static let root = Bundle.module.url(forResource: "Resources", withExtension: nil)!
 
     func reply(for request: URLRequest) -> AsyncThrowingStream<URLSchemeTaskResult, any Error> {
         AsyncThrowingStream { continuation in
             do {
-                guard let url = request.url, let file = Self.resolve(url) else { throw URLError(.fileDoesNotExist) }
+                guard let url = request.url, let file = Self.resolve(url, under: documentRoot?.directory) else {
+                    throw URLError(.fileDoesNotExist)
+                }
                 let data = try Data(contentsOf: file)
                 let mime = UTType(filenameExtension: file.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
                 continuation.yield(.response(URLResponse(url: url, mimeType: mime, expectedContentLength: data.count, textEncodingName: "utf-8")))
@@ -21,7 +37,7 @@ struct Assets: URLSchemeHandler {
         }
     }
 
-    static func resolve(_ url: URL) -> URL? {
+    static func resolve(_ url: URL, under directory: URL? = nil) -> URL? {
         let path = url.path(percentEncoded: false)
         switch url.host() {
         case "app":
@@ -29,7 +45,9 @@ struct Assets: URLSchemeHandler {
             return file.path.hasPrefix(root.standardizedFileURL.path + "/") ? file : nil
         case "file":
             let file = URL(filePath: path).standardizedFileURL
-            return imageTypes.contains(file.pathExtension.lowercased()) ? file : nil
+            if imageTypes.contains(file.pathExtension.lowercased()) { return file }
+            guard let directory else { return nil }
+            return file.path.hasPrefix(directory.standardizedFileURL.path + "/") ? file : nil
         default:
             return nil
         }

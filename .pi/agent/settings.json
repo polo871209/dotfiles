@@ -3,7 +3,9 @@
   "defaultProvider": "anthropic",
   "defaultModel": "claude-opus-5-5",
   "defaultThinkingLevel": "high",
-  "defaultTools": ["+codemode"],
+  "defaultTools": [
+    "+codemode"
+  ],
   "theme": "catppuccin-mocha",
   "tuiMode": "fullscreen",
   "fullscreenScrollbar": "hidden",
@@ -14,7 +16,7 @@
   },
   "quietStartup": true,
   "collapseChangelog": true,
-  "lastChangelogVersion": "1.3.0",
+  "lastChangelogVersion": "1.4.0",
   "showCacheMissNotices": false,
   "warnings": {
     "anthropicExtraUsage": false

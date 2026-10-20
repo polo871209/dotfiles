@@ -23,6 +23,30 @@ import Testing
     }
 }
 
+@Suite struct HTMLSourceTests {
+    @Test func tagsStartTagsWithTheirSourceLine() {
+        let html = "<!doctype html>\n<p class=\"a>b\"\n  id=x>text</p>\n<br/><IMG src=y>\n"
+        #expect(HTMLSource.annotatingLines(html) == """
+            <!doctype html>
+            <p data-mdview-line="2" class="a>b"
+              id=x>text</p>
+            <br data-mdview-line="4"/><IMG data-mdview-line="4" src=y>
+
+            """)
+    }
+
+    @Test func skipsCommentsAndRawText() {
+        let html = "<!-- <p>\n -->\n<script>if (a<b) x = '<div>'\n</SCRIPT><i>\n"
+        #expect(HTMLSource.annotatingLines(html) == """
+            <!-- <p>
+             -->
+            <script data-mdview-line="3">if (a<b) x = '<div>'
+            </SCRIPT><i data-mdview-line="4">
+
+            """)
+    }
+}
+
 @MainActor @Suite struct FileWatcherTests {
     @Test(.timeLimit(.minutes(1))) func reportsInPlaceAndAtomicWrites() async throws {
         let dir = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
@@ -57,6 +81,13 @@ import Testing
         #expect(Assets.resolve(URL(string: "mdview://file/tmp/a.png")!) != nil)
         #expect(Assets.resolve(URL(string: "mdview://file/Users/me/.ssh/id_ed25519")!) == nil)
         #expect(Assets.resolve(URL(string: "mdview://file/Users/me/notes.md")!) == nil)
+    }
+
+    @Test func servesAnHTMLDocumentOnlyTheFilesUnderItsDirectory() {
+        let site = URL(filePath: "/tmp/site")
+        #expect(Assets.resolve(URL(string: "mdview://file/tmp/site/css/style.css")!, under: site) != nil)
+        #expect(Assets.resolve(URL(string: "mdview://file/tmp/style.css")!, under: site) == nil)
+        #expect(Assets.resolve(URL(string: "mdview://file/tmp/site/../secret.txt")!, under: site) == nil)
     }
 
     @Test func blocksScriptsFromRawHTML() throws {

@@ -5,19 +5,22 @@ import WebKit
 private let index = URL(string: "mdview://app/index.html")!
 
 @Observable @MainActor
-final class Find {
-    var shown = false
+final class Screen {
+    var page: WebPage
+    var finding = false
+
+    init(page: WebPage) { self.page = page }
 }
 
 private struct Root: View {
-    let page: WebPage
-    @Bindable var find: Find
+    @Bindable var screen: Screen
 
     var body: some View {
-        WebView(page)
+        WebView(screen.page)
+            .id(ObjectIdentifier(screen.page))
             .webViewMagnificationGestures(.enabled)
             .webViewBackForwardNavigationGestures(.enabled)
-            .findNavigator(isPresented: $find.shown)
+            .findNavigator(isPresented: $screen.finding)
             // The web view takes every click, so this invisible strip is the only place to drag the window.
             // It goes before ignoresSafeArea, or it sits under the hidden title bar and covers the TOC button.
             .overlay(alignment: .top) {
@@ -30,13 +33,18 @@ private struct Root: View {
 @MainActor
 final class Viewer: NSObject, NSWindowDelegate {
     private let page: WebPage
+    /// Shows an HTML file as its own document.
+    /// It has no message handlers, so the file's scripts cannot reach nvim or pi.
+    private let htmlPage: WebPage
+    private let htmlRoot = DocumentRoot()
+    private var htmlFile: URL?
     private let panel: Panel
     private let loaded: Task<Void, any Error>
     private var pending: Message?
     private var busy = false
     private var latest: Message?
     private var watcher: FileWatcher?
-    let find = Find()
+    let screen: Screen
     /// True while a text field in the page has focus, so key shortcuts must not fire.
     private(set) var editing = false
 
@@ -47,9 +55,20 @@ final class Viewer: NSObject, NSWindowDelegate {
         for name in ["open", "scroll", "comment", "editing"] {
             config.userContentController.add(bridge, name: name)
         }
+        Self.addScripts(to: config.userContentController, in: .page)
         let page = WebPage(configuration: config, navigationDecider: Links())
         page.isInspectable = true
+        var htmlConfig = WebPage.Configuration()
+        htmlConfig.urlSchemeHandlers[URLScheme("mdview")!] = Assets(documentRoot: htmlRoot)
+        htmlConfig.userContentController.addUserScript(Self.restyle)
+        Self.addScripts(to: htmlConfig.userContentController, in: Self.htmlWorld)
+        for name in ["comment", "editing"] {
+            htmlConfig.userContentController.add(bridge, contentWorld: Self.htmlWorld, name: name)
+        }
+        htmlPage = WebPage(configuration: htmlConfig, navigationDecider: Links(allowsPageNavigation: true))
+        htmlPage.isInspectable = true
         self.page = page
+        screen = Screen(page: page)
         loaded = Task {
             for try await event in page.load(index) where event == .finished { break }
         }
@@ -74,10 +93,52 @@ final class Viewer: NSObject, NSWindowDelegate {
         for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
             panel.standardWindowButton(button)?.isHidden = true
         }
-        panel.contentView = NSHostingView(rootView: Root(page: page, find: find))
+        panel.contentView = NSHostingView(rootView: Root(screen: screen))
         panel.center()
         panel.setFrameAutosaveName("mdview")
     }
+
+    private static func resource(_ name: String) -> String {
+        guard let file = Assets.resolve(URL(string: "mdview://app/\(name)")!) else { return "" }
+        return (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+    }
+
+    /// Keeps the clipboard and the pi bridge away from an HTML file's own scripts.
+    private static let htmlWorld = WKContentWorld.world(name: "mdview")
+
+    /// Adds the copy buttons and the comment box to a page.
+    private static func addScripts(to controller: WKUserContentController, in world: WKContentWorld) {
+        controller.add(Clipboard(), contentWorld: world, name: "copy")
+        for name in ["copy.js", "comment.js"] {
+            controller.addUserScript(
+                WKUserScript(source: resource(name), injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: world)
+            )
+        }
+    }
+
+    private func callComment(_ function: String, arguments: [String: Any]) {
+        let page = screen.page
+        let world = page === htmlPage ? Self.htmlWorld : .page
+        Task {
+            do {
+                _ = try await page.callJavaScript(
+                    "mdviewComment.\(function)", arguments: arguments, contentWorld: world
+                )
+            } catch {
+                report(error)
+            }
+        }
+    }
+
+    /// Puts theme.css and html.css into every HTML file as an inline style, so the file's own look never shows first.
+    private static let restyle: WKUserScript = {
+        let css = resource("theme.css") + "\n" + resource("html.css")
+        let literal = (try? JSONEncoder().encode(css)).flatMap { String(bytes: $0, encoding: .utf8) } ?? "''"
+        let source = """
+            document.documentElement.append(Object.assign(document.createElement("style"), { textContent: \(literal) }))
+            """
+        return WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: true)
+    }()
 
     func windowWillClose(_ notification: Notification) { NSApp.terminate(nil) }
 
@@ -106,26 +167,15 @@ final class Viewer: NSObject, NSWindowDelegate {
 
     func choose(_ request: Choose) {
         let listeners = request.choose.map { ["sock": $0.sock, "window": $0.window, "label": $0.label] }
-        Task {
-            do {
-                _ = try await page.callJavaScript("mdview.choose(listeners)", arguments: ["listeners": listeners])
-            } catch {
-                report(error)
-            }
-        }
+        callComment("choose(listeners)", arguments: ["listeners": listeners])
     }
 
     func sent(_ result: Sent) {
-        Task {
-            do {
-                _ = try await page.callJavaScript("mdview.sent(ok, info)", arguments: ["ok": result.sent, "info": result.info])
-            } catch {
-                report(error)
-            }
-        }
+        callComment("sent(ok, info)", arguments: ["ok": result.sent, "info": result.info])
     }
 
     private func scroll(to top: Int) {
+        guard screen.page === page else { return }
         Task {
             do {
                 _ = try await page.callJavaScript("mdview.scroll(top)", arguments: ["top": top])
@@ -152,6 +202,34 @@ final class Viewer: NSObject, NSWindowDelegate {
         }
         let file = URL(filePath: message.path)
         panel.title = file.lastPathComponent
+        if ["html", "htm", "xhtml"].contains(file.pathExtension.lowercased()) {
+            await renderHTML(message.text, file: file)
+        } else {
+            await renderMarkdown(message, file: file)
+        }
+        if !panel.isVisible { present() }
+    }
+
+    private func renderHTML(_ html: String, file: URL) async {
+        let reloading = screen.page === htmlPage && htmlFile == file
+        let scrollY = reloading ? try? await htmlPage.callJavaScript("return scrollY") : nil
+        do {
+            htmlRoot.directory = file.deletingLastPathComponent()
+            let base = URL(string: "mdview://file" + file.path(percentEncoded: true))!
+            for try await event in htmlPage.load(html: HTMLSource.annotatingLines(html), baseURL: base) where event == .finished { break }
+            if let scrollY {
+                _ = try await htmlPage.callJavaScript("scrollTo(0, y)", arguments: ["y": scrollY])
+            }
+            _ = try await page.callJavaScript("mdview.visit(path)", arguments: ["path": file.path])
+        } catch {
+            report(error)
+        }
+        htmlFile = file
+        screen.page = htmlPage
+    }
+
+    private func renderMarkdown(_ message: Message, file: URL) async {
+        screen.page = page
         var base = "mdview://file" + file.deletingLastPathComponent().path(percentEncoded: true)
         if !base.hasSuffix("/") { base += "/" }
         do {
@@ -162,7 +240,6 @@ final class Viewer: NSObject, NSWindowDelegate {
         } catch {
             report(error)
         }
-        if !panel.isVisible { present() }
     }
 
     private func present() {
@@ -184,6 +261,14 @@ private final class Panel: NSPanel {
     override func sendEvent(_ event: NSEvent) {
         if event.type == .leftMouseDown, !isKeyWindow { makeKey() }
         super.sendEvent(event)
+    }
+}
+
+private final class Clipboard: NSObject, WKScriptMessageHandler {
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard let text = message.body as? String else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 }
 
@@ -212,10 +297,18 @@ private final class Bridge: NSObject, WKScriptMessageHandler {
 }
 
 private struct Links: WebPage.NavigationDeciding {
+    /// Lets the page load frames and follow its own anchors, as an HTML file does.
+    /// The markdown page loads only `index`.
+    var allowsPageNavigation = false
+
     func decidePolicy(for action: WebPage.NavigationAction, preferences: inout WebPage.NavigationPreferences) async -> WKNavigationActionPolicy {
         guard let url = action.request.url else { return .cancel }
         if url == index { return .allow }
-        guard action.navigationType == .linkActivated else { return .cancel }
+        guard action.navigationType == .linkActivated else { return allowsPageNavigation ? .allow : .cancel }
+        let document = { (url: URL?) in url?.absoluteString.prefix { $0 != "#" } }
+        if allowsPageNavigation, url.fragment != nil, document(url) == document(action.source.request.url) {
+            return .allow
+        }
         switch url.scheme {
         case "http", "https", "mailto":
             NSWorkspace.shared.open(url)

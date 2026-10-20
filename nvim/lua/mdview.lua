@@ -157,7 +157,7 @@ local function start(buf)
     vim.api.nvim_create_autocmd('BufEnter', {
         group = group,
         callback = function(args)
-            if vim.bo[args.buf].filetype ~= 'markdown' or args.buf == state.buf then return end
+            if not vim.tbl_contains({ 'markdown', 'html' }, vim.bo[args.buf].filetype) or args.buf == state.buf then return end
             state.buf = args.buf
             schedule_send()
         end,

@@ -8,11 +8,17 @@ app.setActivationPolicy(.accessory)
 let menu = NSMenu()
 let item = NSMenuItem()
 item.submenu = NSMenu()
+let redo = NSMenuItem(title: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
+redo.keyEquivalentModifierMask = [.command, .shift]
 item.submenu?.items = [
+    NSMenuItem(title: "Undo", action: Selector(("undo:")), keyEquivalent: "z"),
+    redo,
+    NSMenuItem(title: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x"),
     NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"),
+    NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"),
     NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"),
     NSMenuItem(title: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"),
-    NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"),
+    NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 ]
 menu.addItem(item)
 app.mainMenu = menu
@@ -51,7 +57,9 @@ NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .otherMouseDown]) { event 
         let backButton = 3, forwardButton = 4
         delta = [backButton: -1, forwardButton: 1][event.buttonNumber]
     } else {
-        let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad, .function])
+        let mods = event.modifierFlags
+            .intersection(.deviceIndependentFlagsMask)
+            .subtracting([.capsLock, .numericPad, .function])
         let key = event.charactersIgnoringModifiers
         let typing = event.window?.firstResponder is NSText || MainActor.assumeIsolated { viewer.editing }
         if !typing, mods == .command, key == "[" || Int(event.keyCode) == kVK_LeftArrow {
@@ -72,9 +80,9 @@ NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .otherMouseDown]) { event 
         } else if let delta {
             viewer.go(delta)
         } else if find {
-            viewer.find.shown = true
-        } else if viewer.find.shown {
-            viewer.find.shown = false
+            viewer.screen.finding = true
+        } else if viewer.screen.finding {
+            viewer.screen.finding = false
         } else {
             NSApp.terminate(nil)
         }
