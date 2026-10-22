@@ -33,7 +33,6 @@ cask "orbstack"
 cask "spotifast"
 cask "zen"
 mas "LINE", id: 539883307
-mas "PDFgear", id: 6469021132
 mas "Telegram 2", id: 747648890
 mas "WhatsApp", id: 310633997
 mas "Xcode", id: 497799835

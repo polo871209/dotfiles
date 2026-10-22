@@ -3,9 +3,7 @@
   "defaultProvider": "anthropic",
   "defaultModel": "claude-opus-5-5",
   "defaultThinkingLevel": "high",
-  "defaultTools": [
-    "+codemode"
-  ],
+  "defaultTools": ["+codemode", "+grep", "+find"],
   "theme": "catppuccin-mocha",
   "tuiMode": "fullscreen",
   "fullscreenScrollbar": "hidden",
@@ -36,5 +34,5 @@
   },
   "defaultProjectTrust": "always",
   "enableInstallTelemetry": false,
-  "packages": []
+  "skills": ["~/dotfiles/.agents/skills"]
 }

@@ -1,4 +1,4 @@
-import type { ClassifierBoolQuestion } from "@earendil-works/pi-ai";
+import type { ClassifierBoolQuestion, Usage } from "@earendil-works/pi-ai";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -9,7 +9,12 @@ import { Type } from "typebox";
 import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
 import TurndownService from "turndown";
-import { boolProbabilities, findJev, type JevModel } from "./shared/jev";
+import {
+  boolProbabilities,
+  findJev,
+  sumUsage,
+  type JevModel,
+} from "./shared/jev";
 import { lookup as dnsLookup } from "node:dns/promises";
 import net from "node:net";
 import { execFile } from "node:child_process";
@@ -532,7 +537,7 @@ async function scoreCandidates(
   query: string,
   candidates: SearchResult[],
   signal?: AbortSignal,
-): Promise<Array<number | null> | null> {
+): Promise<{ scores: Array<number | null> | null; usage?: Usage }> {
   const questions: Record<string, ClassifierBoolQuestion> = {};
   candidates.forEach((_, i) => {
     questions[`c${i}`] = {
@@ -546,7 +551,7 @@ async function scoreCandidates(
     };
   });
 
-  const probabilities = await boolProbabilities(
+  const { probabilities, usage } = await boolProbabilities(
     ctx,
     jev,
     {
@@ -563,9 +568,9 @@ async function scoreCandidates(
     8_000,
     signal,
   );
-  if (!probabilities) return null;
+  if (!probabilities) return { scores: null, usage };
   const scores = candidates.map((_, i) => probabilities[`c${i}`] ?? null);
-  return scores.some((s) => s !== null) ? scores : null;
+  return { scores: scores.some((s) => s !== null) ? scores : null, usage };
 }
 
 async function rerankResults(
@@ -574,16 +579,25 @@ async function rerankResults(
   query: string,
   results: SearchResult[],
   signal?: AbortSignal,
-): Promise<SearchResult[]> {
-  if (!jev || results.length < 2) return results;
+): Promise<{ results: SearchResult[]; usage?: Usage }> {
+  if (!jev || results.length < 2) return { results };
   const candidates = results.slice(0, RERANK_MAX_CANDIDATES);
-  const scores = await scoreCandidates(ctx, jev, query, candidates, signal);
-  if (!scores) return results;
-  return candidates
-    .map((result, i) => ({ result, i, score: scores[i] }))
-    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || a.i - b.i)
-    .filter((s, rank) => rank < 3 || (s.score ?? 0) >= 0.35)
-    .map((s) => s.result);
+  const { scores, usage } = await scoreCandidates(
+    ctx,
+    jev,
+    query,
+    candidates,
+    signal,
+  );
+  if (!scores) return { results, usage };
+  return {
+    results: candidates
+      .map((result, i) => ({ result, i, score: scores[i] }))
+      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || a.i - b.i)
+      .filter((s, rank) => rank < 3 || (s.score ?? 0) >= 0.35)
+      .map((s) => s.result),
+    usage,
+  };
 }
 
 async function readBoundedText(
@@ -1598,19 +1612,19 @@ export default function (pi: ExtensionAPI) {
             jev ? Math.min(numResults * 2, RERANK_MAX_CANDIDATES) : numResults,
             signal,
           );
+          const ranked = await rerankResults(
+            ctx,
+            jev,
+            query,
+            dedupResults(results),
+            signal,
+          );
           return {
             query,
-            results: (
-              await rerankResults(
-                ctx,
-                jev,
-                query,
-                dedupResults(results),
-                signal,
-              )
-            ).slice(0, numResults),
+            results: ranked.results.slice(0, numResults),
             provider,
             error: null as string | null,
+            usage: ranked.usage,
           };
         } catch (err) {
           return {
@@ -1618,6 +1632,7 @@ export default function (pi: ExtensionAPI) {
             results: [] as SearchResult[],
             provider: "none",
             error: errMsg(err),
+            usage: undefined,
           };
         }
       });
@@ -1677,6 +1692,7 @@ export default function (pi: ExtensionAPI) {
           totalResults,
           providers: [...new Set(queryResults.map((r) => r.provider))],
         },
+        usage: sumUsage(queryResults.map((r) => r.usage)),
         structuredContent: { queries: structured },
         ...(queryResults.every((r) => r.error) ? { isError: true } : {}),
       };

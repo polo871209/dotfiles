@@ -296,7 +296,7 @@ export default function tickets(pi: ExtensionAPI): void {
     const ticket = queue.shift();
     if (ticket === undefined) return;
     changed();
-    pi.sendUserMessage(ticket);
+    pi.sendUserMessage(ticket, { deliverAs: "followUp" });
   };
 
   pi.on("session_start", async (_event, ctx) => {

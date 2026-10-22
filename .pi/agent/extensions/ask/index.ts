@@ -67,8 +67,6 @@ function registerAskUserQuestionTool(pi: ExtensionAPI): void {
     prepareArguments: clampArguments,
     exposure: "model-only",
     annotations: { readOnlyHint: true, openWorldHint: false },
-    // pi shows one custom dialog at a time, so two asks in one turn must queue.
-    executionMode: "sequential",
 
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const typed = params as unknown as QuestionParams;

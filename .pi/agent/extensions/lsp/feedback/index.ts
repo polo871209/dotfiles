@@ -101,7 +101,8 @@ export function registerFeedback(pi: ExtensionAPI): void {
     }, 0);
   });
 
-  pi.on("before_agent_start", async () => {
+  pi.on("before_agent_start", async (event) => {
+    if (event.messageType !== "user") return;
     if (allEditsChecked) touched.clear();
     repairFollowups = 0;
   });
