@@ -1,23 +1,10 @@
-// Agents live in pi's standard agents dir (`~/.pi/agent/agents/*.md`) as
-// markdown with YAML frontmatter:
-//   ---
-//   name: researcher
-//   description: ...
-//   tools: read, grep, find, ls       # optional --tools allowlist
-//   hidden: true                       # optional, invocable but not listed
-//   model: anthropic/claude-sonnet-5-5 # optional, overrides the provider default
-//   thinking: low                      # optional, defaults to the main agent's level
-//   ---
-//   <body, appended to the child's own system prompt>
-
-import { execFile, execFileSync } from "node:child_process";
-import { collectTextMessages, extractText } from "./shared/message";
-import { parseStatusTitle } from "./shared/status";
-import { surviveReload } from "./shared/reload";
+import { execFileSync, spawn } from "node:child_process";
+import { createInterface } from "node:readline";
+import { collectTextMessages, extractText } from "../shared/message";
+import { surviveReload } from "../shared/reload";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { promisify } from "node:util";
 import {
   getAgentDir,
   getMarkdownTheme,
@@ -77,7 +64,8 @@ interface Progress {
 interface RunRecord {
   id: string;
   sessionId: string;
-  paneId?: string;
+  blockId?: string;
+  resultFile?: string;
   controller: AbortController;
   progress: Progress;
   settled?: Promise<void>;
@@ -246,51 +234,42 @@ const manageValue = (v: Static<typeof ManageValueSchema>): JsonValue =>
 const AGENTS_DIR = path.join(getAgentDir(), "agents");
 const MAX_OUTPUT_BYTES = 32 * 1024;
 const TASK_PREVIEW_MAX = 140;
-const FORBIDDEN_TOOLS = new Set(["ask_user_question", "subagent"]);
 const DEFAULT_MAX_DURATION_MS = 3_600_000;
 const DEFAULT_WAIT_TIMEOUT_MS = DEFAULT_MAX_DURATION_MS + 60_000;
 
-const execFileAsync = promisify(execFile);
+const REX_SCRIPT = path.join(import.meta.dirname, "rex.lua");
 
-function tmuxActive(): boolean {
-  return !!process.env.TMUX && !!process.env.TMUX_PANE;
-}
-
-async function tmuxOut(args: string[]): Promise<string> {
-  try {
-    const { stdout } = await execFileAsync("tmux", args, {
-      timeout: 10_000,
-      maxBuffer: 16 * 1024 * 1024,
+function rexScript<T>(
+  args: Record<string, unknown>,
+  options: { signal?: AbortSignal; onProgress?: (status: string) => void } = {},
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      "rex",
+      ["do", REX_SCRIPT, "--args", JSON.stringify(args)],
+      { signal: options.signal, stdio: ["ignore", "pipe", "pipe"] },
+    );
+    let result: unknown;
+    let stderr = "";
+    createInterface({ input: child.stdout }).on("line", (line) => {
+      if (!line.trim()) return;
+      const value = JSON.parse(line) as { progress?: string };
+      if (typeof value?.progress === "string")
+        options.onProgress?.(value.progress);
+      else result = value;
     });
-    return stdout.trim();
-  } catch {
-    return "";
-  }
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) resolve(result as T);
+      else reject(new Error(stderr.trim() || `rex do exited with ${code}`));
+    });
+  });
 }
 
-async function tmuxRun(args: string[]): Promise<boolean> {
-  try {
-    await execFileAsync("tmux", args, { timeout: 10_000 });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-const panelSlot = surviveReload("__piSubagentPanel", () => ({
-  ids: [] as string[],
-}));
 let panelChain: Promise<unknown> = Promise.resolve();
-
-async function prunePanel(): Promise<void> {
-  const alive: string[] = [];
-  for (const id of panelSlot.ids) {
-    if (await tmuxOut(["display-message", "-p", "-t", id, "#{pane_id}"])) {
-      alive.push(id);
-    }
-  }
-  panelSlot.ids = alive;
-}
 
 function withPanelLock<T>(fn: () => Promise<T>): Promise<T> {
   const result = panelChain.then(fn, fn);
@@ -301,111 +280,10 @@ function withPanelLock<T>(fn: () => Promise<T>): Promise<T> {
   return result;
 }
 
-async function rebalancePanel(): Promise<void> {
-  const panel = panelSlot.ids;
-  if (panel.length < 2) return;
-  const totalHeight = Number(
-    await tmuxOut([
-      "display-message",
-      "-t",
-      panel[0]!,
-      "-p",
-      "#{window_height}",
-    ]),
-  );
-  if (!Number.isFinite(totalHeight) || totalHeight <= 0) return;
-  for (const id of panel.slice(0, -1)) {
-    await tmuxRun([
-      "resize-pane",
-      "-t",
-      id,
-      "-y",
-      String(Math.floor(totalHeight / panel.length)),
-    ]);
-  }
-}
-
-async function acquirePanelSlot(
-  cwd: string,
-  shCmd: string,
-): Promise<string | undefined> {
-  return withPanelLock(async () => {
-    await prunePanel();
-    const anchor = panelSlot.ids.at(-1);
-    const paneId = await tmuxOut(
-      anchor
-        ? [
-            "split-window",
-            "-d",
-            "-v",
-            "-c",
-            cwd,
-            "-t",
-            anchor,
-            "-P",
-            "-F",
-            "#{pane_id}",
-            "--",
-            "zsh",
-            "-lc",
-            shCmd,
-          ]
-        : [
-            "split-window",
-            "-d",
-            "-h",
-            "-p",
-            "25",
-            "-c",
-            cwd,
-            "-t",
-            process.env.TMUX_PANE!,
-            "-P",
-            "-F",
-            "#{pane_id}",
-            "--",
-            "zsh",
-            "-lc",
-            shCmd,
-          ],
-    );
-    if (paneId) panelSlot.ids.push(paneId);
-    await rebalancePanel();
-    return paneId || undefined;
-  });
-}
-
-async function releasePanelSlot(paneId: string): Promise<void> {
-  await withPanelLock(async () => {
-    await tmuxRun(["kill-pane", "-t", paneId]);
-    panelSlot.ids = panelSlot.ids.filter((id) => id !== paneId);
-    await rebalancePanel();
-  });
-}
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-function expandToolPatterns(patterns: string[], allNames: string[]): string[] {
-  const out = new Set<string>();
-  for (const p of patterns) {
-    if (!p.includes("*")) {
-      if (!FORBIDDEN_TOOLS.has(p)) out.add(p);
-      continue;
-    }
-    for (const n of allNames) {
-      if (FORBIDDEN_TOOLS.has(n)) continue;
-      if (
-        new RegExp(
-          "^" +
-            p.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*") +
-            "$",
-        ).test(n)
-      )
-        out.add(n);
-    }
-  }
-  return [...out];
-}
+const closePanes = (blockIds: string[], files: string[] = []) =>
+  withPanelLock(() =>
+    rexScript({ op: "close", block_ids: blockIds, files }),
+  ).catch(() => undefined);
 
 function loadAgents(): AgentConfig[] {
   if (!fs.existsSync(AGENTS_DIR)) return [];
@@ -660,7 +538,7 @@ const manageParams = () =>
     id: Type.Optional(
       Type.String({
         description:
-          "Run id as printed by the subagent call. Required for result, steer, stop. wait and result take a comma-separated list; for wait, omit it to cover every running run.",
+          "Run id as printed by the subagent call. Required for result, steer, stop. wait and result take a comma-separated list. For wait, omit it to cover every running run.",
       }),
     ),
     timeoutSeconds: Type.Optional(
@@ -672,7 +550,7 @@ const manageParams = () =>
     path: Type.Optional(
       Type.String({
         description:
-          'result only: dot path into captured result-json, e.g. "findings.0.path"; omit for the whole object.',
+          'result only: dot path into captured result-json, e.g. "findings.0.path". Omit it for the whole object.',
       }),
     ),
     message: Type.Optional(
@@ -715,20 +593,13 @@ const runPayload = (
 const transcriptOf = (r: RunRecord): string =>
   r.progress.output || r.progress.error || "";
 
-function toolsFlagValue(
-  agent: AgentConfig,
-  pi: ExtensionAPI,
-): string | undefined {
-  if (agent.tools.length === 0) return undefined;
-  const expanded = expandToolPatterns(
-    agent.tools,
-    pi.getAllTools().map((t) => t.name),
-  );
-  return expanded.length > 0 ? expanded.join(",") : undefined;
-}
+type WatchOutcome = {
+  state: "done" | "error" | "blocked" | "timeout" | "closed";
+  msg?: string;
+  output?: string;
+};
 
-async function runInTmux(
-  pi: ExtensionAPI,
+async function runInRex(
   agent: AgentConfig,
   task: string,
   model: string | undefined,
@@ -736,7 +607,7 @@ async function runInTmux(
   cwd: string,
   progress: Progress,
   push: () => void,
-  signal: AbortSignal | undefined,
+  signal: AbortSignal,
   target: string,
   record: RunRecord,
   trusted: boolean,
@@ -745,170 +616,115 @@ async function runInTmux(
   details: Progress;
   isError?: boolean;
 }> {
-  const promptFile = path.join(os.tmpdir(), `pi-subagent-sys-${target}.txt`);
-  const taskFile = path.join(os.tmpdir(), `pi-subagent-task-${target}.txt`);
   const resultFile = path.join(os.tmpdir(), `pi-subagent-result-${target}.txt`);
-  fs.writeFileSync(promptFile, agent.appendPrompt, { mode: 0o600 });
-  fs.writeFileSync(taskFile, task, { mode: 0o600 });
-  const cleanupFiles = () => {
-    for (const f of [promptFile, taskFile, resultFile, `${resultFile}.tmp`]) {
-      try {
-        fs.unlinkSync(f);
-      } catch {}
-    }
-  };
-
-  const toolsFlag = toolsFlagValue(agent, pi);
-  const parts = [
+  record.resultFile = resultFile;
+  const command = [
+    "env",
     "PI_IS_SUBAGENT=1",
-    `PI_SUBAGENT_RESULT_FILE='${resultFile}'`,
+    `PI_SUBAGENT_RESULT_FILE=${resultFile}`,
     "pi",
     "--no-session",
-    `--append-system-prompt '${promptFile}'`,
+    ...(agent.appendPrompt
+      ? ["--append-system-prompt", agent.appendPrompt]
+      : []),
+    trusted ? "--approve" : "--no-approve",
+    ...(agent.tools.length > 0 ? ["--tools", agent.tools.join(",")] : []),
+    "--exclude-tools",
+    "ask_user_question",
+    ...(model ? ["--model", model] : []),
+    ...(thinking ? ["--thinking", thinking] : []),
+    task,
   ];
-  parts.push(trusted ? "--approve" : "--no-approve");
-  if (toolsFlag) parts.push(`--tools ${toolsFlag}`);
-  parts.push(`--exclude-tools ${[...FORBIDDEN_TOOLS].join(",")}`);
-  if (model) parts.push(`--model '${model.replaceAll("'", "'\\''")}'`);
-  if (thinking) parts.push(`--thinking ${thinking}`);
-  parts.push(`"$(cat '${taskFile}')"`);
-
-  const paneId = await acquirePanelSlot(cwd, parts.join(" "));
-  if (!paneId) {
-    cleanupFiles();
+  const fail = (error: string, text = `subagent '${agent.name}' ${error}`) => {
     progress.status = "failed";
-    progress.error = "tmux split-window failed";
+    progress.error = error;
     return {
-      content: [
-        {
-          type: "text",
-          text: `subagent '${agent.name}' failed — could not open tmux pane`,
-        },
-      ],
+      content: [{ type: "text" as const, text }],
       details: { ...progress },
       isError: true,
     };
-  }
-  void tmuxRun(["select-pane", "-t", paneId, "-T", target]);
-  record.paneId = paneId;
-
-  let aborted = false;
-  const onAbort = () => {
-    aborted = true;
   };
-  if (signal?.aborted) onAbort();
-  else signal?.addEventListener("abort", onAbort, { once: true });
 
-  let finalStatus: "idle" | "blocked" | "timeout" | "aborted" = "idle";
-
-  while (true) {
-    if (aborted) {
-      finalStatus = "aborted";
-      break;
-    }
-    if (Date.now() - progress.startedAt > DEFAULT_MAX_DURATION_MS) {
-      finalStatus = "timeout";
-      break;
-    }
-
-    if (fs.existsSync(resultFile)) {
-      finalStatus = "idle";
-      break;
-    }
-
-    const paneTitle = await tmuxOut([
-      "display-message",
-      "-t",
-      paneId,
-      "-p",
-      "#{pane_title}",
-    ]);
-    const status = parseStatusTitle(paneTitle);
-    progress.lastMessage = status ? `tmux: ${status}` : "tmux: starting…";
-    push();
-
-    if (status === "done") {
-      finalStatus = "idle";
-      break;
-    }
-    if (status === "blocked") {
-      finalStatus = "blocked";
-      break;
-    }
-    if (!paneTitle) {
-      finalStatus = "idle";
-      break;
-    }
-
-    await sleep(500);
+  let blockId: string;
+  try {
+    ({ block_id: blockId } = await withPanelLock(() =>
+      rexScript<{ block_id: string }>({
+        op: "open",
+        label: target,
+        cwd,
+        command,
+      }),
+    ));
+  } catch (err) {
+    return fail(`failed — could not open a Rex pane: ${String(err)}`);
   }
+  record.blockId = blockId;
 
+  let outcome: WatchOutcome;
+  try {
+    outcome = await rexScript<WatchOutcome>(
+      {
+        op: "watch",
+        block_id: blockId,
+        result_file: resultFile,
+        timeout: DEFAULT_MAX_DURATION_MS / 1000,
+      },
+      {
+        signal,
+        onProgress: (status) => {
+          progress.lastMessage = `rex: ${status}`;
+          push();
+        },
+      },
+    );
+  } catch (err) {
+    progress.durationMs = Date.now() - progress.startedAt;
+    await closePanes([blockId], [resultFile]);
+    return fail(
+      signal.aborted
+        ? "aborted by parent"
+        : `lost the Rex pane: ${String(err)}`,
+    );
+  }
   progress.durationMs = Date.now() - progress.startedAt;
 
-  if (finalStatus === "aborted" || finalStatus === "timeout") {
-    await tmuxRun(["send-keys", "-t", paneId, "C-c"]);
-    await sleep(300);
-    await releasePanelSlot(paneId);
-    cleanupFiles();
-    progress.status = "failed";
-    progress.error =
-      finalStatus === "timeout"
-        ? `timed out after ${formatDuration(DEFAULT_MAX_DURATION_MS)} (wall clock)`
-        : "aborted by parent";
-    return {
-      content: [
-        { type: "text", text: `subagent '${agent.name}' ${progress.error}` },
-      ],
-      details: { ...progress },
-      isError: true,
-    };
+  if (outcome.state === "timeout") {
+    await closePanes([blockId], [resultFile]);
+    return fail(
+      `timed out after ${formatDuration(DEFAULT_MAX_DURATION_MS)} (wall clock)`,
+    );
   }
 
-  let rawOutput = "";
-  if (finalStatus === "idle") {
-    try {
-      rawOutput = fs.readFileSync(resultFile, "utf-8").trim();
-    } catch {}
-  }
-  if (!rawOutput) {
-    rawOutput = (
-      await tmuxOut(["capture-pane", "-p", "-J", "-t", paneId, "-S", "-"])
-    ).trim();
-  }
-  const extracted = extractResultBlock(rawOutput, target);
+  const extracted = extractResultBlock((outcome.output ?? "").trim(), target);
   let finalText = headTruncate(extracted.text, MAX_OUTPUT_BYTES);
   if (extracted.captured) {
-    finalText += `\n\n[result-json cached as ${target}; reachable later with subagent_manage (action: result).]`;
+    finalText += `\n\n[result-json cached as ${target}. Read it later with subagent_manage (action: result).]`;
   }
-
-  if (finalStatus === "blocked") {
-    cleanupFiles();
-    progress.status = "failed";
-    progress.error =
-      "subagent pane is blocked — needs manual attention (left open for review)";
-    progress.output = finalText;
-    return {
-      content: [
-        {
-          type: "text",
-          text: `subagent '${agent.name}' is blocked in tmux pane ${paneId} — check it directly.\n${finalText}`,
-        },
-      ],
-      details: { ...progress },
-      isError: true,
-    };
-  }
-
-  await releasePanelSlot(paneId);
-  cleanupFiles();
-  progress.status = "done";
   progress.output = finalText;
+
+  if (outcome.state === "blocked") {
+    return fail(
+      "subagent pane is blocked — needs manual attention (left open for review)",
+      `subagent '${agent.name}' is blocked in Rex pane ${target} — check it directly.\n${finalText}`,
+    );
+  }
+
+  await closePanes([blockId]);
+  if (outcome.state === "error") {
+    return fail(
+      `failed: ${outcome.msg ?? "the run stopped on an error"}`,
+      `subagent '${agent.name}' failed: ${outcome.msg ?? "the run stopped on an error"}\n${finalText}`,
+    );
+  }
+  if (outcome.state === "closed" && !finalText) {
+    return fail("pane closed before the run finished");
+  }
+  progress.status = "done";
   return {
     content: [{ type: "text", text: finalText }],
     details: { ...progress },
   };
 }
-
 function registerChildResultMirror(pi: ExtensionAPI): void {
   const file = process.env.PI_SUBAGENT_RESULT_FILE;
   if (!file) return;
@@ -928,30 +744,25 @@ function registerChildResultMirror(pi: ExtensionAPI): void {
   });
 }
 
-function sweepStaleRunFiles(): void {
-  const cutoff = Date.now() - DEFAULT_WAIT_TIMEOUT_MS * 2;
-  const dir = os.tmpdir();
-  let names: string[];
-  try {
-    names = fs.readdirSync(dir);
-  } catch {
-    return;
-  }
-  for (const name of names) {
-    if (!name.startsWith("pi-subagent-")) continue;
-    const file = path.join(dir, name);
-    try {
-      if (fs.statSync(file).mtimeMs < cutoff) fs.unlinkSync(file);
-    } catch {}
-  }
+// Rex notifies on every OSC 7501 `done` report and cannot mute one pane, so the child reports `idle` instead.
+function reportDoneAsIdle(): void {
+  const write = process.stdout.write.bind(process.stdout);
+  process.stdout.write = ((chunk: unknown, ...rest: unknown[]) =>
+    (write as (...args: unknown[]) => boolean)(
+      typeof chunk === "string"
+        ? chunk.replaceAll("\x1b]7501;state=done", "\x1b]7501;state=idle")
+        : chunk,
+      ...rest,
+    )) as typeof process.stdout.write;
 }
 
 export default function (pi: ExtensionAPI) {
   if (process.env.PI_IS_SUBAGENT === "1") {
+    reportDoneAsIdle();
     registerChildResultMirror(pi);
     return;
   }
-  if (!tmuxActive()) return;
+  if (!process.env.REX_BLOCK) return;
 
   sink.append = (type, data) => pi.appendEntry(type, data);
   persistResult = (id, value) => {
@@ -960,23 +771,34 @@ export default function (pi: ExtensionAPI) {
   };
   pi.on("session_start", async (event, ctx) => {
     sink.sessionId = ctx.sessionManager.getSessionId();
-    if (event.reason === "startup") sweepStaleRunFiles();
     if (event.reason !== "startup" && event.reason !== "reload")
       resultStore.clear();
     hydrateResultStore(ctx.sessionManager.getBranch());
   });
   pi.on("session_shutdown", (event) => {
     if (event.reason !== "quit") return;
-    for (const record of runsStore.values()) {
-      if (record.progress.status !== "running") continue;
-      record.controller.abort();
-      if (!record.paneId) continue;
-      try {
-        execFileSync("tmux", ["kill-pane", "-t", record.paneId], {
-          timeout: 2_000,
-        });
-      } catch {}
-    }
+    const running = [...runsStore.values()].filter(
+      (record) => record.progress.status === "running",
+    );
+    for (const record of running) record.controller.abort();
+    const blockIds = running.flatMap((record) => record.blockId ?? []);
+    if (blockIds.length === 0) return;
+    try {
+      execFileSync(
+        "rex",
+        [
+          "do",
+          REX_SCRIPT,
+          "--args",
+          JSON.stringify({
+            op: "close",
+            block_ids: blockIds,
+            files: running.flatMap((record) => record.resultFile ?? []),
+          }),
+        ],
+        { timeout: 5_000 },
+      );
+    } catch {}
   });
 
   const agents = loadAgents();
@@ -1069,8 +891,7 @@ export default function (pi: ExtensionAPI) {
         status: "running",
       } satisfies RunEntry);
 
-      const runPromise = runInTmux(
-        pi,
+      const runPromise = runInRex(
         agent,
         args.task,
         model,
@@ -1350,7 +1171,7 @@ export default function (pi: ExtensionAPI) {
           structuredContent: manageValue({ runs: [runValue(record.progress)] }),
         };
       }
-      if (record.progress.status !== "running" || !record.paneId) {
+      if (record.progress.status !== "running" || !record.blockId) {
         return fail(
           `subagent_manage: run "${id}" is not running, cannot steer.`,
         );
@@ -1366,26 +1187,17 @@ export default function (pi: ExtensionAPI) {
           "subagent_manage: a steer message must not start with '/' or '!'. Rephrase it as plain text.",
         );
       }
-      // Bracketed paste keeps newlines as text. Typed with send-keys, the
-      // first newline would submit a partial message.
-      const buffer = `pi-steer-${id}`;
-      if (
-        !(
-          (await tmuxRun(["set-buffer", "-b", buffer, "--", message])) &&
-          (await tmuxRun([
-            "paste-buffer",
-            "-p",
-            "-d",
-            "-b",
-            buffer,
-            "-t",
-            record.paneId,
-          ]))
-        )
-      ) {
-        return fail(`subagent_manage: tmux could not paste into run "${id}".`);
+      try {
+        await rexScript({
+          op: "steer",
+          block_id: record.blockId,
+          text: message,
+        });
+      } catch (err) {
+        return fail(
+          `subagent_manage: Rex could not paste into run "${id}": ${String(err)}`,
+        );
       }
-      await tmuxRun(["send-keys", "-t", record.paneId, "Enter"]);
       return {
         content: [
           {

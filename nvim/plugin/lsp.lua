@@ -24,11 +24,6 @@ vim.lsp.enable {
     'zls',
 }
 
--- Neovim 0.11+ maps grn, gra, grr, gri, grt, grx, gO and K globally, and sets
--- 'tagfunc' so <C-]> jumps to the definition. Those stay as shipped; anything
--- added here keeps the gr prefix so no default has to be deleted. Jumps land
--- on the target directly when there is one result, otherwise in the quickfix
--- list, which after/ftplugin/qf.lua sizes and closes on <CR>.
 vim.keymap.set('n', 'grd', vim.lsp.buf.definition, { desc = 'LSP: Goto Definition' })
 vim.keymap.set('n', 'grD', vim.lsp.buf.declaration, { desc = 'LSP: Goto Declaration' })
 

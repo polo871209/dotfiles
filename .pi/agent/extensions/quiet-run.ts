@@ -45,7 +45,7 @@ function clip(line: string): string {
 
 function collapseRuns(lines: string[]): string[] {
   const out: string[] = [];
-  for (let i = 0; i < lines.length;) {
+  for (let i = 0; i < lines.length; ) {
     let j = i + 1;
     while (j < lines.length && lines[j] === lines[i]) j++;
     out.push(j - i > 1 ? `${lines[i]}  (×${j - i})` : lines[i]!);
@@ -104,9 +104,9 @@ async function scoreDestructive(
           instructions:
             "Is the shell command in `command` destructive? `git.paths` lists the paths under `git.root` that are untracked, ignored, or have uncommitted changes, and any other path there is committed and clean unless `git.unlistedPaths` is set. If `git` is absent, no file has a copy in git.",
           criteria: {
-            true: "Running it can lose data that has no other copy, or change state beyond this machine: it deletes or overwrites untracked files, files with uncommitted changes, ignored files that no build or install regenerates, or files outside `cwd`; rewrites or discards git history or uncommitted work; pushes, publishes, deploys, or migrates; writes to a database, cluster, or cloud account; runs Docker against a remote host through `--context`, `-H`, or `DOCKER_HOST`; or pipes a remote script into a shell.",
+            true: "Running it can lose data that has no other copy, or change state beyond this machine: it deletes or overwrites untracked files, files with uncommitted changes, ignored files that no build or install regenerates, or files outside `cwd`; rewrites or discards git history or uncommitted work; pushes, publishes, or migrates; writes to a database, cluster, or cloud account other than by a deploy; runs Docker against a remote host through `--context`, `-H`, or `DOCKER_HOST`; or pipes a remote script into a shell.",
             false:
-              "It only reads, builds, tests, lints, formats, installs dependencies, or commits locally, or it deletes or overwrites only committed files with no uncommitted changes, which git restores, or ignored build output, dependency folders, caches, or logs, which a build or install regenerates; or it builds, runs, stops, removes, or prunes containers, images, volumes, or networks on the local Docker daemon, even with `-v` or `--volumes`, because the user accepts losing local Docker state.",
+              "It only reads, builds, tests, lints, formats, installs dependencies, or commits locally, or it deletes or overwrites only committed files with no uncommitted changes, which git restores, or ignored build output, dependency folders, caches, or logs, which a build or install regenerates; or it builds, runs, stops, removes, or prunes containers, images, volumes, or networks on the local Docker daemon, even with `-v` or `--volumes`, because the user accepts losing local Docker state; or it deploys, such as `pnpm run deploy`, `wrangler deploy`, or `vercel --prod`, because the user's deploy credentials decide whether the deploy is allowed.",
           },
         },
       },
@@ -203,14 +203,16 @@ export default function (pi: ExtensionAPI) {
       const { risk, usage } = await scoreDestructive(ctx, command, signal);
       if (risk !== null && risk >= 0.65) {
         const score = risk.toFixed(2);
-        if (!(
-          ctx.hasUI &&
-          (await ctx.ui.confirm(
-            `Destructive command (Jev ${score})`,
-            `${command}\n\ncwd: ${cwd}\n\nRun it?`,
-            { signal },
-          ))
-        )) {
+        if (
+          !(
+            ctx.hasUI &&
+            (await ctx.ui.confirm(
+              `Destructive command (Jev ${score})`,
+              `${command}\n\ncwd: ${cwd}\n\nRun it?`,
+              { signal },
+            ))
+          )
+        ) {
           throw new Error(
             `quiet_run: blocked. Jev scored the command destructive (${score}) and ${
               ctx.hasUI
@@ -237,8 +239,7 @@ export default function (pi: ExtensionAPI) {
       const child = spawn("/bin/sh", ["-c", `exec 2>&1\n${command}`], {
         cwd,
         stdio: ["ignore", "pipe", "ignore"],
-        // Own process group so a timeout or abort reaches the whole tree:
-        // signalling only the shell leaves workers alive holding the pipe open.
+        // Own process group, because signalling only the shell leaves workers alive holding the pipe open.
         detached: true,
       });
 

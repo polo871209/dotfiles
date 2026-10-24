@@ -11,28 +11,18 @@ local function notify(msg, level)
     vim.schedule(function() vim.notify(msg, level or vim.log.levels.INFO) end)
 end
 
----@type string[]?
-local bridge_socket_dirs_cache
-
----@return string[]
-local function bridge_socket_dirs()
-    if bridge_socket_dirs_cache then return bridge_socket_dirs_cache end
-    local seen, out = {}, {}
-    local function add(dir)
-        if not dir or dir == '' then return end
-        dir = dir:gsub('/+$', '')
-        if not seen[dir] then
-            seen[dir] = true
-            table.insert(out, dir)
-        end
-    end
-    add(vim.env.TMPDIR)
-    local r = vim.system({ 'getconf', 'DARWIN_USER_TEMP_DIR' }, { text = true, timeout = TIMEOUT }):wait()
-    if r.code == 0 and r.stdout then add(vim.trim(r.stdout)) end
-    add '/tmp'
-    bridge_socket_dirs_cache = out
-    return out
+---@param args string[]
+---@return table?
+local function rex(args)
+    local r = vim.system({ 'rex', unpack(args) }, { text = true, timeout = TIMEOUT }):wait()
+    if r.code ~= 0 or not r.stdout then return nil end
+    local ok, out = pcall(vim.json.decode, r.stdout)
+    return ok and out or nil
 end
+
+---@param block_id string
+---@return string
+local function socket_for_block(block_id) return vim.fs.joinpath(vim.uv.os_tmpdir(), ('pi-%s.sock'):format((block_id:gsub('^block:', '')))) end
 
 ---@param sock string
 ---@return boolean
@@ -49,30 +39,26 @@ local function listener_alive(sock)
     return ok
 end
 
----@param pane_id string
----@return string[]
-local function sockets_for_pane(pane_id)
-    local safe = pane_id:gsub('[^%w_%-]', '_')
-    local found = {}
-    for _, dir in ipairs(bridge_socket_dirs()) do
-        for _, sock in ipairs(vim.fn.glob(('%s/pi-tmux-pane-%s-*.sock'):format(dir, safe), true, true)) do
-            if listener_alive(sock) then table.insert(found, sock) end
-        end
-    end
-    return found
-end
-
----@return table[] { pane_id, sock, window, label }
+---@return { block_id: string, window_id: string, sock: string, window: string, label: string }[]
 local function live_bridges()
-    local fmt = '#{pane_id}\t#{window_index}\t#{window_name}'
-    local r = vim.system({ 'tmux', 'list-panes', '-s', '-F', fmt }, { text = true, timeout = TIMEOUT }):wait()
-    if r.code ~= 0 or not r.stdout then return {} end
+    local session = vim.env.REX_SESSION
+    local layout = rex { 'window', 'ls', '-s', session, '--json' }
+    if not layout then return {} end
     local out = {}
-    for line in r.stdout:gmatch '[^\n]+' do
-        local pane_id, window, label = line:match '^([^\t]*)\t([^\t]*)\t(.*)$'
-        if pane_id then
-            for _, sock in ipairs(sockets_for_pane(pane_id)) do
-                table.insert(out, { pane_id = pane_id, sock = sock, window = window, label = label })
+    for index, window in ipairs(layout.windows) do
+        for _, layer in ipairs(window.layers) do
+            for _, block in ipairs(layer.blocks) do
+                local sock = socket_for_block(block.block_id)
+                if vim.uv.fs_stat(sock) and listener_alive(sock) then
+                    local title = rex { 'block', 'call', '-s', session, '-b', block.block_id, 'title' }
+                    table.insert(out, {
+                        block_id = block.block_id,
+                        window_id = window.window_id,
+                        sock = sock,
+                        window = tostring(index),
+                        label = title and title.title or window.label,
+                    })
+                end
             end
         end
     end
@@ -81,13 +67,13 @@ end
 
 ---@param cb fun(target: table?)
 local function resolve_target(cb)
-    if vim.env.TMUX == nil then
-        notify('pi integration requires tmux', vim.log.levels.ERROR)
+    if vim.env.REX_SESSION == nil then
+        notify('pi integration requires Rex', vim.log.levels.ERROR)
         return cb(nil)
     end
     local live = live_bridges()
     if #live == 0 then
-        notify('No pi listener in this tmux session. Is tmux-bridge.ts loaded?', vim.log.levels.ERROR)
+        notify('No pi listener in this Rex session. Is rex-bridge.ts loaded?', vim.log.levels.ERROR)
         return cb(nil)
     end
     if #live == 1 then return cb(live[1]) end
@@ -97,65 +83,81 @@ local function resolve_target(cb)
     }, function(choice) cb(choice) end)
 end
 
----@param pane_id string
-local function focus_pane(pane_id)
-    vim.system({ 'tmux', 'switch-client', '-t', pane_id }, { timeout = TIMEOUT })
-    vim.system({ 'tmux', 'select-pane', '-t', pane_id }, { timeout = TIMEOUT })
+---@param args string[]
+---@param on_ok? fun()
+local function rex_async(args, on_ok)
+    vim.system({ 'rex', unpack(args) }, { text = true, timeout = TIMEOUT }, function(r)
+        if r.code ~= 0 then return notify(('pi: rex %s failed: %s'):format(args[1], vim.trim(r.stderr or '')), vim.log.levels.WARN) end
+        if on_ok then on_ok() end
+    end)
+end
+
+-- The Rex app keeps its own visible tab per client, so `rex focus` alone leaves the app on the old tab.
+---@param target { block_id: string, window_id: string }
+local function show_target(target)
+    local session = vim.env.REX_SESSION
+    rex_async(
+        { 'focus', '-s', session, target.block_id },
+        function() rex_async { 'do', 'session.select', 'session_id=' .. session, 'window_id=' .. target.window_id } end
+    )
 end
 
 ---@param sock string
 ---@param obj table
----@param on_ack? fun(ok: boolean, info: string)
-local function send(sock, obj, on_ack)
-    local function fail(info)
-        notify('pi: ' .. info, vim.log.levels.ERROR)
-        if on_ack then on_ack(false, info) end
-    end
+---@param on_reply fun(ack: table?, err: string?)
+local function request(sock, obj, on_reply)
     local ok_encode, payload = pcall(vim.json.encode, obj)
-    if not ok_encode then return fail 'could not encode payload' end
-    if #payload > MAX_PAYLOAD then return fail 'payload too large' end
+    if not ok_encode then return on_reply(nil, 'could not encode payload') end
+    if #payload > MAX_PAYLOAD then return on_reply(nil, 'payload too large') end
 
     local pipe = vim.uv.new_pipe(false)
-    if not pipe then return fail 'could not open pipe' end
+    if not pipe then return on_reply(nil, 'could not open pipe') end
     local timer = vim.uv.new_timer()
     if not timer then
         pipe:close()
-        return fail 'could not open timer'
+        return on_reply(nil, 'could not open timer')
     end
     local finished = false
 
-    local function finish(ok, info)
+    local function finish(ack, err)
         if finished then return end
         finished = true
         pcall(function() timer:close() end)
         pcall(function()
             if not pipe:is_closing() then pipe:close() end
         end)
-        if ok then
-            notify('pi: ' .. info)
-        else
-            notify('pi: ' .. info, vim.log.levels.ERROR)
-        end
-        if on_ack then on_ack(ok, info) end
+        on_reply(ack, err)
     end
 
-    timer:start(TIMEOUT * 3, 0, function() finish(false, 'timed out waiting for pi') end)
+    timer:start(TIMEOUT * 3, 0, function() finish(nil, 'timed out waiting for pi') end)
     pipe:connect(sock, function(cerr)
-        if cerr then return finish(false, 'connect failed: ' .. cerr) end
+        if cerr then return finish(nil, 'connect failed: ' .. cerr) end
         pipe:write(payload .. '\n', function(werr)
-            if werr then return finish(false, 'write failed: ' .. werr) end
+            if werr then return finish(nil, 'write failed: ' .. werr) end
             local buf = ''
             pipe:read_start(function(rerr, chunk)
-                if rerr then return finish(false, 'read failed: ' .. rerr) end
-                if not chunk then return finish(false, 'pi closed the connection without acknowledging') end
+                if rerr then return finish(nil, 'read failed: ' .. rerr) end
+                if not chunk then return finish(nil, 'pi closed the connection without acknowledging') end
                 buf = buf .. chunk
                 local line = buf:match '^(.-)\n'
                 if not line then return end
                 local ok_decode, ack = pcall(vim.json.decode, line)
-                if not ok_decode or type(ack) ~= 'table' then return finish(false, 'unreadable reply from pi') end
-                finish(ack.ok == true, ack.ok and (ack.delivered or 'delivered') or (ack.error or 'rejected'))
+                if not ok_decode or type(ack) ~= 'table' then return finish(nil, 'unreadable reply from pi') end
+                finish(ack)
             end)
         end)
+    end)
+end
+
+---@param sock string
+---@param obj table
+---@param on_ack? fun(ok: boolean, info: string)
+local function send(sock, obj, on_ack)
+    request(sock, obj, function(ack, err)
+        local ok = ack ~= nil and ack.ok == true
+        local info = err or (ok and (ack.delivered or 'delivered') or (ack.error or 'rejected'))
+        notify('pi: ' .. info, not ok and vim.log.levels.ERROR or nil)
+        if on_ack then on_ack(ok, info) end
     end)
 end
 
@@ -208,22 +210,18 @@ function M.send_selection()
         else
             send(target.sock, { paste = ('Re: %s lines %d-%d. Read the file for full context.'):format(filepath, sline, eline) })
         end
-        focus_pane(target.pane_id)
+        show_target(target)
     end)
 end
 
---- The pi listeners in this tmux session, in tmux pane order.
 ---@return { sock: string, window: string, label: string }[]?, string? error when there is no list
 function M.listeners()
-    if vim.env.TMUX == nil then return nil, 'nvim does not run inside tmux' end
+    if vim.env.REX_SESSION == nil then return nil, 'nvim does not run inside Rex' end
     local live = live_bridges()
-    if #live == 0 then return nil, 'no pi listener in this tmux session' end
+    if #live == 0 then return nil, 'no pi listener in this Rex session' end
     return vim.tbl_map(function(p) return { sock = p.sock, window = p.window, label = p.label } end, live)
 end
 
---- Sends a review comment on a file range to the pi listening on `sock`: the line-numbered
---- snapshot of the range, then `comment` as a user message, which starts a turn or steers
---- the running one. `on_done` runs on the main loop with pi's answer to the last request.
 ---@param sock string
 ---@param file { path: string, sline: integer, eline: integer, ft: string, content: string, total: integer }
 ---@param comment string
@@ -234,6 +232,17 @@ function M.send_comment(sock, file, comment, on_done)
         if not ok then return done(false, info) end
         send(sock, { text = comment }, done)
     end)
+end
+
+---@param block_id string
+function M.open_last_edit(block_id)
+    local path, replied = nil, false
+    request(socket_for_block(block_id), { query = 'last_edit' }, function(ack)
+        path = ack and ack.ok and ack.path
+        replied = true
+    end)
+    vim.wait(TIMEOUT, function() return replied end, 5)
+    if path then vim.cmd.edit(vim.fn.fnameescape(path)) end
 end
 
 function M.send_diagnostics()
@@ -263,7 +272,7 @@ function M.send_diagnostics()
     resolve_target(function(target)
         if not target then return end
         send(target.sock, { text = text })
-        focus_pane(target.pane_id)
+        show_target(target)
     end)
 end
 

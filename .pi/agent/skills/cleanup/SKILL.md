@@ -52,7 +52,7 @@ Completion: every deletion has evidence that it is unreachable, unreferenced, or
 1. Copy every scope file to a snapshot directory under `$TMPDIR`. Other agents edit this tree, so step 4 diffs against the snapshot to isolate comment-sicko's edits.
 2. Call the `subagent` tool with agent `comment-sicko` in the foreground. Pass the file list, the diff command, or in session mode the line ranges. Do not restate its rules.
 
-If the `subagent` tool is missing, skip steps 3 to 6 and report that the comment pass did not run. The tool needs tmux and does not exist inside a subagent.
+If the `subagent` tool is missing, skip steps 3 to 6 and report that the comment pass did not run. The tool loads only inside a Rex pane (`REX_BLOCK` set) and never inside a subagent.
 
 Completion: a report with touched files, deletion count, `MUST KILL` flags, keeps, and skips.
 

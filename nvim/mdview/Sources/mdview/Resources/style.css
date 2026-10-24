@@ -45,7 +45,6 @@ body.has-toc.toc-collapsed {
     margin-bottom: 0;
 }
 
-/* Prose, from the blog's .prose rules. */
 a {
     color: var(--kw-link);
     text-decoration: underline;
@@ -181,7 +180,6 @@ th {
     background: var(--kw-bg-soft);
 }
 
-/* GitHub markup that app.js adds after cmark-gfm. */
 .markdown-alert {
     background: var(--kw-bg-soft);
     border-left: 2px solid var(--kw-accent);
@@ -265,7 +263,6 @@ th {
     white-space: pre-wrap;
 }
 
-/* Table of contents. */
 #sidebar {
     display: none;
 }

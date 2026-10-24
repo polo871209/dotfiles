@@ -1,15 +1,3 @@
-typeset -U path
-path=(
-  ~/.local/share/mise/shims
-  ~/.local/bin
-  "$GOPATH/bin"
-  "$ANDROID_HOME/emulator"
-  "$ANDROID_HOME/platform-tools"
-  /opt/homebrew/opt/libpq/bin
-  /Applications/Obsidian.app/Contents/MacOS
-  $path
-)
-
 setopt prompt_subst
 
 # History Configuration
@@ -113,7 +101,6 @@ alias o="open ."
 alias oc="opencode --port --continue"
 p() { clear; command pi --continue "$@"; clear; }
 alias pwd='printf %s "$PWD" | pbcopy'
-alias st="tmux source-file ${XDG_CONFIG_HOME:-$HOME}/tmux/tmux.conf"
 alias sz="source ${ZDOTDIR:-$HOME}/.zshrc"
 alias tf="terraform"
 alias up="brew update && brew upgrade -y && brew cleanup && mise upgrade && mise prune -y && pi update && pi update --extensions"
@@ -145,23 +132,15 @@ ff() {
     if [[ -d "$pick" ]]; then cd "$pick"; else nvim "$pick"; fi
 }
 
-sesh-sessions() {
-  {
-    exec </dev/tty
-    exec <&1
-    local session
-    session=$(sesh list --icons | fzf --height 40% --reverse --border-label ' sesh ' --border --prompt '> ' \
-      --ansi \
-      --color 'bg:#282828,bg+:#3c3836,fg:#89b4fa,fg+:#89b4fa' \
-      --color 'hl:#fabd2f,hl+:#fabd2f,info:#83a598,marker:#8ec07c' \
-      --color 'prompt:#d79921,spinner:#8ec07c,pointer:#fe8019,header:#928374' \
-      --color 'border:#928374,label:#ebdbb2,query:#ebdbb2')
-    zle reset-prompt > /dev/null 2>&1 || true
-    [[ -z "$session" ]] && return
-    sesh connect "$session"
+if [[ $TERM_PROGRAM == rex ]]; then
+  alias s="$XDG_CONFIG_HOME/rex/session-picker"
+  # The Rex app starts its first session in $HOME.
+  () {
+    local dir=$PWD
+    [[ $dir == $HOME ]] && dir=$HOME/dotfiles
+    [[ -n $(rex --timeout 1s do session_default dir="$dir" 2>/dev/null) ]] && cd "$dir"
   }
-}
-alias s=sesh-sessions
+fi
 
 # Tool Integrations
 _eval_cache uv       uv       ""  uv generate-shell-completion zsh
@@ -169,5 +148,20 @@ _eval_cache direnv   direnv   ""  direnv hook zsh
 _eval_cache zoxide   zoxide   ""  zoxide init zsh
 _eval_cache atuin    atuin    ""  atuin init zsh
 unfunction _eval_cache
+
+# Rex lists zoxide folders in its palette only when it loads its config, so reload it when zoxide learns a folder.
+if [[ $TERM_PROGRAM == rex ]] && (( $+functions[__zoxide_hook] )); then
+  _rex_zoxide_hook() {
+    if zoxide query --list | grep -qxF -- "$PWD"; then
+      __zoxide_hook
+      return
+    fi
+    __zoxide_hook
+    if zoxide query --list | grep -qxF -- "$PWD"; then
+      rex config reload >/dev/null 2>&1 &!
+    fi
+  }
+  chpwd_functions=("${(@)chpwd_functions:#__zoxide_hook}" _rex_zoxide_hook)
+fi
 
 eval "$(oh-my-posh init zsh --config "${XDG_CONFIG_HOME}/ohmyposh/config.yaml")"

@@ -1,5 +1,7 @@
 local M = {}
 
+M.TOGGLE = '<leader>tm'
+
 local DIR = vim.fn.stdpath 'config' .. '/mdview'
 local BIN = DIR .. '/.build/release/mdview'
 local DEBOUNCE_MS = 80
@@ -67,9 +69,7 @@ end
 ---@param msg { comment: string, path: string, sline: integer, eline: integer, target: string? }
 local function comment(msg)
     local function reply(ok, info) to_viewer { sent = ok, info = info } end
-    if not state or path(state.buf) ~= msg.path or vim.api.nvim_buf_get_name(state.buf) == '' then
-        return reply(false, 'the previewed buffer has no file')
-    end
+    if not state or path(state.buf) ~= msg.path or vim.api.nvim_buf_get_name(state.buf) == '' then return reply(false, 'the previewed buffer has no file') end
     local pi = require 'pi'
     local listeners, err = pi.listeners()
     if not listeners then return reply(false, err) end
@@ -108,7 +108,7 @@ end
 local function start(buf)
     local stderr, stdout = {}, ''
     local proc ---@type vim.SystemObj
-    proc = vim.system({ BIN }, {
+    proc = vim.system({ BIN, vim.keycode(M.TOGGLE) }, {
         stdin = true,
         stderr = function(_, data) table.insert(stderr, data) end,
         stdout = function(_, data)

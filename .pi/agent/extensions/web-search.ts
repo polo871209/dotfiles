@@ -46,9 +46,6 @@ const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 const MAX_REDIRECTS = 5;
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
-// Per-mode, because one hardcoded text/html value made mode:"raw" against
-// api.github.com fail with HTTP 415. Both keep a */* tail so a server that
-// negotiates strictly still answers.
 const ACCEPT_HTML = "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8";
 
 const DUCKDUCKGO_URL = "https://html.duckduckgo.com/html/";
@@ -242,7 +239,6 @@ async function callMcpTool(
     };
     error?: { message?: string };
   } | null = null;
-  // One endpoint answers as plain JSON or as SSE, so try event lines first.
   for (const line of body.split("\n")) {
     if (!line.startsWith("data:")) continue;
     try {

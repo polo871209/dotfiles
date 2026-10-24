@@ -1,6 +1,4 @@
 enum HTMLSource {
-    /// Adds `data-mdview-line="N"` to every start tag, where N is the 1-based source line of its `<`.
-    /// Comments, declarations, end tags, and the contents of raw text elements such as `<script>` stay unchanged.
     static func annotatingLines(_ html: String) -> String {
         var scanner = Scanner(bytes: Array(html.utf8))
         while scanner.index < scanner.bytes.count {

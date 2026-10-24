@@ -6,7 +6,7 @@ Every code block, in markdown and in HTML, has a copy button in its top-right co
 
 An HTML file renders as its own page, with its relative files and its scripts. `html.css` replaces the page's colors and fonts with the blog's, and inverts inline SVG diagrams so that they turn dark. The page cannot reach nvim or pi, and it loads files from disk only under its own directory. Scroll sync works in markdown only.
 
-To send a review comment to pi, select text in the viewer and press Space Space. Type the comment and press Enter. pi gets a line-numbered snapshot of the selected source lines, then the comment, which starts a turn or steers the running one. If two or more pi run in the tmux session, the comment box lists them the way the tmux tabs show them, and you press the tmux window number. Later comments on the same buffer go to that pi without asking, until it stops. A partly selected block counts whole. Comments work in HTML files too, where the selection maps to the source lines of the selected elements. This needs nvim inside tmux with a pi that loads `tmux-bridge.ts`.
+To send a review comment to pi, select text in the viewer and press Space Space. Type the comment and press Enter. pi gets a line-numbered snapshot of the selected source lines, then the comment, which starts a turn or steers the running one. If two or more pi run in the Rex session, the comment box lists them by Rex tab number and terminal title, and you press the tab number. Later comments on the same buffer go to that pi without asking, until it stops. A partly selected block counts whole. Comments work in HTML files too, where the selection maps to the source lines of the selected elements. This needs nvim inside Rex with a pi that loads `rex-bridge.ts`.
 
 ## Build and test
 

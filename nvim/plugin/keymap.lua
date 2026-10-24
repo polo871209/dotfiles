@@ -6,51 +6,18 @@ vim.keymap.set({ 'n', 'i' }, '<C-.>', '<cmd>bnext<CR>', { desc = 'Next Buffer' }
 vim.keymap.set('n', '<leader>-', '<cmd>split<CR>', { desc = 'Horizontal Split' })
 vim.keymap.set('n', '<leader>|', '<cmd>vsplit<CR>', { desc = 'Vertical Split' })
 
-local function tmux(...)
-    -- $TMUX is "socket,pid,session"; -S pins the command to that server so a
-    -- non-default socket (tmux -L) still resolves.
-    local socket = vim.split(vim.env.TMUX, ',')[1]
-    local cmd = { 'tmux', '-S', socket, ... }
-    return vim.system(cmd, { text = true }):wait().stdout or ''
-end
-
-local function is_zoomed() return vim.trim(tmux('display-message', '-p', '#{window_zoomed_flag}')) == '1' end
-
 ---@param arg string
 local function wincmd(arg)
     if vim.fn.getcmdwintype() ~= '' then return end
     vim.cmd('wincmd ' .. arg)
 end
 
-local tmux_pane = { h = '-L', j = '-D', k = '-U', l = '-R' }
-
-local came_from_tmux = true
-
 ---@param direction 'h'|'j'|'k'|'l'
-local function navigate(direction)
-    local win = vim.api.nvim_get_current_win()
-    wincmd(direction)
-    if win ~= vim.api.nvim_get_current_win() then
-        came_from_tmux = false
-        return
-    end
-    if not vim.env.TMUX or is_zoomed() then return end
-    tmux('select-pane', tmux_pane[direction])
-    came_from_tmux = true
-end
+local function navigate(direction) wincmd(direction) end
 
-local function last_active()
-    if vim.env.TMUX and came_from_tmux then return tmux('select-pane', '-l') end
-    wincmd 'p'
-end
+local function last_active() wincmd 'p' end
 
-local function next_pane()
-    if vim.env.TMUX and vim.fn.winnr() == vim.fn.winnr '$' then
-        wincmd 't'
-        return tmux('select-pane', '-t:.+')
-    end
-    wincmd 'w'
-end
+local function next_pane() wincmd 'w' end
 
 vim.keymap.set('n', '<C-h>', function() navigate 'h' end, { desc = 'Left Pane' })
 vim.keymap.set('n', '<C-j>', function() navigate 'j' end, { desc = 'Down Pane' })

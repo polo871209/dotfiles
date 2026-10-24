@@ -1,6 +1,3 @@
--- The cutoff tracks the language server, not nvim: a 30MB go file opens in
--- ~250ms with treesitter attached, while gopls took 4.3GB on it (jsonls 309MB
--- on 9MB of json). Below this, highlighting is worth more than the savings.
 local BIGFILE_SIZE = 10 * 1024 * 1024
 
 vim.filetype.add {

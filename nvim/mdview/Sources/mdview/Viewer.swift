@@ -33,8 +33,6 @@ private struct Root: View {
 @MainActor
 final class Viewer: NSObject, NSWindowDelegate {
     private let page: WebPage
-    /// Shows an HTML file as its own document.
-    /// It has no message handlers, so the file's scripts cannot reach nvim or pi.
     private let htmlPage: WebPage
     private let htmlRoot = DocumentRoot()
     private var htmlFile: URL?
@@ -45,7 +43,6 @@ final class Viewer: NSObject, NSWindowDelegate {
     private var latest: Message?
     private var watcher: FileWatcher?
     let screen: Screen
-    /// True while a text field in the page has focus, so key shortcuts must not fire.
     private(set) var editing = false
 
     override init() {
@@ -103,10 +100,8 @@ final class Viewer: NSObject, NSWindowDelegate {
         return (try? String(contentsOf: file, encoding: .utf8)) ?? ""
     }
 
-    /// Keeps the clipboard and the pi bridge away from an HTML file's own scripts.
     private static let htmlWorld = WKContentWorld.world(name: "mdview")
 
-    /// Adds the copy buttons and the comment box to a page.
     private static func addScripts(to controller: WKUserContentController, in world: WKContentWorld) {
         controller.add(Clipboard(), contentWorld: world, name: "copy")
         for name in ["copy.js", "comment.js"] {
@@ -130,7 +125,6 @@ final class Viewer: NSObject, NSWindowDelegate {
         }
     }
 
-    /// Puts theme.css and html.css into every HTML file as an inline style, so the file's own look never shows first.
     private static let restyle: WKUserScript = {
         let css = resource("theme.css") + "\n" + resource("html.css")
         let literal = (try? JSONEncoder().encode(css)).flatMap { String(bytes: $0, encoding: .utf8) } ?? "''"
@@ -216,7 +210,9 @@ final class Viewer: NSObject, NSWindowDelegate {
         do {
             htmlRoot.directory = file.deletingLastPathComponent()
             let base = URL(string: "mdview://file" + file.path(percentEncoded: true))!
-            for try await event in htmlPage.load(html: HTMLSource.annotatingLines(html), baseURL: base) where event == .finished { break }
+            for try await event in htmlPage.load(
+                html: HTMLSource.annotatingLines(html), baseURL: base
+            ) where event == .finished { break }
             if let scrollY {
                 _ = try await htmlPage.callJavaScript("scrollTo(0, y)", arguments: ["y": scrollY])
             }
@@ -288,7 +284,10 @@ private final class Bridge: NSObject, WKScriptMessageHandler {
             scrolled(scroll)
             toNvim(scroll)
         case "comment":
-            guard let comment = body["comment"] as? String, let sline = body["sline"] as? Int, let eline = body["eline"] as? Int else { return }
+            guard let comment = body["comment"] as? String,
+                  let sline = body["sline"] as? Int,
+                  let eline = body["eline"] as? Int
+            else { return }
             toNvim(Comment(comment: comment, path: path, sline: sline, eline: eline, target: body["target"] as? String))
         default:
             toNvim(Open(open: path, anchor: nil))
@@ -297,11 +296,11 @@ private final class Bridge: NSObject, WKScriptMessageHandler {
 }
 
 private struct Links: WebPage.NavigationDeciding {
-    /// Lets the page load frames and follow its own anchors, as an HTML file does.
-    /// The markdown page loads only `index`.
     var allowsPageNavigation = false
 
-    func decidePolicy(for action: WebPage.NavigationAction, preferences: inout WebPage.NavigationPreferences) async -> WKNavigationActionPolicy {
+    func decidePolicy(
+        for action: WebPage.NavigationAction, preferences: inout WebPage.NavigationPreferences
+    ) async -> WKNavigationActionPolicy {
         guard let url = action.request.url else { return .cancel }
         if url == index { return .allow }
         guard action.navigationType == .linkActivated else { return allowsPageNavigation ? .allow : .cancel }

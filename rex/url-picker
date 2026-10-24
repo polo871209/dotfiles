@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Usage: url-picker --extract < TEXT prints the URLs in TEXT, newest first. url-picker URL... picks some of them in fzf and opens them.
+set -euo pipefail
+
+if [[ ${1:-} == --extract ]]; then
+  perl -0777 -ne '
+    s{([-\w+&@#/%?=~|!:,.;()])[ \t]*\n[ \t]+([-\w+&@#/%?=~|!:,.;()])}{$1$2}g;
+    my $c = qr{[-\w+&@#/%?=~|!:,.;]};
+    my $parens = qr{\($c*\)};
+    print "$1\n" while m{((?:https?|ftp|file):/?//(?:$c|$parens)*(?:[-\w+&@#/%=~|]|$parens))}g;
+  ' | tail -r | awk '!seen[$0]++'
+  exit 0
+fi
+
+trap 'read -r -p "Press Enter to close. "' ERR
+
+# Rex draws default-background cells of a floating layer as transparent, so paint the theme background that OSC 11 reports.
+colors=16
+if IFS= read -rs -d $'\a' -t 1 -p $'\e]11;?\a' reply </dev/tty &&
+  [[ $reply =~ rgb:([0-9a-fA-F]{2})[0-9a-fA-F]*/([0-9a-fA-F]{2})[0-9a-fA-F]*/([0-9a-fA-F]{2}) ]]; then
+  colors+=",bg:#${BASH_REMATCH[1]}${BASH_REMATCH[2]}${BASH_REMATCH[3]}"
+fi
+
+picks=$(printf '%s\n' "$@" | fzf -m --color "$colors" --prompt '> ') || exit 0
+while IFS= read -r url; do open "$url"; done <<<"$picks"

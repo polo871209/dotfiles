@@ -1,6 +1,10 @@
 // Native port of @juicesharp/rpiv-ask-user-question.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
+  formatProgramStatus,
+  type ProgramStatus,
+} from "@earendil-works/pi-tui";
+import {
   buildQuestionnaireResponse,
   buildToolResult,
   MAX_HEADER_LENGTH,
@@ -25,6 +29,12 @@ function clamp(value: string, max: number): string {
   if (chars.length <= max) return value;
   return `${chars.slice(0, Math.max(0, max - 1)).join("")}…`;
 }
+
+// Pi reports OSC 7501 status for its built-in dialogs but not for ui.custom().
+const reportStatus = (status: ProgramStatus): void => {
+  if (process.env.TERM_PROGRAM === "rex")
+    process.stdout.write(formatProgramStatus({ ...status, app: "pi" }));
+};
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
@@ -97,23 +107,33 @@ function registerAskUserQuestionTool(pi: ExtensionAPI): void {
       }
 
       let onAbort: (() => void) | undefined;
-      const result = await ctx.ui.custom<QuestionnaireResult>(
-        (tui, theme, _kb, done) => {
-          onAbort = () => done({ answers: [], cancelled: true });
-          if (signal?.aborted) onAbort();
-          else signal?.addEventListener("abort", onAbort, { once: true });
-          return new QuestionnaireSession({
-            tui,
-            theme,
-            params: typed,
-            itemsByTab: typed.questions.map((q) =>
-              buildItemsForQuestion(q),
-            ) satisfies WrappingSelectItem[][],
-            done,
-          }).component;
-        },
-      );
-      if (signal && onAbort) signal.removeEventListener("abort", onAbort);
+      reportStatus({
+        state: "blocked",
+        kind: "question",
+        message: typed.questions[0]?.question,
+      });
+      let result: QuestionnaireResult;
+      try {
+        result = await ctx.ui.custom<QuestionnaireResult>(
+          (tui, theme, _kb, done) => {
+            onAbort = () => done({ answers: [], cancelled: true });
+            if (signal?.aborted) onAbort();
+            else signal?.addEventListener("abort", onAbort, { once: true });
+            return new QuestionnaireSession({
+              tui,
+              theme,
+              params: typed,
+              itemsByTab: typed.questions.map((q) =>
+                buildItemsForQuestion(q),
+              ) satisfies WrappingSelectItem[][],
+              done,
+            }).component;
+          },
+        );
+      } finally {
+        if (signal && onAbort) signal.removeEventListener("abort", onAbort);
+        reportStatus({ state: "working", message: pi.getSessionName() });
+      }
 
       return buildQuestionnaireResponse(result, typed);
     },

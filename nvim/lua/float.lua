@@ -17,9 +17,6 @@ function M.anchor()
     }
 end
 
---- Centred multiline prompt. <CR> sends, <S-CR> opens a new line, and the box
---- grows with the text. `on_confirm` runs exactly once: with the typed text on
---- send, with nil on <Esc>, <C-c>, or leaving the window.
 ---@param opts { prompt: string?, default: string?, completion: string? }?
 ---@param on_confirm fun(input: string?)
 function M.input(opts, on_confirm)

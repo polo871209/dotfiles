@@ -21,3 +21,4 @@ shell-integration-features = cursor,sudo,title,ssh-env,ssh-terminfo
 # Pi: make Alt+Backspace delete previous word (ESC + DEL)
 # https://pi.dev/docs/latest/terminal-setup
 keybind = alt+backspace=text:\x1b\x7f
+keybind = super+l=csi:5;30012~

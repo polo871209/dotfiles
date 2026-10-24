@@ -29,9 +29,9 @@ Work that outlives its tool call, such as a background subagent run, writes a st
 - **`web-search.ts`** — searches or fetches one or many web targets for external research, ranking results most relevant first and dropping the ones that do not answer the query, returning GitHub links as local files or comment threads, and videos as transcripts.
 - **`lsp/`** — provides symbol navigation and deterministic post-edit diagnostics and fixes for code work.
 - **`github-pr.ts`** — fetches concise PR metadata, failures, review threads, diffs, or a single section for PR analysis, and resolves all open review threads once the fixes land.
-- **`subagent.ts`** — delegates external research, read-only recon of the local repo, or a read-only parallel review to an isolated agent, with background control, compact structured results, and an interrupted status for runs that a pi restart cut off.
+- **`subagent/`** — delegates external research, read-only recon of the local repo, or a read-only parallel review to an isolated agent, with background control, compact structured results, and an interrupted status for runs that a pi restart cut off.
 - **`quiet-run.ts`** — runs shell commands by default, with output kept in a log file, returning only the verdict and the requested slice, and holds a destructive command until the user approves it.
-- **`ask/`** — presents structured choices when a request needs clarification.
+- **`ask/`** — presents structured choices when a request needs clarification, and shows the agent as waiting on the user in Rex while the dialog is open.
 
 ### Cleaner context
 
@@ -42,18 +42,17 @@ Work that outlives its tool call, such as a background subagent run, writes a st
 ### Workflow shortcuts
 
 - **`go.ts`** — resumes an interrupted or stalled agent turn.
-- **`tickets.ts`** — holds queued follow-up messages as reorderable tickets in a side panel and sends the first one on `/next`, compacting large context first.
 - **`yeet.ts`** — validates, generates Conventional Commits with Sonnet 5.5, and pushes current changes with progress.
-- **`worktree.ts`** — moves the session into the git worktree of a branch, under `.worktree/` in the repo, on `/wt` or when the user asks the agent for a worktree, and on `/wt done` removes a clean worktree, keeps its branch, and moves the session back to the main checkout.
+- **`worktree.ts`** — on `/wt` or when the user asks the agent for a worktree, moves the current session and tab into the git worktree of a branch under `.worktree/`, starts a separate agent on a task in a background worktree tab, lists worktrees with their changes and tabs, and removes a clean worktree with its tab while keeping its branch.
+- **`fork-window.ts`** — on `/fork` or `/clone` in Rex, clones the whole current conversation into a new Rex window as a session named `fork: <name>` or `clone: <name>`, while this pane keeps the original session, so both run in parallel.
 - **`copy.ts`** — copies a selected code block or the session transcript.
 - **`usage.ts`** — reports Claude Pro/Max subscription usage and quota reset times on request.
-- **`auto-rename.ts`** — gives established sessions a title of at most four words that names their key topic.
+- **`auto-rename.ts`** — titles each session in at most three words, renames a fork or clone at its first new message, keeps a name the user set, and shows the title on the Rex tab.
 
 ### Outside-pi surface
 
-- **`notifier.ts`** — reports agent status through desktop and terminal surfaces when attention is elsewhere.
 - **`caffeinate.ts`** — keeps the Mac from idle sleep while the agent actively works, for at most 100 minutes per run, and lets the display sleep.
-- **`tmux-bridge.ts`** — sends Nvim selections or diagnostics to Pi as a line-numbered snapshot of the selected lines.
+- **`rex-bridge.ts`** — sends Nvim selections or diagnostics from the same Rex session to Pi, and tells Nvim which file Pi edited last.
 
 ### TUI taste
 
@@ -68,5 +67,6 @@ extensions/
 ├── *.ts          single-file extensions
 ├── ask/          ask_user_question dialog
 ├── lsp/          navigation and post-edit feedback
+├── subagent/     isolated agents in Rex panes
 └── shared/       shared extension utilities
 ```

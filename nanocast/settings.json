@@ -9,9 +9,15 @@
   },
   "appearance": {
     "theme": "system",
+    "animations": true,
     "interfaceSize": "standard",
     "compactMode": false,
-    "showFavoritesInCompactMode": true,
+    "compactBarCommands": [
+      "command:clipboard-history",
+      "command:search-files",
+      "command:search-emoji",
+      "command:show-notes"
+    ],
     "followCursorAcrossDisplays": true,
     "dragToReposition": false
   },
@@ -46,7 +52,7 @@
         "alias": null,
         "showInLauncher": true
       },
-      "com.mitchellh.ghostty": {
+      "com.superlogical.rex": {
         "shortcut": "hyper+j",
         "alias": null,
         "showInLauncher": true
@@ -70,6 +76,7 @@
   "dictation": {
     "mode": "toggle",
     "shortcut": null,
+    "playsSounds": true,
     "model": "redux",
     "microphone": null,
     "destination": "paste",
@@ -80,9 +87,7 @@
   },
   "fileSearch": {
     "enabled": true,
-    "scopes": [
-      "~"
-    ],
+    "scopes": ["~"],
     "ignorePatterns": [],
     "removedDefaultPatterns": [],
     "showInLauncher": true,
@@ -105,7 +110,7 @@
     "menuSearchShowsAppleMenu": false,
     "menuSearchDisabledApps": [],
     "windowSwitcherShortcut": "cmd+tab",
-    "windowSwitcherExcludedApps": [],
+    "windowSwitcherExcludedApps": ["rocks.spotifast.Spotifast"],
     "commands": {
       "search-menu-items": {
         "shortcut": null,
@@ -168,10 +173,7 @@
     "enabled": true,
     "retentionDays": 180,
     "defaultAction": "paste",
-    "disabledApps": [
-      "com.apple.keychainaccess",
-      "com.apple.Passwords"
-    ],
+    "disabledApps": ["com.apple.keychainaccess", "com.apple.Passwords"],
     "commands": {
       "clipboard-history": {
         "shortcut": "cmd+b",

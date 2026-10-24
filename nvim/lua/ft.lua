@@ -12,8 +12,9 @@ end
 
 function M.preview()
     if vim.g.pi_agent or vim.fn.has 'mac' == 0 then return end
-    vim.keymap.set('n', '<leader>tm', function() require('mdview').toggle() end, { buffer = true, desc = '[T]oggle [M]dview preview' })
-    M.undo 'silent! nunmap <buffer> <leader>tm'
+    local mdview = require 'mdview'
+    vim.keymap.set('n', mdview.TOGGLE, function() mdview.toggle() end, { buffer = true, desc = '[T]oggle [M]dview preview' })
+    M.undo('silent! nunmap <buffer> ' .. mdview.TOGGLE)
 end
 
 ---@class ft.IndentOpts

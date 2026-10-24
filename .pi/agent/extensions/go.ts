@@ -1,9 +1,6 @@
 // pi exposes no public "continue" from idle (every public path appends a
 // message), so this reaches the live AgentSession. Two internals remain:
-// the session lookup below and AgentSession._startRun. Everything else
-// uses public API and follows pi's own auto-retry. A trailing aborted or
-// errored reply gets a context_edit omission, so it stays in raw history but
-// leaves model context for good, including after a resume.
+// the session lookup below and AgentSession._startRun.
 import { AgentSession } from "@earendil-works/pi-coding-agent";
 import type {
   ExtensionAPI,
@@ -12,11 +9,7 @@ import type {
 
 type AgentMessage = AgentSession["agent"]["state"]["messages"][number];
 
-// ExtensionContext carries no session handle, but ctx.sessionManager is the
-// same object as session.sessionManager. Key by it, so a stale or second
-// session never answers for the current one. The map lives on globalThis
-// because /reload re-imports this file, and the prototype must be wrapped
-// only once.
+// Pi's ExtensionContext has no session handle and /reload re-imports this file, so the map lives on globalThis, keyed by ctx.sessionManager.
 function sessionRegistry(): WeakMap<object, AgentSession> {
   const key = Symbol.for("dotfiles.pi.go.sessions");
   const g = globalThis as Record<symbol, WeakMap<object, AgentSession>>;
@@ -63,11 +56,7 @@ function omitAbandoned(session: AgentSession): void {
   if (omitted) session.refreshContext();
 }
 
-// _startRun owns retries, compaction, before_agent_start, agent_before_settle
-// (lsp feedback) and agent_settled (notifier, subagent result file). It needs a
-// starting message and hands it to one agent.prompt(messages) call. Strip that
-// marker there: forward what pi added (system prompt patch, nextTurn and
-// before_agent_start messages), or continue() when nothing is left.
+// pi exposes no resume, and its private _startRun needs a starting message, so swap the marker for what pi queued or continue().
 async function resume(session: AgentSession, start: StartRun): Promise<void> {
   const agent = session.agent;
   const marker: GoMessage = {

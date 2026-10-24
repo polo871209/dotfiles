@@ -31,7 +31,7 @@ local function to_https(remote)
 end
 
 -- GitHub anchors a range as #L1-L9 under /blob/; GitLab uses #L1-9 under
--- /-/blob/. Keyed by host so a new forge is a table entry, not a branch.
+-- /-/blob/.
 local forges = {
     default = { blob = '/blob/%s/%s', range = '#L%d-L%d' },
     ['gitlab.com'] = { blob = '/-/blob/%s/%s', range = '#L%d-%d' },

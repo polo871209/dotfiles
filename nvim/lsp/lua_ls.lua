@@ -24,6 +24,17 @@ return {
         local root = client.workspace_folders and resolve(client.workspace_folders[1].name)
         if not root or not (contains(root, config) or contains(config, root)) then library[#library + 1] = config end
 
+        -- lua-ls reads .luarc.json only at a workspace root, so it would diagnose nested projects with this workspace's settings.
+        local ignore_dir = { '.vscode' }
+        if root then
+            local listed = vim.system({ 'git', '-C', root, 'ls-files', '--', '*/.luarc.json', '*/.luarc.jsonc' }, { text = true }):wait()
+            if listed.code == 0 then
+                for _, file in ipairs(vim.split(listed.stdout, '\n', { trimempty = true })) do
+                    ignore_dir[#ignore_dir + 1] = '/' .. vim.fs.dirname(file)
+                end
+            end
+        end
+
         client.config.settings.Lua = vim.tbl_deep_extend('force', client.config.settings.Lua or {}, {
             runtime = {
                 version = 'LuaJIT',
@@ -32,6 +43,7 @@ return {
             workspace = {
                 checkThirdParty = false,
                 library = library,
+                ignoreDir = ignore_dir,
             },
             completion = { callSnippet = 'Replace' },
             diagnostics = {

@@ -1,9 +1,8 @@
 ## Tools
 
 - AI Agent: [pi](https://pi.dev/) — see [my harness](.pi/agent/extensions/AGENTS.md)
-- Terminal: [Ghostty](https://ghostty.org/)
+- Terminal: [Rex](https://www.superlogical.com/rex/docs/installation)
 - Editor: [Nvim](https://neovim.io/)
-- Multiplexer: [Tmux](https://github.com/tmux/tmux)
 - Prompt: [Oh-my-posh](https://ohmyposh.dev/)
 - Completer: [Carapace](https://carapace.sh/)
 - Version Manager: [mise](https://mise.jdx.dev/)

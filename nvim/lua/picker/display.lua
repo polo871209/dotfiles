@@ -121,9 +121,6 @@ local function path_segments(item)
     return segs, off
 end
 
---- Build one display row: its text, absolute highlight ranges, and the byte
---- offset at which `item.text` begins (nil when match positions cannot be
---- mapped onto it).
 ---@param item PickerItem
 ---@param kind ('file'|'grep')?
 ---@return string, { col: integer, end_col: integer, hl: string }[], integer?

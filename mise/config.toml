@@ -19,7 +19,6 @@ zig = "latest"
 neovim = "latest"
 
 # Shell / CLI tools
-"aqua:joshmedeski/sesh" = "latest"
 "github:noahdunnagan/fsearch" = "latest"
 "github:veirt/weathr" = "latest"
 "pipx:pgcli" = "latest"
@@ -35,7 +34,6 @@ jq = "latest"
 just = "latest"
 oh-my-posh = "latest"
 ripgrep = "latest"
-tmux = "latest"
 yq = "latest"
 zoxide = "latest"
 
@@ -54,6 +52,7 @@ cloud-sql-proxy = "2"
 kubectx = "latest"
 kubectl = "latest"
 kubens = "latest"
+wrangler = "latest"
 
 # LSPs
 "aqua:grafana/jsonnet-language-server" = "latest"
