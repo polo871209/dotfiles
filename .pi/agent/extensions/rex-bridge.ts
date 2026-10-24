@@ -1,19 +1,7 @@
-// Wire format for nvim/lua/pi.lua: one JSON object per line, e.g.
-//   {"text": "hello"}                     -- send immediately, triggers a turn
-//   {"paste": "some reference text"}      -- drop into pi's own input editor, no turn
-//   {"file": {"path": ..., "sline": ..., "eline": ..., "ft": ..., "content": ..., "total": ...}}
-//                                          -- line-numbered snapshot of the selected
-//                                             lines only, pasted into the editor as
-//                                             part of the next prompt
-// Optional "mode": "steer" | "followUp" | "nextTurn" turns a snapshot into a
-// queued custom message instead, the only way to reach an already running turn.
-//
-// Each line is answered with one JSON line, {"ok":true,"delivered":<where>} or
-// {"ok":false,"error":...}, so the client can report what actually happened
-// instead of assuming a successful write means the message landed.
 import type {
   ExtensionAPI,
   ExtensionContext,
+  MessageRenderer,
 } from "@earendil-works/pi-coding-agent";
 import { Box, Text } from "@earendil-works/pi-tui";
 import * as fs from "node:fs";
@@ -21,39 +9,10 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 
-function socketPathForPane(paneId: string): string {
-  return path.join(
-    os.tmpdir(),
-    `pi-tmux-pane-${paneId.replace(/[^a-zA-Z0-9_-]/g, "_")}-${process.pid}.sock`,
-  );
-}
-
-function removeDeadSockets(paneId: string): void {
-  const prefix = path
-    .basename(socketPathForPane(paneId))
-    .replace(/-\d+\.sock$/, "-");
-  let names: string[];
-  try {
-    names = fs.readdirSync(os.tmpdir());
-  } catch {
-    return;
-  }
-  for (const name of names) {
-    if (!name.startsWith(prefix) || !name.endsWith(".sock")) continue;
-    const pid = Number(name.slice(prefix.length, -".sock".length));
-    if (!Number.isInteger(pid) || pid <= 0) continue;
-    if (pid !== process.pid) {
-      try {
-        process.kill(pid, 0);
-        continue;
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === "EPERM") continue;
-      }
-    }
-    try {
-      fs.unlinkSync(path.join(os.tmpdir(), name));
-    } catch {}
-  }
+// The temp directory keeps the path under the 104-byte macOS socket limit, and
+// macOS clears the sockets that a pi killed with its pane leaves behind.
+function socketPathForBlock(blockId: string): string {
+  return path.join(os.tmpdir(), `pi-${blockId.replace(/^block:/, "")}.sock`);
 }
 
 let sessionCwd = process.cwd();
@@ -72,7 +31,8 @@ type FilePayload = {
   total?: number;
 };
 
-const SNAPSHOT_MESSAGE_TYPE = "tmux-bridge-file";
+const SNAPSHOT_MESSAGE_TYPE = "rex-bridge-file";
+const LEGACY_SNAPSHOT_MESSAGE_TYPE = "tmux-bridge-file";
 const GUTTER_SEP = " | ";
 
 type SnapshotDetails = { path: string; sline: number; eline: number };
@@ -108,37 +68,70 @@ function tabFidelityNote(content: string): string {
   );
 }
 
+function lastEditedFile(ctx: ExtensionContext): string | undefined {
+  const failedCalls = new Set<string>();
+  const branch = ctx.sessionManager.getBranch();
+  for (let i = branch.length - 1; i >= 0; i--) {
+    const entry = branch[i];
+    if (entry.type !== "message") continue;
+    const message = entry.message;
+    if (message.role === "toolResult" && message.isError) {
+      failedCalls.add(message.toolCallId);
+      continue;
+    }
+    if (message.role !== "assistant") continue;
+    for (let j = message.content.length - 1; j >= 0; j--) {
+      const block = message.content[j];
+      if (
+        block.type !== "toolCall" ||
+        (block.name !== "edit" && block.name !== "write") ||
+        failedCalls.has(block.id)
+      )
+        continue;
+      const filePath = block.arguments.path;
+      if (typeof filePath === "string" && filePath !== "")
+        return path.resolve(ctx.cwd, filePath);
+    }
+  }
+}
+
 export default function (pi: ExtensionAPI) {
   if (process.env.PI_IS_SUBAGENT === "1") return;
 
-  pi.registerMessageRenderer<SnapshotDetails>(
-    SNAPSHOT_MESSAGE_TYPE,
-    (message, { expanded, outputPad }, theme) => {
-      const details = message.details;
-      const box = new Box(outputPad, 0, (t) => theme.bg("customMessageBg", t));
-      box.addChild(
-        new Text(
-          `${theme.fg("dim", details ? snapshotLabel(details) : "file snapshot")}${
-            expanded && typeof message.content === "string"
-              ? `\n${message.content}`
-              : ""
-          }`,
-          0,
-          0,
-        ),
-      );
-      return box;
-    },
-  );
+  const renderSnapshot: MessageRenderer<SnapshotDetails> = (
+    message,
+    { expanded, outputPad },
+    theme,
+  ) => {
+    const details = message.details;
+    const box = new Box(outputPad, 0, (t) => theme.bg("customMessageBg", t));
+    box.addChild(
+      new Text(
+        `${theme.fg("dim", details ? snapshotLabel(details) : "file snapshot")}${
+          expanded && typeof message.content === "string"
+            ? `\n${message.content}`
+            : ""
+        }`,
+        0,
+        0,
+      ),
+    );
+    return box;
+  };
+  pi.registerMessageRenderer(SNAPSHOT_MESSAGE_TYPE, renderSnapshot);
+  pi.registerMessageRenderer(LEGACY_SNAPSHOT_MESSAGE_TYPE, renderSnapshot);
 
-  const paneId = process.env.TMUX_PANE;
-  if (!process.env.TMUX || !paneId) return;
-  const sockPath = socketPathForPane(paneId);
+  const blockId = process.env.REX_BLOCK;
+  if (!blockId) return;
+  const sockPath = socketPathForBlock(blockId);
 
   let server: net.Server | undefined;
   let currentCtx: ExtensionContext | undefined;
 
-  type Ack = { ok: true; delivered: string } | { ok: false; error: string };
+  type Ack =
+    | { ok: true; delivered: string }
+    | { ok: true; path: string }
+    | { ok: false; error: string };
 
   const handleLine = (line: string): Ack => {
     const trimmed = line.trim();
@@ -148,20 +141,28 @@ export default function (pi: ExtensionAPI) {
       paste?: string;
       file?: FilePayload;
       mode?: "steer" | "followUp" | "nextTurn";
+      query?: "last_edit";
     };
     try {
       payload = JSON.parse(trimmed);
     } catch {
       currentCtx?.ui.notify(
-        "tmux-bridge: dropped malformed JSON line",
+        "rex-bridge: dropped malformed JSON line",
         "warning",
       );
       return { ok: false, error: "malformed JSON" };
     }
 
+    if (payload.query === "last_edit") {
+      if (!currentCtx) return { ok: false, error: "no session context" };
+      const filePath = lastEditedFile(currentCtx);
+      return filePath
+        ? { ok: true, path: filePath }
+        : { ok: false, error: "no file edited in this session" };
+    }
+
     const requested =
-      payload.mode &&
-      ["steer", "followUp", "nextTurn"].includes(payload.mode)
+      payload.mode && ["steer", "followUp", "nextTurn"].includes(payload.mode)
         ? payload.mode
         : undefined;
     const idle = currentCtx?.isIdle() ?? true;
@@ -225,29 +226,23 @@ export default function (pi: ExtensionAPI) {
       };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      currentCtx?.ui.notify(`tmux-bridge: ${msg}`, "error");
+      currentCtx?.ui.notify(`rex-bridge: ${msg}`, "error");
       return { ok: false, error: msg };
     }
   };
 
   const start = (ctx: ExtensionContext) => {
     sessionCwd = ctx.cwd;
-    if (server) {
-      currentCtx = ctx;
-      return;
-    }
     currentCtx = ctx;
-    removeDeadSockets(paneId);
+    if (server || !ctx.hasUI) return;
+    fs.rmSync(sockPath, { force: true });
     server = net.createServer((socket: net.Socket) => {
       let buf = "";
       socket.setEncoding("utf8");
       socket.on("data", (chunk: string) => {
         buf += chunk;
         if (buf.length > 2 * 1024 * 1024) {
-          currentCtx?.ui.notify(
-            "tmux-bridge: oversize line dropped",
-            "warning",
-          );
+          currentCtx?.ui.notify("rex-bridge: oversize line dropped", "warning");
           buf = "";
           socket.write(
             `${JSON.stringify({ ok: false, error: "payload too large" })}\n`,
@@ -266,7 +261,7 @@ export default function (pi: ExtensionAPI) {
       socket.on("error", () => {});
     });
     server.on("error", (err: Error) => {
-      ctx.ui?.notify?.(`tmux-bridge: ${err.message}`, "error");
+      ctx.ui?.notify?.(`rex-bridge: ${err.message}`, "error");
     });
     server.listen(sockPath, () => {
       try {

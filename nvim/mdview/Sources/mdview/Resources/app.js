@@ -237,7 +237,6 @@ try {
 } catch {}
 tocToggle.addEventListener("click", () => collapseToc(!document.body.classList.contains("toc-collapsed")));
 
-// Each rendered block with its source lines and page position, in document order.
 // cmark-gfm writes data-sourcepos as "startLine:startCol-endLine:endCol".
 function sourceLines(el) {
     const [, start, end] = el.dataset.sourcepos.match(/^(\d+):\d+-(\d+):/);
@@ -252,7 +251,6 @@ function blocks() {
     });
 }
 
-// Source lines and page offsets map linearly inside a block and inside the gap between two blocks.
 function lineToY(line) {
     let prev;
     let next;
@@ -289,7 +287,6 @@ function yToLine(y) {
 
 const contentTop = () => content.getBoundingClientRect().top + scrollY;
 
-// The scroll event that our own scrollTo causes must not go back to nvim, or the two sides chase each other.
 let syncedY;
 
 function syncTo(top) {

@@ -1,6 +1,11 @@
 import AppKit
 import Carbon.HIToolbox
 
+guard CommandLine.arguments.count == 2, !CommandLine.arguments[1].isEmpty else {
+    FileHandle.standardError.write(Data("usage: mdview TOGGLE_KEYS\n".utf8))
+    exit(2)
+}
+
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 
@@ -31,9 +36,8 @@ final class KeySequence {
     private var matched = 0
     private var last = ContinuousClock.now
 
-    init(_ keys: String...) { self.keys = keys }
+    init(_ keys: [String]) { self.keys = keys }
 
-    /// Returns true when `key` completes the sequence.
     func feed(_ key: String) -> Bool {
         let now = ContinuousClock.now
         if now - last > .seconds(1) { matched = 0 }
@@ -45,8 +49,7 @@ final class KeySequence {
     }
 }
 
-// The same keys as the nvim mapping, with mapleader = " " from nvim/init.lua.
-let toggleKeys = KeySequence(" ", "t", "m")
+let toggleKeys = KeySequence(CommandLine.arguments[1].map(String.init))
 
 NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .otherMouseDown]) { event in
     let delta: Int?

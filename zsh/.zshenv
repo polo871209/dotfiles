@@ -33,4 +33,3 @@ export TYPESAFE_API_KEY="$(security find-generic-password -s typesafe-api-key -w
 export OBSIDIAN_VAULT="$HOME/vaults/obsidian"
 export HOMEBREW_NO_ENV_HINTS=1
 export OPENCODE_DISABLE_CLAUDE_CODE=1
-export TERM=xterm-256color

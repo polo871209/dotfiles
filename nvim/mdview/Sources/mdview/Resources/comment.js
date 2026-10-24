@@ -1,6 +1,3 @@
-// Space Space on a selection opens a comment box that sends the selected source lines and a comment to pi.
-// The markdown page marks blocks with cmark-gfm's data-sourcepos. The HTML page marks every start tag with
-// data-mdview-line, which HTMLSource.swift adds before the page loads.
 
 const commentBox = document.createElement("form");
 commentBox.id = "mdview-comment";
@@ -22,7 +19,6 @@ const toast = document.createElement("div");
 toast.id = "mdview-toast";
 toast.setAttribute("role", "status");
 toast.hidden = true;
-// Outside <body>, so the HTML page's body layout and html.css resets do not reach them.
 document.documentElement.append(commentBox, toast);
 
 let commentTarget;
@@ -30,7 +26,6 @@ let listeners;
 let lastSpace = -Infinity;
 let toastTimer;
 
-// The markdown page loads index.html for every file, and app.js names the file in data-mdview-path.
 function currentPath() {
     return location.host === "file"
         ? decodeURIComponent(location.pathname)
@@ -41,7 +36,6 @@ function isInline(el) {
     return getComputedStyle(el).display.startsWith("inline");
 }
 
-// The innermost marked block, with its first and last source line. A partly selected block counts whole.
 function sourceBlock(node) {
     let el = node instanceof Element ? node : node.parentElement;
     el = el?.closest("[data-sourcepos], [data-mdview-line]");
@@ -56,7 +50,6 @@ function sourceBlock(node) {
         const [, start, end] = el.dataset.sourcepos.match(/^(\d+):\d+-(\d+):/);
         return { el, start: Number(start), end: Number(end) };
     }
-    // An HTML element ends before the next marked element that it does not contain.
     const start = Number(el.dataset.mdviewLine);
     let end = start;
     let after;
@@ -99,7 +92,6 @@ function selectedLines() {
     };
 }
 
-// The markdown text column, or on the HTML page the nearest ancestor wide enough for the commentBox.
 function column(first) {
     const content = document.querySelector("[data-mdview-column]");
     if (content) return content.getBoundingClientRect();
@@ -228,13 +220,12 @@ window.mdviewComment = {
         if (commentBox.hidden) return;
         listeners = choices;
         commentStatus.textContent =
-            "Send to which pi? Press its tmux window number, or Esc to go back.";
+            "Send to which pi? Press its Rex tab number, or Esc to go back.";
         listenerList.replaceChildren(
             ...choices.map((listener) => {
                 const button = document.createElement("button");
                 button.type = "button";
                 button.textContent = `${listener.window} ${listener.label}`;
-                // Keeps focus in the textarea, so the viewer's key shortcuts stay off.
                 button.addEventListener("mousedown", (event) =>
                     event.preventDefault(),
                 );

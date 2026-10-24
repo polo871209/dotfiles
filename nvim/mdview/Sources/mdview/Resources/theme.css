@@ -25,7 +25,6 @@
     --kw-font: "Fira Code", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-/* The copy button that copy.js adds to every code block. !important beats an HTML file's own CSS. */
 pre:has(> .mdview-copy) {
     position: relative !important;
 }
@@ -81,7 +80,6 @@ pre:hover > .mdview-copy,
     display: block !important;
 }
 
-/* The comment box and toast that comment.js adds. They sit outside <body>, so they set their own font. */
 #mdview-comment,
 #mdview-toast {
     z-index: 2147483647 !important;

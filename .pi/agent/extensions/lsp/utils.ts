@@ -87,7 +87,6 @@ export const displayPath = (abs: string, cwd: string): string => {
 export const toAbs = (p: string, cwd: string): string =>
   path.isAbsolute(p) ? p : path.resolve(cwd, p);
 
-// LLMs sometimes prefix paths with @. Strip it to match built-in tool behavior.
 export const normalizeAtPath = (p: string): string =>
   p.startsWith("@") ? p.slice(1) : p;
 

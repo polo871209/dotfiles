@@ -1,8 +1,9 @@
-import { isAbsolute, relative } from "node:path";
+import { basename, isAbsolute, relative } from "node:path";
 import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { isForkName } from "./shared/fork-name";
 import { extractText } from "./shared/message";
 import {
   sideChannelComplete,
@@ -10,8 +11,15 @@ import {
   type SideChannelOpts,
 } from "./shared/llm";
 
-const MAX_WORDS = 4;
-const MAX_CHARS = 40;
+const MAX_WORDS = 3;
+const MAX_CHARS = 24;
+const RENAME_AT_USER_TURNS = [1, 3];
+const ENTRY_TYPE = "auto-rename";
+
+interface AutoRenameEntry {
+  turns: number;
+  name?: string;
+}
 const DANGLING_WORD =
   /^(and|or|for|with|without|of|the|a|an|to|in|into|on|at|by|via|vs|from)$/i;
 
@@ -71,7 +79,19 @@ async function finalTitle(
   return capTitle(retry.ok ? cleanTitle(retry.text) : title);
 }
 
-function sessionDigest(ctx: ExtensionContext): {
+function lastAutoRename(ctx: ExtensionContext): AutoRenameEntry | undefined {
+  let last: AutoRenameEntry | undefined;
+  for (const entry of ctx.sessionManager.getBranch()) {
+    if (entry.type === "custom" && entry.customType === ENTRY_TYPE)
+      last = entry.data as AutoRenameEntry;
+  }
+  return last;
+}
+
+function sessionDigest(
+  ctx: ExtensionContext,
+  pendingRequest?: string,
+): {
   text: string;
   userTurns: number;
 } {
@@ -95,6 +115,7 @@ function sessionDigest(ctx: ExtensionContext): {
       }
     }
   }
+  if (pendingRequest?.trim()) requests.push(pendingRequest.trim());
 
   const [opening, ...later] = requests;
   const sections = [`Opening request:\n${clip(opening ?? "", 2_000)}`];
@@ -128,8 +149,8 @@ Rules:
 - One topic. Never join two topics with "and" or a comma.
 - No filler: session, discussion, help, improving, refinement, updates, various.
 
-Good: Worktree session switching | Auto-rename title quality | Kulala HTTP client setup | Subagent notification leak
-Bad: Pi session naming and rename command (two topics) | Claude Code Agent Refinement (vague) | Improving SYSTEM.md writing guidelines (filler)
+Good: Worktree switching | Auto-rename titles | Kulala HTTP setup | Subagent status leak
+Bad: Shared LSP daemon socket path (too long) | Session naming and rename command (two topics) | Agent refinement (vague) | Improving SYSTEM.md guidelines (filler)
 
 Reply with the title only.`,
     messages: [
@@ -147,21 +168,28 @@ Reply with the title only.`,
 
 export default function (pi: ExtensionAPI) {
   const inFlight = new Set<string>();
-  const settledSessions = new Set<string>();
 
-  const tryRename = async (ctx: ExtensionContext) => {
+  const tryRename = async (ctx: ExtensionContext, pendingRequest?: string) => {
     if (!ctx.model) return;
 
     const sessionFile = ctx.sessionManager.getSessionFile();
-    if (!sessionFile) return;
-    if (inFlight.has(sessionFile) || settledSessions.has(sessionFile)) return;
-    if (pi.getSessionName()) {
-      settledSessions.add(sessionFile);
-      return;
-    }
+    if (!sessionFile || inFlight.has(sessionFile)) return;
 
-    const { text: digest, userTurns } = sessionDigest(ctx);
-    if (userTurns <= 3) return;
+    const { text, userTurns } = sessionDigest(ctx, pendingRequest);
+    const currentName = pi.getSessionName();
+    let digest = text;
+    let dueTurns: number;
+    if (isForkName(currentName)) {
+      if (!pendingRequest) return;
+      dueTurns = userTurns;
+      digest += `\n\nThis session branched off a session about "${currentName}". Name the topic of the newest request, because that is where this branch goes.`;
+    } else {
+      dueTurns =
+        RENAME_AT_USER_TURNS.filter((turns) => userTurns >= turns).at(-1) ?? 0;
+      const last = lastAutoRename(ctx);
+      const namedByHand = !!currentName && currentName !== last?.name;
+      if (namedByHand || dueTurns <= (last?.turns ?? 0)) return;
+    }
 
     inFlight.add(sessionFile);
     try {
@@ -175,23 +203,37 @@ export default function (pi: ExtensionAPI) {
       if (!name) return;
 
       if (ctx.sessionManager.getSessionFile() !== sessionFile) return;
-      if (pi.getSessionName()) {
-        settledSessions.add(sessionFile);
-        return;
-      }
+      if (pi.getSessionName() !== currentName) return;
 
       pi.setSessionName(name);
-      settledSessions.add(sessionFile);
+      pi.appendEntry<AutoRenameEntry>(ENTRY_TYPE, { turns: dueTurns, name });
     } finally {
       inFlight.delete(sessionFile);
     }
   };
 
-  const renameInBackground = (ctx: ExtensionContext) => {
-    void tryRename(ctx).catch(() => {});
+  const renameInBackground = (
+    ctx: ExtensionContext,
+    pendingRequest?: string,
+  ) => {
+    void tryRename(ctx, pendingRequest).catch(() => {});
   };
-  pi.on("agent_settled", (_e, ctx) => renameInBackground(ctx));
-  pi.on("session_start", (_e, ctx) => renameInBackground(ctx));
+  const showSessionNameAsTitle = (ctx: ExtensionContext) => {
+    if (ctx.mode !== "tui") return;
+    ctx.ui.setTitle(pi.getSessionName() ?? basename(ctx.cwd));
+  };
+
+  // Pi emits message_end before it stores the message, so the prompt is passed along.
+  pi.on("message_end", (event, ctx) => {
+    if (event.message.role !== "user") return;
+    renameInBackground(ctx, extractText(event.message.content));
+  });
+  pi.on("session_start", (_e, ctx) => {
+    renameInBackground(ctx);
+    // Pi writes its own "\u03c0 - name - cwd" title after session_start handlers return.
+    setTimeout(() => showSessionNameAsTitle(ctx), 0);
+  });
+  pi.on("session_info_changed", (_e, ctx) => showSessionNameAsTitle(ctx));
 
   pi.registerCommand("rename", {
     description:
@@ -202,7 +244,7 @@ export default function (pi: ExtensionAPI) {
 
       if (arg === "-" || arg.toLowerCase() === "clear") {
         pi.setSessionName("");
-        if (sessionFile) settledSessions.delete(sessionFile);
+        pi.appendEntry<AutoRenameEntry>(ENTRY_TYPE, { turns: 0 });
         ctx.ui.notify("Session name cleared", "info");
         return;
       }
@@ -244,7 +286,6 @@ export default function (pi: ExtensionAPI) {
           return;
         }
         pi.setSessionName(name);
-        if (sessionFile) settledSessions.add(sessionFile);
         ctx.ui.notify(`Session named: ${name}`, "info");
       } finally {
         if (sessionFile) inFlight.delete(sessionFile);

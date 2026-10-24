@@ -57,7 +57,6 @@ local runnable = {
     eslint_d = function(bufnr) return eslint_root(bufnr) ~= nil end,
 }
 
---- Drop the linters that cannot run for this buffer. Call before M.apply.
 ---@param names string[]
 ---@param bufnr integer?
 ---@return string[]
@@ -68,7 +67,6 @@ function M.filter(names, bufnr)
     end, names)
 end
 
---- Patch every named linter that still needs it. Safe to call on every lint.
 ---@param names string[]
 function M.apply(names)
     local ok, lint = pcall(require, 'lint')

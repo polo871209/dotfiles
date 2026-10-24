@@ -67,7 +67,6 @@ async function ask(
       ],
     },
     {
-      // Same session id and thinking level as the main agent, so the provider reuses its prompt cache.
       sessionId: ctx.sessionManager.getSessionId(),
       reasoning: ctx.thinkingLevel === "off" ? undefined : ctx.thinkingLevel,
       signal,

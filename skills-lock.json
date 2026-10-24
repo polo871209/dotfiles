@@ -48,6 +48,12 @@
       "skillPath": "pstack/skills/principle-prove-it-works/SKILL.md",
       "computedHash": "6777a72ed3c15bbd73f0d264ba4eb701e5e733de70dd519c72fc2698a32379a2"
     },
+    "show-me": {
+      "source": "humanlayer/skills",
+      "sourceType": "github",
+      "skillPath": "plugins/show-me/skills/show-me/SKILL.md",
+      "computedHash": "43766f53afe7eb9feba0bb7716590c35cbb8d39d4a91eddef50e9566a6f6ae19"
+    },
     "writing-for-agents": {
       "source": "mattpocock/skills",
       "sourceType": "github",

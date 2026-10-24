@@ -1,4 +1,3 @@
-/* Restyles any HTML file in the blog's look. :where() keeps these resets weaker than the rules below. */
 html,
 body {
     background: var(--kw-bg) !important;
@@ -75,7 +74,6 @@ mark {
     color: var(--kw-bg) !important;
 }
 
-/* Inline diagrams are drawn for a light page. Inverting by 0.88 keeps their hues and turns white into the page background. */
 :is(figure, [role="img"]) > svg,
 svg[role="img"] {
     filter: invert(0.88) hue-rotate(180deg);

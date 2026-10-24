@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Usage: session-picker [CLIENT_ID]. Lists Rex sessions and zoxide directories, then shows the pick in the Rex app.
+# shellcheck disable=SC1010 # `rex do` is a subcommand, not a shell loop.
+set -euo pipefail
+trap 'read -r -p "Press Enter to close. "' ERR
+
+client=${1:-$(rex client ls --json | jq -r 'first(.clients[] | select(.info.kind == "app")) | .client_id')}
+
+pick=$(
+  {
+    rex ls --json | jq -r '.sessions[] | "session\t\(.session_id)\t \(.label)"'
+    zoxide query -l | awk -v home="$HOME" '{
+      shown = index($0, home) == 1 ? "~" substr($0, length(home) + 1) : $0
+      print "dir\t" $0 "\t " shown
+    }'
+  } | fzf --delimiter '\t' --with-nth 3 \
+    --ansi --no-sort --no-select-1 --prompt '> ' \
+    --color 'bg:#282828,bg+:#3c3836,fg:#89b4fa,fg+:#89b4fa' \
+    --color 'hl:#fabd2f,hl+:#fabd2f,info:#83a598,marker:#8ec07c' \
+    --color 'prompt:#d79921,spinner:#8ec07c,pointer:#fe8019,header:#928374' \
+    --color 'border:#928374,label:#ebdbb2,query:#ebdbb2'
+) || exit 0
+
+IFS=$'\t' read -r kind target _ <<<"$pick"
+if [[ $kind == dir ]]; then
+  rex -C "$client" do session_open dir="$target" >/dev/null
+else
+  rex -C "$client" do session.select session_id="$target"
+fi

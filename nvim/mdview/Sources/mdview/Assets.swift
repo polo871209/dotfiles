@@ -13,8 +13,6 @@ final class DocumentRoot: Sendable {
 }
 
 struct Assets: URLSchemeHandler {
-    /// Set for the HTML page, which may load any file under this directory.
-    /// Without it, as on the markdown page, only images load from disk.
     var documentRoot: DocumentRoot?
 
     private static let imageTypes: Set<String> = ["png", "jpg", "jpeg", "gif", "svg", "webp", "avif", "heic", "ico", "bmp"]
