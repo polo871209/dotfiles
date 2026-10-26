@@ -26,28 +26,17 @@ local function biome_or_prettier(bufnr)
     return { 'biome' }
 end
 
-local format_on_save_enabled = true
-
-local ignore_patterns = { '/node_modules/', '/%.agents/skills/', '%.lock$' }
-local function is_ignored(bufnr)
-    local path = vim.api.nvim_buf_get_name(bufnr)
-    for _, pattern in ipairs(ignore_patterns) do
-        if path:match(pattern) then return true end
-    end
-    return false
-end
-
-local SLOW_FORMATTERS_BY_FT = { sql = true }
+local autoformat = require 'autoformat'
 
 require('conform').setup {
     notify_on_error = false,
     default_format_opts = { timeout_ms = 500, lsp_format = 'fallback' },
     format_on_save = function(bufnr)
-        if not format_on_save_enabled or is_ignored(bufnr) or SLOW_FORMATTERS_BY_FT[vim.bo[bufnr].filetype] then return end
+        if not autoformat.on_save or autoformat.ignored(bufnr) or autoformat.slow(bufnr) then return end
         return {}
     end,
     format_after_save = function(bufnr)
-        if not format_on_save_enabled or is_ignored(bufnr) or not SLOW_FORMATTERS_BY_FT[vim.bo[bufnr].filetype] then return end
+        if not autoformat.on_save or autoformat.ignored(bufnr) or not autoformat.slow(bufnr) then return end
         return {}
     end,
     formatters_by_ft = {
@@ -78,14 +67,20 @@ require('conform').setup {
         zig = { 'zigfmt' },
     },
     formatters = {
+        -- conform's biome runs in nvim's cwd when the file has no biome config, and biome then reads that cwd's biome.json.
+        biome = {
+            cwd = function(_, ctx) return vim.fs.root(ctx.dirname, biome_configs) or ctx.dirname end,
+            args = function(_, ctx)
+                if vim.fs.root(ctx.dirname, biome_configs) then return { 'format', '--stdin-file-path', '$FILENAME' } end
+                local indent_style = vim.bo[ctx.buf].expandtab and 'space' or 'tab'
+                return { 'format', '--stdin-file-path', '$FILENAME', '--indent-style', indent_style, '--indent-width', tostring(ctx.shiftwidth) }
+            end,
+        },
         prettier = {
             prepend_args = { '--prose-wrap', 'preserve' },
         },
         jsonnetfmt = {
             args = { '--indent', '0', '--max-blank-lines', '2', '--sort-imports', '--string-style', 's', '--comment-style', 's', '--no-pad-objects', '-' },
-        },
-        sqlfluff = {
-            require_cwd = false,
         },
         -- With --use-stdin, SwiftLint prints nothing when there is nothing to fix, so it edits a temp file instead.
         swiftlint = {
@@ -99,12 +94,12 @@ require('conform').setup {
 -- conform reads the current mode itself and formats only the selection when
 -- called from visual mode, so this covers both whole-buffer and range.
 vim.keymap.set('', '<leader>f', function()
-    if is_ignored(0) then return end
+    if autoformat.ignored(0) then return end
     require('conform').format { async = true }
 end, { desc = '[F]ormat buffer' })
 
 require('toggle').map('<leader>tf', {
     name = 'Format on Save',
-    get = function() return format_on_save_enabled end,
-    set = function(state) format_on_save_enabled = state end,
+    get = function() return autoformat.on_save end,
+    set = function(state) autoformat.on_save = state end,
 })

@@ -113,9 +113,10 @@ export function registerFeedback(pi: ExtensionAPI): void {
   ): Promise<string | undefined> => {
     if (!fs.existsSync(abs)) return;
     if (isScratchPath(abs)) return;
-    if (isIgnoredPath(abs, cwd)) return;
-    touched.add(abs);
-    allEditsChecked = false;
+    if (!isIgnoredPath(abs, cwd)) {
+      touched.add(abs);
+      allEditsChecked = false;
+    }
     return withFileMutationQueue(abs, async () => {
       try {
         const before = fs.readFileSync(abs, "utf8");

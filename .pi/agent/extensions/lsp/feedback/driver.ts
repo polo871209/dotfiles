@@ -76,7 +76,7 @@ export const formatFile = async (
     const res = await callLua<{ formatted: string[] }>(
       cwd,
       "return PiFeedback.format(...)",
-      [[file], Math.min(1_200, remaining - INLINE_MARGIN_MS)],
+      [[file], remaining - INLINE_MARGIN_MS],
       deadline,
       undefined,
       "inline",

@@ -262,7 +262,7 @@ const params = Type.Object({
   action: Type.Optional(
     Type.Union([Type.Literal("report"), Type.Literal("resolve")], {
       description:
-        "report (default) returns the PR as markdown. resolve marks every unresolved review thread as resolved on GitHub, without a reply. It writes to the PR, so run it only after the fixes land.",
+        "report (default) returns the PR as markdown. resolve marks every unresolved review thread as resolved on GitHub, without a reply. Call resolve as soon as you have fixed the review comments locally. Do not wait for a commit, push, or merge.",
     }),
   ),
 });
@@ -540,6 +540,11 @@ export default function (pi: ExtensionAPI) {
                 );
               }
             }
+          }
+          if (threads.some((t) => !t.isResolved)) {
+            out.push(
+              `\n**Next:** after you fix these review comments, call \`github_pr\` with \`pr: "${m.url}"\` and \`action: "resolve"\`.`,
+            );
           }
           const unfetchedT =
             pr.reviewThreads.totalCount - pr.reviewThreads.nodes.length;

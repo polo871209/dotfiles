@@ -28,7 +28,7 @@ Work that outlives its tool call, such as a background subagent run, writes a st
 
 - **`web-search.ts`** — searches or fetches one or many web targets for external research, ranking results most relevant first and dropping the ones that do not answer the query, returning GitHub links as local files or comment threads, and videos as transcripts.
 - **`lsp/`** — provides symbol navigation and deterministic post-edit diagnostics and fixes for code work.
-- **`github-pr.ts`** — fetches concise PR metadata, failures, review threads, diffs, or a single section for PR analysis, and resolves all open review threads once the fixes land.
+- **`github-pr.ts`** — fetches concise PR metadata, failures, review threads, diffs, or a single section for PR analysis, and resolves all open review threads as soon as the review comments are fixed locally.
 - **`subagent/`** — delegates external research, read-only recon of the local repo, or a read-only parallel review to an isolated agent, with background control, compact structured results, and an interrupted status for runs that a pi restart cut off.
 - **`quiet-run.ts`** — runs shell commands by default, with output kept in a log file, returning only the verdict and the requested slice, and holds a destructive command until the user approves it.
 - **`ask/`** — presents structured choices when a request needs clarification, and shows the agent as waiting on the user in Rex while the dialog is open.

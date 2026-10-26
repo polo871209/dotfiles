@@ -3,7 +3,7 @@
     "launcherShortcut": "cmd+g",
     "showInMenuBar": false,
     "automaticallyCheckForUpdates": false,
-    "popToRootSeconds": 90,
+    "popToRootSeconds": 0,
     "escapeKeyBehavior": "navigateBackOrClose",
     "autoSwitchInputSource": null
   },

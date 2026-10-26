@@ -118,22 +118,8 @@ lint.linters_by_ft = {
     zig = { 'zlint' },
 }
 
-local SLOW_LINTERS = { semgrep = true }
-
-local function lint_buf(on_save)
-    if not vim.bo.modifiable then return end
-    local names = lint.linters_by_ft[vim.bo.filetype]
-    if not names then return end
-    local run_slow = on_save and not vim.g.pi_agent
-    if not run_slow then names = vim.tbl_filter(function(n) return not SLOW_LINTERS[n] end, names) end
-    names = require('lint_patch').filter(names, 0)
-    if #names == 0 then return end
-    require('lint_patch').apply(names)
-    lint.try_lint(names)
-end
-
 local lint_augroup = vim.api.nvim_create_augroup('lint', { clear = true })
 vim.api.nvim_create_autocmd({ 'BufReadPost', 'BufWritePost', 'InsertLeave' }, {
     group = lint_augroup,
-    callback = function(args) lint_buf(args.event == 'BufWritePost') end,
+    callback = function(args) require('linting').run(args.buf, args.event == 'BufWritePost' and not vim.g.pi_agent) end,
 })

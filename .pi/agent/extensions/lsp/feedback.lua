@@ -1,7 +1,6 @@
 local M = {}
 _G.PiFeedback = M
 
-local FORMAT_TIMEOUT_MS = 3000
 local CODEACTION_TIMEOUT_MS = 2000
 local PER_FILE_BUDGET_MS = 4500
 local SETTLE_MS = 1000
@@ -66,12 +65,9 @@ local function apply_code_actions(bufnr, remaining)
     return changed
 end
 
-local function try_format(bufnr, timeout_ms)
-    local ok_conform, conform = pcall(require, 'conform')
-    if not ok_conform then return false end
-    local before = vim.api.nvim_buf_get_changedtick(bufnr)
-    pcall(function() conform.format { bufnr = bufnr, async = false, lsp_format = 'fallback', timeout_ms = timeout_ms or FORMAT_TIMEOUT_MS } end)
-    return vim.api.nvim_buf_get_changedtick(bufnr) ~= before
+local function try_format(bufnr, budget_ms)
+    local ok, autoformat = pcall(require, 'autoformat')
+    return ok and autoformat.format(bufnr, budget_ms)
 end
 
 local function pull_diagnostics(bufnr) _G.PiLspShared.pull_diagnostics(bufnr) end
@@ -135,13 +131,11 @@ function M.run(files)
             vim.wait(math.min(800, remaining()), function() return false end, 50)
 
             local fixed = apply_code_actions(bufnr, remaining)
-            if fixed then
-                local refmt = try_format(bufnr)
-                pcall(function()
-                    vim.api.nvim_buf_call(bufnr, function() vim.cmd 'silent! write' end)
-                end)
-                if refmt then table.insert(formatted, vim.api.nvim_buf_get_name(bufnr)) end
-            end
+            local refmt = try_format(bufnr, remaining())
+            if fixed or refmt then pcall(function()
+                vim.api.nvim_buf_call(bufnr, function() vim.cmd 'silent! write' end)
+            end) end
+            if refmt then table.insert(formatted, vim.api.nvim_buf_get_name(bufnr)) end
 
             pull_diagnostics(bufnr)
         end

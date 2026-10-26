@@ -277,6 +277,7 @@ function M.rename(file, line, symbol, new_name)
         table.insert(out_files, { file = f, edits = n })
         local nbuf = vim.uri_to_bufnr(uri)
         if vim.api.nvim_buf_is_valid(nbuf) then
+            pcall(function() require('autoformat').format(nbuf) end)
             vim.api.nvim_buf_call(nbuf, function() vim.cmd 'silent! write' end)
             bufs[f] = nbuf
             mtimes[f] = file_mtime(f)
@@ -354,30 +355,8 @@ end
 
 _G.PiLspShared = _G.PiLspShared or {}
 
-_G.PiLspShared.SLOW_LINTERS = { semgrep = true }
-
--- nvim-lint's try_lint() always targets the current buffer and ignores any
--- bufnr, so callers that :edit buffers out of band (M.diagnostics) MUST switch
--- buffer via nvim_buf_call, or every call re-lints the last :edit'd buffer.
 function _G.PiLspShared.run_fast_lint(bufnr)
-    local ok, lint = pcall(require, 'lint')
-    if not ok then return end
-    local names = lint.linters_by_ft[vim.bo[bufnr].filetype]
-    if not names then return end
-    local allowed = {}
-    for _, name in ipairs(names) do
-        if not _G.PiLspShared.SLOW_LINTERS[name] then table.insert(allowed, name) end
-    end
-    if #allowed == 0 then return end
-    pcall(function()
-        local patch = require 'lint_patch'
-        allowed = patch.filter(allowed, bufnr)
-        patch.apply(allowed)
-    end)
-    if #allowed == 0 then return end
-    vim.api.nvim_buf_call(bufnr, function()
-        pcall(function() lint.try_lint(allowed) end)
-    end)
+    pcall(function() require('linting').run(bufnr, false) end)
 end
 
 function _G.PiLspShared.pull_diagnostics(bufnr)

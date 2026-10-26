@@ -16,6 +16,8 @@ Completion: command prints `agent-nvim ok` and exits 0. A hang means the agent l
 
 Configuration also has to survive being shared: the daemon roams across projects and lives for hours, so anything scoped to a single project or a single run (a cwd-relative path, a one-shot autocmd standing in for state) is wrong under `vim.g.pi_agent`. Prefer buffer-local and `root_markers`-resolved settings, and prefer per-project cost over per-session cost — a setting that adds a process per project (`enableProjectDiagnostics`) is now paid once, but paid for as long as the daemon lives.
 
+Format and lint policy lives once, in `lua/autoformat.lua` (skip list, slow filetypes, save-equivalent format) and `lua/linting.lua` (slow linters, the working directory of each linter). The agent daemon calls these modules, so change format or lint behavior there and keep `.pi/agent/extensions/lsp/` free of its own lists.
+
 ## Gotcha: `lsp/` config that reads fine and does nothing
 
 A server config can be wrong in three ways that no error reports, so a `lsp/*.lua` change is not done until a fixture proves the server attached where you intended.
