@@ -20,7 +20,7 @@ neovim = "latest"
 
 # Shell / CLI tools
 "github:noahdunnagan/fsearch" = "latest"
-"github:veirt/weathr" = "latest"
+"npm:opengarden" = { version = "latest", allow_low_downloads = true }
 "pipx:pgcli" = "latest"
 atuin = "latest"
 bat = "latest"

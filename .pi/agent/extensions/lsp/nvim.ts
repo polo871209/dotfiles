@@ -70,8 +70,10 @@ const connect = (lane: Lane): Promise<net.Socket | null> =>
       socket.removeAllListeners("connect");
       socket.removeAllListeners("error");
       socket.setTimeout(0);
-      if (ok) resolve(socket);
-      else {
+      if (ok) {
+        socket.on("error", () => {});
+        resolve(socket);
+      } else {
         socket.destroy();
         resolve(null);
       }

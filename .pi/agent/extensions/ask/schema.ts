@@ -120,7 +120,6 @@ type QuestionnaireError =
   | "no_ui"
   | "no_questions"
   | "empty_options"
-  | "too_many_questions"
   | "duplicate_question"
   | "duplicate_option_label"
   | "reserved_label";
@@ -140,13 +139,6 @@ export function validateQuestionnaire(typed: QuestionParams): ValidationResult {
       ok: false,
       error: "no_questions",
       message: "Error: At least one question is required",
-    };
-  }
-  if (typed.questions.length > MAX_QUESTIONS) {
-    return {
-      ok: false,
-      error: "too_many_questions",
-      message: `Error: At most ${MAX_QUESTIONS} questions are allowed per invocation`,
     };
   }
 
@@ -241,5 +233,5 @@ export function buildQuestionnaireResponse(
       cancelled: true,
     });
   }
-  return buildToolResult(`${"User answered:"} ${segments.join(" ")}`, result);
+  return buildToolResult(`User answered: ${segments.join(" ")}`, result);
 }

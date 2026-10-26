@@ -30,6 +30,7 @@ import {
   openSync,
   readSync,
   closeSync,
+  realpathSync,
 } from "node:fs";
 import {
   join,
@@ -96,9 +97,7 @@ function withTimeout(signal: AbortSignal | undefined): AbortSignal {
   return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
-// Expands an IPv6 literal into its 8 groups, including the "::" run and a
-// trailing dotted-quad. Needed because a textual prefix test cannot see
-// through normalization: Node rewrites ::ffff:127.0.0.1 as ::ffff:7f00:1.
+// Node rewrites ::ffff:127.0.0.1 as ::ffff:7f00:1, so a textual prefix test cannot see through normalization.
 function parseIPv6Groups(addr: string): number[] | null {
   const halves = addr.split("%")[0].split("::");
   if (halves.length > 2) return null;
@@ -184,6 +183,7 @@ async function fetchSafely(
       return { res, finalUrl: current.toString() };
     const location = res.headers.get("location");
     if (!location) return { res, finalUrl: current.toString() };
+    await res.body?.cancel();
     if (redirects === MAX_REDIRECTS)
       throw new Error(`Too many redirects fetching ${current.toString()}`);
     current = await assertSafeUrl(new URL(location, current).toString());
@@ -466,10 +466,8 @@ function dedupKey(raw: string): { page: string; query: string } {
   }
 }
 
-function dedupResults(
-  results: SearchResult[],
-  seen = new Map<string, Set<string>>(),
-): SearchResult[] {
+function dedupResults(results: SearchResult[]): SearchResult[] {
+  const seen = new Map<string, Set<string>>();
   return results.filter((r) => {
     const { page, query } = dedupKey(r.url);
     const queries = seen.get(page);
@@ -490,7 +488,7 @@ function isTransient(err: unknown): boolean {
   return (
     message.includes("fetch failed") ||
     message.includes("terminated") ||
-    message.includes("timeouterror") ||
+    (err as Error)?.name === "TimeoutError" ||
     message.includes("socket")
   );
 }
@@ -704,11 +702,15 @@ async function fetchReadable(
       ? "application/json,text/plain;q=0.9,*/*;q=0.8"
       : ACCEPT_HTML,
   );
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+  const reject = async (message: string): Promise<never> => {
+    await res.body?.cancel();
+    throw new Error(message);
+  };
+  if (!res.ok) await reject(`HTTP ${res.status}: ${res.statusText}`);
 
   const contentLength = res.headers.get("content-length");
   if (contentLength && Number(contentLength) > MAX_RESPONSE_BYTES) {
-    throw new Error(
+    await reject(
       `Response too large (${Math.round(Number(contentLength) / 1024 / 1024)}MB)`,
     );
   }
@@ -726,7 +728,7 @@ async function fetchReadable(
       "application/x-7z-compressed",
     ].includes(baseType)
   ) {
-    throw new Error(`Unsupported content type: ${baseType || "unknown"}`);
+    await reject(`Unsupported content type: ${baseType || "unknown"}`);
   }
 
   const text = await readBoundedText(res, MAX_RESPONSE_BYTES);
@@ -1084,9 +1086,9 @@ function pidAlive(pid: number): boolean {
 
 const cloneCache = new Map<string, Promise<string>>();
 
-function execGitClone(args: string[], signal?: AbortSignal): Promise<void> {
+function execGitClone(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = execFile(
+    execFile(
       "git",
       args,
       {
@@ -1095,12 +1097,6 @@ function execGitClone(args: string[], signal?: AbortSignal): Promise<void> {
       },
       (err) => (err ? reject(err) : resolve()),
     );
-    if (signal) {
-      const onAbort = () => child.kill();
-      if (signal.aborted) onAbort();
-      signal.addEventListener("abort", onAbort, { once: true });
-      child.once("exit", () => signal.removeEventListener("abort", onAbort));
-    }
   });
 }
 
@@ -1108,7 +1104,6 @@ async function cloneGitHubRepo(
   owner: string,
   repo: string,
   ref: string | undefined,
-  signal?: AbortSignal,
 ): Promise<string> {
   const key = ref ? `${owner}/${repo}@${ref}` : `${owner}/${repo}`;
   const cached = cloneCache.get(key);
@@ -1127,7 +1122,7 @@ async function cloneGitHubRepo(
     if (ref) args.push("--branch", ref);
     args.push(`https://github.com/${owner}/${repo}.git`, localPath);
     try {
-      await execGitClone(args, signal);
+      await execGitClone(args);
     } catch (err) {
       rmSync(localPath, { recursive: true, force: true });
       cloneCache.delete(key);
@@ -1140,8 +1135,9 @@ async function cloneGitHubRepo(
 }
 
 function resolveWithinRepo(root: string, rel: string): string | null {
-  const normalizedRoot = resolvePath(root);
-  const candidate = resolvePath(normalizedRoot, rel);
+  const normalizedRoot = realpathSync(root);
+  const joined = resolvePath(normalizedRoot, rel);
+  const candidate = existsSync(joined) ? realpathSync(joined) : joined;
   if (
     candidate !== normalizedRoot &&
     !candidate.startsWith(
@@ -1244,8 +1240,8 @@ function buildRepoTree(root: string): string {
 
 function readRepoReadme(root: string): string | null {
   for (const name of ["README.md", "readme.md", "README", "README.txt"]) {
-    const p = join(root, name);
-    if (existsSync(p)) {
+    const p = resolveWithinRepo(root, name);
+    if (p && existsSync(p)) {
       const content = readFileSync(p, "utf-8");
       return content.length > 8000
         ? content.slice(0, 8000) + "\n\n[README truncated]"
@@ -1447,7 +1443,7 @@ async function fetchOne(
           ? `${gh.owner}/${gh.repo} - ${gh.path}`
           : `${gh.owner}/${gh.repo}`,
         content: describeGithubPath(
-          await cloneGitHubRepo(gh.owner, gh.repo, gh.ref, signal),
+          await cloneGitHubRepo(gh.owner, gh.repo, gh.ref),
           gh,
         ),
       };
@@ -1643,14 +1639,13 @@ export default function (pi: ExtensionAPI) {
         results: { title: string; url: string; content: string }[];
         error: string | null;
       }[] = [];
-      for (const { query, results: raw, error } of queryResults) {
+      for (const { query, results, error } of queryResults) {
         if (queryList.length > 1) output += `## Query: "${query}"\n\n`;
         if (error) {
           structured.push({ query, results: [], error });
           output += `0 results (error: ${error})\n\n`;
           continue;
         }
-        const results = dedupResults(raw, new Map<string, Set<string>>());
         structured.push({
           query,
           results: results.map(({ title, url, content }) => ({
@@ -1701,7 +1696,12 @@ export default function (pi: ExtensionAPI) {
     description:
       "Fetch web content as markdown. A GitHub code link returns a local path to read files from. A GitHub issue or pull link returns the thread with its comments. A video link returns the transcript. For PR diffs, checks, or review threads, use github_pr instead.",
     promptSnippet: "Read a web page, GitHub link, or video transcript",
-    annotations: { readOnlyHint: true, openWorldHint: true },
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
     renderResult(result, _options, theme: Theme, context) {
       if (context.isError) return errorLine("fetch_content", result, theme);
       const d = result.details as { urls?: string[]; ok?: number } | undefined;

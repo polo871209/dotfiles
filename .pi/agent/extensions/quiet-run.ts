@@ -1,7 +1,7 @@
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { promisify, stripVTControlCharacters } from "node:util";
+import { stripVTControlCharacters } from "node:util";
 import type { JsonObject, Usage } from "@earendil-works/pi-ai";
 import type {
   ExtensionAPI,
@@ -9,6 +9,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { run } from "./shared/exec";
 import { boolProbabilities, findJev } from "./shared/jev";
 
 const SUCCESS_TAIL = 10;
@@ -55,8 +56,11 @@ function collapseRuns(lines: string[]): string[] {
 }
 
 async function gitState(cwd: string): Promise<JsonObject | null> {
-  const git = async (args: string[]) =>
-    (await promisify(execFile)("git", args, { cwd, timeout: 2_000 })).stdout;
+  const git = async (args: string[]) => {
+    const r = await run("git", args, undefined, cwd, 2_000);
+    if (r.code !== 0) throw new Error(r.stderr);
+    return r.stdout;
+  };
   try {
     const [root, status] = await Promise.all([
       git(["rev-parse", "--show-toplevel"]),
@@ -87,10 +91,12 @@ async function gitState(cwd: string): Promise<JsonObject | null> {
 async function scoreDestructive(
   ctx: ExtensionContext,
   command: string,
+  onCheck: () => void,
   signal?: AbortSignal,
-): Promise<{ risk: number | null; usage?: Usage }> {
+): Promise<{ risk: number | null; usage?: Usage } | undefined> {
   const jev = await findJev(ctx);
-  if (!jev) return { risk: null };
+  if (!jev) return undefined;
+  onCheck();
   const cwd = ctx.cwd;
   const git = await gitState(cwd);
   const { probabilities, usage } = await boolProbabilities(
@@ -196,25 +202,36 @@ export default function (pi: ExtensionAPI) {
         ? new RegExp(params.filter, "i")
         : undefined;
 
-      onUpdate?.({
-        content: [{ type: "text", text: "checking command with Jev…" }],
-        details: {},
-      });
-      const { risk, usage } = await scoreDestructive(ctx, command, signal);
+      const score = await scoreDestructive(
+        ctx,
+        command,
+        () =>
+          onUpdate?.({
+            content: [{ type: "text", text: "checking command with Jev…" }],
+            details: {},
+          }),
+        signal,
+      );
+      const risk = score?.risk ?? null;
+      if (score && risk === null && ctx.hasUI)
+        ctx.ui.notify(
+          "quiet_run: the Jev destructive check failed, so the command runs unchecked.",
+          "warning",
+        );
       if (risk !== null && risk >= 0.65) {
-        const score = risk.toFixed(2);
+        const riskText = risk.toFixed(2);
         if (
           !(
             ctx.hasUI &&
             (await ctx.ui.confirm(
-              `Destructive command (Jev ${score})`,
+              `Destructive command (Jev ${riskText})`,
               `${command}\n\ncwd: ${cwd}\n\nRun it?`,
               { signal },
             ))
           )
         ) {
           throw new Error(
-            `quiet_run: blocked. Jev scored the command destructive (${score}) and ${
+            `quiet_run: blocked. Jev scored the command destructive (${riskText}) and ${
               ctx.hasUI
                 ? "the user declined to run it"
                 : "no user is present to approve it"
@@ -252,6 +269,7 @@ export default function (pi: ExtensionAPI) {
       let lineCount = 0;
       let pending = "";
       let lastPush = 0;
+      let lastData = Date.now();
 
       const addLines = (raws: string[]) => {
         const clean = raws.map(cleanLine);
@@ -272,6 +290,7 @@ export default function (pi: ExtensionAPI) {
 
       child.stdout!.setEncoding("utf8");
       child.stdout!.on("data", (chunk: string) => {
+        lastData = Date.now();
         const parts = (pending + chunk).split("\n");
         pending = parts.pop()!;
         const cr = pending.lastIndexOf("\r", pending.length - 2);
@@ -322,6 +341,19 @@ export default function (pi: ExtensionAPI) {
           resolve({ code: null, killSignal: null, spawnError: err }),
         );
         child.on("close", (c, s) => resolve({ code: c, killSignal: s }));
+        // A background job (`cmd &`) inherits the pipe and holds it open after the shell exits.
+        child.on("exit", (c, s) => {
+          const deadline = Date.now() + 2_000;
+          const settle = () => {
+            if (Date.now() - lastData < 100 && Date.now() < deadline) {
+              setTimeout(settle, 100);
+              return;
+            }
+            child.stdout!.destroy();
+            resolve({ code: c, killSignal: s });
+          };
+          setTimeout(settle, 100);
+        });
       });
       clearTimeout(timer);
       clearTimeout(sigkillTimer);
@@ -371,7 +403,7 @@ export default function (pi: ExtensionAPI) {
           },
         ],
         details: {},
-        usage,
+        usage: score?.usage,
         structuredContent: {
           verdict,
           exit_code: spawnError || timedOut || killSignal ? null : code,

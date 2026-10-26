@@ -3,7 +3,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { collectTextMessages, extractText } from "./shared/message";
+import { lastAssistantText, textMessages } from "./shared/message";
 
 type Block = { lang?: string; code: string };
 
@@ -64,26 +64,15 @@ const previewText = (text: string): string => {
 const lineCount = (text: string): number =>
   text.length === 0 ? 1 : text.split("\n").length;
 
-const lastAssistantText = (ctx: ExtensionContext): string | undefined => {
-  const { messages } = collectTextMessages(ctx.sessionManager.getBranch());
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role !== "assistant") continue;
-    const text = extractText(messages[i].content).trim();
-    if (text) return text;
-  }
-};
-
-const formatSession = (ctx: ExtensionContext): string => {
+const formatSession = (
+  ctx: ExtensionContext,
+): { text: string; turns: number } => {
   const lines: string[] = [];
-  const name = ctx.sessionManager.getSessionName?.();
+  const name = ctx.sessionManager.getSessionName();
   if (name) lines.push(`# ${name}`, "");
-  const { messages } = collectTextMessages(ctx.sessionManager.getBranch());
-  for (const m of messages) {
-    const text = extractText(m.content).trim();
-    if (!text) continue;
-    lines.push(`## ${m.role}`, "", text, "");
-  }
-  return lines.join("\n").trimEnd() + "\n";
+  const messages = textMessages(ctx.sessionManager.getBranch());
+  for (const m of messages) lines.push(`## ${m.role}`, "", m.text, "");
+  return { text: lines.join("\n").trimEnd() + "\n", turns: messages.length };
 };
 
 const copyWithNotify = async (
@@ -100,7 +89,7 @@ const copyWithNotify = async (
 };
 
 const copyBlocks = async (ctx: ExtensionContext): Promise<void> => {
-  const text = lastAssistantText(ctx);
+  const text = lastAssistantText(ctx.sessionManager.getBranch());
   if (!text) {
     ctx.ui.notify("No assistant messages yet", "warning");
     return;
@@ -149,15 +138,15 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("copy-all", {
     description: "Copy entire session history (user + assistant) as markdown",
     handler: async (_args, ctx) => {
-      const text = formatSession(ctx);
-      if (!text.trim()) {
+      const { text, turns } = formatSession(ctx);
+      if (turns === 0) {
         ctx.ui.notify("Session is empty", "warning");
         return;
       }
       await copyWithNotify(
         ctx,
         text,
-        `session (${(text.match(/^## /gm) ?? []).length} turns, ${text.length} chars)`,
+        `session (${turns} turns, ${text.length} chars)`,
       );
     },
   });

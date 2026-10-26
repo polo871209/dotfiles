@@ -1,34 +1,26 @@
-// pi exposes no public "continue" from idle (every public path appends a
-// message), so this reaches the live AgentSession. Two internals remain:
-// the session lookup below and AgentSession._startRun.
 import { AgentSession } from "@earendil-works/pi-coding-agent";
 import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { surviveReload } from "./shared/reload";
 
 type AgentMessage = AgentSession["agent"]["state"]["messages"][number];
 
-// Pi's ExtensionContext has no session handle and /reload re-imports this file, so the map lives on globalThis, keyed by ctx.sessionManager.
-function sessionRegistry(): WeakMap<object, AgentSession> {
-  const key = Symbol.for("dotfiles.pi.go.sessions");
-  const g = globalThis as Record<symbol, WeakMap<object, AgentSession>>;
-  if (g[key]) return g[key];
-  const sessions = new WeakMap<object, AgentSession>();
-  g[key] = sessions;
+// Pi's ExtensionContext has no session handle, so this patches AgentSession once per process to map each sessionManager to its session.
+const sessions = surviveReload("dotfiles.pi.go.sessions", () => {
+  const map = new WeakMap<object, AgentSession>();
   const proto = AgentSession.prototype as unknown as Record<string, unknown>;
   for (const name of ["bindExtensions", "subscribe", "prompt"]) {
     const orig = proto[name];
     if (typeof orig !== "function") continue;
     proto[name] = function (this: AgentSession, ...args: unknown[]) {
-      sessions.set(this.sessionManager, this);
+      map.set(this.sessionManager, this);
       return (orig as (...a: unknown[]) => unknown).apply(this, args);
     };
   }
-  return sessions;
-}
-
-const sessions = sessionRegistry();
+  return map;
+});
 
 type GoMessage = Extract<AgentMessage, { role: "custom" }>;
 type StartRun = (trigger: {

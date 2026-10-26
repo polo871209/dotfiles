@@ -41,12 +41,6 @@ local function file_mtime(file)
     return st and st.mtime and (st.mtime.sec * 1e9 + st.mtime.nsec) or 0
 end
 
--- open_buf silently creates an empty scratch buffer for a missing path
--- (`:edit` doesn't error), which then surfaces as a confusing "no LSP
--- attached" instead of "file not found". Callers taking a single `file`
--- check this first.
-local function file_exists(file) return vim.uv.fs_stat(file) ~= nil end
-
 local function open_buf_nowait(file)
     local existing = bufs[file]
     local current_mtime = file_mtime(file)
@@ -66,32 +60,32 @@ local function open_buf_nowait(file)
 end
 
 local function open_buf(file)
+    if not vim.uv.fs_stat(file) then return nil, 'file not found: ' .. file end
     local b = open_buf_nowait(file)
     vim.wait(ATTACH_TIMEOUT_MS, function() return #vim.lsp.get_clients { bufnr = b } > 0 end, 50)
     wait_progress_done(PROGRESS_TIMEOUT_MS)
     return b
 end
 
-local function find_col(bufnr, line_1idx, symbol)
+local function find_byte_col(line, symbol)
     if not symbol or symbol == '' then
-        local line = vim.api.nvim_buf_get_lines(bufnr, line_1idx - 1, line_1idx, false)[1] or ''
         local s = line:find '%S'
         return s and (s - 1) or 0
     end
-    local line = vim.api.nvim_buf_get_lines(bufnr, line_1idx - 1, line_1idx, false)[1] or ''
-    local s = line:find(symbol, 1, true)
-    if not s then s = line:lower():find(symbol:lower(), 1, true) end
-    return s and (s - 1) or 0
+    local s = line:find(symbol, 1, true) or line:lower():find(symbol:lower(), 1, true)
+    return s and (s - 1)
 end
 
 local function make_position_params(bufnr, line_1idx, symbol)
     if #vim.lsp.get_clients { bufnr = bufnr } == 0 then vim.wait(1500, function() return #vim.lsp.get_clients { bufnr = bufnr } > 0 end, 50) end
     local clients = vim.lsp.get_clients { bufnr = bufnr }
     if #clients == 0 then return nil, 'no LSP attached' end
-    local col = find_col(bufnr, line_1idx, symbol)
+    local line = vim.api.nvim_buf_get_lines(bufnr, line_1idx - 1, line_1idx, false)[1] or ''
+    local byte_col = find_byte_col(line, symbol)
+    if not byte_col then return nil, ('symbol %q not found on line %d'):format(symbol, line_1idx) end
     return {
         textDocument = vim.lsp.util.make_text_document_params(bufnr),
-        position = { line = line_1idx - 1, character = col },
+        position = { line = line_1idx - 1, character = vim.str_utfindex(line, clients[1].offset_encoding, byte_col, false) },
     }
 end
 
@@ -118,8 +112,8 @@ local function read_line(file, line_1idx)
 end
 
 function M.hover(file, line, symbol)
-    if not file_exists(file) then return { ok = false, error = 'file not found: ' .. file } end
-    local b = open_buf(file)
+    local b, missing = open_buf(file)
+    if not b then return { ok = false, error = missing } end
     local params, err = make_position_params(b, line, symbol)
     if not params then return { ok = false, error = err } end
     local ok, res = pcall(vim.lsp.buf_request_sync, b, 'textDocument/hover', params, REQ_TIMEOUT_MS)
@@ -166,8 +160,8 @@ local function normalize_locations(res)
 end
 
 function M.definition(file, line, symbol)
-    if not file_exists(file) then return { ok = false, error = 'file not found: ' .. file } end
-    local b = open_buf(file)
+    local b, missing = open_buf(file)
+    if not b then return { ok = false, error = missing } end
     local params, err = make_position_params(b, line, symbol)
     if not params then return { ok = false, error = err } end
     local ok, res = pcall(vim.lsp.buf_request_sync, b, 'textDocument/definition', params, REQ_TIMEOUT_MS)
@@ -176,8 +170,8 @@ function M.definition(file, line, symbol)
 end
 
 function M.references(file, line, symbol)
-    if not file_exists(file) then return { ok = false, error = 'file not found: ' .. file } end
-    local b = open_buf(file)
+    local b, missing = open_buf(file)
+    if not b then return { ok = false, error = missing } end
     local params, err = make_position_params(b, line, symbol)
     if not params then return { ok = false, error = err } end
     params.context = { includeDeclaration = true }
@@ -193,8 +187,8 @@ function M.references(file, line, symbol)
 end
 
 local function loc_request(file, line, symbol, method)
-    if not file_exists(file) then return { ok = false, error = 'file not found: ' .. file } end
-    local b = open_buf(file)
+    local b, missing = open_buf(file)
+    if not b then return { ok = false, error = missing } end
     local params, err = make_position_params(b, line, symbol)
     if not params then return { ok = false, error = err } end
     local ok, res = pcall(vim.lsp.buf_request_sync, b, method, params, REQ_TIMEOUT_MS)
@@ -242,9 +236,9 @@ local function edits_for_uri(edit, uri)
 end
 
 function M.rename(file, line, symbol, new_name)
-    if not file_exists(file) then return { ok = false, error = 'file not found: ' .. file } end
     if not new_name or new_name == '' then return { ok = false, error = 'new_name is required' } end
-    local b = open_buf(file)
+    local b, missing = open_buf(file)
+    if not b then return { ok = false, error = missing } end
     local params, err = make_position_params(b, line, symbol)
     if not params then return { ok = false, error = err } end
     params.newName = new_name
@@ -340,8 +334,8 @@ local function flatten_doc_symbols(items, out, depth)
 end
 
 function M.document_symbols(file)
-    if not file_exists(file) then return { ok = false, error = 'file not found: ' .. file } end
-    local b = open_buf(file)
+    local b, missing = open_buf(file)
+    if not b then return { ok = false, error = missing } end
     if #vim.lsp.get_clients { bufnr = b } == 0 then return { ok = false, error = 'no LSP attached' } end
     local params = { textDocument = vim.lsp.util.make_text_document_params(b) }
     local ok, res = pcall(vim.lsp.buf_request_sync, b, 'textDocument/documentSymbol', params, REQ_TIMEOUT_MS)
@@ -353,13 +347,11 @@ function M.document_symbols(file)
     return { ok = true, symbols = out }
 end
 
-_G.PiLspShared = _G.PiLspShared or {}
-
-function _G.PiLspShared.run_fast_lint(bufnr)
+local function run_fast_lint(bufnr)
     pcall(function() require('linting').run(bufnr, false) end)
 end
 
-function _G.PiLspShared.pull_diagnostics(bufnr)
+local function pull_diagnostics(bufnr)
     local method = vim.lsp.protocol.Methods.textDocument_diagnostic
     local clients = vim.lsp.get_clients { bufnr = bufnr, method = method }
     for _, client in ipairs(clients) do
@@ -387,8 +379,8 @@ function M.diagnostics(files)
     end, 50)
     wait_progress_done(PROGRESS_TIMEOUT_MS)
     for _, b in ipairs(opened) do
-        _G.PiLspShared.pull_diagnostics(b)
-        _G.PiLspShared.run_fast_lint(b)
+        pull_diagnostics(b)
+        run_fast_lint(b)
     end
     local function total_diags()
         local n = 0

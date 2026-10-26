@@ -10,6 +10,7 @@ export default function (pi: ExtensionAPI) {
 
   let runStartedAt: number | null = null;
   let lastActivityAt = 0;
+  let runningTools = 0;
   let prompting = false;
   let assertion: ChildProcess | null = null;
   let renewal: ReturnType<typeof setInterval> | null = null;
@@ -19,7 +20,7 @@ export default function (pi: ExtensionAPI) {
       ? 0
       : Math.min(
           runStartedAt + MAX_HOLD_MS,
-          lastActivityAt + QUIET_LIMIT_MS,
+          runningTools > 0 ? Infinity : lastActivityAt + QUIET_LIMIT_MS,
           Date.now() + ASSERTION_TTL_MS,
         );
 
@@ -61,6 +62,7 @@ export default function (pi: ExtensionAPI) {
 
   const endRun = (): void => {
     runStartedAt = null;
+    runningTools = 0;
     prompting = false;
     release();
   };
@@ -74,9 +76,15 @@ export default function (pi: ExtensionAPI) {
   pi.on("message_start", async () => onActivity());
   pi.on("message_update", async () => onActivity());
   pi.on("message_end", async () => onActivity());
-  pi.on("tool_execution_start", async () => onActivity());
   pi.on("tool_execution_update", async () => onActivity());
-  pi.on("tool_execution_end", async () => onActivity());
+  pi.on("tool_execution_start", async () => {
+    runningTools++;
+    onActivity();
+  });
+  pi.on("tool_execution_end", async () => {
+    runningTools = Math.max(0, runningTools - 1);
+    onActivity();
+  });
   pi.on("ui_prompt_start", async () => {
     prompting = true;
     release();

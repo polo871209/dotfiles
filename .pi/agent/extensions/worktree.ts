@@ -371,7 +371,15 @@ async function moveSessionInPlace(
   continuation?: string,
 ): Promise<void> {
   await ctx.waitForIdle();
-  const sessionFile = forkSession(ctx, target);
+  await switchToSession(ctx, forkSession(ctx, target), notice, continuation);
+}
+
+async function switchToSession(
+  ctx: ExtensionCommandContext,
+  sessionFile: string,
+  notice: string,
+  continuation?: string,
+): Promise<void> {
   await ctx.switchSession(sessionFile, {
     withSession: async (next) => {
       next.ui.notify(notice, "info");
@@ -390,11 +398,12 @@ async function finishWorktree(
 ): Promise<void> {
   await ctx.waitForIdle();
   const { root, path, branch } = await finishableWorktree(ctx.cwd);
+  const sessionFile = forkSession(ctx, root);
   await clearTabLabel(branch);
   await removeWorktree(root, path);
-  await moveSessionInPlace(
+  await switchToSession(
     ctx,
-    root,
+    sessionFile,
     `Removed worktree ${path}. Branch ${branch} is kept. Session moved to ${root}`,
     continuation,
   );
@@ -668,7 +677,7 @@ export default function (pi: ExtensionAPI) {
           session,
           branch,
           wt.path,
-          ["pi", task],
+          ["pi", "--", task.startsWith("@") ? ` ${task}` : task],
           signal,
         );
         return reply(

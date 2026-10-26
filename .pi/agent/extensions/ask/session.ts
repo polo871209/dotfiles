@@ -223,8 +223,9 @@ function routeKey(
       };
     }
     if (kb.matches(data, KEYBIND_CONFIRM)) {
-      return state.submitChoiceIndex === 1
-        ? { kind: "cancel" }
+      if (state.submitChoiceIndex === 1) return { kind: "cancel" };
+      return state.answers.size < runtime.questions.length
+        ? { kind: "ignore" }
         : { kind: "submit" };
     }
     return { kind: "ignore" };

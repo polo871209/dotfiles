@@ -77,15 +77,15 @@ export function registerSkillToggle(
       await ensureClone();
       return "cloned";
     }
+    const before = await git(["rev-parse", "HEAD"], cloneDir);
     try {
-      return (await git(["pull", "--ff-only"], cloneDir)).includes(
-        "Already up to date",
-      )
-        ? "up to date"
-        : "updated";
-    } catch {
-      return "offline — using cached copy";
+      await git(["pull", "--ff-only"], cloneDir);
+    } catch (err) {
+      return `pull failed, using cached copy: ${(err as Error).message.split("\n")[0]}`;
     }
+    return (await git(["rev-parse", "HEAD"], cloneDir)) === before
+      ? "up to date"
+      : "updated";
   };
 
   pi.on("resources_discover", async () => {

@@ -3,10 +3,12 @@ import {
   type ExtensionAPI,
   type ExtensionContext,
   type KeybindingsManager,
+  SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import type { Theme as PiTheme } from "@earendil-works/pi-coding-agent";
 import {
   Editor,
+  Marked,
   type Component,
   type EditorTheme,
   type OverlayHandle,
@@ -17,6 +19,7 @@ import {
   truncateToWidth,
   visibleWidth,
 } from "@earendil-works/pi-tui";
+import { diagramKind, type MermaidArt, render, type Span } from "grok-mermaid";
 
 const SGR_RESET = "\x1b[0m";
 
@@ -421,9 +424,143 @@ const installFooter = (pi: ExtensionAPI) => {
   });
 };
 
+const MIN_LABEL_WIDTH = 6;
+
+const shortenLabel = (label: string, max: number) => {
+  const text = label.replace(/<br\s*\/?>/gi, " ").trim();
+  const chars = [...text];
+  return chars.length <= max ? text : `${chars.slice(0, max - 1).join("")}…`;
+};
+
+const PARTICIPANT = /^(\s*(?:participant|actor)\s+\S+\s+as\s+)(.+)$/;
+
+const sequenceLabels = (src: string) =>
+  src.split("\n").flatMap((line) => {
+    const participant = PARTICIPANT.exec(line);
+    if (participant) return [participant[2]];
+    const colon = line.indexOf(":");
+    return colon === -1 ? [] : [line.slice(colon + 1)];
+  });
+
+const shortenSequence = (src: string, max: number) =>
+  src
+    .split("\n")
+    .map((line) => {
+      const participant = PARTICIPANT.exec(line);
+      if (participant)
+        return `${participant[1]}${shortenLabel(participant[2], max)}`;
+      const colon = line.indexOf(":");
+      return colon === -1
+        ? line
+        : `${line.slice(0, colon)}: ${shortenLabel(line.slice(colon + 1), max)}`;
+    })
+    .join("\n");
+
+const fitMermaid = (src: string, width: number): MermaidArt | undefined => {
+  const fitting = (candidate: string) => {
+    const art = render(candidate);
+    return art && art.width <= width ? art : undefined;
+  };
+  const kind = diagramKind(src);
+  if (kind === "flowchart")
+    return fitting(
+      src.replace(/^(\s*(?:flowchart|graph)\s+)(?:LR|RL)\b/m, "$1TD"),
+    );
+  if (kind !== "sequence") return undefined;
+  let best: MermaidArt | undefined;
+  let low = MIN_LABEL_WIDTH;
+  let high = Math.max(...sequenceLabels(src).map((l) => [...l].length));
+  while (low <= high) {
+    const max = Math.floor((low + high) / 2);
+    const art = fitting(shortenSequence(src, max));
+    if (art) {
+      best = art;
+      low = max + 1;
+    } else {
+      high = max - 1;
+    }
+  }
+  return best;
+};
+
+const codeSpan = (line: string) => {
+  const content = line || "\u00a0";
+  const fence = "`".repeat(
+    Math.max(0, ...Array.from(content.matchAll(/`+/g), (m) => m[0].length)) + 1,
+  );
+  const pad = content.startsWith("`") || content.endsWith("`") ? " " : "";
+  return `${fence}${pad}${content}${pad}${fence}`;
+};
+
+const styleSpan = (span: Span, theme: PiTheme) => {
+  switch (span.cls) {
+    case "border":
+      return theme.fg("borderMuted", span.text);
+    case "text":
+      return theme.fg("text", span.text);
+    case "edge":
+      return theme.fg("accent", span.text);
+    case "edgeLabel":
+      return theme.fg("muted", span.text);
+    case "title":
+      return theme.fg("accent", theme.bold(span.text));
+    case "none":
+      return span.text;
+  }
+};
+
+// Pi's built-in Mermaid transformer leaves a diagram wider than the terminal as source, so redraw it narrower.
+const installWideMermaid = (pi: ExtensionAPI) => {
+  const parser = new Marked();
+  let theme: PiTheme | undefined;
+  let mode = "off";
+
+  pi.on("session_start", async (_event, ctx) => {
+    if (ctx.mode !== "tui") return;
+    theme = ctx.ui.theme;
+    mode = SettingsManager.create(ctx.cwd).getMermaidRenderingMode();
+  });
+
+  pi.registerMarkdownTransformer((markdown, context) => {
+    if (
+      !theme ||
+      mode === "off" ||
+      context.messageType === "assistant-thinking" ||
+      (context.isStreaming && mode !== "streaming")
+    )
+      return markdown;
+    const activeTheme = theme;
+    return parser
+      .lexer(markdown)
+      .map((token) => {
+        if (
+          token.type !== "code" ||
+          token.lang?.trim().split(/\s+/, 1)[0]?.toLowerCase() !== "mermaid"
+        )
+          return token.raw;
+        const art = render(token.text);
+        if (
+          !art ||
+          art.width <= context.availableWidth ||
+          (!context.isStreaming && art.warnings.length > 0)
+        )
+          return token.raw;
+        const fitted = fitMermaid(token.text, context.availableWidth);
+        if (!fitted) return token.raw;
+        return `${fitted.styled
+          .map((row) =>
+            codeSpan(row.map((span) => styleSpan(span, activeTheme)).join("")),
+          )
+          .join("  \n")}\n`;
+      })
+      .join("");
+  });
+};
+
 removeLegacyPrototypePatch();
 
 export default function (pi: ExtensionAPI) {
+  installWideMermaid(pi);
   installInputColor(pi);
   installFooter(pi);
   installWorking(pi);

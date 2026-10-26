@@ -129,29 +129,25 @@ local function root_status()
     return { state = 'starting' }
 end
 
--- The child writes its result file from its own agent_settled handler, which can run after pi reports done.
-local function settled_output(state)
-    for _ = 1, state == 'done' and 20 or 1 do
-        local text = take_file(args.result_file)
-        if text then return text end
-        rex.sleep(0.1)
-    end
-    return screen()
+local function take_result()
+    local text = take_file(args.result_file)
+    return text and rex.json.decode(text)
 end
 
 local function watch()
     local deadline = os.time() + args.timeout
-    local worked, last
     while true do
         local record = root_status()
-        if not record then return { state = 'closed', output = take_file(args.result_file) } end
-        if record.state ~= last then
-            last = record.state
-            print(rex.json.encode { progress = record.msg and record.state .. ': ' .. record.msg or record.state })
+        if not record then
+            local result = take_result()
+            return { state = 'closed', output = result and result.output }
         end
-        worked = worked or record.state == 'working'
-        local state = (worked and record.state == 'idle') and 'done' or record.state
-        if state == 'done' or state == 'error' or state == 'blocked' then return { state = state, msg = record.msg, output = settled_output(state) } end
+        if record.state == 'blocked' then return { state = 'blocked', msg = record.msg, output = screen() } end
+        local result = take_result()
+        if result then
+            if (result.output or '') == '' then result.output = screen() end
+            return result
+        end
         local remaining = deadline - os.time()
         if remaining <= 0 then return { state = 'timeout' } end
         rex.wait('block_event', function(ev) return ev.block_id == args.block_id end, math.min(remaining, 2))

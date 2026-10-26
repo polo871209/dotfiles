@@ -286,6 +286,7 @@ export default function (pi: ExtensionAPI) {
           return;
         }
         pi.setSessionName(name);
+        pi.appendEntry<AutoRenameEntry>(ENTRY_TYPE, { turns: userTurns, name });
         ctx.ui.notify(`Session named: ${name}`, "info");
       } finally {
         if (sessionFile) inFlight.delete(sessionFile);

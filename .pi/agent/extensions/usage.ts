@@ -10,19 +10,23 @@ import {
 async function oauthToken(
   ctx: ExtensionContext,
   provider: string,
-): Promise<{ token: string } | string> {
+): Promise<string> {
   const cred = readStoredCredential(provider);
-  if (!cred || cred.type !== "oauth") return "not logged in";
+  if (!cred) throw new Error("not logged in");
+  if (cred.type !== "oauth")
+    throw new Error("needs a Claude subscription login, not an API key");
   // getProviderAuth, not getApiKeyForProvider: the latter swallows the
   // refresh error that tells the user what to do.
   let token: string | undefined;
   try {
     token = (await ctx.modelRegistry.getProviderAuth(provider))?.auth.apiKey;
   } catch (e) {
-    return `token refresh failed: ${e instanceof Error ? e.message : String(e)}`;
+    throw new Error(
+      `token refresh failed: ${e instanceof Error ? e.message : String(e)}`,
+    );
   }
-  if (!token) return "token refresh failed";
-  return { token };
+  if (!token) throw new Error("token refresh failed");
+  return token;
 }
 
 interface ClaudeBucket {
@@ -56,46 +60,43 @@ function bar(pct: number, theme: Theme): string {
 function fmtLine(
   name: string,
   pct: number,
-  resetsAt: Date | string,
+  resetsAt: Date,
   theme: Theme,
 ): string {
-  return `${name}\n${bar(pct, theme)} ${`${pct.toFixed(0)}%`.padStart(4)} used  (resets ${
-    resetsAt instanceof Date
-      ? Number.isNaN(resetsAt.getTime())
-        ? String(resetsAt)
-        : resetsAt.toLocaleString()
-      : resetsAt
-  })`;
+  return `${name}\n${bar(pct, theme)} ${`${pct.toFixed(0)}%`.padStart(4)} used  (resets ${resetsAt.toLocaleString()})`;
 }
 
 async function claudeUsageLines(ctx: ExtensionContext): Promise<string[]> {
-  const auth = await oauthToken(ctx, "anthropic");
-  if (typeof auth === "string") return [auth];
+  const token = await oauthToken(ctx, "anthropic");
 
   let res: Response;
   try {
     res = await fetch("https://api.anthropic.com/api/oauth/usage", {
       headers: {
-        Authorization: `Bearer ${auth.token}`,
+        Authorization: `Bearer ${token}`,
         "anthropic-beta": "oauth-2025-04-20",
         "User-Agent": "pi-coding-agent-usage-ext/0.1",
       },
       signal: AbortSignal.timeout(10_000),
     });
   } catch (e) {
-    return [`request failed: ${e instanceof Error ? e.message : String(e)}`];
+    throw new Error(
+      `request failed: ${e instanceof Error ? e.message : String(e)}`,
+    );
   }
   if (!res.ok) {
-    return [
+    throw new Error(
       `endpoint returned HTTP ${res.status} (undocumented API; may be rate-limited)`,
-    ];
+    );
   }
 
   let data: ClaudeUsageResponse;
   try {
     data = (await res.json()) as ClaudeUsageResponse;
   } catch {
-    return ["endpoint returned a body that is not JSON (undocumented API)"];
+    throw new Error(
+      "endpoint returned a body that is not JSON (undocumented API)",
+    );
   }
   const bucket = (name: string, b: ClaudeBucket | null | undefined) =>
     b
@@ -122,10 +123,14 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("usage", {
     description: "Show Claude Pro/Max subscription usage (5h + weekly quotas)",
     handler: async (_args, ctx) => {
-      ctx.ui.notify(
-        `Claude\n${(await claudeUsageLines(ctx)).join("\n")}`,
-        "info",
-      );
+      try {
+        ctx.ui.notify(
+          `Claude\n${(await claudeUsageLines(ctx)).join("\n")}`,
+          "info",
+        );
+      } catch (e) {
+        ctx.ui.notify(`Claude usage: ${(e as Error).message}`, "error");
+      }
     },
   });
 }

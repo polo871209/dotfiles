@@ -90,20 +90,23 @@ export default function (pi: ExtensionAPI) {
     (entry, _options, theme) => entry.data && card(entry.data, theme),
   );
 
-  pi.on("session_shutdown", () => running?.abort());
+  pi.on("session_shutdown", () => {
+    running?.abort();
+    running = undefined;
+  });
 
   const run = async (ctx: ExtensionContext, question: string) => {
     running?.abort();
     const controller = new AbortController();
     running = controller;
-    const show = (answer: string) =>
+    const show = (answer: string) => {
+      if (controller.signal.aborted) return;
       ctx.ui.setWidget(
         "btw",
         (_tui, theme) => card({ question, answer }, theme),
-        {
-          placement: "aboveEditor",
-        },
+        { placement: "aboveEditor" },
       );
+    };
     show("…");
     try {
       const answer = await ask(ctx, question, controller.signal, show);

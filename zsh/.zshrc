@@ -77,16 +77,27 @@ bindkey -M vicmd 'v' edit-command-line
 
 # Aliases
 function cafe {
-  if (( $# == 0 )); then
-    caffeinate -id weathr --hide-location
-    return
-  fi
-  if [[ $1 != <1-> ]]; then
+  if (( $# > 1 )) || [[ $# == 1 && $1 != <1-> ]]; then
     print -u2 "usage: cafe [minutes]"
     return 1
   fi
-  # weathr only restores the terminal on SIGINT, and caffeinate ignores -t when it runs a command.
-  caffeinate -id sh -c '(sleep "$1"; kill -INT $$) & exec weathr --hide-location' sh $(( $1 * 60 ))
+  # Rex drops frames and freezes at pixel ratio 1, but keeps 60 fps at 0.75.
+  local garden=(opengarden --pixel-ratio 0.75)
+  # caffeinate ignores -t when it runs a command.
+  (( $# )) && garden=(sh -c '(sleep "$1"; kill -INT $$) & shift; exec "$@"' sh $(( $1 * 60 )) $garden)
+  garden=(caffeinate -id $garden)
+  if [[ -z $REX_BLOCK ]]; then
+    $garden
+    return
+  fi
+  local zoomed=$(rex session inspect "$REX_SESSION" --json | jq -r --arg block "$REX_BLOCK" \
+    '.windows[] | select(any(.layers[].blocks[]; .block_id == $block)) | .zoomed_block_id // empty')
+  rex zoom --on
+  {
+    $garden
+  } always {
+    [[ $zoomed == $REX_BLOCK ]] || rex zoom --off
+  }
 }
 alias gc="gcloud config configurations activate"
 alias k="kubectl"

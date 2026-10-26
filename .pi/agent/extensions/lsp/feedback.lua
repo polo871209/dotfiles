@@ -70,7 +70,13 @@ local function try_format(bufnr, budget_ms)
     return ok and autoformat.format(bufnr, budget_ms)
 end
 
-local function pull_diagnostics(bufnr) _G.PiLspShared.pull_diagnostics(bufnr) end
+local function pull_diagnostics(bufnr)
+    local method = vim.lsp.protocol.Methods.textDocument_diagnostic
+    for _, client in ipairs(vim.lsp.get_clients { bufnr = bufnr, method = method }) do
+        local params = { textDocument = vim.lsp.util.make_text_document_params(bufnr) }
+        pcall(client.request, client, method, params, nil, bufnr)
+    end
+end
 
 local function touch(bufnr)
     if _G.PiDaemon and _G.PiDaemon.touch then _G.PiDaemon.touch(bufnr) end
@@ -135,7 +141,7 @@ function M.run(files)
             if fixed or refmt then pcall(function()
                 vim.api.nvim_buf_call(bufnr, function() vim.cmd 'silent! write' end)
             end) end
-            if refmt then table.insert(formatted, vim.api.nvim_buf_get_name(bufnr)) end
+            if fixed or refmt then table.insert(formatted, vim.api.nvim_buf_get_name(bufnr)) end
 
             pull_diagnostics(bufnr)
         end

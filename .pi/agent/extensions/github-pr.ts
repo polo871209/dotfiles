@@ -19,12 +19,10 @@ function isBot(login: string, typename?: string): boolean {
   if (l.endsWith("[bot]")) return true;
   if (
     [
-      "coderabbitai",
       "dependabot",
       "github-actions",
       "codecov",
       "sonarcloud",
-      "sonarqube",
     ].includes(l)
   )
     return true;
@@ -38,17 +36,14 @@ function stripHtmlComments(s: string): string {
     .trim();
 }
 
-function cleanBody(body: string): string {
-  let b = body.replace(
-    /<!--\s*This is an auto-generated comment[\s\S]*?end of auto-generated comment[\s\S]*?-->/gi,
-    "",
+function cleanBody(body: string, maxBytes: number): string {
+  const b = stripHtmlComments(
+    body.replace(
+      /<!--\s*This is an auto-generated comment[\s\S]*?end of auto-generated comment[\s\S]*?-->/gi,
+      "",
+    ),
   );
-  b = b.replace(/<!--[\s\S]*?-->/g, "");
-  b = b.replace(/\n{3,}/g, "\n\n").trim();
-  const r = truncateHead(b, {
-    maxBytes: 6 * 1024,
-    maxLines: NO_LINE_CAP,
-  });
+  const r = truncateHead(b, { maxBytes, maxLines: NO_LINE_CAP });
   return r.truncated ? `${r.content}\n…[body truncated]` : r.content;
 }
 
@@ -122,9 +117,9 @@ async function resolveThreads(
       "graphql",
       "-f",
       `query=${GRAPHQL}`,
-      "-F",
+      "-f",
       `owner=${owner}`,
-      "-F",
+      "-f",
       `repo=${repo}`,
       "-F",
       `number=${num}`,
@@ -368,9 +363,9 @@ export default function (pi: ExtensionAPI) {
                 "graphql",
                 "-f",
                 `query=${GRAPHQL}`,
-                "-F",
+                "-f",
                 `owner=${glOwner}`,
-                "-F",
+                "-f",
                 `repo=${glRepo}`,
                 "-F",
                 `number=${num}`,
@@ -442,7 +437,7 @@ export default function (pi: ExtensionAPI) {
               : ""),
         );
 
-        const body = cleanBody(m.body || "");
+        const body = cleanBody(m.body || "", 6 * 1024);
         if (body) out.push(`\n## Description\n${body}`);
       }
 
@@ -514,7 +509,9 @@ export default function (pi: ExtensionAPI) {
           if (comments.length) {
             out.push(`\n## Comments`);
             for (const c of comments) {
-              out.push(`**@${c.author?.login ?? "?"}**: ${c.body.trim()}`);
+              out.push(
+                `**@${c.author?.login ?? "?"}**: ${cleanBody(c.body, 2 * 1024)}`,
+              );
             }
           }
           const unfetchedC = pr.comments.totalCount - pr.comments.nodes.length;
@@ -536,7 +533,7 @@ export default function (pi: ExtensionAPI) {
               );
               for (const c of t.comments.nodes) {
                 out.push(
-                  `- **@${c.author?.login ?? "?"}**: ${stripHtmlComments(c.body)}`,
+                  `- **@${c.author?.login ?? "?"}**: ${cleanBody(c.body, 2 * 1024)}`,
                 );
               }
             }
@@ -583,6 +580,7 @@ export default function (pi: ExtensionAPI) {
           }`,
         );
       }
+      if (out.length === 0) out.push(`No ${select} for PR #${m.number}.`);
       return {
         content: [{ type: "text" as const, text: out.join("\n") }],
         details: {

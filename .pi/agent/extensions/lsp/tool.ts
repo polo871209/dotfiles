@@ -1,10 +1,7 @@
 import * as fs from "node:fs";
 import { Type } from "typebox";
 import {
-  DEFAULT_MAX_BYTES,
-  DEFAULT_MAX_LINES,
   defineTool,
-  truncateHead,
   withFileMutationQueue,
   type AgentToolResult,
 } from "@earendil-works/pi-coding-agent";
@@ -128,16 +125,6 @@ const err = (text: string): AgentToolResult<unknown> => ({
   isError: true,
 });
 
-const cap = (text: string): string => {
-  const t = truncateHead(text, {
-    maxLines: DEFAULT_MAX_LINES,
-    maxBytes: DEFAULT_MAX_BYTES,
-  });
-  return t.truncated
-    ? `${t.content}\n\n[truncated: shown ${t.outputLines}/${t.totalLines} lines]`
-    : t.content;
-};
-
 interface DriverLocResult extends DriverErr {
   locations?: LspLocation[];
 }
@@ -205,15 +192,7 @@ async function runAnchor(
 
   return withDriver<DriverLocResult>(
     ctx,
-    (
-      {
-        hover: "hover",
-        definition: "definition",
-        references: "references",
-        implementation: "implementation",
-        type_definition: "type_definition",
-      } satisfies Record<AnchorAction, string>
-    )[action],
+    action,
     [file, params.line, params.symbol ?? ""],
     signal,
     onUpdate,
@@ -268,7 +247,7 @@ async function runDocumentSymbols(
           `${"  ".repeat(s.depth + 1)}${s.kind} ${s.name}${s.detail ? `  ${s.detail}` : ""}  :${s.line}`,
         );
       }
-      return { text: cap(lines.join("\n")), details: { count: syms.length } };
+      return { text: capText(lines.join("\n")).text, details: { count: syms.length } };
     },
   );
 }
@@ -303,7 +282,7 @@ async function runRename(
           lines.push(`  ${displayPath(f.file, cwd)}  (${f.edits} edit(s))`);
         }
         return {
-          text: cap(lines.join("\n")),
+          text: capText(lines.join("\n")).text,
           details: { count: res.edit_count ?? 0, files: files.length },
         };
       },
@@ -387,7 +366,7 @@ async function runDiagnostics(
       ];
       for (const d of diags) lines.push(formatDiagLine(d, cwd));
       return {
-        text: cap(`${workspaceNote}${lines.join("\n")}`),
+        text: capText(`${workspaceNote}${lines.join("\n")}`).text,
         details: { count: diags.length, errors, warns },
       };
     },

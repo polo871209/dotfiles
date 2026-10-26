@@ -1,12 +1,20 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { homedir } from "node:os";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 const PREVIEW_CHARS = 12_000;
 const MESSAGE_TYPE = "folder-context";
+const CONTEXT_FILE_NAMES = [
+  "AGENTS.override.md",
+  "AGENTS.md",
+  "AGENTS.MD",
+  "CLAUDE.md",
+  "CLAUDE.MD",
+];
 
 interface InjectedDetails {
   path: string;
@@ -92,7 +100,10 @@ export default function (pi: ExtensionAPI) {
     const rawPath = (event.input as { path?: unknown }).path;
     if (typeof rawPath !== "string" || rawPath === "") return;
 
-    const absPath = isAbsolute(rawPath) ? rawPath : resolve(ctx.cwd, rawPath);
+    const absPath = resolve(
+      ctx.cwd,
+      rawPath.replace(/^@/, "").replace(/^~(?=$|\/)/, homedir()),
+    );
 
     const rel = relative(ctx.cwd, absPath);
     if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return;
@@ -115,8 +126,10 @@ export default function (pi: ExtensionAPI) {
     ancestors.reverse();
 
     for (const d of ancestors) {
-      const rawCandidate = resolve(d, "AGENTS.md");
-      if (!existsSync(rawCandidate)) continue;
+      const rawCandidate = CONTEXT_FILE_NAMES.map((name) => join(d, name)).find(
+        existsSync,
+      );
+      if (!rawCandidate) continue;
       const candidate = canonical(rawCandidate);
 
       try {

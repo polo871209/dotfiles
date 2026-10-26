@@ -1,6 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import { collectTextMessages, extractText } from "../shared/message";
+import { lastAssistantText } from "../shared/message";
 import { surviveReload } from "../shared/reload";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -56,7 +56,6 @@ interface Progress {
   status: "running" | "done" | "failed";
   startedAt: number;
   durationMs: number;
-  lastMessage: string;
   output: string;
   error?: string;
 }
@@ -241,7 +240,7 @@ const REX_SCRIPT = path.join(import.meta.dirname, "rex.lua");
 
 function rexScript<T>(
   args: Record<string, unknown>,
-  options: { signal?: AbortSignal; onProgress?: (status: string) => void } = {},
+  options: { signal?: AbortSignal } = {},
 ): Promise<T> {
   return new Promise((resolve, reject) => {
     const child = spawn(
@@ -253,10 +252,12 @@ function rexScript<T>(
     let stderr = "";
     createInterface({ input: child.stdout }).on("line", (line) => {
       if (!line.trim()) return;
-      const value = JSON.parse(line) as { progress?: string };
-      if (typeof value?.progress === "string")
-        options.onProgress?.(value.progress);
-      else result = value;
+      try {
+        result = JSON.parse(line);
+      } catch {
+        child.kill();
+        reject(new Error(`rex do printed non-JSON output: ${line}`));
+      }
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
@@ -361,29 +362,6 @@ const fitLine = (text: string, maxWidth: number): string => {
   return out;
 };
 
-function throttle<F extends (...args: never[]) => void>(fn: F, ms: number): F {
-  let last = 0;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  return ((...args: never[]) => {
-    const now = Date.now();
-    const wait = ms - (now - last);
-    if (wait <= 0) {
-      last = now;
-      if (timer) {
-        clearTimeout(timer);
-        timer = undefined;
-      }
-      fn(...args);
-    } else if (!timer) {
-      timer = setTimeout(() => {
-        last = Date.now();
-        timer = undefined;
-        fn(...args);
-      }, wait);
-    }
-  }) as F;
-}
-
 const buildParams = (agents: AgentConfig[]) =>
   Type.Object({
     agent:
@@ -466,13 +444,6 @@ const renderProgressComponent = (
     ),
   );
 
-  if (p.lastMessage && p.status === "running") {
-    c.addChild(new Spacer(1));
-    c.addChild(
-      new Text(fitLine(theme.fg("text", `  ${p.lastMessage}`), width), 0, 0),
-    );
-  }
-
   if (p.error) {
     c.addChild(new Spacer(1));
     c.addChild(new Text(theme.fg("error", `  ${p.error}`), 0, 0));
@@ -511,7 +482,6 @@ const initialProgress = (
   status: "running",
   startedAt: Date.now(),
   durationMs: 0,
-  lastMessage: "",
   output: "",
 });
 
@@ -570,10 +540,9 @@ type ManageArgs = {
 
 const formatRunLine = (r: RunRecord): string => {
   const p = r.progress;
-  const msg = p.status === "running" ? p.lastMessage : (p.error ?? "");
   return `${r.id}  [${p.status}]  ${p.agent}  ${formatDuration(
     p.status === "running" ? Date.now() - p.startedAt : p.durationMs,
-  )}${msg ? `  — ${msg}` : ""}`;
+  )}${p.error ? `  — ${p.error}` : ""}`;
 };
 
 const runPayload = (
@@ -582,10 +551,10 @@ const runPayload = (
   fieldPath?: string,
 ): string => {
   if (resultStore.has(id)) {
-    return headTruncate(
-      JSON.stringify(getByPath(resultStore.get(id), fieldPath), null, 2),
-      MAX_OUTPUT_BYTES,
-    );
+    const value = getByPath(resultStore.get(id), fieldPath);
+    if (value === undefined)
+      return `(no field "${fieldPath}" in the result-json of ${id})`;
+    return headTruncate(JSON.stringify(value, null, 2), MAX_OUTPUT_BYTES);
   }
   return transcript || "(no output)";
 };
@@ -606,7 +575,6 @@ async function runInRex(
   thinking: string | undefined,
   cwd: string,
   progress: Progress,
-  push: () => void,
   signal: AbortSignal,
   target: string,
   record: RunRecord,
@@ -633,7 +601,8 @@ async function runInRex(
     "ask_user_question",
     ...(model ? ["--model", model] : []),
     ...(thinking ? ["--thinking", thinking] : []),
-    task,
+    "--",
+    task.startsWith("@") ? ` ${task}` : task,
   ];
   const fail = (error: string, text = `subagent '${agent.name}' ${error}`) => {
     progress.status = "failed";
@@ -669,13 +638,7 @@ async function runInRex(
         result_file: resultFile,
         timeout: DEFAULT_MAX_DURATION_MS / 1000,
       },
-      {
-        signal,
-        onProgress: (status) => {
-          progress.lastMessage = `rex: ${status}`;
-          push();
-        },
-      },
+      { signal },
     );
   } catch (err) {
     progress.durationMs = Date.now() - progress.startedAt;
@@ -730,27 +693,39 @@ function registerChildResultMirror(pi: ExtensionAPI): void {
   if (!file) return;
   pi.on("agent_settled", async (_event, ctx) => {
     try {
-      const { messages } = collectTextMessages(ctx.sessionManager.getBranch());
-      for (let i = messages.length - 1; i >= 0; i--) {
-        const m = messages[i]!;
-        if (m.role !== "assistant") continue;
-        const text = extractText(m.content).trim();
-        if (!text) continue;
-        fs.writeFileSync(`${file}.tmp`, text, { mode: 0o600 });
-        fs.renameSync(`${file}.tmp`, file);
-        break;
-      }
+      const branch = ctx.sessionManager.getBranch();
+      const lastReply = branch
+        .flatMap((e) =>
+          e.type === "message" && e.message.role === "assistant"
+            ? [e.message]
+            : [],
+        )
+        .at(-1);
+      const output = lastAssistantText(branch);
+      const result: Omit<WatchOutcome, "state"> & { state: "done" | "error" } =
+        lastReply?.stopReason === "error"
+          ? {
+              state: "error",
+              msg: lastReply.errorMessage?.split("\n", 1)[0],
+              output,
+            }
+          : { state: "done", output };
+      fs.writeFileSync(`${file}.tmp`, JSON.stringify(result), { mode: 0o600 });
+      fs.renameSync(`${file}.tmp`, file);
     } catch {}
   });
 }
 
-// Rex notifies on every OSC 7501 `done` report and cannot mute one pane, so the child reports `idle` instead.
-function reportDoneAsIdle(): void {
+// Rex plays its finish sound whenever a status record leaves `working` and has no per-pane mute, so the child reports every state except `blocked` as `idle`.
+function hideRunStateFromRex(): void {
   const write = process.stdout.write.bind(process.stdout);
   process.stdout.write = ((chunk: unknown, ...rest: unknown[]) =>
     (write as (...args: unknown[]) => boolean)(
       typeof chunk === "string"
-        ? chunk.replaceAll("\x1b]7501;state=done", "\x1b]7501;state=idle")
+        ? chunk.replace(
+            /\x1b\]7501;state=(?:working|done|error)\b/g,
+            "\x1b]7501;state=idle",
+          )
         : chunk,
       ...rest,
     )) as typeof process.stdout.write;
@@ -758,7 +733,7 @@ function reportDoneAsIdle(): void {
 
 export default function (pi: ExtensionAPI) {
   if (process.env.PI_IS_SUBAGENT === "1") {
-    reportDoneAsIdle();
+    hideRunStateFromRex();
     registerChildResultMirror(pi);
     return;
   }
@@ -849,16 +824,9 @@ export default function (pi: ExtensionAPI) {
       };
     },
 
-    async execute(_toolCallId, rawParams, signal, onUpdate, ctx) {
+    async execute(_toolCallId, rawParams, signal, _onUpdate, ctx) {
       const args = rawParams as SubagentArgs;
-      const agent = agents.find((a) => a.name === args.agent);
-      if (!agent) {
-        return {
-          content: [{ type: "text", text: `Unknown agent: ${args.agent}` }],
-          details: undefined,
-          isError: true,
-        };
-      }
+      const agent = agents.find((a) => a.name === args.agent)!;
       const model =
         agent.model ??
         (ctx.model &&
@@ -898,13 +866,6 @@ export default function (pi: ExtensionAPI) {
         agent.thinking ?? pi.getThinkingLevel(),
         ctx.cwd,
         progress,
-        throttle(() => {
-          progress.durationMs = Date.now() - progress.startedAt;
-          onUpdate?.({
-            content: [{ type: "text", text: "" }],
-            details: { ...progress },
-          });
-        }, 150),
         controller.signal,
         target,
         record,
@@ -963,7 +924,7 @@ export default function (pi: ExtensionAPI) {
     outputSchema: ManageValueSchema,
     async execute(_toolCallId, rawParams, signal) {
       const {
-        action: rawAction,
+        action,
         id,
         path: fieldPath,
         message,
@@ -975,28 +936,6 @@ export default function (pi: ExtensionAPI) {
         details: undefined,
         isError: true,
       });
-
-      const action =
-        (
-          {
-            list: "wait",
-            status: "wait",
-            transcript: "result",
-            output: "result",
-            log: "result",
-            logs: "result",
-            tail: "result",
-            peek: "result",
-            view: "result",
-            kill: "stop",
-            message: "steer",
-          } satisfies Record<string, ManageAction>
-        )[String(rawAction).toLowerCase()] ?? rawAction;
-      if (!MANAGE_ACTIONS.includes(action)) {
-        return fail(
-          `subagent_manage: unknown action '${String(rawAction)}'. Valid: ${MANAGE_ACTIONS.join(", ")}.`,
-        );
-      }
 
       if (action === "wait") {
         const wanted = (id ?? "")
@@ -1053,18 +992,20 @@ export default function (pi: ExtensionAPI) {
             ? timeoutSeconds * 1000
             : DEFAULT_WAIT_TIMEOUT_MS;
         let timer: ReturnType<typeof setTimeout> | undefined;
+        let onAbort: (() => void) | undefined;
         const outcome = await Promise.race([
           Promise.all(records.map((r) => r.settled ?? Promise.resolve())).then(
             () => "finished" as const,
           ),
           new Promise<"timeout" | "aborted">((resolve) => {
+            if (signal?.aborted) return resolve("aborted");
             timer = setTimeout(() => resolve("timeout"), timeoutMs);
-            signal?.addEventListener("abort", () => resolve("aborted"), {
-              once: true,
-            });
+            onAbort = () => resolve("aborted");
+            signal?.addEventListener("abort", onAbort, { once: true });
           }),
         ]);
-        if (timer) clearTimeout(timer);
+        clearTimeout(timer);
+        if (onAbort) signal?.removeEventListener("abort", onAbort);
         return {
           content: [
             {

@@ -32,7 +32,7 @@ function clamp(value: string, max: number): string {
 
 // Pi reports OSC 7501 status for its built-in dialogs but not for ui.custom().
 const reportStatus = (status: ProgramStatus): void => {
-  if (process.env.TERM_PROGRAM === "rex")
+  if (process.env.TERM_PROGRAM === "rex" && process.env.PI_PROGRAM_STATUS !== "0")
     process.stdout.write(formatProgramStatus({ ...status, app: "pi" }));
 };
 

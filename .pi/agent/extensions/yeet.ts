@@ -39,19 +39,38 @@ function barWidget(lines: string[]) {
 const YEET_MSG_TYPE = "yeet-marker";
 const YEET_WIDGET_KEY = "yeet-progress";
 const HOOK_TIMEOUT_MS = 600_000;
+const CONVENTIONAL_SUBJECT =
+  /^(?:feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(?:\([\w.-]+\))?!?:\s/i;
 
 export default function (pi: ExtensionAPI) {
-  pi.registerMessageRenderer(YEET_MSG_TYPE, (message, _opts, theme) => {
-    const box = new Box(1, 1, (t) => theme.bg("customMessageBg", t));
-    box.addChild(
-      new Text(
-        `${theme.fg("success", "✓ yeet")} ${message.content as string}`,
-        0,
-        0,
-      ),
+  pi.registerMessageRenderer<{ ok: boolean }>(
+    YEET_MSG_TYPE,
+    (message, _opts, theme) => {
+      const mark =
+        message.details?.ok === false
+          ? theme.fg("error", "✗ yeet")
+          : theme.fg("success", "✓ yeet");
+      const box = new Box(1, 1, (t) => theme.bg("customMessageBg", t));
+      box.addChild(new Text(`${mark} ${message.content as string}`, 0, 0));
+      return box;
+    },
+  );
+
+  const report = (ok: boolean, content: string) =>
+    pi.sendMessage<{ ok: boolean }>(
+      {
+        customType: YEET_MSG_TYPE,
+        content: content.split("\n").slice(-30).join("\n"),
+        display: true,
+        details: { ok },
+      },
+      { triggerTurn: false },
     );
-    return box;
-  });
+  const failureOutput = (r: { stdout: string; stderr: string }) =>
+    [r.stdout, r.stderr]
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .join("\n") || "(no output)";
 
   const commitAndPush = async (
     args: string,
@@ -116,22 +135,9 @@ export default function (pi: ExtensionAPI) {
       }
       const pushNote = push.ok
         ? "pushed"
-        : `push failed: ${
-            [push.stdout, push.stderr]
-              .map((s) => s.trim())
-              .filter(Boolean)
-              .join(" | ") || "(no output)"
-          }`;
-      if (!push.ok) ctx.ui.notify(`/yeet: ${pushNote}`, "error");
-
-      pi.sendMessage(
-        {
-          customType: YEET_MSG_TYPE,
-          content: `${sha} ${subject} (${pushNote})`,
-          display: true,
-        },
-        { triggerTurn: false },
-      );
+        : `push failed: ${failureOutput(push)}`;
+      if (!push.ok) ctx.ui.notify("/yeet: push failed (see history)", "error");
+      report(push.ok, `${sha} ${subject} (${pushNote})`);
     };
 
     if (!(await git("rev-parse", "--git-dir")).ok) {
@@ -163,40 +169,20 @@ export default function (pi: ExtensionAPI) {
     }
 
     showProgress(1);
-    let hook = await gitWith(HOOK_TIMEOUT_MS, [
-      "hook",
-      "run",
-      "--ignore-missing",
-      "pre-commit",
-    ]);
+    const runHook = () =>
+      gitWith(HOOK_TIMEOUT_MS, ["hook", "run", "--ignore-missing", "pre-commit"]);
+    let hook = await runHook();
     if (!(await git("diff", "--quiet", "--", ".", ...EXCLUDE)).ok) {
       const restage = await git("add", "-A", "--", ".", ...EXCLUDE);
       if (!restage.ok) {
         ctx.ui.notify(`/yeet: git add failed: ${restage.err}`, "error");
         return;
       }
-      hook = await gitWith(HOOK_TIMEOUT_MS, [
-        "hook",
-        "run",
-        "--ignore-missing",
-        "pre-commit",
-      ]);
+      hook = await runHook();
     }
     if (!hook.ok) {
       ctx.ui.notify("/yeet: pre-commit failed (see history)", "error");
-      pi.sendMessage(
-        {
-          customType: YEET_MSG_TYPE,
-          content: `pre-commit failed:\n${
-            [hook.stdout, hook.stderr]
-              .map((s) => s.trim())
-              .filter(Boolean)
-              .join("\n") || "(no output)"
-          }`,
-          display: true,
-        },
-        { triggerTurn: false },
-      );
+      report(false, `pre-commit failed:\n${failureOutput(hook)}`);
       return;
     }
     const base = (await git("rev-parse", "--verify", "HEAD")).ok
@@ -267,10 +253,7 @@ Return the raw commit message, starting with the subject line.`,
     }
     const lines = message.trim().split("\n");
     const subjectIndex = lines.findIndex((l) =>
-      new RegExp(
-        `^(?:${"feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert"})(?:\\([\\w.-]+\\))?!?:\\s`,
-        "i",
-      ).test(l.trim()),
+      CONVENTIONAL_SUBJECT.test(l.trim()),
     );
     const [subject = "", ...bodyLines] = (
       subjectIndex > 0 ? lines.slice(subjectIndex).join("\n") : message
@@ -294,19 +277,7 @@ Return the raw commit message, starting with the subject line.`,
     const commit = await git("commit", "--no-verify", "-m", cleanMessage);
     if (!commit.ok) {
       ctx.ui.notify("/yeet: commit failed (see history)", "error");
-      pi.sendMessage(
-        {
-          customType: YEET_MSG_TYPE,
-          content: `commit failed:\n${
-            [commit.stdout, commit.stderr]
-              .map((s) => s.trim())
-              .filter(Boolean)
-              .join("\n") || "(no output)"
-          }`,
-          display: true,
-        },
-        { triggerTurn: false },
-      );
+      report(false, `commit failed:\n${failureOutput(commit)}`);
       return;
     }
 
@@ -316,10 +287,17 @@ Return the raw commit message, starting with the subject line.`,
     );
   };
 
+  let running = false;
   const runYeet = async (args: string, ctx: ExtensionContext) => {
+    if (running) {
+      ctx.ui.notify("/yeet is already running", "warning");
+      return;
+    }
+    running = true;
     try {
       await commitAndPush(args, ctx);
     } finally {
+      running = false;
       ctx.ui.setWidget(YEET_WIDGET_KEY, undefined);
     }
   };

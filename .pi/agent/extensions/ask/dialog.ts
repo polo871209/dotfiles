@@ -277,7 +277,7 @@ class SubmitTabStrategy implements TabContentStrategy {
           ? this.config.theme.fg("muted", "Ready to submit your answers?")
           : this.config.theme.fg(
               "warning",
-              `${"⚠ Answer remaining questions before submitting:"} ${missing.join(", ")}`,
+              `⚠ Answer remaining questions before submitting: ${missing.join(", ")}`,
             ),
         1,
         0,

@@ -56,7 +56,7 @@ Work that outlives its tool call, such as a background subagent run, writes a st
 
 ### TUI taste
 
-- **`tui.ts`** — keeps the interface compact and exposes relevant session state.
+- **`tui.ts`** — keeps the interface compact, exposes relevant session state, and draws a Mermaid diagram that is wider than the terminal at a width that fits.
 
 ## Layout
 

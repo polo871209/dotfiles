@@ -16,8 +16,14 @@ import { changeNote } from "./diff";
 const isRebasing = (cwd: string): boolean => {
   let dir = cwd;
   for (let i = 0; i < 8; i++) {
-    const gitDir = path.join(dir, ".git");
-    if (fs.existsSync(gitDir)) {
+    const dotGit = path.join(dir, ".git");
+    if (fs.existsSync(dotGit)) {
+      const gitDir = fs.statSync(dotGit).isFile()
+        ? path.resolve(
+            dir,
+            fs.readFileSync(dotGit, "utf8").replace(/^gitdir:\s*/, "").trim(),
+          )
+        : dotGit;
       return (
         fs.existsSync(path.join(gitDir, "rebase-merge")) ||
         fs.existsSync(path.join(gitDir, "rebase-apply")) ||
@@ -128,7 +134,6 @@ export function registerFeedback(pi: ExtensionAPI): void {
           before,
           after,
           displayPath(abs, cwd),
-          "auto-formatted",
         );
       } catch {
         return;
@@ -162,9 +167,23 @@ export function registerFeedback(pi: ExtensionAPI): void {
     }
     consecutiveMissedPasses = 0;
     allEditsChecked = true;
+    const changed = result.formatted.length
+      ? `[lsp-feedback] auto-fixed and saved ${result.formatted.map((f) => `\`${displayPath(f, projectCwd)}\``).join(", ")}. Re-read before the next edit to them.`
+      : "";
     if (result.diagnostics.length === 0) {
       touched.clear();
-      return;
+      if (!changed) return;
+      return {
+        entries: [
+          ...event.entries,
+          {
+            type: "custom_message" as const,
+            customType: "lsp-feedback-changed",
+            content: changed,
+            display: false,
+          },
+        ],
+      };
     }
     repairFollowups++;
     return {
@@ -177,7 +196,8 @@ export function registerFeedback(pi: ExtensionAPI): void {
             "Deterministic LSP feedback still reports diagnostics across the files touched in this task. Fix them, then finish the task. Do not delegate this repair.\n" +
             sortDiagnostics(result.diagnostics)
               .map((d) => formatDiagLine(d, projectCwd))
-              .join("\n"),
+              .join("\n") +
+            (changed ? `\n${changed}` : ""),
           display: false,
         },
       ],

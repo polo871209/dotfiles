@@ -40,9 +40,23 @@ local function open_session(dir)
     return { session_id = session_id }
 end
 
-local function open_zoomed(ctx, command)
+local function foreground_cwd(ctx)
     local process, err = rex.block.call(terminal, 'process', { block_id = ctx.block_id })
     if err ~= nil then error(err, 0) end
+    return process.foreground and process.foreground.cwd
+end
+
+local function remote_web_url(remote)
+    local url = remote:gsub('%s+$', ''):gsub('%.git$', '')
+    local host, path = url:match '^[^/:]+@([^/:]+):(.+)$'
+    if host then return 'https://' .. host .. '/' .. path end
+    local authority
+    authority, path = url:match '^%a[%w+.-]*://([^/]+)/(.+)$'
+    if not authority then return url end
+    return 'https://' .. authority:gsub('^.*@', ''):gsub(':%d+$', '') .. '/' .. path
+end
+
+local function open_zoomed(ctx, command)
     -- A floating layer leaves cells with the default background transparent, so zoom a split instead.
     local split, split_err = rex.session.new_split {
         anchor_id = ctx.block_id,
@@ -51,7 +65,7 @@ local function open_zoomed(ctx, command)
         focus = true,
         layout = rex.layout.block {
             flavor = shell,
-            options = { cwd = process.foreground and process.foreground.cwd, command = command },
+            options = { cwd = foreground_cwd(ctx), command = command },
         },
     }
     if split_err ~= nil then error(split_err, 0) end
@@ -148,6 +162,17 @@ rex.action {
 }
 
 rex.action {
+    name = 'browse_repo',
+    title = 'Open Git Remote in Browser',
+    run = function(ctx)
+        local remote, err = rex.exec({ 'git', 'ls-remote', '--get-url' }, { cwd = foreground_cwd(ctx) })
+        if not remote then error(err, 0) end
+        if not remote.ok then error(remote.stderr, 0) end
+        rex.exec { 'open', remote_web_url(remote.stdout) }
+    end,
+}
+
+rex.action {
     name = 'open_url',
     title = 'Open URL from Pane',
     run = function(ctx)
@@ -186,6 +211,7 @@ rex.bind('ctrl+left', 'pane.focus.left')
 rex.bind('ctrl+right', 'pane.focus.right')
 rex.bind('ctrl+b>ctrl+b', 'pane.send_key', { key = 'ctrl+b' })
 
+rex.bind('shift+cmd+b', 'browse_repo')
 rex.bind('cmd+l', 'lazygit')
 rex.bind('cmd+n', 'nvim')
 rex.bind('cmd+u', 'open_url')
