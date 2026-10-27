@@ -238,9 +238,11 @@ rex.bind('shift+cmd+k', 'client.palette.toggle')
 rex.bind('ctrl+alt+shift+cmd+s', 'client.sidebar.toggle')
 rex.bind('ctrl+b>shift+k', 'session_picker')
 
-rex.bind('ctrl+up', 'client.tab.previous')
-rex.bind('ctrl+down', 'client.tab.next')
+rex.bind('cmd+up', 'client.tab.previous')
+rex.bind('cmd+down', 'client.tab.next')
 
+rex.bind('ctrl+up', 'pane.focus.up')
+rex.bind('ctrl+down', 'pane.focus.down')
 rex.bind('ctrl+left', 'pane.focus.left')
 rex.bind('ctrl+right', 'pane.focus.right')
 rex.bind('ctrl+b>ctrl+b', 'pane.send_key', { key = 'ctrl+b' })

@@ -20,6 +20,7 @@ import {
   visibleWidth,
 } from "@earendil-works/pi-tui";
 import { diagramKind, type MermaidArt, render, type Span } from "grok-mermaid";
+import { LINK_OPEN, LINK_READY, PI_LINK_PREFIX } from "./shared/link";
 
 const SGR_RESET = "\x1b[0m";
 
@@ -249,13 +250,46 @@ class ThemedEditor extends CustomEditor {
   }
 }
 
-const installInputColor = (pi: ExtensionAPI) => {
+const LINK_ROUTER = Symbol.for("pi.linkRouter");
+
+// Fullscreen pi-tui opens a clicked OSC 8 link through the TS-private
+// `TuiAltScreen.openUrl`, which has no extension hook. The router survives
+// /reload on the TUI object, so a reload swaps its emitter instead of
+// wrapping openUrl twice.
+interface LinkRouterHost {
+  openUrl?: (url: string) => void;
+  [LINK_ROUTER]?: { emit: (url: string) => void };
+}
+
+const installLinkRouter = (tui: TUI, pi: ExtensionAPI) => {
+  const host = tui as unknown as LinkRouterHost;
+  const openUrl = host.openUrl;
+  if (typeof openUrl !== "function") return;
+  const emit = (url: string) => pi.events.emit(LINK_OPEN, url);
+  const router = host[LINK_ROUTER];
+  if (router) {
+    router.emit = emit;
+  } else {
+    const created = { emit };
+    host[LINK_ROUTER] = created;
+    host.openUrl = (url) =>
+      url.startsWith(PI_LINK_PREFIX) ? created.emit(url) : openUrl(url);
+  }
+  pi.events.emit(LINK_READY, undefined);
+};
+
+const installEditor = (pi: ExtensionAPI) => {
   pi.on("session_start", async (_event, ctx) => {
     if (ctx.mode !== "tui") return;
-    ctx.ui.setEditorComponent(
-      (tui, editorTheme, keybindings) =>
-        new ThemedEditor(tui, editorTheme, keybindings, () => ctx.ui.theme),
-    );
+    ctx.ui.setEditorComponent((tui, editorTheme, keybindings) => {
+      installLinkRouter(tui, pi);
+      return new ThemedEditor(
+        tui,
+        editorTheme,
+        keybindings,
+        () => ctx.ui.theme,
+      );
+    });
   });
 };
 
@@ -561,7 +595,7 @@ removeLegacyPrototypePatch();
 
 export default function (pi: ExtensionAPI) {
   installWideMermaid(pi);
-  installInputColor(pi);
+  installEditor(pi);
   installFooter(pi);
   installWorking(pi);
   installCollapsedTools(pi);

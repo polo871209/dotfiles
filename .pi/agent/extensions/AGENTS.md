@@ -44,10 +44,10 @@ Work that outlives its tool call, such as a background subagent run, writes a st
 - **`go.ts`** — resumes an interrupted or stalled agent turn.
 - **`yeet.ts`** — validates, generates Conventional Commits with Sonnet 5.5, and pushes current changes with progress.
 - **`worktree.ts`** — on `/wt` or when the user asks the agent for a worktree, moves the current session and tab into the git worktree of a branch under `.worktree/`, starts a separate agent on a task in a background worktree tab, lists worktrees with their changes and tabs, and removes a clean worktree with its tab while keeping its branch.
-- **`fork-window.ts`** — on `/fork` or `/clone` in Rex, clones the whole current conversation into a new Rex window as a session named `fork: <name>` or `clone: <name>`, while this pane keeps the original session, so both run in parallel.
-- **`copy.ts`** — copies a selected code block or the session transcript.
+- **`fork-window.ts`** — on `/fork` or `/clone` in Rex, clones the whole current conversation into a new Rex window that takes focus, as a session named `fork: <name>` or `clone: <name>`, while this pane keeps the original session, so both run in parallel.
+- **`runbook/`** — shows commands the user must run as steps that run inside pi with their output and exit status, paste into a Rex pane ready for Enter, or copy, from a click or the keyboard, hands a failed step's output to the agent, which can replace that step's command in place so the user continues from the same step, tells the agent on the next turn which steps ran and how they ended, with the output of failed steps and of steps whose log the user attaches, adds the same actions to code blocks, and copies a code block or the session transcript on request.
 - **`usage.ts`** — reports Claude Pro/Max subscription usage and quota reset times on request.
-- **`auto-rename.ts`** — titles each session in at most three words, renames a fork or clone at its first new message, keeps a name the user set, and shows the title on the Rex tab.
+- **`auto-rename.ts`** — titles each session in at most five words from its latest request, renames a fork or clone at its first new message, keeps a name the user set, and shows the title on the Rex tab.
 
 ### Outside-pi surface
 
@@ -57,7 +57,7 @@ Work that outlives its tool call, such as a background subagent run, writes a st
 
 ### TUI taste
 
-- **`tui.ts`** — keeps the interface compact, exposes relevant session state, and draws a Mermaid diagram that is wider than the terminal at a width that fits.
+- **`tui.ts`** — keeps the interface compact, exposes relevant session state, draws a Mermaid diagram that is wider than the terminal at a width that fits, and hands clicks on `pi-` links to other extensions.
 
 ## Layout
 
@@ -67,6 +67,7 @@ extensions/
 ├── node_modules → ../npm/node_modules
 ├── *.ts          single-file extensions
 ├── ask/          ask_user_question dialog
+├── runbook/      command steps for the user, with Rex Lua
 ├── lsp/          navigation and post-edit feedback
 ├── subagent/     isolated agents in Rex panes
 └── shared/       shared extension utilities

@@ -4,6 +4,7 @@ Work as a peer. When a premise or plan is wrong, say so and name the fix. After 
 
 - Mutation: run reads and local edits immediately, with no asking. Print a risky command and wait, for example a cluster or cloud write, a destructive operation, a publish or push to a registry, or a database migration.
 - Production: never mutate. Print only. If you are unsure that the target is production, ask.
+- Commands for the user to run: show them with `show_runbook` as the last action of the turn, after the explanation.
 - Other edits: other agents work in this tree at the same time. Touch only the files that your task needs. Never revert, overwrite an edit that you did not make. Dont break foreign edit.
 - Git: if the user did not ask, do not run `git commit`, `git push`, or `git worktree`.
 - Tools: never install with Homebrew. Install with mise. If the tool is temporary, add it to `.mise.toml`, which git ignores. If the tool stays, add it to `mise.toml`.

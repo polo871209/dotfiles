@@ -35,6 +35,7 @@ export default function (pi: ExtensionAPI) {
         REX_SESSION,
         "-c",
         ctx.cwd,
+        "--json",
         "--",
         "pi",
         "--session",
@@ -52,6 +53,28 @@ export default function (pi: ExtensionAPI) {
       );
       return;
     }
+
+    // Rex.app ignores the server's active window, so only an app action switches its visible tab: https://discord.com/channels/1546797889009881158/1559289044439932949
+    const { window_id } = JSON.parse(r.stdout) as { window_id: string };
+    const select = await run(
+      "rex",
+      [
+        "do",
+        "-s",
+        REX_SESSION,
+        "session.select",
+        `session_id=${REX_SESSION}`,
+        `window_id=${window_id}`,
+      ],
+      undefined,
+      ctx.cwd,
+      15_000,
+    );
+    if (select.code !== 0)
+      ctx.ui.notify(
+        `Fork window opened, but Rex could not switch to it: ${(select.stderr || select.stdout).trim()}`,
+        "warning",
+      );
     return { cancel: true };
   });
 }

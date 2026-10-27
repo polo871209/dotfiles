@@ -11,8 +11,8 @@ import {
   type SideChannelOpts,
 } from "./shared/llm";
 
-const MAX_WORDS = 3;
-const MAX_CHARS = 24;
+const MAX_WORDS = 5;
+const MAX_CHARS = 40;
 const RENAME_AT_USER_TURNS = [1, 3];
 const ENTRY_TYPE = "auto-rename";
 
@@ -117,12 +117,12 @@ function sessionDigest(
   }
   if (pendingRequest?.trim()) requests.push(pendingRequest.trim());
 
-  const [opening, ...later] = requests;
-  const sections = [`Opening request:\n${clip(opening ?? "", 2_000)}`];
-  if (later.length)
+  const [latest, ...earlier] = [...requests].reverse();
+  const sections = [`Latest request:\n${clip(latest ?? "", 2_000)}`];
+  if (earlier.length)
     sections.push(
-      `Later requests, oldest first:\n${later
-        .slice(-10)
+      `Earlier requests, newest first:\n${earlier
+        .slice(0, 10)
         .map((r) => `- ${clip(r, 300)}`)
         .join("\n")}`,
     );
@@ -140,17 +140,17 @@ function sessionDigest(
 function nameRequest(ctx: ExtensionContext, text: string): SideChannelOpts {
   const model = ctx.modelRegistry.find("anthropic", "claude-sonnet-5-5");
   return {
-    systemPrompt: `You title coding-agent sessions with 2 to ${MAX_WORDS} words. Name the key topic: the one thing the session builds, fixes, or investigates. The opening request and the files edited most decide it. If later requests moved to a new topic, name the topic with the most requests and edits.
+    systemPrompt: `You title coding-agent sessions with 2 to ${MAX_WORDS} words. Name the key topic: the one thing the session builds, fixes, or investigates now. Requests come newest first, and each one weighs more than the ones after it. The latest request decides the topic. Use earlier requests and the files edited most only to name that topic precisely, or when the latest request has no topic of its own, such as "go on" or "fix it".
 
 Rules:
 - 2 to ${MAX_WORDS} words and ${MAX_CHARS} characters at most. Sentence case. No quotes, no final punctuation.
-- Drop words a reader can infer: "Slow unit tests", not "Slow unit tests on GitHub runner".
+- Drop words a reader can infer: "Slow unit tests on CI", not "Fix the slow unit tests on the GitHub runner".
 - Name the concrete subject: the feature, file, tool, command, or error, with the project's own names.
 - One topic. Never join two topics with "and" or a comma.
 - No filler: session, discussion, help, improving, refinement, updates, various.
 
-Good: Worktree switching | Auto-rename titles | Kulala HTTP setup | Subagent status leak
-Bad: Shared LSP daemon socket path (too long) | Session naming and rename command (two topics) | Agent refinement (vague) | Improving SYSTEM.md guidelines (filler)
+Good: Worktree switching | Auto-rename weights latest request | Kulala HTTP setup | Subagent status leak
+Bad: Shared LSP daemon socket path for every Nvim instance (too long) | Session naming and rename command (two topics) | Agent refinement (vague) | Improving SYSTEM.md guidelines (filler)
 
 Reply with the title only.`,
     messages: [
@@ -182,7 +182,7 @@ export default function (pi: ExtensionAPI) {
     if (isForkName(currentName)) {
       if (!pendingRequest) return;
       dueTurns = userTurns;
-      digest += `\n\nThis session branched off a session about "${currentName}". Name the topic of the newest request, because that is where this branch goes.`;
+      digest += `\n\nThis session branched off a session about "${currentName}". Name the topic of the latest request, because that is where this branch goes. Pick a title that tells this branch apart from that session.`;
     } else {
       dueTurns =
         RENAME_AT_USER_TURNS.filter((turns) => userTurns >= turns).at(-1) ?? 0;
