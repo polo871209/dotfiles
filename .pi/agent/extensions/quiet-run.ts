@@ -2,15 +2,9 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { stripVTControlCharacters } from "node:util";
-import type { JsonObject, Usage } from "@earendil-works/pi-ai";
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { run } from "./shared/exec";
-import { boolProbabilities, findJev } from "./shared/jev";
 
 const SUCCESS_TAIL = 10;
 const FAILURE_TAIL = 30;
@@ -53,74 +47,6 @@ function collapseRuns(lines: string[]): string[] {
     i = j;
   }
   return out;
-}
-
-async function gitState(cwd: string): Promise<JsonObject | null> {
-  const git = async (args: string[]) => {
-    const r = await run("git", args, undefined, cwd, 2_000);
-    if (r.code !== 0) throw new Error(r.stderr);
-    return r.stdout;
-  };
-  try {
-    const [root, status] = await Promise.all([
-      git(["rev-parse", "--show-toplevel"]),
-      git(["status", "--porcelain=v1", "--branch", "--ignored"]),
-    ]);
-    const [head = "", ...entries] = status.split("\n").filter(Boolean);
-    const paths: Record<string, string> = {};
-    for (const entry of entries.slice(0, 40)) {
-      const code = entry.slice(0, 2);
-      paths[entry.slice(3)] =
-        code === "??"
-          ? "untracked"
-          : code === "!!"
-            ? "ignored"
-            : "uncommitted changes";
-    }
-    return {
-      root: root.trim(),
-      branch: head.slice(3),
-      paths,
-      ...(entries.length > 40 ? { unlistedPaths: entries.length - 40 } : {}),
-    };
-  } catch {
-    return null;
-  }
-}
-
-async function scoreDestructive(
-  ctx: ExtensionContext,
-  command: string,
-  onCheck: () => void,
-  signal?: AbortSignal,
-): Promise<{ risk: number | null; usage?: Usage } | undefined> {
-  const jev = await findJev(ctx);
-  if (!jev) return undefined;
-  onCheck();
-  const cwd = ctx.cwd;
-  const git = await gitState(cwd);
-  const { probabilities, usage } = await boolProbabilities(
-    ctx,
-    jev,
-    {
-      state: { cwd, command, ...(git ? { git } : {}) },
-      questions: {
-        destructive: {
-          type: "bool",
-          instructions:
-            "Is the shell command in `command` destructive? `git.paths` lists the paths under `git.root` that are untracked, ignored, or have uncommitted changes, and any other path there is committed and clean unless `git.unlistedPaths` is set. If `git` is absent, no file has a copy in git.",
-          criteria: {
-            true: "Running it can lose data that has no other copy, or change state beyond this machine: it deletes or overwrites untracked files, files with uncommitted changes, ignored files that no build or install regenerates, or files outside `cwd`; rewrites or discards git history or uncommitted work; pushes, publishes, or migrates; writes to a database, cluster, or cloud account other than by a deploy; runs Docker against a remote host through `--context`, `-H`, or `DOCKER_HOST`; or pipes a remote script into a shell.",
-            false:
-              "It only reads, builds, tests, lints, formats, installs dependencies, or commits locally, or it deletes or overwrites only committed files with no uncommitted changes, which git restores, or ignored build output, dependency folders, caches, or logs, which a build or install regenerates; or it builds, runs, stops, removes, or prunes containers, images, volumes, or networks on the local Docker daemon, even with `-v` or `--volumes`, because the user accepts losing local Docker state; or it deploys, such as `pnpm run deploy`, `wrangler deploy`, or `vercel --prod`, because the user's deploy credentials decide whether the deploy is allowed.",
-          },
-        },
-      },
-    },
-    5_000,
-    signal,
-  );
-  return { risk: probabilities?.destructive ?? null, usage };
 }
 
 const liveGroups = new Set<number>();
@@ -201,44 +127,6 @@ export default function (pi: ExtensionAPI) {
       const matcher = params.filter
         ? new RegExp(params.filter, "i")
         : undefined;
-
-      const score = await scoreDestructive(
-        ctx,
-        command,
-        () =>
-          onUpdate?.({
-            content: [{ type: "text", text: "checking command with Jev…" }],
-            details: {},
-          }),
-        signal,
-      );
-      const risk = score?.risk ?? null;
-      if (score && risk === null && ctx.hasUI)
-        ctx.ui.notify(
-          "quiet_run: the Jev destructive check failed, so the command runs unchecked.",
-          "warning",
-        );
-      if (risk !== null && risk >= 0.65) {
-        const riskText = risk.toFixed(2);
-        if (
-          !(
-            ctx.hasUI &&
-            (await ctx.ui.confirm(
-              `Destructive command (Jev ${riskText})`,
-              `${command}\n\ncwd: ${cwd}\n\nRun it?`,
-              { signal },
-            ))
-          )
-        ) {
-          throw new Error(
-            `quiet_run: blocked. Jev scored the command destructive (${riskText}) and ${
-              ctx.hasUI
-                ? "the user declined to run it"
-                : "no user is present to approve it"
-            }. Do not run it through bash or another tool. Show the command to the user and wait for their decision.`,
-          );
-        }
-      }
 
       if (signal?.aborted)
         throw new Error("quiet_run: aborted before the command started.");
@@ -403,7 +291,6 @@ export default function (pi: ExtensionAPI) {
           },
         ],
         details: {},
-        usage: score?.usage,
         structuredContent: {
           verdict,
           exit_code: spawnError || timedOut || killSignal ? null : code,

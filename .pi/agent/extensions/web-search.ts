@@ -1,4 +1,9 @@
-import type { ClassifierBoolQuestion, Usage } from "@earendil-works/pi-ai";
+import type {
+  ClassifierApi,
+  ClassifierBoolQuestion,
+  ClassifierModel,
+  Usage,
+} from "@earendil-works/pi-ai";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -9,12 +14,7 @@ import { Type } from "typebox";
 import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
 import TurndownService from "turndown";
-import {
-  boolProbabilities,
-  findJev,
-  sumUsage,
-  type JevModel,
-} from "./shared/jev";
+import { extractText, getDocumentProxy, getMeta } from "unpdf";
 import { lookup as dnsLookup } from "node:dns/promises";
 import net from "node:net";
 import { execFile } from "node:child_process";
@@ -191,10 +191,86 @@ async function fetchSafely(
   throw new Error("Too many redirects");
 }
 
-interface SearchResult {
+type SearchResult = {
   title: string;
   url: string;
   content: string;
+  published?: string;
+};
+
+const RECENCY_DAYS = { day: 1, week: 7, month: 31, year: 366 } as const;
+type Recency = keyof typeof RECENCY_DAYS;
+
+interface SearchFilters {
+  include: string[];
+  exclude: string[];
+  since?: string;
+  recency?: Recency;
+}
+
+function normalizeDomain(raw: string): string {
+  const trimmed = raw.trim().toLowerCase();
+  try {
+    return new URL(
+      trimmed.includes("://") ? trimmed : `https://${trimmed}`,
+    ).hostname.replace(/^www\./, "");
+  } catch {
+    return trimmed;
+  }
+}
+
+function buildFilters(domains: string[], recency?: Recency): SearchFilters {
+  const include: string[] = [];
+  const exclude: string[] = [];
+  for (const entry of domains) {
+    if (entry.trim().startsWith("-"))
+      exclude.push(normalizeDomain(entry.trim().slice(1)));
+    else include.push(normalizeDomain(entry));
+  }
+  return {
+    include: include.filter(Boolean),
+    exclude: exclude.filter(Boolean),
+    recency,
+    since: recency
+      ? new Date(Date.now() - RECENCY_DAYS[recency] * 86_400_000)
+          .toISOString()
+          .slice(0, 10)
+      : undefined,
+  };
+}
+
+function withSiteOperators(query: string, filters: SearchFilters): string {
+  return [
+    query,
+    filters.include.map((d) => `site:${d}`).join(" OR "),
+    ...filters.exclude.map((d) => `-site:${d}`),
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function hostMatches(url: string, domains: string[]): boolean {
+  try {
+    const host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+    return domains.some((d) => host === d || host.endsWith(`.${d}`));
+  } catch {
+    return false;
+  }
+}
+
+function matchesFilters(result: SearchResult, filters: SearchFilters): boolean {
+  if (filters.include.length && !hostMatches(result.url, filters.include))
+    return false;
+  if (hostMatches(result.url, filters.exclude)) return false;
+  return (
+    !filters.since || !result.published || result.published >= filters.since
+  );
+}
+
+function isoDate(raw: string | undefined): string | undefined {
+  return /^\d{4}-\d{2}-\d{2}/.test(raw?.trim() ?? "")
+    ? raw!.trim().slice(0, 10)
+    : undefined;
 }
 
 class RetryableSearchError extends Error {}
@@ -266,13 +342,11 @@ async function callMcpTool(
   return text;
 }
 
-// Exa's public MCP endpoint exposes the advanced tool only when the query
-// string asks for it (verified live via tools/list). It returns structured
-// JSON, not a `Title:`/`URL:` text blob, and takes textMaxCharacters plus
-// highlights, so results carry the matched passages, not the page head.
+// Exa's public MCP endpoint exposes the advanced tool only when the query string asks for it.
 async function exaAdvancedSearch(
   query: string,
   numResults: number,
+  filters: SearchFilters,
   signal?: AbortSignal,
 ): Promise<SearchResult[]> {
   const results = (
@@ -288,7 +362,14 @@ async function exaAdvancedSearch(
             type: "auto",
             textMaxCharacters: EXA_TEXT_CHARS,
             enableHighlights: true,
-            highlightsNumSentences: 2,
+            highlightsMaxCharacters: 500,
+            ...(filters.include.length
+              ? { includeDomains: filters.include }
+              : {}),
+            ...(filters.exclude.length
+              ? { excludeDomains: filters.exclude }
+              : {}),
+            ...(filters.since ? { startPublishedDate: filters.since } : {}),
           },
           signal,
         ),
@@ -298,6 +379,7 @@ async function exaAdvancedSearch(
           title?: string;
           text?: string;
           highlights?: string[];
+          publishedDate?: string;
         }>;
       }
     ).results ?? []
@@ -306,12 +388,11 @@ async function exaAdvancedSearch(
       return {
         title: r.title?.trim() ?? "",
         url: r.url?.trim() ?? "",
-        content: [
-          Array.isArray(r.highlights) ? r.highlights.join(" … ") : "",
-          r.text?.trim(),
-        ]
-          .filter(Boolean)
-          .join("\n")
+        published: isoDate(r.publishedDate),
+        content: (
+          (Array.isArray(r.highlights) ? r.highlights.join(" … ") : "") ||
+          (r.text ?? "")
+        )
           .trim()
           .slice(0, EXA_TEXT_CHARS),
       };
@@ -325,6 +406,7 @@ async function exaAdvancedSearch(
 async function exaBasicSearch(
   query: string,
   numResults: number,
+  filters: SearchFilters,
   signal?: AbortSignal,
 ): Promise<SearchResult[]> {
   const results = (
@@ -332,7 +414,7 @@ async function exaBasicSearch(
       EXA_MCP_URL,
       "Exa",
       "web_search_exa",
-      { query, numResults },
+      { query: withSiteOperators(query, filters), numResults },
       signal,
     )
   )
@@ -355,6 +437,7 @@ async function exaBasicSearch(
       return {
         title: block.match(/^Title: (.+)/m)?.[1]?.trim() ?? "",
         url: block.match(/^URL: (.+)/m)?.[1]?.trim() ?? "",
+        published: isoDate(block.match(/^Published: (.+)/m)?.[1]),
         content,
       };
     })
@@ -367,6 +450,7 @@ async function exaBasicSearch(
 async function parallelSearch(
   query: string,
   numResults: number,
+  filters: SearchFilters,
   signal?: AbortSignal,
 ): Promise<SearchResult[]> {
   const results = (
@@ -376,11 +460,19 @@ async function parallelSearch(
           "https://search.parallel.ai/mcp",
           "Parallel",
           "web_search",
-          { objective: query, search_queries: [query] },
+          {
+            objective: query,
+            search_queries: [withSiteOperators(query, filters)],
+          },
           signal,
         ),
       ) as {
-        results?: Array<{ url?: string; title?: string; excerpts?: string[] }>;
+        results?: Array<{
+          url?: string;
+          title?: string;
+          excerpts?: string[];
+          publish_date?: string;
+        }>;
       }
     ).results ?? []
   )
@@ -388,6 +480,7 @@ async function parallelSearch(
       return {
         title: r.title?.trim() ?? "",
         url: r.url?.trim() ?? "",
+        published: isoDate(r.publish_date),
         content: (Array.isArray(r.excerpts) ? r.excerpts : [])
           .join("\n")
           .trim()
@@ -401,13 +494,36 @@ async function parallelSearch(
   return results;
 }
 
-async function duckDuckGoSearch(
+let duckDuckGoQueue: Promise<unknown> = Promise.resolve();
+let duckDuckGoBlockedUntil = 0;
+
+function duckDuckGoSearch(
   query: string,
   numResults: number,
+  filters: SearchFilters,
   signal?: AbortSignal,
 ): Promise<SearchResult[]> {
+  const run = duckDuckGoQueue.then(() =>
+    duckDuckGoRequest(query, numResults, filters, signal),
+  );
+  duckDuckGoQueue = run.catch(() => {}).then(() => sleep(2_000));
+  return run;
+}
+
+async function duckDuckGoRequest(
+  query: string,
+  numResults: number,
+  filters: SearchFilters,
+  signal?: AbortSignal,
+): Promise<SearchResult[]> {
+  signal?.throwIfAborted();
+  if (Date.now() < duckDuckGoBlockedUntil)
+    throw new Error(
+      `DuckDuckGo bot check, paused for ${Math.ceil((duckDuckGoBlockedUntil - Date.now()) / 60_000)} min`,
+    );
   const url = new URL(DUCKDUCKGO_URL);
-  url.searchParams.set("q", query);
+  url.searchParams.set("q", withSiteOperators(query, filters));
+  if (filters.recency) url.searchParams.set("df", filters.recency[0]);
   const res = await fetch(url, {
     headers: { "User-Agent": USER_AGENT, Accept: "text/html" },
     signal: withTimeout(signal),
@@ -420,6 +536,13 @@ async function duckDuckGoSearch(
   const { document } = parseHTML(
     await readBoundedText(res, MAX_RESPONSE_BYTES),
   );
+  if (
+    res.status === 202 ||
+    document.querySelector(".anomaly-modal__box, #challenge-form")
+  ) {
+    duckDuckGoBlockedUntil = Date.now() + 5 * 60_000;
+    throw new Error("DuckDuckGo bot check, paused for 5 min");
+  }
   const results: SearchResult[] = [];
   for (const container of document.querySelectorAll(".result")) {
     if (container.classList.contains("result--ad")) continue;
@@ -496,6 +619,7 @@ function isTransient(err: unknown): boolean {
 async function runSearch(
   query: string,
   numResults: number,
+  filters: SearchFilters,
   signal?: AbortSignal,
 ): Promise<{ results: SearchResult[]; provider: string }> {
   const failures: string[] = [];
@@ -507,10 +631,12 @@ async function runSearch(
   ].entries()) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        return {
-          results: await provider.run(query, numResults, signal),
-          provider: provider.name,
-        };
+        const results = (
+          await provider.run(query, numResults, filters, signal)
+        ).filter((r) => matchesFilters(r, filters));
+        if (results.length === 0)
+          throw new Error("no results match the domain or recency filter");
+        return { results, provider: provider.name };
       } catch (err) {
         if (signal?.aborted) throw err;
         if (index === 0 && attempt === 0 && isTransient(err)) {
@@ -525,9 +651,44 @@ async function runSearch(
   throw new Error(failures.join("; "));
 }
 
+async function findRanker(
+  ctx: ExtensionContext,
+): Promise<ClassifierModel<ClassifierApi> | undefined> {
+  try {
+    return (
+      await ctx.modelRegistry.getAvailableOfType("classifier", "typesafe")
+    ).find((model) => model.id === "jev-latest");
+  } catch {
+    return undefined;
+  }
+}
+
+function addUsage(a: Usage, b: Usage): Usage {
+  return {
+    input: a.input + b.input,
+    output: a.output + b.output,
+    cacheRead: a.cacheRead + b.cacheRead,
+    cacheWrite: a.cacheWrite + b.cacheWrite,
+    totalTokens: a.totalTokens + b.totalTokens,
+    ...(a.cacheWrite1h !== undefined || b.cacheWrite1h !== undefined
+      ? { cacheWrite1h: (a.cacheWrite1h ?? 0) + (b.cacheWrite1h ?? 0) }
+      : {}),
+    ...(a.reasoning !== undefined || b.reasoning !== undefined
+      ? { reasoning: (a.reasoning ?? 0) + (b.reasoning ?? 0) }
+      : {}),
+    cost: {
+      input: a.cost.input + b.cost.input,
+      output: a.cost.output + b.cost.output,
+      cacheRead: a.cost.cacheRead + b.cost.cacheRead,
+      cacheWrite: a.cost.cacheWrite + b.cost.cacheWrite,
+      total: a.cost.total + b.cost.total,
+    },
+  };
+}
+
 async function scoreCandidates(
   ctx: ExtensionContext,
-  jev: JevModel,
+  ranker: ClassifierModel<ClassifierApi>,
   query: string,
   candidates: SearchResult[],
   signal?: AbortSignal,
@@ -545,9 +706,9 @@ async function scoreCandidates(
     };
   });
 
-  const { probabilities, usage } = await boolProbabilities(
-    ctx,
-    jev,
+  const timeout = AbortSignal.timeout(8_000);
+  const result = await ctx.modelRegistry.classify(
+    ranker,
     {
       state: {
         query,
@@ -559,50 +720,57 @@ async function scoreCandidates(
       },
       questions,
     },
-    8_000,
-    signal,
+    { signal: signal ? AbortSignal.any([signal, timeout]) : timeout },
   );
-  if (!probabilities) return { scores: null, usage };
-  const scores = candidates.map((_, i) => probabilities[`c${i}`] ?? null);
-  return { scores: scores.some((s) => s !== null) ? scores : null, usage };
+  if (result.stopReason !== "stop")
+    return { scores: null, usage: result.usage };
+  const scores = candidates.map((_, i) => {
+    const answer = result.answers[`c${i}`];
+    return answer?.type === "bool" ? answer.probability : null;
+  });
+  return {
+    scores: scores.some((s) => s !== null) ? scores : null,
+    usage: result.usage,
+  };
 }
 
 async function rerankResults(
   ctx: ExtensionContext,
-  jev: JevModel | undefined,
+  ranker: ClassifierModel<ClassifierApi> | undefined,
   query: string,
   results: SearchResult[],
   signal?: AbortSignal,
-): Promise<{ results: SearchResult[]; usage?: Usage }> {
-  if (!jev || results.length < 2) return { results };
+): Promise<{ results: SearchResult[]; dropped: number; usage?: Usage }> {
+  if (!ranker || results.length < 2) return { results, dropped: 0 };
   const candidates = results.slice(0, RERANK_MAX_CANDIDATES);
   const { scores, usage } = await scoreCandidates(
     ctx,
-    jev,
+    ranker,
     query,
     candidates,
     signal,
   );
-  if (!scores) return { results, usage };
+  if (!scores) return { results, dropped: 0, usage };
+  const kept = candidates
+    .map((result, i) => ({ result, i, score: scores[i] }))
+    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || a.i - b.i)
+    .filter((s, rank) => rank < 3 || (s.score ?? 0) >= 0.35)
+    .map((s) => s.result);
   return {
-    results: candidates
-      .map((result, i) => ({ result, i, score: scores[i] }))
-      .sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || a.i - b.i)
-      .filter((s, rank) => rank < 3 || (s.score ?? 0) >= 0.35)
-      .map((s) => s.result),
+    results: kept,
+    dropped: candidates.length - kept.length,
     usage,
   };
 }
 
-async function readBoundedText(
+async function readBounded(
   res: Response,
   maxBytes: number,
-): Promise<string> {
-  if (!res.body) return res.text();
+): Promise<Uint8Array> {
+  if (!res.body) return new Uint8Array(await res.arrayBuffer());
   const reader = res.body.getReader();
-  const decoder = new TextDecoder();
+  const chunks: Uint8Array[] = [];
   let received = 0;
-  let out = "";
   try {
     while (true) {
       const { done, value } = await reader.read();
@@ -613,13 +781,45 @@ async function readBoundedText(
           `Response too large (>${Math.round(maxBytes / 1024 / 1024)}MB)`,
         );
       }
-      out += decoder.decode(value, { stream: true });
+      chunks.push(value);
     }
   } finally {
     reader.cancel().catch(() => {});
   }
-  out += decoder.decode();
-  return out;
+  // pdf.js rejects a Node Buffer, so copy into a plain Uint8Array.
+  return new Uint8Array(Buffer.concat(chunks));
+}
+
+async function readBoundedText(
+  res: Response,
+  maxBytes: number,
+): Promise<string> {
+  return new TextDecoder().decode(await readBounded(res, maxBytes));
+}
+
+async function pdfToMarkdown(
+  bytes: Uint8Array,
+  url: string,
+): Promise<{ title: string; content: string }> {
+  const pdf = await getDocumentProxy(bytes);
+  try {
+    const [{ text }, { info }] = await Promise.all([
+      extractText(pdf),
+      getMeta(pdf),
+    ]);
+    if (!text.some((page) => page.trim()))
+      throw new Error("PDF has no text layer (scanned images only)");
+    const content = text
+      .map((page, i) => `## Page ${i + 1}\n\n${page.trim()}`)
+      .join("\n\n");
+    const title =
+      typeof info?.Title === "string" && info.Title.trim()
+        ? info.Title.trim()
+        : decodeURIComponent(new URL(url).pathname.split("/").pop() || url);
+    return { title, content };
+  } finally {
+    await pdf.loadingTask.destroy();
+  }
 }
 
 function sliceWithContinuation(
@@ -647,6 +847,78 @@ function sliceWithContinuation(
     nextOffset: end,
     totalChars,
   };
+}
+
+function findPassages(content: string, needles: string[]): string {
+  const terms = [...new Set(needles.map((n) => n.trim()).filter(Boolean))];
+  const lower = content.toLowerCase();
+  const hits: Array<{ start: number; end: number; term: number }> = [];
+  terms.forEach((term, t) => {
+    const needle = term.toLowerCase();
+    for (
+      let i = lower.indexOf(needle);
+      i >= 0;
+      i = lower.indexOf(needle, i + needle.length)
+    ) {
+      hits.push({
+        start: Math.max(0, i - 400),
+        end: Math.min(content.length, i + needle.length + 400),
+        term: t,
+      });
+    }
+  });
+  hits.sort((a, b) => a.start - b.start);
+
+  const passages: Array<{ start: number; end: number; terms: Set<number> }> =
+    [];
+  for (const hit of hits) {
+    const last = passages.at(-1);
+    if (
+      last &&
+      hit.start <= last.end &&
+      (hit.end <= last.end || hit.end - last.start <= 2_000)
+    ) {
+      last.end = Math.max(last.end, hit.end);
+      last.terms.add(hit.term);
+    } else {
+      passages.push({
+        start: Math.max(hit.start, last?.end ?? 0),
+        end: hit.end,
+        terms: new Set([hit.term]),
+      });
+    }
+  }
+
+  const missing = terms.filter((_, t) => !passages.some((p) => p.terms.has(t)));
+  const missingLine = missing.length
+    ? `No match: ${missing.map((m) => `"${m}"`).join(", ")}`
+    : "";
+  if (passages.length === 0)
+    return `${missingLine}. The page has ${content.length} chars. Retry with a shorter term, or fetch without find.`;
+
+  const firstPerTerm = terms.flatMap((_, t) =>
+    passages.filter((p) => p.terms.has(t)).slice(0, 1),
+  );
+  const shown = new Set<(typeof passages)[number]>();
+  let used = 0;
+  for (const passage of new Set([...firstPerTerm, ...passages])) {
+    if (used + passage.end - passage.start > 20_000) continue;
+    shown.add(passage);
+    used += passage.end - passage.start;
+  }
+
+  return [
+    ...passages
+      .filter((p) => shown.has(p))
+      .map(
+        (p, i) =>
+          `[${i + 1}] ${p.start > 0 ? "\u2026" : ""}${content.slice(p.start, p.end).trim()}${p.end < content.length ? "\u2026" : ""}`,
+      ),
+    missingLine,
+    `[${hits.length} matches in ${passages.length} passages${shown.size < passages.length ? `, showing ${shown.size}. Narrow find to see the rest` : ""}]`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 function withContinuationFooter(
@@ -708,21 +980,26 @@ async function fetchReadable(
   };
   if (!res.ok) await reject(`HTTP ${res.status}: ${res.statusText}`);
 
+  const contentType = res.headers.get("content-type") ?? "";
+  const baseType = contentType.split(";")[0].trim().toLowerCase();
+  const isPdf =
+    baseType === "application/pdf" ||
+    (baseType === "application/octet-stream" &&
+      /\.pdf$/i.test(new URL(finalUrl).pathname));
+  const maxBytes = isPdf ? 25 * 1024 * 1024 : MAX_RESPONSE_BYTES;
   const contentLength = res.headers.get("content-length");
-  if (contentLength && Number(contentLength) > MAX_RESPONSE_BYTES) {
+  if (contentLength && Number(contentLength) > maxBytes) {
     await reject(
       `Response too large (${Math.round(Number(contentLength) / 1024 / 1024)}MB)`,
     );
   }
+  if (isPdf) return pdfToMarkdown(await readBounded(res, maxBytes), finalUrl);
 
-  const contentType = res.headers.get("content-type") ?? "";
-  const baseType = contentType.split(";")[0].trim().toLowerCase();
   if (
     /^(image|audio|video|font)\//i.test(baseType) ||
     [
       "application/octet-stream",
       "application/zip",
-      "application/pdf",
       "application/gzip",
       "application/x-tar",
       "application/x-7z-compressed",
@@ -1517,7 +1794,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: "web_search",
     label: "Web Search",
-    description: `Search the web. Each result is a title, a URL, and a snippet, so fetch a result when the snippet does not settle the question. The current year is ${new Date().getFullYear()}; put it in the query when recency matters.`,
+    description: `Search the web. Each result is a title, a URL, a publish date when known, and a snippet, so fetch a result when the snippet does not settle the question. The current year is ${new Date().getFullYear()}; put it in the query when recency matters.`,
     promptSnippet: "Search the web for external facts",
     annotations: { readOnlyHint: true, openWorldHint: true },
     renderResult(result, _options, theme: Theme, context) {
@@ -1552,6 +1829,23 @@ export default function (pi: ExtensionAPI) {
           description: "Keep the default of 5 unless the task needs breadth.",
         }),
       ),
+      domains: Type.Optional(
+        Type.Array(nonEmptyText, {
+          description:
+            'Only these domains, or "-domain" to exclude one. Applies to every query.',
+        }),
+      ),
+      recency: Type.Optional(
+        Type.Union(
+          [
+            Type.Literal("day"),
+            Type.Literal("week"),
+            Type.Literal("month"),
+            Type.Literal("year"),
+          ],
+          { description: "Only pages published in this period." },
+        ),
+      ),
     }),
     outputSchema: Type.Object({
       queries: Type.Array(
@@ -1562,6 +1856,9 @@ export default function (pi: ExtensionAPI) {
               title: Type.String(),
               url: Type.String(),
               content: Type.String(),
+              published: Type.Optional(
+                Type.String({ description: "YYYY-MM-DD" }),
+              ),
             }),
           ),
           error: Type.Union([Type.String(), Type.Null()]),
@@ -1595,25 +1892,32 @@ export default function (pi: ExtensionAPI) {
         10,
       );
 
-      const jev = await findJev(ctx);
+      const ranker = await findRanker(ctx);
+      const filters = buildFilters(params.domains ?? [], params.recency);
 
       const queryResults = await mapLimit(queryList, 4, async (query) => {
         try {
           const { results, provider } = await runSearch(
             query,
-            jev ? Math.min(numResults * 2, RERANK_MAX_CANDIDATES) : numResults,
+            ranker
+              ? Math.min(numResults * 2, RERANK_MAX_CANDIDATES)
+              : numResults,
+            filters,
             signal,
           );
+          // DuckDuckGo snippets are too short to judge relevance on.
           const ranked = await rerankResults(
             ctx,
-            jev,
+            provider === "duckduckgo" ? undefined : ranker,
             query,
             dedupResults(results),
             signal,
           );
+          const shown = ranked.results.slice(0, numResults);
           return {
             query,
-            results: ranked.results.slice(0, numResults),
+            results: shown,
+            dropped: shown.length < numResults ? ranked.dropped : 0,
             provider,
             error: null as string | null,
             usage: ranked.usage,
@@ -1622,6 +1926,7 @@ export default function (pi: ExtensionAPI) {
           return {
             query,
             results: [] as SearchResult[],
+            dropped: 0,
             provider: "none",
             error: errMsg(err),
             usage: undefined,
@@ -1636,10 +1941,10 @@ export default function (pi: ExtensionAPI) {
           "Note: fallback search for at least one query. Snippets are shorter than usual, so fetch a result before concluding.\n\n";
       const structured: {
         query: string;
-        results: { title: string; url: string; content: string }[];
+        results: SearchResult[];
         error: string | null;
       }[] = [];
-      for (const { query, results, error } of queryResults) {
+      for (const { query, results, dropped, error } of queryResults) {
         if (queryList.length > 1) output += `## Query: "${query}"\n\n`;
         if (error) {
           structured.push({ query, results: [], error });
@@ -1648,26 +1953,26 @@ export default function (pi: ExtensionAPI) {
         }
         structured.push({
           query,
-          results: results.map(({ title, url, content }) => ({
-            title,
-            url,
-            content,
-          })),
+          results,
           error: null,
         });
         totalResults += results.length;
+        const droppedNote = dropped
+          ? `${dropped} off-topic result${dropped === 1 ? "" : "s"} dropped. Rephrase the query if these do not answer it.\n\n`
+          : "";
         if (results.length === 0) {
-          output += "0 results.\n\n";
+          output += `0 results.\n\n${droppedNote}`;
           continue;
         }
         output +=
           results
             .map(
               (r, i) =>
-                `${i + 1}. ${r.title}\n   ${r.url}\n   ${r.content.slice(0, 400).replace(/\s+/g, " ")}`,
+                `${i + 1}. ${r.title}${r.published ? ` (${r.published})` : ""}\n   ${r.url}\n   ${r.content.slice(0, 400).replace(/\s+/g, " ")}`,
             )
-            .join("\n\n") + "\n\n";
+            .join("\n\n") + `\n\n${droppedNote}`;
       }
+      const usages = queryResults.flatMap((r) => (r.usage ? [r.usage] : []));
 
       return {
         content: [
@@ -1683,7 +1988,7 @@ export default function (pi: ExtensionAPI) {
           totalResults,
           providers: [...new Set(queryResults.map((r) => r.provider))],
         },
-        usage: sumUsage(queryResults.map((r) => r.usage)),
+        usage: usages.length ? usages.reduce(addUsage) : undefined,
         structuredContent: { queries: structured },
         ...(queryResults.every((r) => r.error) ? { isError: true } : {}),
       };
@@ -1694,7 +1999,7 @@ export default function (pi: ExtensionAPI) {
     name: "fetch_content",
     label: "Fetch Content",
     description:
-      "Fetch web content as markdown. A GitHub code link returns a local path to read files from. A GitHub issue or pull link returns the thread with its comments. A video link returns the transcript. For PR diffs, checks, or review threads, use github_pr instead.",
+      "Fetch web content as markdown. A PDF returns its text by page. A GitHub code link returns a local path to read files from. A GitHub issue or pull link returns the thread with its comments. A video link returns the transcript. For PR diffs, checks, or review threads, use github_pr instead.",
     promptSnippet: "Read a web page, GitHub link, or video transcript",
     annotations: {
       readOnlyHint: false,
@@ -1730,6 +2035,13 @@ export default function (pi: ExtensionAPI) {
         }),
       ),
       offset: Type.Optional(Type.Number({ minimum: 0, default: 0 })),
+      find: Type.Optional(
+        Type.Array(nonEmptyText, {
+          minItems: 1,
+          description:
+            "Return only passages around these strings, ignoring case, instead of the whole page.",
+        }),
+      ),
     }),
     outputSchema: Type.Object({
       pages: Type.Array(
@@ -1774,11 +2086,13 @@ export default function (pi: ExtensionAPI) {
           return {
             url,
             title,
-            content: withContinuationFooter(
-              content,
-              Math.max(Math.floor(params.offset ?? 0), 0),
-              url,
-            ),
+            content: params.find?.length
+              ? findPassages(content, params.find)
+              : withContinuationFooter(
+                  content,
+                  Math.max(Math.floor(params.offset ?? 0), 0),
+                  url,
+                ),
             error: null as string | null,
           };
         } catch (err) {

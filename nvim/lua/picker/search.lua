@@ -9,6 +9,8 @@ end
 
 local SKIP_FILES = vim.tbl_map(vim.glob.to_lpeg, ignore.files)
 
+local LOCAL_FILES = vim.tbl_map(vim.glob.to_lpeg, { '.env', '.env.*', '.envrc', '.mise.toml', '.mise.local.toml', 'mise.local.toml' })
+
 local function rg_globs()
     local globs = {}
     for _, dir in ipairs(ignore.dirs) do
@@ -46,6 +48,26 @@ function M.files()
     local cmd = { 'rg', '--files', '--no-messages', '--color', 'never', '--hidden' }
     vim.list_extend(cmd, rg_globs())
     return cmd
+end
+
+---@param cwd string
+---@param on_files fun(files: string[]) runs on the main loop with gitignored local files, such as `.env` and `.mise.toml`, relative to `cwd`
+function M.local_files(cwd, on_files)
+    -- --directory lists an ignored folder as one entry, so git skips node_modules and build output.
+    local cmd = { 'git', 'ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory' }
+    vim.system(cmd, { cwd = cwd, text = true }, function(result)
+        local files = {}
+        for _, rel in ipairs(result.code == 0 and vim.split(result.stdout, '\0', { trimempty = true }) or {}) do
+            local name = vim.fs.basename(rel)
+            for _, glob in ipairs(LOCAL_FILES) do
+                if glob:match(name) and not M.excluded(rel, true) then
+                    files[#files + 1] = rel
+                    break
+                end
+            end
+        end
+        vim.schedule(function() on_files(files) end)
+    end)
 end
 
 ---@param query string

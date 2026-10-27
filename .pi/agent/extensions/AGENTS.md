@@ -26,11 +26,11 @@ Work that outlives its tool call, such as a background subagent run, writes a st
 
 ### Bigger toolbox for the model
 
-- **`web-search.ts`** — searches or fetches one or many web targets for external research, ranking results most relevant first and dropping the ones that do not answer the query, returning GitHub links as local files or comment threads, and videos as transcripts.
+- **`web-search.ts`** — searches or fetches one or many web targets for external research, limits a search to chosen domains or a recent period, returns only the passages of a page that contain given text, ranks results most relevant first and drops the ones that do not answer the query, with a count of the dropped results, and returns GitHub links as local files or comment threads, videos as transcripts, and PDFs as text.
 - **`lsp/`** — provides symbol navigation and deterministic post-edit diagnostics and fixes for code work.
 - **`github-pr.ts`** — fetches concise PR metadata, failures, review threads, diffs, or a single section for PR analysis, and resolves all open review threads as soon as the review comments are fixed locally.
 - **`subagent/`** — delegates external research, read-only recon of the local repo, or a read-only parallel review to an isolated agent, with background control, compact structured results, and an interrupted status for runs that a pi restart cut off.
-- **`quiet-run.ts`** — runs shell commands by default, with output kept in a log file, returning only the verdict and the requested slice, and holds a destructive command until the user approves it.
+- **`quiet-run.ts`** — runs shell commands by default, with output kept in a log file, returning only the verdict and the requested slice.
 - **`ask/`** — presents structured choices when a request needs clarification, and shows the agent as waiting on the user in Rex while the dialog is open.
 
 ### Cleaner context
@@ -52,6 +52,7 @@ Work that outlives its tool call, such as a background subagent run, writes a st
 ### Outside-pi surface
 
 - **`caffeinate.ts`** — keeps the Mac from idle sleep while the agent actively works, for at most 100 minutes per run, and lets the display sleep.
+- **`posthog.ts`** — sends the model, tokens, cost, and latency of every model call, and the name, duration, and error flag of every tool call, to PostHog when `posthog.json` holds a project token, and never sends prompts, outputs, or tool arguments.
 - **`rex-bridge.ts`** — sends Nvim selections or diagnostics from the same Rex session to Pi, and tells Nvim which file Pi edited last.
 
 ### TUI taste

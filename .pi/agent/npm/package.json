@@ -6,7 +6,8 @@
 		"grok-mermaid": "^0.2.3",
 		"linkedom": "^0.18.13",
 		"neovim": "^5.4.0",
-		"turndown": "^7.2.4"
+		"turndown": "^7.2.4",
+		"unpdf": "^1.9.1"
 	},
 	"devDependencies": {
 		"@earendil-works/pi-agent-core": "1.4.0",

@@ -63,6 +63,16 @@ function M.smart()
             table.sort(seed, function(a, b) return (a.bonus + frecency.score(a.file, self.cwd)) > (b.bonus + frecency.score(b.file, self.cwd)) end)
             self:add(seed)
 
+            local tick = self.tick
+            search.local_files(self.cwd, function(files)
+                if self.closed or tick ~= self.tick then return end
+                local items = {}
+                for _, rel in ipairs(files) do
+                    if not seen[vim.fs.joinpath(self.cwd, rel)] then items[#items + 1] = { text = rel, file = rel } end
+                end
+                if #items > 0 then self:add(items) end
+            end)
+
             self:spawn(list_cmd, function(line)
                 local path = line:gsub('^%./', '')
                 if seen[vim.fs.joinpath(self.cwd, path)] then return nil end

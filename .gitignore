@@ -3,6 +3,7 @@ history.txt
 .zcompdump
 .zsh_history
 .pi/agent/auth.json
+.pi/agent/posthog.json
 .pi/agent/sessions/
 .pi/agent/models-store.json
 

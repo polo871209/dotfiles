@@ -2,7 +2,8 @@ local terminal = 'com.superlogical.terminal'
 local shell = terminal .. '.shell'
 local home = os.getenv 'HOME'
 -- The Rex server's PATH has no mise shims.
-local zoxide = home .. '/.local/share/mise/shims/zoxide'
+local shims = home .. '/.local/share/mise/shims/'
+local zoxide = shims .. 'zoxide'
 local config_dir = (os.getenv 'XDG_CONFIG_HOME' or home .. '/.config') .. '/rex'
 local picker_bounds = { 0.225, 0.2, 0.55, 0.6 }
 
@@ -173,6 +174,39 @@ rex.action {
 }
 
 rex.action {
+    name = 'browse_pr',
+    title = 'Open PR',
+    keywords = 'pull request github browser branch',
+    run = function(ctx)
+        local result, err = rex.exec({ shims .. 'gh', 'pr', 'view', '--web' }, { cwd = foreground_cwd(ctx) })
+        if not result then error(err, 0) end
+        if result.ok then return end
+        local branch = result.stderr:match 'no pull requests found for branch "(.-)"'
+        if branch then error('No PR for ' .. branch, 0) end
+        if result.stderr:find 'not a git repository' then error('Not a git repository', 0) end
+        error(result.stderr:match '[^\n]*', 0)
+    end,
+}
+
+rex.action {
+    name = 'copy_path',
+    title = 'Copy Pane Directory',
+    run = function(ctx)
+        local process, process_err = rex.block.call(terminal, 'process', { block_id = ctx.block_id })
+        if process_err ~= nil then error(process_err, 0) end
+        local dir = process.foreground.cwd
+        local copied, copy_err = rex.exec({ 'pbcopy' }, { stdin = dir })
+        if not copied then error(copy_err, 0) end
+        -- Rex has no Lua call for an in-app notice, so send the pane an OSC 9 desktop notification.
+        local tty = rex.exec { 'ps', '-o', 'tty=', '-p', tostring(process.foreground.pid) }
+        local tty_file = tty and tty.ok and io.open('/dev/' .. tty.stdout:gsub('%s', ''), 'w')
+        if not tty_file then return end
+        tty_file:write(('\27]9;Copied %s\7'):format(tilde_path(dir)))
+        tty_file:close()
+    end,
+}
+
+rex.action {
     name = 'open_url',
     title = 'Open URL from Pane',
     run = function(ctx)
@@ -215,3 +249,5 @@ rex.bind('shift+cmd+b', 'browse_repo')
 rex.bind('cmd+l', 'lazygit')
 rex.bind('cmd+n', 'nvim')
 rex.bind('cmd+u', 'open_url')
+rex.bind('cmd+p', 'browse_pr')
+rex.bind('cmd+y', 'copy_path')
