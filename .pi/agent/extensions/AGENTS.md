@@ -1,74 +1,63 @@
 # my pi harness
 
-<!-- AGENT: when adding, removing, or materially changing an extension under `.pi/agent/extensions/`, update its bullet here. One bullet per extension: capability and when to use it, in one concise clause. Omit implementation details. -->
+<!-- AGENT: when you add, remove, or materially change an extension here, update its bullet below. One bullet per extension: what it does and when it applies, in one clause. No mechanism. -->
 
-Personal agent harness built on [pi](https://github.com/earendil-works/pi): more tools, less context bloat, fewer reasons to leave the terminal.
+Personal agent harness on [pi](https://github.com/earendil-works/pi): more tools, less context bloat, fewer reasons to leave the terminal.
 
 ## Design rules
 
-1. **Deterministic first.** If a script, regex, or hard-coded branch can do the step, don't prompt an LLM.
+1. **Deterministic first.** If a script, regex, or fixed branch can do the step, do not prompt an LLM.
 2. **Protect main-agent context.** Keep data out of history unless the next turn needs it.
-3. **Hooks idempotent.** Dedupe repeatable lifecycle side effects per session.
-4. **Agent borrows from dev environment.** Nvim config remains the source of truth for LSP, formatters, and diagnostics; don't reimplement them for the agent.
-5. **Say what, not how.** Model-facing descriptions and this capability index state capability and trigger, never mechanism.
+3. **Idempotent hooks.** Dedupe repeatable lifecycle side effects per session.
+4. **Borrow the dev environment.** The Nvim configuration owns LSP, formatters, and diagnostics. Reuse it instead of reimplementing it.
+5. **Say what, not how.** Model-facing descriptions and this index state capability and trigger, never mechanism.
 
 ## Working on pi itself
 
-Before changing Pi-native behavior, read directly relevant documentation in the installed `@earendil-works/pi-coding-agent` package and its explicitly required prerequisites. Stop once the relevant API and constraints are covered.
+Before you change pi-native behavior, read the relevant docs in the installed `@earendil-works/pi-coding-agent` package. Stop when the API and its constraints are covered.
 
-Report a tool failure with a throw or `isError: true`. Pi ignores an `error` field on the result and shows the call as a success. A tool whose result is data declares `outputSchema` and returns `structuredContent`, because codemode scripts receive that value instead of the text.
-
-Declare `annotations` on every tool: `readOnlyHint` and `openWorldHint` always, plus `destructiveHint` and `idempotentHint` when the tool writes. For a tool with several actions, annotate the worst action. Set `readOnlyHint` or `idempotentHint` only when a rerun after a crash or retry repeats no side effect.
-
-Work that outlives its tool call, such as a background subagent run, writes a start entry and an end entry with `pi.appendEntry()`. On `session_start`, a start entry with no end entry means pi stopped mid-run, and the tool must report that run as interrupted instead of unknown.
+- Report a tool failure with a throw or `isError: true`. Pi ignores an `error` field and shows the call as a success.
+- A tool that returns data declares `outputSchema` and returns `structuredContent`, because codemode scripts receive that value instead of the text.
+- Every tool declares `annotations`: `readOnlyHint` and `openWorldHint` always, plus `destructiveHint` and `idempotentHint` when it writes. Annotate the worst action of a multi-action tool. Set `readOnlyHint` or `idempotentHint` only if a rerun after a crash repeats no side effect.
+- Work that outlives its tool call, such as a background subagent run, writes a start entry and an end entry with `pi.appendEntry()`. On `session_start`, a start entry without an end entry means pi stopped mid-run, so report that run as interrupted.
 
 ## What it adds to vanilla pi
 
-### Bigger toolbox for the model
+### Tools for the model
 
-- **`web-search.ts`** — searches or fetches one or many web targets for external research, limits a search to chosen domains or a recent period, returns only the passages of a page that contain given text, ranks results most relevant first and drops the ones that do not answer the query, with a count of the dropped results, and returns GitHub links as local files or comment threads, videos as transcripts, and PDFs as text.
-- **`lsp/`** — provides symbol navigation and deterministic post-edit diagnostics and fixes for code work.
-- **`github-pr.ts`** — fetches concise PR metadata, failures, review threads, diffs, or a single section for PR analysis, and resolves all open review threads as soon as the review comments are fixed locally.
-- **`subagent/`** — delegates external research, read-only recon of the local repo, or a read-only parallel review to an isolated agent, with background control, compact structured results, and an interrupted status for runs that a pi restart cut off.
-- **`quiet-run.ts`** — runs shell commands by default, with output kept in a log file, returning only the verdict and the requested slice.
-- **`ask/`** — presents structured choices when a request needs clarification, and shows the agent as waiting on the user in Rex while the dialog is open.
+- **`web-search.ts`** — searches or fetches web targets for external research, scoped by domain or recency, ranked and filtered for relevance, and returns GitHub links as local files or threads, videos as transcripts, and PDFs as text.
+- **`lsp/`** — symbol navigation, plus deterministic post-edit diagnostics and fixes.
+- **`github-pr.ts`** — fetches a PR's metadata, failing checks, review threads, or diff, and resolves open threads once their comments are fixed locally.
+- **`subagent/`** — delegates external research, read-only repo recon, or parallel review to an isolated agent. It runs in the foreground or background, returns compact structured results, shows each run's live status in pi without Rex status or notifications, and delivers background results as a message.
+- **`quiet-run.ts`** — the default way to run shell commands. Output goes to a log, and the agent gets the verdict and the requested slice.
+- **`ask/`** — structured choices when a request needs clarification.
 
 ### Cleaner context
 
-- **`skill-packs.ts`** — enables Lark/Feishu or Google Workspace skills only when requested.
-- **`folder-context.ts`** — loads scoped agent instructions when files are touched and refreshes them after edits.
-- **`btw.ts`** — answers a side question on `/btw` with the whole session as context, and keeps the exchange out of the main agent's context.
+- **`skill-packs.ts`** — enables Lark/Feishu or Google Workspace skills only on request.
+- **`folder-context.ts`** — loads scoped agent instructions when files are touched, and refreshes them after edits.
+- **`btw.ts`** — answers a `/btw` side question with the session as context, outside the main agent's history.
 
 ### Workflow shortcuts
 
 - **`go.ts`** — resumes an interrupted or stalled agent turn.
-- **`yeet.ts`** — validates, generates Conventional Commits with Sonnet 5.5, and pushes current changes with progress.
-- **`worktree.ts`** — on `/wt` or when the user asks the agent for a worktree, moves the current session and tab into the git worktree of a branch under `.worktree/`, starts a separate agent on a task in a background worktree tab, lists worktrees with their changes and tabs, and removes a clean worktree with its tab while keeping its branch.
-- **`fork-window.ts`** — on `/fork` or `/clone` in Rex, clones the whole current conversation into a new Rex window that takes focus, as a session named `fork: <name>` or `clone: <name>`, while this pane keeps the original session, so both run in parallel.
-- **`runbook/`** — shows commands the user must run as steps that run inside pi with their output and exit status, paste into a Rex pane ready for Enter, or copy, from a click or the keyboard, hands a failed step's output to the agent, which can replace that step's command in place so the user continues from the same step, tells the agent on the next turn which steps ran and how they ended, with the output of failed steps and of steps whose log the user attaches, adds the same actions to code blocks, and copies a code block or the session transcript on request.
-- **`usage.ts`** — reports Claude Pro/Max subscription usage and quota reset times on request.
-- **`auto-rename.ts`** — titles each session in at most five words from its latest request, renames a fork or clone at its first new message, keeps a name the user set, and shows the title on the Rex tab.
+- **`yeet.ts`** — validates, writes Conventional Commits, and pushes current changes.
+- **`worktree.ts`** — on `/wt` or a worktree request, moves the session into a branch's worktree under `.worktree/`, starts a background agent in a new worktree, lists worktrees, and removes clean ones.
+- **`fork-window.ts`** — on `/fork` or `/clone` in Rex, continues the conversation in a new Rex window while this pane keeps the original.
+- **`runbook/`** — shows commands the user must run as steps they can run in pi, paste into a Rex pane, or copy. It hands failed output back to the agent for a fix in place, and reports on the next turn which steps ran and how they ended.
+- **`usage.ts`** — reports Claude Pro/Max usage and quota reset times.
+- **`auto-rename.ts`** — titles each session from its requests, weighted toward the latest one, and shows the title on the Rex tab. A name the user set is kept.
 
-### Outside-pi surface
+### Outside pi
 
-- **`caffeinate.ts`** — keeps the Mac from idle sleep while the agent actively works, for at most 100 minutes per run, and lets the display sleep.
-- **`posthog.ts`** — sends the model, tokens, cost, and latency of every model call, and the name, duration, and error flag of every tool call, to PostHog when `posthog.json` holds a project token, and never sends prompts, outputs, or tool arguments.
-- **`rex-bridge.ts`** — sends Nvim selections or diagnostics from the same Rex session to Pi, and tells Nvim which file Pi edited last.
+- **`caffeinate.ts`** — keeps the Mac awake while the agent works, for at most 100 minutes per run.
+- **`posthog.ts`** — sends model, token, cost, latency, and tool-call metrics to PostHog when `posthog.json` holds a token. It never sends prompts, outputs, or tool arguments.
+- **`rex-bridge.ts`** — sends Nvim selections or diagnostics from the same Rex session to pi, and tells Nvim which file pi edited last.
 
-### TUI taste
+### TUI
 
-- **`tui.ts`** — keeps the interface compact, exposes relevant session state, draws a Mermaid diagram that is wider than the terminal at a width that fits, and hands clicks on `pi-` links to other extensions.
+- **`tui.ts`** — compact interface with session state, Mermaid diagrams fitted to the terminal width, and clicks on `pi-` links routed to other extensions.
 
 ## Layout
 
-```
-extensions/
-├── tsconfig.json
-├── node_modules → ../npm/node_modules
-├── *.ts          single-file extensions
-├── ask/          ask_user_question dialog
-├── runbook/      command steps for the user, with Rex Lua
-├── lsp/          navigation and post-edit feedback
-├── subagent/     isolated agents in Rex panes
-└── shared/       shared extension utilities
-```
+Single-file extensions sit at the top level. Each directory is one extension, except `shared/`, which holds utilities used by several. `node_modules` links to `../npm/node_modules`.

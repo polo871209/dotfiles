@@ -140,7 +140,9 @@ function sessionDigest(
 function nameRequest(ctx: ExtensionContext, text: string): SideChannelOpts {
   const model = ctx.modelRegistry.find("anthropic", "claude-sonnet-5-5");
   return {
-    systemPrompt: `You title coding-agent sessions with 2 to ${MAX_WORDS} words. Name the key topic: the one thing the session builds, fixes, or investigates now. Requests come newest first, and each one weighs more than the ones after it. The latest request decides the topic. Use earlier requests and the files edited most only to name that topic precisely, or when the latest request has no topic of its own, such as "go on" or "fix it".
+    systemPrompt: `You title coding-agent sessions with 2 to ${MAX_WORDS} words. Name the key topic: the one thing the whole session builds, fixes, or investigates, as it stands now. Requests come newest first, and each one weighs more than the ones after it. Read the latest request as a step in the earlier work. If it continues, narrows, or follows up on that work, name the work and use the latest request to make the title precise. Name only the subject of the latest request if it clearly leaves the earlier work for a new subject. The files edited most show where the work happens.
+
+Example: earlier "fix the retry in order sync", latest "stack this PR on top of #5584". Title: Order sync retry, because stacking the PR is a step in that work, not a new topic.
 
 Rules:
 - 2 to ${MAX_WORDS} words and ${MAX_CHARS} characters at most. Sentence case. No quotes, no final punctuation.

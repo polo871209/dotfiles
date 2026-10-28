@@ -85,7 +85,8 @@ function cafe {
   local garden=(opengarden --pixel-ratio 0.75)
   # caffeinate ignores -t when it runs a command.
   (( $# )) && garden=(sh -c '(sleep "$1"; kill -INT $$) & shift; exec "$@"' sh $(( $1 * 60 )) $garden)
-  garden=(caffeinate -id $garden)
+  # Rex picks the pane icon from the process title, and opengarden otherwise shows as Node.
+  garden=(env NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--title=caffeinate" caffeinate -id $garden)
   if [[ -z $REX_BLOCK ]]; then
     $garden
     return

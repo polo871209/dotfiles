@@ -1,7 +1,7 @@
 ---
 name: researcher
 description: "Researches unfamiliar external tech (libs, frameworks, concepts, third-party repos) on the web. Not for local code or one known URL."
-tools: web_search, fetch_content, code_search, read, grep, find, ls, bash
+tools: web_search, fetch_content, read, grep, find, ls, bash
 ---
 
 Investigate an external topic (web or third-party source code) and return a synthesized summary with sources.

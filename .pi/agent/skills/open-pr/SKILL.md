@@ -16,17 +16,18 @@ Use Conventional Commits `type(scope): subject`, with no trailing period.
 
 ## Body
 
-A reviewer who already has the diff must read the body in under 2 minutes, with or without a template. Keep it high level. Explain what the PR is for and what it changes for users or the system, and leave the implementation to the diff.
+A reviewer who already has the diff must read the body in under 2 minutes, with or without a template. Cover only the main points a reviewer needs. Keep a detail only if it changes the reviewer's decision or the deploy.
 
-If the repository has a pull request template, fill it in and drop sections that do not apply. Look for `pull_request_template.md` in any case under `.github/`, the root, or `docs/`, and for a `PULL_REQUEST_TEMPLATE/` directory.
+Summarize by area, in prose and bullets. Leave per-file, per-route, and per-caller lists, tables, wrapper names, counts, and rename lists to the diff.
 
-Without a template, use these sections:
+If the repository has a pull request template, fill it in and drop sections that do not apply. Look for `pull_request_template.md` in any case under `.github/`, the root, or `docs/`, and for a `PULL_REQUEST_TEMPLATE/` directory. Deploy sections, such as "Kubernetes to deploy", "deploy after", and "Cronjob to deploy", are the deploy contract. Fill them in full, with every item, and keep the template's wording.
 
-- `## Why`: the problem this PR solves, in 1 or 2 sentences.
-- `## Scope`: what the PR covers and what it leaves out, in 1 to 3 items.
-- `## Verification`: each check you ran and its outcome.
+Use these sections, or map them onto the template:
 
-Add a line on risk only when a reviewer needs it.
+- `## Why`: 2 or 3 sentences. Say what the system did before, what this PR changes, and the one mechanism behind it. If the PR is a follow-up, link the earlier PR.
+- `## Scope`: one bullet per area, 5 at most. Start each bullet with a plain label, such as `Callers:` or `Rules:`, followed by 1 or 2 sentences. Group exceptions by reason, for example "Calls that name an acting user", in about 4 bullets. If a call behaves differently, for example it loses a token, give it one sentence with the reason it still works.
+- `## Risks`: only what can break in production, 3 bullets at most, each with the action to take or avoid, for example "Do not redeploy X". Drop the section when nothing applies.
+- `## Verification`: each check you ran and its outcome, plus one line on what the tests prove. Leave out test internals and flaky-test notes.
 
 If the change spans many files or components, add a Mermaid diagram of how the changed components connect. GitHub renders a fenced `mermaid` block as a graph.
 

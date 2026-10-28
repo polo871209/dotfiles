@@ -2,6 +2,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { lastAssistantText } from "../shared/message";
 import { surviveReload } from "../shared/reload";
+import { WORKING_FRAME_MS, workingFrames } from "../shared/working-indicator";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -14,6 +15,7 @@ import {
   type Theme,
 } from "@earendil-works/pi-coding-agent";
 import {
+  Box,
   Container,
   Markdown,
   Spacer,
@@ -48,14 +50,24 @@ const THINKING_LEVELS: Record<ThinkingLevel, true> = {
 const isThinkingLevel = (value: unknown): value is ThinkingLevel =>
   typeof value === "string" && Object.hasOwn(THINKING_LEVELS, value);
 
+interface Activity {
+  callId: string;
+  tool: string;
+  summary: string;
+  since: number;
+}
+
 interface Progress {
   id?: string;
   agent: string;
   task: string;
   model: string;
   status: "running" | "done" | "failed";
+  background: boolean;
   startedAt: number;
   durationMs: number;
+  activity?: Activity;
+  stalled?: boolean;
   output: string;
   error?: string;
 }
@@ -68,7 +80,42 @@ interface RunRecord {
   controller: AbortController;
   progress: Progress;
   settled?: Promise<void>;
+  delivered?: boolean;
+  stopped?: boolean;
+  stallReportedFor?: string;
+  detach?: () => void;
+  redrawRow?: () => void;
 }
+
+const STALL_MS = 5 * 60_000;
+const DETACH_KEY = "ctrl+alt+b";
+const NOTICE_BATCH_MS = 1_000;
+const NOTICE_TYPE = "subagent-notice";
+
+interface Notice {
+  kind: "done" | "stall";
+  progress: Progress;
+  stall?: string;
+}
+
+const delivery = surviveReload(
+  "__piSubagentDelivery",
+  (): {
+    waiting: Map<string, number>;
+    attentionListeners: Set<(runId: string, stall: string) => void>;
+    pending: { kind: Notice["kind"]; record: RunRecord; stall?: string }[];
+    timer?: ReturnType<typeof setTimeout>;
+  } => ({
+    waiting: new Map(),
+    attentionListeners: new Set(),
+    pending: [],
+  }),
+);
+
+const activityFileOf = (resultFile: string) => `${resultFile}.activity`;
+
+const stallText = (activity: Activity): string =>
+  `${activity.tool} open for ${formatDuration(Date.now() - activity.since)}${activity.summary ? `: ${activity.summary}` : ""}`;
 const runsStore = surviveReload(
   "__piSubagentRuns",
   () => new Map<string, RunRecord>(),
@@ -111,8 +158,69 @@ const sink = surviveReload(
   (): {
     sessionId?: string;
     append?: (type: string, data: unknown) => void;
+    notify?: (content: string, notices: Notice[], triggerTurn: boolean) => void;
+    userAborted?: boolean;
   } => ({}),
 );
+
+const isWaitedOn = (runId: string) => (delivery.waiting.get(runId) ?? 0) > 0;
+
+const stallNoticeText = (record: RunRecord, stall: string): string =>
+  `subagent '${record.progress.agent}' (${record.id}) has had ${stall}. It can be legitimately slow. To intervene, call subagent_manage with action steer or stop.`;
+
+const doneNoticeText = (record: RunRecord): string =>
+  `${formatRunLine(record)}\n${runPayload(record.id, transcriptOf(record))}`;
+
+function flushNotices(): void {
+  delivery.timer = undefined;
+  const pending = delivery.pending
+    .splice(0)
+    .filter(
+      ({ kind, record }) =>
+        record.sessionId === sink.sessionId &&
+        (kind === "done"
+          ? !record.delivered && !isWaitedOn(record.id)
+          : record.progress.status === "running"),
+    );
+  if (pending.length === 0) return;
+  for (const { kind, record } of pending)
+    if (kind === "done") record.delivered = true;
+  const finished = pending.filter(({ kind }) => kind === "done").length;
+  const header =
+    finished === pending.length
+      ? `${finished} background subagent run${finished === 1 ? "" : "s"} finished.`
+      : "Background subagent update.";
+  try {
+    sink.notify?.(
+      `${header}\n\n${pending.map(({ record, stall }) => (stall ? stallNoticeText(record, stall) : doneNoticeText(record))).join("\n\n")}`,
+      pending.map(({ kind, record, stall }) => ({
+        kind,
+        progress: { ...record.progress },
+        ...(stall ? { stall } : {}),
+      })),
+      !sink.userAborted,
+    );
+  } catch {}
+}
+
+function queueNotice(
+  kind: Notice["kind"],
+  record: RunRecord,
+  stall?: string,
+): void {
+  if (!record.progress.background || record.stopped) return;
+  if (isWaitedOn(record.id) || record.sessionId !== sink.sessionId) return;
+  delivery.pending.push({ kind, record, stall });
+  delivery.timer ??= setTimeout(flushNotices, NOTICE_BATCH_MS);
+}
+
+function reportStall(record: RunRecord, activity: Activity): void {
+  if (!record.progress.background) return;
+  const stall = stallText(activity);
+  for (const listener of delivery.attentionListeners)
+    listener(record.id, stall);
+  queueNotice("stall", record, stall);
+}
 
 function persist(sessionId: string, type: string, data: unknown): void {
   if (sink.sessionId !== sessionId) return;
@@ -221,6 +329,7 @@ const ManageValueSchema = Type.Object({
         Type.Literal("finished"),
         Type.Literal("timeout"),
         Type.Literal("aborted"),
+        Type.Literal("attention"),
       ],
       { description: "wait only" },
     ),
@@ -232,7 +341,6 @@ const manageValue = (v: Static<typeof ManageValueSchema>): JsonValue =>
 
 const AGENTS_DIR = path.join(getAgentDir(), "agents");
 const MAX_OUTPUT_BYTES = 32 * 1024;
-const TASK_PREVIEW_MAX = 140;
 const DEFAULT_MAX_DURATION_MS = 3_600_000;
 const DEFAULT_WAIT_TIMEOUT_MS = DEFAULT_MAX_DURATION_MS + 60_000;
 
@@ -394,37 +502,25 @@ type SubagentArgs = {
 };
 
 const statusIcon = (theme: Theme, p: Progress): string => {
-  if (p.status === "running") return theme.fg("warning", "⟳");
+  if (p.status === "running" && p.background) return theme.fg("muted", "•");
+  if (p.status === "running") {
+    const frames = workingFrames(theme);
+    return frames[Math.floor(Date.now() / WORKING_FRAME_MS) % frames.length]!;
+  }
   if (p.status === "failed") return theme.fg("error", "✗");
   return theme.fg("success", "✓");
 };
 
-const renderCallComponent = (args: SubagentArgs, theme: Theme) => {
-  const c = new Container();
-  c.addChild(
-    new Text(
-      `${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("text", args.agent)}`,
-      0,
-      0,
-    ),
-  );
-  const firstLine = args.task.split("\n", 1)[0] ?? "";
-  c.addChild(
-    new Text(
-      theme.fg(
-        "dim",
-        `task: ${
-          firstLine.length > TASK_PREVIEW_MAX
-            ? firstLine.slice(0, TASK_PREVIEW_MAX - 1) + "…"
-            : firstLine + (args.task.includes("\n") ? " …" : "")
-        }`,
-      ),
-      0,
-      0,
-    ),
-  );
-  return c;
-};
+const pendingProgress = (args: Partial<SubagentArgs>): Progress => ({
+  agent: args.agent ?? "",
+  task: args.task ?? "",
+  model: "",
+  status: "running",
+  background: args.background === true,
+  startedAt: 0,
+  durationMs: 0,
+  output: "",
+});
 
 const renderProgressComponent = (
   p: Progress,
@@ -433,16 +529,37 @@ const renderProgressComponent = (
   expanded: boolean,
 ) => {
   const c = new Container();
+  const running = p.status === "running";
+  const starting = p.startedAt === 0;
+  const facts = [
+    p.model.split("/").at(-1) ?? "",
+    starting
+      ? "starting"
+      : running && p.background
+        ? "in background"
+        : formatDuration(p.durationMs),
+  ].filter(Boolean);
+  const activity =
+    running && p.activity
+      ? ` · ${theme.fg(p.stalled ? "warning" : "dim", stallText(p.activity))}`
+      : "";
   c.addChild(
     new Text(
       fitLine(
-        `${statusIcon(theme, p)} ${theme.fg("toolTitle", theme.bold(p.agent))}${theme.fg("dim", ` (${p.model})`)} ${theme.fg("dim", "—")} ${theme.fg("dim", formatDuration(p.durationMs))}`,
+        `${statusIcon(theme, p)} ${theme.fg("toolTitle", theme.bold(p.agent))} ${theme.fg("dim", facts.join(" · "))}${activity}`,
         width,
       ),
       0,
       0,
     ),
   );
+  const task = p.task.trim().split("\n", 1)[0] ?? "";
+  if (task)
+    c.addChild(new Text(fitLine(theme.fg("dim", `  ${task}`), width), 0, 0));
+  if (running && !p.background && !starting)
+    c.addChild(
+      new Text(theme.fg("dim", `  ${DETACH_KEY} to move to background`), 0, 0),
+    );
 
   if (p.error) {
     c.addChild(new Spacer(1));
@@ -475,11 +592,13 @@ const initialProgress = (
   agent: AgentConfig,
   task: string,
   model: string,
+  background: boolean,
 ): Progress => ({
   agent: agent.name,
   task,
   model,
   status: "running",
+  background,
   startedAt: Date.now(),
   durationMs: 0,
   output: "",
@@ -502,7 +621,7 @@ const manageParams = () =>
       MANAGE_ACTIONS.map((a) => Type.Literal(a)),
       {
         description:
-          "wait: block until the given runs (or all running ones) finish, then return each one's output. This is the only call a background run needs. result: re-read a finished run's output later. steer: send follow-up text into the run. stop: abort the run.",
+          "wait: block until the given runs (or all running ones) finish or one needs attention, then return each one's output. result: re-read a finished run's output later. steer: send follow-up text into the run. stop: abort the run.",
       },
     ),
     id: Type.Optional(
@@ -542,7 +661,7 @@ const formatRunLine = (r: RunRecord): string => {
   const p = r.progress;
   return `${r.id}  [${p.status}]  ${p.agent}  ${formatDuration(
     p.status === "running" ? Date.now() - p.startedAt : p.durationMs,
-  )}${p.error ? `  — ${p.error}` : ""}`;
+  )}${p.status === "running" && p.activity ? `  — ${stallText(p.activity)}` : ""}${p.error ? `  — ${p.error}` : ""}`;
 };
 
 const runPayload = (
@@ -568,23 +687,49 @@ type WatchOutcome = {
   output?: string;
 };
 
+function readActivity(file: string): Activity | undefined {
+  try {
+    return JSON.parse(fs.readFileSync(file, "utf-8")) as Activity;
+  } catch {
+    return undefined;
+  }
+}
+
+function tick(record: RunRecord, activityFile: string): void {
+  const { progress } = record;
+  progress.durationMs = Date.now() - progress.startedAt;
+  progress.activity = readActivity(activityFile);
+  progress.stalled =
+    progress.activity !== undefined &&
+    Date.now() - progress.activity.since >= STALL_MS;
+  if (
+    progress.stalled &&
+    progress.activity &&
+    record.stallReportedFor !== progress.activity.callId
+  ) {
+    record.stallReportedFor = progress.activity.callId;
+    reportStall(record, progress.activity);
+  }
+}
+
 async function runInRex(
   agent: AgentConfig,
   task: string,
   model: string | undefined,
   thinking: string | undefined,
   cwd: string,
-  progress: Progress,
-  signal: AbortSignal,
-  target: string,
   record: RunRecord,
   trusted: boolean,
+  onTick: () => void,
 ): Promise<{
   content: { type: "text"; text: string }[];
   details: Progress;
   isError?: boolean;
 }> {
+  const { progress, id: target } = record;
+  const { signal } = record.controller;
   const resultFile = path.join(os.tmpdir(), `pi-subagent-result-${target}.txt`);
+  const activityFile = activityFileOf(resultFile);
   record.resultFile = resultFile;
   const command = [
     "env",
@@ -602,7 +747,8 @@ async function runInRex(
     ...(model ? ["--model", model] : []),
     ...(thinking ? ["--thinking", thinking] : []),
     "--",
-    task.startsWith("@") ? ` ${task}` : task,
+    // pi reads a leading @ as a file to attach and a leading / as a command.
+    /^[@/]/.test(task) ? ` ${task}` : task,
   ];
   const fail = (error: string, text = `subagent '${agent.name}' ${error}`) => {
     progress.status = "failed";
@@ -629,6 +775,16 @@ async function runInRex(
   }
   record.blockId = blockId;
 
+  const ticker = setInterval(() => {
+    tick(record, activityFile);
+    onTick();
+  }, WORKING_FRAME_MS);
+  const stopTicking = () => {
+    clearInterval(ticker);
+    progress.activity = undefined;
+    progress.stalled = undefined;
+  };
+  const childFiles = [activityFile, `${activityFile}.tmp`];
   let outcome: WatchOutcome;
   try {
     outcome = await rexScript<WatchOutcome>(
@@ -641,18 +797,21 @@ async function runInRex(
       { signal },
     );
   } catch (err) {
+    stopTicking();
     progress.durationMs = Date.now() - progress.startedAt;
-    await closePanes([blockId], [resultFile]);
+    await closePanes([blockId], [resultFile, ...childFiles]);
     return fail(
       signal.aborted
         ? "aborted by parent"
         : `lost the Rex pane: ${String(err)}`,
     );
+  } finally {
+    stopTicking();
   }
   progress.durationMs = Date.now() - progress.startedAt;
 
   if (outcome.state === "timeout") {
-    await closePanes([blockId], [resultFile]);
+    await closePanes([blockId], [resultFile, ...childFiles]);
     return fail(
       `timed out after ${formatDuration(DEFAULT_MAX_DURATION_MS)} (wall clock)`,
     );
@@ -672,7 +831,7 @@ async function runInRex(
     );
   }
 
-  await closePanes([blockId]);
+  await closePanes([blockId], childFiles);
   if (outcome.state === "error") {
     return fail(
       `failed: ${outcome.msg ?? "the run stopped on an error"}`,
@@ -688,9 +847,48 @@ async function runInRex(
     details: { ...progress },
   };
 }
-function registerChildResultMirror(pi: ExtensionAPI): void {
+
+const describeCall = (args: unknown): string => {
+  if (!args || typeof args !== "object") return "";
+  for (const key of ["command", "path", "pattern", "query", "url"]) {
+    const value = (args as Record<string, unknown>)[key];
+    if (typeof value === "string" && value.trim())
+      return value.trim().split("\n", 1)[0]!.slice(0, 80);
+  }
+  return "";
+};
+
+function registerChildReporter(pi: ExtensionAPI): void {
   const file = process.env.PI_SUBAGENT_RESULT_FILE;
   if (!file) return;
+  const activityFile = activityFileOf(file);
+  const openCalls = new Map<string, Activity>();
+  const writeActivity = () => {
+    const oldest = openCalls.values().next().value;
+    try {
+      if (!oldest) {
+        fs.rmSync(activityFile, { force: true });
+        return;
+      }
+      fs.writeFileSync(`${activityFile}.tmp`, JSON.stringify(oldest), {
+        mode: 0o600,
+      });
+      fs.renameSync(`${activityFile}.tmp`, activityFile);
+    } catch {}
+  };
+  pi.on("tool_execution_start", (event) => {
+    if (event.parentToolCallId) return;
+    openCalls.set(event.toolCallId, {
+      callId: event.toolCallId,
+      tool: event.toolName,
+      summary: describeCall(event.args),
+      since: Date.now(),
+    });
+    writeActivity();
+  });
+  pi.on("tool_execution_end", (event) => {
+    if (openCalls.delete(event.toolCallId)) writeActivity();
+  });
   pi.on("agent_settled", async (_event, ctx) => {
     try {
       const branch = ctx.sessionManager.getBranch();
@@ -716,15 +914,15 @@ function registerChildResultMirror(pi: ExtensionAPI): void {
   });
 }
 
-// Rex plays its finish sound whenever a status record leaves `working` and has no per-pane mute, so the child reports every state except `blocked` as `idle`.
+// Rex marks a pane with any status record as unread, so the child keeps a root record only while `blocked`, which rex.lua watches for.
 function hideRunStateFromRex(): void {
   const write = process.stdout.write.bind(process.stdout);
   process.stdout.write = ((chunk: unknown, ...rest: unknown[]) =>
     (write as (...args: unknown[]) => boolean)(
       typeof chunk === "string"
         ? chunk.replace(
-            /\x1b\]7501;state=(?:working|done|error)\b/g,
-            "\x1b]7501;state=idle",
+            /\x1b\]7501;state=(?:idle|working|done|error)\b/g,
+            "\x1b]7501;state=clear",
           )
         : chunk,
       ...rest,
@@ -734,18 +932,68 @@ function hideRunStateFromRex(): void {
 export default function (pi: ExtensionAPI) {
   if (process.env.PI_IS_SUBAGENT === "1") {
     hideRunStateFromRex();
-    registerChildResultMirror(pi);
+    registerChildReporter(pi);
     return;
   }
   if (!process.env.REX_BLOCK) return;
 
   sink.append = (type, data) => pi.appendEntry(type, data);
+  sink.notify = (content, notices, triggerTurn) =>
+    pi.sendMessage<Notice[]>(
+      { customType: NOTICE_TYPE, content, display: true, details: notices },
+      { triggerTurn, deliverAs: "steer" },
+    );
+  pi.on("agent_start", () => {
+    sink.userAborted = false;
+  });
+  pi.on("agent_settled", (event) => {
+    sink.userAborted = event.aborted;
+  });
+  pi.registerMessageRenderer<Notice[]>(
+    NOTICE_TYPE,
+    (message, options, theme) => ({
+      render: (width: number) => {
+        const box = new Box(1, 1, (t) => theme.bg("customMessageBg", t));
+        for (const notice of message.details ?? [])
+          box.addChild(
+            notice.stall
+              ? new Text(
+                  `${theme.fg("warning", "\u26a0")} ${theme.fg("toolTitle", theme.bold(notice.progress.agent))} ${theme.fg("warning", notice.stall)}`,
+                  0,
+                  0,
+                )
+              : renderProgressComponent(
+                  notice.progress,
+                  theme,
+                  width - 2,
+                  options.expanded,
+                ),
+          );
+        return box.render(width);
+      },
+      invalidate: () => {},
+    }),
+  );
+  pi.registerShortcut(DETACH_KEY, {
+    description: "Move running foreground subagents to the background",
+    handler: (ctx) => {
+      const detachable = [...runsStore.values()].filter(
+        (record) => record.detach !== undefined,
+      );
+      if (detachable.length === 0) {
+        ctx.ui.notify("No foreground subagent is running", "info");
+        return;
+      }
+      for (const record of detachable) record.detach?.();
+    },
+  });
   persistResult = (id, value) => {
     const sessionId = runsStore.get(id)?.sessionId;
     if (sessionId) persist(sessionId, RESULT_ENTRY_TYPE, { id, value });
   };
   pi.on("session_start", async (event, ctx) => {
     sink.sessionId = ctx.sessionManager.getSessionId();
+    sink.userAborted = false;
     if (event.reason !== "startup" && event.reason !== "reload")
       resultStore.clear();
     hydrateResultStore(ctx.sessionManager.getBranch());
@@ -768,7 +1016,11 @@ export default function (pi: ExtensionAPI) {
           JSON.stringify({
             op: "close",
             block_ids: blockIds,
-            files: running.flatMap((record) => record.resultFile ?? []),
+            files: running.flatMap((record) =>
+              record.resultFile
+                ? [record.resultFile, activityFileOf(record.resultFile)]
+                : [],
+            ),
           }),
         ],
         { timeout: 5_000 },
@@ -786,7 +1038,7 @@ export default function (pi: ExtensionAPI) {
     label: "Subagent",
     annotations: {
       readOnlyHint: false,
-      destructiveHint: false,
+      destructiveHint: true,
       idempotentHint: false,
       openWorldHint: true,
     },
@@ -801,20 +1053,32 @@ export default function (pi: ExtensionAPI) {
           return `  ${a.name}: ${summary.length > 140 ? `${summary.slice(0, 137)}…` : summary}`;
         })
         .join("\n")}\n\n` +
-      "For a compact hand-back, tell the subagent to end with a fenced ```result-json ... ``` block: a background run's wait returns it, and subagent_manage (action: result, path) pulls one field.",
+      "A background run's result arrives as a message when it finishes, so end the turn when nothing else is left to do.\n\n" +
+      "For a compact hand-back, tell the subagent to end with a fenced ```result-json ... ``` block: the result returns it, and subagent_manage (action: result, path) pulls one field.",
     parameters: params,
     outputSchema: RunValueSchema,
     renderShell: "self",
 
-    renderCall(args, theme) {
-      return renderCallComponent(args as SubagentArgs, theme);
+    renderCall(args, theme, context) {
+      if (context.executionStarted)
+        return { render: () => [], invalidate() {} };
+      const p = pendingProgress(args as Partial<SubagentArgs>);
+      return {
+        render: (width: number) =>
+          renderProgressComponent(p, theme, width - 2, false).render(width),
+        invalidate: () => {},
+      };
     },
 
-    renderResult(result, options, theme) {
-      const p = result.details;
-      if (!p) {
-        return new Text(theme.fg("dim", "  …"), 0, 0);
-      }
+    renderResult(result, options, theme, context) {
+      const record = result.details?.id
+        ? runsStore.get(result.details.id)
+        : undefined;
+      if (record?.progress.background) record.redrawRow = context.invalidate;
+      const p = record?.progress.background
+        ? record.progress
+        : (result.details ??
+          pendingProgress(context.args as Partial<SubagentArgs>));
       return {
         render: (width: number) =>
           renderProgressComponent(p, theme, width - 2, options.expanded).render(
@@ -824,9 +1088,23 @@ export default function (pi: ExtensionAPI) {
       };
     },
 
-    async execute(_toolCallId, rawParams, signal, _onUpdate, ctx) {
+    async execute(_toolCallId, rawParams, signal, onUpdate, ctx) {
       const args = rawParams as SubagentArgs;
       const agent = agents.find((a) => a.name === args.agent)!;
+      const registered = pi.getAllTools().map((tool) => tool.name);
+      const unknownTools = agent.tools.filter((entry) => {
+        const pattern = new RegExp(
+          `^${entry
+            .split("*")
+            .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+            .join(".*")}$`,
+        );
+        return !registered.some((name) => pattern.test(name));
+      });
+      if (unknownTools.length > 0)
+        throw new Error(
+          `agent '${agent.name}' lists tools that no extension registers: ${unknownTools.join(", ")}. Fix the tools line of this agent in ${AGENTS_DIR}.`,
+        );
       const model =
         agent.model ??
         (ctx.model &&
@@ -838,16 +1116,19 @@ export default function (pi: ExtensionAPI) {
         (ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined);
 
       const target = `sub-${agent.name}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-      const progress = initialProgress(agent, args.task, model ?? "default");
+      const progress = initialProgress(
+        agent,
+        args.task,
+        model ?? "default",
+        args.background === true,
+      );
       progress.id = target;
 
       const controller = new AbortController();
+      const abortWithParent = () => controller.abort();
       if (signal && !args.background) {
         if (signal.aborted) controller.abort();
-        else
-          signal.addEventListener("abort", () => controller.abort(), {
-            once: true,
-          });
+        else signal.addEventListener("abort", abortWithParent, { once: true });
       }
       const sessionId = ctx.sessionManager.getSessionId();
       const record: RunRecord = { id: target, sessionId, controller, progress };
@@ -865,11 +1146,12 @@ export default function (pi: ExtensionAPI) {
         model,
         agent.thinking ?? pi.getThinkingLevel(),
         ctx.cwd,
-        progress,
-        controller.signal,
-        target,
         record,
         ctx.isProjectTrusted(),
+        () => {
+          if (progress.background) record.redrawRow?.();
+          else onUpdate?.({ content: [], details: { ...progress } });
+        },
       );
 
       record.settled = runPromise
@@ -887,22 +1169,39 @@ export default function (pi: ExtensionAPI) {
             status: progress.status,
             ...(progress.error ? { error: progress.error } : {}),
           } satisfies RunEntry),
-        );
+        )
+        .then(() => {
+          record.redrawRow?.();
+          queueNotice("done", record);
+        });
 
-      if (args.background) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `subagent '${agent.name}' running in background, id ${target}. Carry on with other work, then make one subagent_manage (action: wait) call: it blocks until the run ends and returns its output.`,
-            },
-          ],
-          details: { ...progress },
-          structuredContent: runValue(progress),
+      const backgroundReceipt = (how: string) => ({
+        content: [
+          {
+            type: "text" as const,
+            text: `subagent '${agent.name}' ${how}, id ${target}. Its result arrives as a message when it finishes. Carry on with other work, or end the turn if nothing is left. Call subagent_manage (action: wait) only when your next step needs the result sooner.`,
+          },
+        ],
+        details: { ...progress },
+        structuredContent: runValue(progress),
+      });
+
+      if (args.background) return backgroundReceipt("running in background");
+
+      const detached = new Promise<"detached">((resolve) => {
+        record.detach = () => {
+          record.detach = undefined;
+          record.stallReportedFor = undefined;
+          progress.background = true;
+          signal?.removeEventListener("abort", abortWithParent);
+          resolve("detached");
         };
-      }
-
-      return { ...(await runPromise), structuredContent: runValue(progress) };
+      });
+      const finished = await Promise.race([runPromise, detached]);
+      record.detach = undefined;
+      if (finished === "detached")
+        return backgroundReceipt("was moved to the background by the user");
+      return { ...finished, structuredContent: runValue(progress) };
     },
   });
 
@@ -917,9 +1216,9 @@ export default function (pi: ExtensionAPI) {
     },
     promptSnippet: "Wait for, read, steer, or stop subagent runs",
     description:
-      "Inspect or control background subagent runs started this session. A foreground run already returned its output, so it needs no call here.\n\n" +
-      "WRONG: sleep in a shell, or call result after a wait — each spends a turn on information you already have.\n" +
-      "RIGHT: keep working, then one wait call at the point the runs gate your next step. It returns their output the moment they finish.",
+      "Inspect or control background subagent runs started this session. A foreground run already returned its output, and a background run's output arrives as a message when it finishes, so neither needs a call here.\n\n" +
+      "WRONG: sleep in a shell, or call wait or result for output a message already delivered. Each spends a turn on information you already have.\n" +
+      "RIGHT: keep working or end the turn. Call wait only when your next step needs a background result before its message arrives.",
     parameters: manageParams(),
     outputSchema: ManageValueSchema,
     async execute(_toolCallId, rawParams, signal) {
@@ -991,21 +1290,42 @@ export default function (pi: ExtensionAPI) {
           timeoutSeconds && timeoutSeconds > 0
             ? timeoutSeconds * 1000
             : DEFAULT_WAIT_TIMEOUT_MS;
+        const deliveredBefore = new Set(
+          records.filter((r) => r.delivered).map((r) => r.id),
+        );
+        for (const r of records)
+          delivery.waiting.set(r.id, (delivery.waiting.get(r.id) ?? 0) + 1);
         let timer: ReturnType<typeof setTimeout> | undefined;
         let onAbort: (() => void) | undefined;
+        let onAttention: ((runId: string, stall: string) => void) | undefined;
+        let needsAttention: { record: RunRecord; stall: string } | undefined;
         const outcome = await Promise.race([
           Promise.all(records.map((r) => r.settled ?? Promise.resolve())).then(
             () => "finished" as const,
           ),
-          new Promise<"timeout" | "aborted">((resolve) => {
+          new Promise<"timeout" | "aborted" | "attention">((resolve) => {
             if (signal?.aborted) return resolve("aborted");
             timer = setTimeout(() => resolve("timeout"), timeoutMs);
             onAbort = () => resolve("aborted");
             signal?.addEventListener("abort", onAbort, { once: true });
+            onAttention = (runId, stall) => {
+              const record = records.find((r) => r.id === runId);
+              if (!record) return;
+              needsAttention = { record, stall };
+              resolve("attention");
+            };
+            delivery.attentionListeners.add(onAttention);
           }),
         ]);
         clearTimeout(timer);
         if (onAbort) signal?.removeEventListener("abort", onAbort);
+        if (onAttention) delivery.attentionListeners.delete(onAttention);
+        for (const r of records) {
+          const count = (delivery.waiting.get(r.id) ?? 1) - 1;
+          if (count > 0) delivery.waiting.set(r.id, count);
+          else delivery.waiting.delete(r.id);
+          if (r.progress.status !== "running") r.delivered = true;
+        }
         return {
           content: [
             {
@@ -1015,12 +1335,19 @@ export default function (pi: ExtensionAPI) {
                   ? `Wait timed out after ${formatDuration(timeoutMs)}. The runs below keep going.`
                   : outcome === "aborted"
                     ? "Wait cancelled. The runs below keep going."
-                    : `All ${records.length} run${records.length === 1 ? "" : "s"} finished; output below.`
+                    : outcome === "attention" && needsAttention
+                      ? stallNoticeText(
+                          needsAttention.record,
+                          needsAttention.stall,
+                        )
+                      : `All ${records.length} run${records.length === 1 ? "" : "s"} finished; output below.`
               }\n\n${records
                 .map((r) =>
                   r.progress.status === "running"
                     ? formatRunLine(r)
-                    : `${formatRunLine(r)}\n${runPayload(r.id, transcriptOf(r))}`,
+                    : deliveredBefore.has(r.id)
+                      ? `${formatRunLine(r)}\n(output already delivered in a subagent message)`
+                      : `${formatRunLine(r)}\n${runPayload(r.id, transcriptOf(r))}`,
                 )
                 .concat(
                   interrupted.map(
@@ -1100,6 +1427,7 @@ export default function (pi: ExtensionAPI) {
         return fail(`subagent_manage: no tracked run with id "${id}"`);
       }
       if (action === "stop") {
+        record.stopped = true;
         record.controller.abort();
         return {
           content: [

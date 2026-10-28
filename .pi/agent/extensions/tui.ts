@@ -21,6 +21,7 @@ import {
 } from "@earendil-works/pi-tui";
 import { diagramKind, type MermaidArt, render, type Span } from "grok-mermaid";
 import { LINK_OPEN, LINK_READY, PI_LINK_PREFIX } from "./shared/link";
+import { WORKING_FRAME_MS, workingFrames } from "./shared/working-indicator";
 
 const SGR_RESET = "\x1b[0m";
 
@@ -303,15 +304,9 @@ const installWorking = (pi: ExtensionAPI) => {
   };
 
   const applyIndicator = (ctx: ExtensionContext) => {
-    const t = ctx.ui.theme;
     ctx.ui.setWorkingIndicator({
-      frames: [
-        t.fg("dim", "·"),
-        t.fg("muted", "•"),
-        t.fg("accent", "●"),
-        t.fg("muted", "•"),
-      ],
-      intervalMs: 150,
+      frames: workingFrames(ctx.ui.theme),
+      intervalMs: WORKING_FRAME_MS,
     });
   };
 

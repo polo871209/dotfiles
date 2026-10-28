@@ -47,14 +47,21 @@ local function foreground_cwd(ctx)
     return process.foreground and process.foreground.cwd
 end
 
+local function ssh_hostname(alias)
+    local resolved = rex.exec { 'ssh', '-G', alias }
+    return resolved and resolved.ok and ('\n' .. resolved.stdout):match '\nhostname (%S+)' or alias
+end
+
 local function remote_web_url(remote)
     local url = remote:gsub('%s+$', ''):gsub('%.git$', '')
     local host, path = url:match '^[^/:]+@([^/:]+):(.+)$'
-    if host then return 'https://' .. host .. '/' .. path end
-    local authority
-    authority, path = url:match '^%a[%w+.-]*://([^/]+)/(.+)$'
+    if host then return 'https://' .. ssh_hostname(host) .. '/' .. path end
+    local scheme, authority
+    scheme, authority, path = url:match '^(%a[%w+.-]*)://([^/]+)/(.+)$'
     if not authority then return url end
-    return 'https://' .. authority:gsub('^.*@', ''):gsub(':%d+$', '') .. '/' .. path
+    host = authority:gsub('^.*@', ''):gsub(':%d+$', '')
+    if scheme:find 'ssh' then host = ssh_hostname(host) end
+    return 'https://' .. host .. '/' .. path
 end
 
 local function open_zoomed(ctx, command)
