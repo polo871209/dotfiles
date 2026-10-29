@@ -7,7 +7,7 @@ export default function (pi: ExtensionAPI) {
     label: "Lark skills",
     repoUrl: "https://github.com/larksuite/cli",
     cacheDirName: "lark-skills",
-    skillsSubdir: "skills",
+    skillPaths: ["skills"],
   });
 
   registerSkillToggle(pi, {
@@ -15,6 +15,6 @@ export default function (pi: ExtensionAPI) {
     label: "GWS skills",
     repoUrl: "https://github.com/googleworkspace/cli",
     cacheDirName: "gws-skills",
-    skillsSubdir: "skills",
+    skillPaths: ["skills"],
   });
 }

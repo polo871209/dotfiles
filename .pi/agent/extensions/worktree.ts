@@ -1,6 +1,7 @@
 import {
   copyFileSync,
   existsSync,
+  readFileSync,
   readdirSync,
   rmdirSync,
   writeFileSync,
@@ -162,6 +163,15 @@ async function ensureWorktree(
   await git(root, args, signal);
   const copied = await copyLocalConfig(root, path, signal);
   return { root, path, branch, created: true, copied };
+}
+
+async function usesWorktrees(cwd: string): Promise<boolean> {
+  const worktrees = await listWorktrees(cwd).catch(() => []);
+  const gitignore = join(worktrees[0]?.path ?? cwd, ".gitignore");
+  if (!existsSync(gitignore)) return false;
+  return readFileSync(gitignore, "utf8")
+    .split("\n")
+    .some((line) => /^\/?\.worktree\/?$/.test(line.trim()));
 }
 
 function currentWorktree(cwd: string, signal?: AbortSignal): Promise<string> {
@@ -448,7 +458,6 @@ function createdText(wt: CreatedWorktree): string {
 
 export default function (pi: ExtensionAPI) {
   let pendingMove: PendingMove | undefined;
-  let completionCwd = process.cwd();
 
   const offerTool = (offered: boolean) => {
     const active = pi.getActiveTools();
@@ -460,9 +469,10 @@ export default function (pi: ExtensionAPI) {
     );
   };
 
-  pi.on("session_start", (_event, ctx) => {
-    completionCwd = ctx.cwd;
-    offerTool(false);
+  pi.on("session_start", async (_event, ctx) => {
+    // Pi keeps its launch directory when a session moves, and Rex reads the process directory for new panes.
+    if (existsSync(ctx.cwd)) process.chdir(ctx.cwd);
+    offerTool(await usesWorktrees(ctx.cwd));
   });
 
   pi.on("input", (event) => {
@@ -496,7 +506,7 @@ export default function (pi: ExtensionAPI) {
         "git",
         ["for-each-ref", "--format=%(refname:short)", "refs/heads"],
         undefined,
-        completionCwd,
+        process.cwd(),
         5_000,
       );
       if (r.code !== 0) return null;
@@ -562,7 +572,7 @@ export default function (pi: ExtensionAPI) {
     promptSnippet:
       "List, enter, leave, and remove git worktrees, or start an agent in one",
     description:
-      "Git worktrees of this repo, under `.worktree/`. `list` shows each worktree with its branch, changed files, commits ahead and behind the main checkout, and open Rex tab. The other actions are only for an explicit user request. `enter` moves this session into the worktree of `branch`, creating it if missing; end your turn after it. `spawn` starts a separate agent on `task` in the worktree of `branch`, in a background Rex tab, and this session keeps working. `done` removes the current clean worktree, keeps its branch, and returns to the main checkout; end your turn after it. `remove` deletes the clean worktree of another `branch`, keeps the branch, and closes its Rex tab. Use instead of `git worktree`.",
+      "Git worktrees of this repo, under `.worktree/`. `list` shows each worktree with its branch, changed files, commits ahead and behind the main checkout, and open Rex tab. Use the other actions when the user asks for them or when the repo's AGENTS.md or plan says to. `enter` moves this session into the worktree of `branch`, creating it if missing; end your turn after it. `spawn` starts a separate agent on `task` in the worktree of `branch`, in a background Rex tab, and this session keeps working. `done` removes the current clean worktree, keeps its branch, and returns to the main checkout; end your turn after it. `remove` deletes the clean worktree of another `branch`, keeps the branch, and closes its Rex tab. Use instead of `git worktree`.",
     parameters: Type.Object({
       action: Type.Union([
         Type.Literal("list"),

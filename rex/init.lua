@@ -201,7 +201,8 @@ rex.action {
     run = function(ctx)
         local process, process_err = rex.block.call(terminal, 'process', { block_id = ctx.block_id })
         if process_err ~= nil then error(process_err, 0) end
-        local dir = process.foreground.cwd
+        local launcher = process.ancestors[1]
+        local dir = launcher and launcher.cwd or process.foreground.cwd
         local copied, copy_err = rex.exec({ 'pbcopy' }, { stdin = dir })
         if not copied then error(copy_err, 0) end
         -- Rex has no Lua call for an in-app notice, so send the pane an OSC 9 desktop notification.

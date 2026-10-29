@@ -20,40 +20,6 @@
       "skillPath": "SKILL.md",
       "computedHash": "1e67c3a4a675bd0c961b1fd8ebb718174f9a61a547d9bedad2ade5eb99cce831"
     },
-    "principle-attack-the-premise": {
-      "source": "cursor/plugins",
-      "sourceType": "github",
-      "skillPath": "harness/pstack/claude-code/skills/principle-attack-the-premise/SKILL.md",
-      "computedHash": "a573188d09f1ce9ff275ca9446d1d0091f7de42dc0ff8ad2a03a3db133bbd0dc"
-    },
-    "principle-build-the-lever": {
-      "source": "cursor/plugins",
-      "ref": "main",
-      "sourceType": "github",
-      "skillPath": "pstack/skills/principle-build-the-lever/SKILL.md",
-      "computedHash": "3090c545b2a7c3a252514c9b522e69d3ee6cce25342fd3e4d10c9fe6bcaafd53"
-    },
-    "principle-encode-lessons-in-structure": {
-      "source": "cursor/plugins",
-      "ref": "main",
-      "sourceType": "github",
-      "skillPath": "pstack/skills/principle-encode-lessons-in-structure/SKILL.md",
-      "computedHash": "200f578bf772cff030e7b18c582c935686375ddb6ebfe96b97bfee663434da21"
-    },
-    "principle-laziness-protocol": {
-      "source": "cursor/plugins",
-      "ref": "main",
-      "sourceType": "github",
-      "skillPath": "pstack/skills/principle-laziness-protocol/SKILL.md",
-      "computedHash": "abf419046bf6635136cb4b30d3d7e9263967b30c3a8f1fe3ed831776b1e5e67a"
-    },
-    "principle-prove-it-works": {
-      "source": "cursor/plugins",
-      "ref": "main",
-      "sourceType": "github",
-      "skillPath": "pstack/skills/principle-prove-it-works/SKILL.md",
-      "computedHash": "6777a72ed3c15bbd73f0d264ba4eb701e5e733de70dd519c72fc2698a32379a2"
-    },
     "show-me": {
       "source": "humanlayer/skills",
       "sourceType": "github",

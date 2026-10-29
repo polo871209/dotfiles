@@ -221,14 +221,40 @@ const removeLegacyPrototypePatch = () => {
   proto.render = render;
 };
 
+type Paint = (text: string) => string;
+
+const rgbFg =
+  (rgb: string): Paint =>
+  (text) =>
+    `\x1b[38;2;${rgb}m${text}\x1b[39m`;
+
+const STATUS_BADGES = [
+  { key: "lark", paint: rgbFg("51;112;255"), tintsEditor: false },
+  { key: "gws", paint: rgbFg("66;133;244"), tintsEditor: false },
+  { key: "poteto", paint: rgbFg("177;212;228"), tintsEditor: true },
+];
+
+const editorTint = (statuses: ReadonlyMap<string, string>) =>
+  STATUS_BADGES.find((b) => b.tintsEditor && statuses.get(b.key))?.paint;
+
 class ThemedEditor extends CustomEditor {
   constructor(
     tui: TUI,
     editorTheme: EditorTheme,
     keybindings: KeybindingsManager,
     readonly getTheme: () => PiTheme,
+    tint: () => Paint | undefined,
   ) {
     super(tui, editorTheme, keybindings, { embedWorkingStatus: true });
+    let base = this.borderColor;
+    // pi-tui declares borderColor as an instance field, and pi reassigns it on each thinking-level or bash-mode change.
+    Object.defineProperty(this, "borderColor", {
+      get: () =>
+        this.getText().trimStart().startsWith("!") ? base : (tint() ?? base),
+      set: (paint: Paint) => {
+        base = paint;
+      },
+    });
   }
 
   render(width: number): string[] {
@@ -279,7 +305,7 @@ const installLinkRouter = (tui: TUI, pi: ExtensionAPI) => {
   pi.events.emit(LINK_READY, undefined);
 };
 
-const installEditor = (pi: ExtensionAPI) => {
+const installEditor = (pi: ExtensionAPI, statuses: StatusSource) => {
   pi.on("session_start", async (_event, ctx) => {
     if (ctx.mode !== "tui") return;
     ctx.ui.setEditorComponent((tui, editorTheme, keybindings) => {
@@ -289,6 +315,7 @@ const installEditor = (pi: ExtensionAPI) => {
         editorTheme,
         keybindings,
         () => ctx.ui.theme,
+        () => editorTint(statuses.read()),
       );
     });
   });
@@ -355,101 +382,102 @@ const formatTokenCount = (n: number): string => {
   return `${n}`;
 };
 
-const installFooter = (pi: ExtensionAPI) => {
+interface StatusSource {
+  read: () => ReadonlyMap<string, string>;
+}
+
+const installFooter = (pi: ExtensionAPI, statuses: StatusSource) => {
   pi.on("session_start", async (_event, ctx) => {
     if (ctx.mode !== "tui") return;
-    ctx.ui.setFooter((_tui, theme, footerData) => ({
-      invalidate() {},
-      render(width: number): string[] {
-        let pwd = ctx.cwd;
-        const home = process.env.HOME || process.env.USERPROFILE;
-        if (home && pwd.startsWith(home)) pwd = `~${pwd.slice(home.length)}`;
-        const branch = footerData.getGitBranch();
-        if (branch) pwd = `${pwd} (${branch})`;
+    ctx.ui.setFooter((_tui, theme, footerData) => {
+      statuses.read = () => footerData.getExtensionStatuses();
+      return {
+        invalidate() {},
+        render(width: number): string[] {
+          let pwd = ctx.cwd;
+          const home = process.env.HOME || process.env.USERPROFILE;
+          if (home && pwd.startsWith(home)) pwd = `~${pwd.slice(home.length)}`;
+          const branch = footerData.getGitBranch();
+          if (branch) pwd = `${pwd} (${branch})`;
 
-        const modelName = ctx.model?.id ?? "no-model";
-        let thinkingText = "";
-        let thinkingKey: string | null = null;
-        if (ctx.model?.reasoning) {
-          const lvl = String(pi.getThinkingLevel() ?? "off");
-          thinkingText = lvl === "off" ? "thinking off" : lvl;
-          thinkingKey = `thinking${lvl.charAt(0).toUpperCase() + lvl.slice(1)}`;
-        }
+          const modelName = ctx.model?.id ?? "no-model";
+          let thinkingText = "";
+          let thinkingKey: string | null = null;
+          if (ctx.model?.reasoning) {
+            const lvl = String(pi.getThinkingLevel() ?? "off");
+            thinkingText = lvl === "off" ? "thinking off" : lvl;
+            thinkingKey = `thinking${lvl.charAt(0).toUpperCase() + lvl.slice(1)}`;
+          }
 
-        const usage = ctx.getContextUsage?.();
-        const usageText =
-          usage?.percent != null
-            ? `${usage.percent.toFixed(1)}%/${formatTokenCount(usage.contextWindow)}`
-            : "";
+          const usage = ctx.getContextUsage?.();
+          const usageText =
+            usage?.percent != null
+              ? `${usage.percent.toFixed(1)}%/${formatTokenCount(usage.contextWindow)}`
+              : "";
 
-        if (process.env.PI_IS_SUBAGENT === "1") {
-          return [
-            theme.fg(
-              "dim",
-              [
-                usageText,
-                thinkingText ? `${modelName} • ${thinkingText}` : modelName,
-              ]
-                .filter(Boolean)
-                .join("   "),
-            ),
-          ];
-        }
+          if (process.env.PI_IS_SUBAGENT === "1") {
+            return [
+              theme.fg(
+                "dim",
+                [
+                  usageText,
+                  thinkingText ? `${modelName} • ${thinkingText}` : modelName,
+                ]
+                  .filter(Boolean)
+                  .join("   "),
+              ),
+            ];
+          }
 
-        const statuses = footerData.getExtensionStatuses();
-        const larkText = statuses.get("lark") ?? "";
-        const larkColored = larkText
-          ? `\x1b[38;2;51;112;255m${larkText}\x1b[39m`
-          : "";
-        const gwsText = statuses.get("gws") ?? "";
-        const gwsColored = gwsText
-          ? `\x1b[38;2;66;133;244m${gwsText}\x1b[39m`
-          : "";
+          const active = footerData.getExtensionStatuses();
+          const badges = STATUS_BADGES.flatMap(({ key, paint }) => {
+            const text = active.get(key);
+            return text ? [{ text, colored: paint(text) }] : [];
+          });
 
-        const leftPlain = [
-          pwd,
-          usageText,
-          thinkingText ? `${modelName} • ${thinkingText}` : modelName,
-          larkText,
-          gwsText,
-        ]
-          .filter(Boolean)
-          .join("   ");
-        const dimLeft =
-          theme.fg("dim", `${pwd}   `) +
-          (usageText ? theme.fg("dim", `${usageText}   `) : "") +
-          (thinkingKey
-            ? `${theme.fg("dim", `${modelName} • `)}${theme.fg(thinkingKey as never, thinkingText)}`
-            : theme.fg("dim", modelName)) +
-          (larkColored ? `   ${larkColored}` : "") +
-          (gwsColored ? `   ${gwsColored}` : "");
+          const leftPlain = [
+            pwd,
+            usageText,
+            thinkingText ? `${modelName} • ${thinkingText}` : modelName,
+            ...badges.map((b) => b.text),
+          ]
+            .filter(Boolean)
+            .join("   ");
+          const dimLeft =
+            theme.fg("dim", `${pwd}   `) +
+            (usageText ? theme.fg("dim", `${usageText}   `) : "") +
+            (thinkingKey
+              ? `${theme.fg("dim", `${modelName} • `)}${theme.fg(thinkingKey as never, thinkingText)}`
+              : theme.fg("dim", modelName)) +
+            badges.map((b) => `   ${b.colored}`).join("");
 
-        const sessionName = ctx.sessionManager.getSessionName?.() ?? "";
-        const rightPlain = sessionName;
+          const sessionName = ctx.sessionManager.getSessionName?.() ?? "";
+          const rightPlain = sessionName;
 
-        const lw = visibleWidth(leftPlain);
-        const rw = visibleWidth(rightPlain);
-        let line: string;
-        if (lw + 2 + rw <= width) {
-          line =
-            dimLeft +
-            " ".repeat(width - lw - rw) +
-            theme.fg("dim", sessionName);
-        } else if (lw < width) {
-          const avail = width - lw - 2;
-          const truncR =
-            avail > 0 ? truncateToWidth(rightPlain, avail, "") : "";
-          line =
-            dimLeft +
-            " ".repeat(Math.max(0, width - lw - visibleWidth(truncR))) +
-            theme.fg("dim", truncR);
-        } else {
-          line = theme.fg("dim", truncateToWidth(leftPlain, width, "..."));
-        }
+          const lw = visibleWidth(leftPlain);
+          const rw = visibleWidth(rightPlain);
+          let line: string;
+          if (lw + 2 + rw <= width) {
+            line =
+              dimLeft +
+              " ".repeat(width - lw - rw) +
+              theme.fg("dim", sessionName);
+          } else if (lw < width) {
+            const avail = width - lw - 2;
+            const truncR =
+              avail > 0 ? truncateToWidth(rightPlain, avail, "") : "";
+            line =
+              dimLeft +
+              " ".repeat(Math.max(0, width - lw - visibleWidth(truncR))) +
+              theme.fg("dim", truncR);
+          } else {
+            line = theme.fg("dim", truncateToWidth(leftPlain, width, "..."));
+          }
 
-        return [line];
-      },
-    }));
+          return [line];
+        },
+      };
+    });
   });
 };
 
@@ -590,8 +618,9 @@ removeLegacyPrototypePatch();
 
 export default function (pi: ExtensionAPI) {
   installWideMermaid(pi);
-  installEditor(pi);
-  installFooter(pi);
+  const statuses: StatusSource = { read: () => new Map() };
+  installEditor(pi, statuses);
+  installFooter(pi, statuses);
   installWorking(pi);
   installCollapsedTools(pi);
 }

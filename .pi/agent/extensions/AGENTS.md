@@ -27,14 +27,15 @@ Before you change pi-native behavior, read the relevant docs in the installed `@
 
 - **`web-search.ts`** — searches or fetches web targets for external research, scoped by domain or recency, ranked and filtered for relevance, and returns GitHub links as local files or threads, videos as transcripts, and PDFs as text.
 - **`lsp/`** — symbol navigation, plus deterministic post-edit diagnostics and fixes.
-- **`github-pr.ts`** — fetches a PR's metadata, failing checks, review threads, or diff, and resolves open threads once their comments are fixed locally.
+- **`github-pr.ts`** — fetches a PR's metadata, failing checks, review bodies and threads, or diff, and once the comments are fixed locally, resolves open threads and hides review content that no longer holds.
 - **`subagent/`** — delegates external research, read-only repo recon, or parallel review to an isolated agent. It runs in the foreground or background, returns compact structured results, shows each run's live status in pi without Rex status or notifications, and delivers background results as a message.
 - **`quiet-run.ts`** — the default way to run shell commands. Output goes to a log, and the agent gets the verdict and the requested slice.
 - **`ask/`** — structured choices when a request needs clarification.
 
 ### Cleaner context
 
-- **`skill-packs.ts`** — enables Lark/Feishu or Google Workspace skills only on request.
+- **`skill-packs.ts`** — enables Lark/Feishu or Google Workspace skills only on request, for one session or as a repository default.
+- **`poteto/`** — on `/poteto`, switches the current session into pstack's poteto mode with the latest pstack skills, and switches it back off on the next `/poteto`. `/poteto repo` flips the default for every new session in the repository.
 - **`folder-context.ts`** — loads scoped agent instructions when files are touched, and refreshes them after edits.
 - **`btw.ts`** — answers a `/btw` side question with the session as context, outside the main agent's history.
 
@@ -50,6 +51,7 @@ Before you change pi-native behavior, read the relevant docs in the installed `@
 
 ### Outside pi
 
+- **`approval.ts`** — asks the user before a risky shell command runs, such as `kill`, `pkill`, or `killall`, and makes subagents hand those commands back to the parent agent.
 - **`caffeinate.ts`** — keeps the Mac awake while the agent works, for at most 100 minutes per run.
 - **`posthog.ts`** — sends model, token, cost, latency, and tool-call metrics to PostHog when `posthog.json` holds a token. It never sends prompts, outputs, or tool arguments.
 - **`rex-bridge.ts`** — sends Nvim selections or diagnostics from the same Rex session to pi, and tells Nvim which file pi edited last.
