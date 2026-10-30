@@ -161,8 +161,9 @@ export function registerSkillToggle(
   pi.on("session_start", async (_event, ctx) => {
     const file = await repoDefaultFile(ctx.cwd);
     enabled =
-      sessionChoice(ctx.sessionManager.getBranch()) ??
-      (file !== undefined && existsSync(file));
+      process.env.PI_SKILL_PACKS?.split(",").includes(name) ||
+      (sessionChoice(ctx.sessionManager.getBranch()) ??
+        (file !== undefined && existsSync(file)));
     if (enabled && !isCloned()) {
       try {
         await ensureClone();

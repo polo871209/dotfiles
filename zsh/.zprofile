@@ -4,9 +4,6 @@ typeset -U path
 path=(
   ~/.local/share/mise/shims
   ~/.local/bin
-  "$GOPATH/bin"
-  "$ANDROID_HOME/emulator"
-  "$ANDROID_HOME/platform-tools"
   /opt/homebrew/opt/libpq/bin
   /Applications/Obsidian.app/Contents/MacOS
   /opt/homebrew/bin

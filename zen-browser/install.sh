@@ -88,17 +88,13 @@ else
     echo -e "${YELLOW}⚠ user.js not found in dotfiles${NC}"
 fi
 
-# Symlink zen-keyboard-shortcuts.json
-if [ -f "$DOTFILES_ZEN_DIR/zen-keyboard-shortcuts.json" ]; then
-    create_symlink "$DOTFILES_ZEN_DIR/zen-keyboard-shortcuts.json" "$FULL_PROFILE_PATH/zen-keyboard-shortcuts.json"
-else
-    echo -e "${YELLOW}⚠ zen-keyboard-shortcuts.json not found in dotfiles${NC}"
-fi
+# Zen saves customKeys.json through a temp file and a rename, which replaces a symlink, so copy it.
+cp "$DOTFILES_ZEN_DIR/customKeys.json" "$FULL_PROFILE_PATH/customKeys.json"
+echo -e "${GREEN}✓ Copied: customKeys.json${NC}"
 
 echo ""
 echo -e "${GREEN}✅ Zen Browser configuration installed!${NC}"
 echo ""
 echo "📌 Next steps:"
 echo "   1. Restart Zen Browser for changes to take effect"
-echo "   2. Customize zen-browser/user.js with your preferences"
-echo "   3. Commit these files to your dotfiles repo"
+echo "   2. After you change a shortcut in Zen, copy customKeys.json from the profile back to zen-browser/"

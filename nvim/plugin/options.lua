@@ -44,8 +44,6 @@ vim.o.winborder = 'rounded'
 
 vim.o.cmdheight = 0
 
-vim.o.spell = false
-vim.o.spelllang = 'en'
 vim.o.spellfile = vim.fn.stdpath 'config' .. '/spell/en.utf-8.add'
 
 -- render-markdown.nvim needs concealment on to hide the markup it replaces.

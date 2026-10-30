@@ -1,14 +1,11 @@
-history.txt
-.worktrees/
 .zcompdump
 .zsh_history
 .pi/agent/auth.json
 .pi/agent/posthog.json
 .pi/agent/sessions/
 .pi/agent/models-store.json
+.pi/agent/trust.json
 
 # Override global ignore (`npm/`) so we track shared extension deps.
 # node_modules/ inside still ignored by the global `node_modules/` rule.
 !.pi/agent/npm/
-!.pi/agent/npm/package.json
-!.pi/agent/npm/package-lock.json

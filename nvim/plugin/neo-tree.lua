@@ -58,7 +58,6 @@ local function load_neotree()
         },
         filesystem = {
             filtered_items = {
-                visible = false,
                 show_hidden_count = false,
                 hide_dotfiles = false,
                 hide_by_name = ignore.names,
@@ -96,6 +95,6 @@ end
 vim.keymap.set('n', '\\', function()
     load_neotree()
     local bufname = vim.api.nvim_buf_get_name(0)
-    local revealable = bufname ~= '' and vim.bo.buftype == '' and vim.bo.filetype ~= 'ministarter' and vim.uv.fs_stat(bufname) ~= nil
+    local revealable = bufname ~= '' and vim.bo.buftype == '' and vim.uv.fs_stat(bufname) ~= nil
     vim.cmd(revealable and 'Neotree reveal' or 'Neotree toggle')
 end, { desc = 'NeoTree toggle/reveal', silent = true })

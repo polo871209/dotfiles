@@ -1,5 +1,3 @@
-setopt prompt_subst
-
 # History Configuration
 HISTFILE="${ZDOTDIR:-$HOME}/.zsh_history"
 HISTSIZE=50000
@@ -51,7 +49,6 @@ source /opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
 
 # vi mode
 bindkey -v
-export VI_MODE_SET_CURSOR=true
 
 # cursor style when in vi mode
 function zle-keymap-select {
@@ -110,7 +107,6 @@ alias lg="lazygit"
 alias ls="eza --group-directories-first -a --icons=auto"
 alias n="nvim"
 alias o="open ."
-alias oc="opencode --port --continue"
 p() { clear; command pi --continue "$@"; clear; }
 alias pwd='printf %s "$PWD" | pbcopy'
 alias sz="source ${ZDOTDIR:-$HOME}/.zshrc"
@@ -163,17 +159,18 @@ unfunction _eval_cache
 
 # Rex lists zoxide folders in its palette only when it loads its config, so reload it when zoxide learns a folder.
 if [[ $TERM_PROGRAM == rex ]] && (( $+functions[__zoxide_hook] )); then
-  _rex_zoxide_hook() {
+  functions[_zoxide_add_pwd]=$functions[__zoxide_hook]
+  # zoxide's doctor warns on every z unless chpwd_functions holds __zoxide_hook, so wrap it under the same name.
+  __zoxide_hook() {
     if zoxide query --list | grep -qxF -- "$PWD"; then
-      __zoxide_hook
+      _zoxide_add_pwd
       return
     fi
-    __zoxide_hook
+    _zoxide_add_pwd
     if zoxide query --list | grep -qxF -- "$PWD"; then
       rex config reload >/dev/null 2>&1 &!
     fi
   }
-  chpwd_functions=("${(@)chpwd_functions:#__zoxide_hook}" _rex_zoxide_hook)
 fi
 
 eval "$(oh-my-posh init zsh --config "${XDG_CONFIG_HOME}/ohmyposh/config.yaml")"

@@ -1,9 +1,6 @@
 vim.b.completion = false -- blink.cmp reads this flag
-vim.bo.swapfile = false
 vim.bo.undofile = false
 
-vim.opt_local.foldmethod = 'manual'
-vim.opt_local.statuscolumn = ''
 vim.opt_local.conceallevel = 0
 vim.opt_local.list = false
 vim.opt_local.spell = false

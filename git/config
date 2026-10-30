@@ -50,12 +50,11 @@
 [help]
 	autocorrect = prompt
 
-[filter "lfs"]
-	required = true
-	clean = git-lfs clean -- %f
-	smudge = git-lfs smudge -- %f
-	process = git-lfs filter-process
 [url "git@github.com:"]
 	insteadOf = https://github.com/
 [url "git@github.com-qashier:qashierpos/"]
 	insteadOf = git@github.com:qashierpos/
+[includeIf "hasconfig:remote.*.url:git@github.com:qashierpos/**"]
+	path = /Users/polo/.gitconfig-qashier
+[includeIf "hasconfig:remote.*.url:https://github.com/qashierpos/**"]
+	path = /Users/polo/.gitconfig-qashier

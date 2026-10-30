@@ -1,5 +1,4 @@
-tap "abue-ammar/tinycast"
-tap "crmne/tap"
+tap "crmne/tap", trusted: true
 tap "polo871209/nanocast", "https://github.com/polo871209/nanocast", trusted: true
 brew "cocoapods"
 brew "git"
@@ -21,7 +20,6 @@ cask "betterdisplay"
 cask "dbeaver-community"
 cask "font-fira-code-nerd-font"
 cask "gcloud-cli"
-cask "ghostty"
 cask "google-chrome"
 cask "google-drive"
 cask "lark"
@@ -30,7 +28,7 @@ cask "microsoft-teams"
 cask "polo871209/nanocast/nanocast"
 cask "obsidian"
 cask "orbstack"
-cask "spotifast"
+cask "crmne/tap/spotifast"
 cask "zen"
 mas "LINE", id: 539883307
 mas "Telegram 2", id: 747648890

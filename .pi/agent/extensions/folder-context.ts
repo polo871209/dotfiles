@@ -47,8 +47,6 @@ function frameContext(
 }
 
 export default function (pi: ExtensionAPI) {
-  if (process.env.PI_IS_SUBAGENT === "1") return;
-
   const injected = new Map<string, string>();
   const inSystemPrompt = new Map<string, string>();
   const pending: { text: string; details: InjectedDetails }[] = [];

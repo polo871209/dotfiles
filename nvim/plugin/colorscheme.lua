@@ -12,7 +12,6 @@ require('catppuccin').setup {
     integrations = {
         blink_cmp = { enabled = true, style = 'bordered' },
         flash = true,
-        gitsigns = true,
         mini = { enabled = true, indentscope_color = 'overlay2' },
         neotree = true,
         render_markdown = true,

@@ -12,7 +12,7 @@ pstack is written for Cursor and lives in `~/.cache/cursor-plugins/pstack`. Tran
 - `AskQuestion` → `ask_user_question`.
 - A todolist → a list in your reply, updated at each phase.
 - Another pstack skill → read `skills/<name>/SKILL.md` and follow it. The user types `/skill:<name>`.
-- `create-skill` → the `writing-for-agents` skill.
+- `create-skill` → the `writing-for-agents` skill at `~/dotfiles/.agents/skills/writing-for-agents/SKILL.md`.
 - A built-in PR tool → `github_pr` to read a PR or resolve its threads, `gh` for every write.
 - `.cursor/skills/` → `.agents/skills/`. `.cursor/rules/` → `AGENTS.md`.
 - `https://github.com/cursor/plugins/blob/main/pstack/<path>` → the local copy at `<path>`.

@@ -57,13 +57,24 @@ function bar(pct: number, theme: Theme): string {
   );
 }
 
+function fmtCountdown(resetsAt: Date): string {
+  const minutes = Math.max(
+    0,
+    Math.round((resetsAt.getTime() - Date.now()) / 60_000),
+  );
+  const days = Math.floor(minutes / 1440);
+  const hours = Math.floor((minutes % 1440) / 60);
+  const mins = minutes % 60;
+  return days > 0 ? `${days}d ${hours}h` : `${hours}h ${mins}m`;
+}
+
 function fmtLine(
   name: string,
   pct: number,
   resetsAt: Date,
   theme: Theme,
 ): string {
-  return `${name}\n${bar(pct, theme)} ${`${pct.toFixed(0)}%`.padStart(4)} used  (resets ${resetsAt.toLocaleString()})`;
+  return `${name}\n${bar(pct, theme)} ${`${pct.toFixed(0)}%`.padStart(4)} used  (${fmtCountdown(resetsAt)}, ${resetsAt.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })})`;
 }
 
 async function claudeUsageLines(ctx: ExtensionContext): Promise<string[]> {

@@ -13,12 +13,7 @@ pick=$(
       shown = index($0, home) == 1 ? "~" substr($0, length(home) + 1) : $0
       print "dir\t" $0 "\t " shown
     }'
-  } | fzf --delimiter '\t' --with-nth 3 \
-    --ansi --no-sort --no-select-1 --prompt '> ' \
-    --color 'bg:#282828,bg+:#3c3836,fg:#89b4fa,fg+:#89b4fa' \
-    --color 'hl:#fabd2f,hl+:#fabd2f,info:#83a598,marker:#8ec07c' \
-    --color 'prompt:#d79921,spinner:#8ec07c,pointer:#fe8019,header:#928374' \
-    --color 'border:#928374,label:#ebdbb2,query:#ebdbb2'
+  } | fzf --delimiter '\t' --with-nth 3 --ansi --no-sort --no-select-1 --layout reverse --color 16
 ) || exit 0
 
 IFS=$'\t' read -r kind target _ <<<"$pick"

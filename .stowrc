@@ -4,4 +4,12 @@
 --ignore=.agents
 --ignore=DS_Store
 --ignore=zen-browser
+--ignore=^\.github
+--ignore=^\.ruff_cache
+--ignore=^\.mise\.toml
+--ignore=^Brewfile
+--ignore=^justfile
+--ignore=^dot_zshenv
+--ignore=^prek\.toml
+--ignore=^skills-lock\.json
 --adopt

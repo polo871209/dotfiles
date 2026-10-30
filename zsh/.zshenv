@@ -6,11 +6,7 @@ export MANPAGER="bat -plman"
 export LESS=-iRFX
 
 # Go
-export GOPATH="$HOME/go"
-
-# Android
-export ANDROID_HOME="$HOME/Library/Android/sdk"
-export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+export GOPATH="$HOME/.local/share/go"
 
 # Google Cloud
 export CLOUDSDK_CONFIG="$HOME/.gcloud"
@@ -30,6 +26,5 @@ export GITHUB_TOKEN="$(gh auth token 2>/dev/null)"
 export TYPESAFE_API_KEY="$(security find-generic-password -s typesafe-api-key -w 2>/dev/null)"
 
 # Misc
-export OBSIDIAN_VAULT="$HOME/vaults/obsidian"
+export OBSIDIAN_VAULT="$HOME/vault/obsidian"
 export HOMEBREW_NO_ENV_HINTS=1
-export OPENCODE_DISABLE_CLAUDE_CODE=1

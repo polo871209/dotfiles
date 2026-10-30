@@ -1,5 +1,6 @@
 import { existsSync, rmSync } from "node:fs";
 import { basename } from "node:path";
+import type { UserMessage } from "@earendil-works/pi-ai";
 import {
   SessionManager,
   type ExtensionAPI,
@@ -7,18 +8,41 @@ import {
 import { run } from "./shared/exec";
 import { forkName } from "./shared/fork-name";
 
+const userText = (content: UserMessage["content"]): string =>
+  typeof content === "string"
+    ? content
+    : content
+        .flatMap((part) => (part.type === "text" ? [part.text] : []))
+        .join("");
+
 export default function (pi: ExtensionAPI) {
+  pi.on("session_start", (_event, ctx) => {
+    const draft = process.env.PI_FORK_DRAFT;
+    if (draft === undefined) return;
+    delete process.env.PI_FORK_DRAFT;
+    ctx.ui.setEditorText(draft);
+  });
+
   pi.on("session_before_fork", async (event, ctx) => {
     const { REX_SESSION } = process.env;
     const source = ctx.sessionManager.getSessionFile();
-    const leafId = ctx.sessionManager.getLeafId();
-    if (!REX_SESSION || !source || !existsSync(source) || !leafId) return;
+    const selected = ctx.sessionManager.getEntry(event.entryId);
+    if (!REX_SESSION || !source || !existsSync(source) || !selected) return;
+
+    const draft =
+      event.position === "before" &&
+      selected.type === "message" &&
+      selected.message.role === "user"
+        ? userText(selected.message.content)
+        : undefined;
+    const targetLeafId = draft === undefined ? selected.id : selected.parentId;
+    if (!targetLeafId) return;
 
     const copy = SessionManager.open(
       source,
       ctx.sessionManager.getSessionDir(),
     );
-    const file = copy.createBranchedSession(leafId);
+    const file = copy.createBranchedSession(targetLeafId);
     if (!file || !existsSync(file)) return;
     const name = forkName(
       event.position === "at" ? "clone" : "fork",
@@ -37,6 +61,7 @@ export default function (pi: ExtensionAPI) {
         ctx.cwd,
         "--json",
         "--",
+        ...(draft === undefined ? [] : ["env", `PI_FORK_DRAFT=${draft}`]),
         "pi",
         "--session",
         file,

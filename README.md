@@ -43,10 +43,6 @@ git remote set-url origin git@github.com:polo871209/dotfiles.git
 
 ## Additional Configuration
 
-### Note-Taking Vault
-
-Requires Google Drive to be logged in first:
-
 ### Python Virtual Environment with direnv
 
 ```bash

@@ -1,11 +1,20 @@
 local terminal = 'com.superlogical.terminal'
-local shell = terminal .. '.shell'
 local home = os.getenv 'HOME'
 -- The Rex server's PATH has no mise shims.
 local shims = home .. '/.local/share/mise/shims/'
 local zoxide = shims .. 'zoxide'
 local config_dir = (os.getenv 'XDG_CONFIG_HOME' or home .. '/.config') .. '/rex'
-local picker_bounds = { 0.225, 0.2, 0.55, 0.6 }
+
+local function must(result, err)
+    if err ~= nil then error(err, 0) end
+    return result
+end
+
+local function exec_stdout(argv, opts)
+    local result = must(rex.exec(argv, opts))
+    if not result.ok then error(result.stderr, 0) end
+    return result.stdout
+end
 
 local function tilde_path(dir)
     local path = dir:gsub('(.)/+$', '%1')
@@ -13,10 +22,19 @@ local function tilde_path(dir)
     return path
 end
 
+local function shell_block(spec)
+    return rex.layout.block { flavor = terminal .. '.shell', label = spec.label, options = { cwd = spec.cwd, command = spec.command } }
+end
+
+local function process(ctx) return must(rex.block.call(terminal, 'process', { block_id = ctx.block_id })) end
+
+local function foreground_cwd(ctx)
+    local foreground = process(ctx).foreground
+    return foreground and foreground.cwd
+end
+
 local function session_with_label(label)
-    local list, err = rex.call 'session.list'
-    if err ~= nil then error(err, 0) end
-    for _, session in ipairs(list.sessions) do
+    for _, session in ipairs(must(rex.call 'session.list').sessions) do
         if session.label == label then return session.session_id end
     end
 end
@@ -26,25 +44,14 @@ local function open_session(dir)
     local label = tilde_path(dir)
     local session_id = session_with_label(label)
     if not session_id then
-        local created, err = rex.call('session.create', {
+        session_id = must(rex.call('session.create', {
             label = label,
-            initial_windows = {
-                { layout = rex.layout.block { flavor = shell, options = { cwd = dir, command = { '/bin/zsh', '-ic', 'p' } } } },
-            },
-        })
-        if err ~= nil then error(err, 0) end
-        session_id = created.session_id
-        local _, attach_err = rex.call('session.attach', { session_id = session_id })
-        if attach_err ~= nil then error(attach_err, 0) end
+            initial_windows = { { layout = shell_block { cwd = dir, command = { '/bin/zsh', '-ic', 'p' } } } },
+        })).session_id
+        must(rex.call('session.attach', { session_id = session_id }))
     end
     rex.client.queue('session.select', { session_id = session_id })
     return { session_id = session_id }
-end
-
-local function foreground_cwd(ctx)
-    local process, err = rex.block.call(terminal, 'process', { block_id = ctx.block_id })
-    if err ~= nil then error(err, 0) end
-    return process.foreground and process.foreground.cwd
 end
 
 local function ssh_hostname(alias)
@@ -66,36 +73,22 @@ end
 
 local function open_zoomed(ctx, command)
     -- A floating layer leaves cells with the default background transparent, so zoom a split instead.
-    local split, split_err = rex.session.new_split {
+    local split = must(rex.session.new_split {
         anchor_id = ctx.block_id,
         direction = 'horizontal',
         side = 'after',
         focus = true,
-        layout = rex.layout.block {
-            flavor = shell,
-            options = { cwd = foreground_cwd(ctx), command = command },
-        },
-    }
-    if split_err ~= nil then error(split_err, 0) end
-    local _, zoom_err = rex.session.zoom_block { block_id = split.block_ids[1], zoom = true }
-    if zoom_err ~= nil then error(zoom_err, 0) end
+        layout = shell_block { cwd = foreground_cwd(ctx), command = command },
+    })
+    must(rex.session.zoom_block { block_id = split.block_ids[1], zoom = true })
 end
 
--- Rex clips a floating layer at x = w and y = h instead of x + w and y + h, so the layer is stretched by its offset and fzf leaves the hidden part empty.
--- https://discord.com/channels/1546797889009881158/1560653603151282378
-local function open_centered_fzf(label, command)
-    local x, y, w, h = unpack(picker_bounds)
-    local margin = ('0,%d%%,%d%%,0'):format(math.ceil(x / (x + w) * 100), math.ceil(y / (y + h) * 100))
-    local _, err = rex.session.new_layer {
-        bounds = { x, y, x + w, y + h },
+local function open_picker(label, command)
+    must(rex.session.new_layer {
+        bounds = { 0.225, 0.2, 0.55, 0.6 },
         focus = true,
-        layout = rex.layout.block {
-            flavor = shell,
-            label = label,
-            options = { command = { 'env', 'FZF_DEFAULT_OPTS=--layout reverse --margin ' .. margin, unpack(command) } },
-        },
-    }
-    if err ~= nil then error(err, 0) end
+        layout = shell_block { label = label, command = command },
+    })
 end
 
 rex.action {
@@ -110,15 +103,11 @@ rex.action {
     title = 'Name Only Session After Its Folder',
     args = { dir = 'string' },
     run = function(ctx, args)
-        local list, err = rex.call 'session.list'
-        if err ~= nil then error(err, 0) end
-        local blocks, blocks_err = rex.session.list_blocks {}
-        if blocks_err ~= nil then error(blocks_err, 0) end
-        local only = list.sessions[1]
-        if #list.sessions ~= 1 or only.session_id ~= ctx.session_id or #blocks.blocks ~= 1 then return end
+        local sessions = must(rex.call 'session.list').sessions
+        local blocks = must(rex.session.list_blocks {}).blocks
+        if #sessions ~= 1 or sessions[1].session_id ~= ctx.session_id or #blocks ~= 1 then return end
         local label = tilde_path(args.dir)
-        local _, label_err = rex.session.set_label { label = label }
-        if label_err ~= nil then error(label_err, 0) end
+        must(rex.session.set_label { label = label })
         return label
     end,
 }
@@ -126,17 +115,7 @@ rex.action {
 rex.action {
     name = 'session_picker',
     title = 'Pick Session',
-    run = function(ctx)
-        local _, err = rex.session.new_layer {
-            bounds = picker_bounds,
-            focus = true,
-            layout = rex.layout.block {
-                flavor = shell,
-                options = { command = { config_dir .. '/session-picker', ctx.client_id } },
-            },
-        }
-        if err ~= nil then error(err, 0) end
-    end,
+    run = function(ctx) open_picker('Pick Session', { config_dir .. '/session-picker', ctx.client_id }) end,
 }
 
 local listed = rex.exec { zoxide, 'query', '--list' }
@@ -160,7 +139,29 @@ end
 rex.action {
     name = 'lazygit',
     title = 'Open Lazygit',
-    run = function(ctx) open_zoomed(ctx, { 'lazygit' }) end,
+    run = function(ctx)
+        local bounds = { 0.05, 0.05, 0.9, 0.9 }
+        local label = 'Lazygit'
+        local lazygit
+        for _, block in ipairs(must(rex.session.list_blocks {}).blocks) do
+            if block.label == label then lazygit = block end
+        end
+        if not lazygit then
+            must(rex.session.new_layer {
+                bounds = bounds,
+                focus = true,
+                layout = shell_block { label = label, cwd = foreground_cwd(ctx), command = { 'lazygit' } },
+            })
+        elseif lazygit.block_id == ctx.block_id then
+            must(rex.session.detach_block { block_id = lazygit.block_id })
+        else
+            if lazygit.placement ~= 'placed' then
+                must(rex.session.move_block { block_id = lazygit.block_id, anchor_block_id = ctx.block_id })
+                must(rex.session.float_block { block_id = lazygit.block_id, bounds = bounds })
+            end
+            must(rex.session.focus_block { block_id = lazygit.block_id })
+        end
+    end,
 }
 
 rex.action {
@@ -173,10 +174,8 @@ rex.action {
     name = 'browse_repo',
     title = 'Open Git Remote in Browser',
     run = function(ctx)
-        local remote, err = rex.exec({ 'git', 'ls-remote', '--get-url' }, { cwd = foreground_cwd(ctx) })
-        if not remote then error(err, 0) end
-        if not remote.ok then error(remote.stderr, 0) end
-        rex.exec { 'open', remote_web_url(remote.stdout) }
+        local remote = exec_stdout({ 'git', 'ls-remote', '--get-url' }, { cwd = foreground_cwd(ctx) })
+        rex.exec { 'open', remote_web_url(remote) }
     end,
 }
 
@@ -185,8 +184,7 @@ rex.action {
     title = 'Open PR',
     keywords = 'pull request github browser branch',
     run = function(ctx)
-        local result, err = rex.exec({ shims .. 'gh', 'pr', 'view', '--web' }, { cwd = foreground_cwd(ctx) })
-        if not result then error(err, 0) end
+        local result = must(rex.exec({ shims .. 'gh', 'pr', 'view', '--web' }, { cwd = foreground_cwd(ctx) }))
         if result.ok then return end
         local branch = result.stderr:match 'no pull requests found for branch "(.-)"'
         if branch then error('No PR for ' .. branch, 0) end
@@ -199,14 +197,12 @@ rex.action {
     name = 'copy_path',
     title = 'Copy Pane Directory',
     run = function(ctx)
-        local process, process_err = rex.block.call(terminal, 'process', { block_id = ctx.block_id })
-        if process_err ~= nil then error(process_err, 0) end
-        local launcher = process.ancestors[1]
-        local dir = launcher and launcher.cwd or process.foreground.cwd
-        local copied, copy_err = rex.exec({ 'pbcopy' }, { stdin = dir })
-        if not copied then error(copy_err, 0) end
+        local pane = process(ctx)
+        local launcher = pane.ancestors[1]
+        local dir = launcher and launcher.cwd or pane.foreground.cwd
+        must(rex.exec({ 'pbcopy' }, { stdin = dir }))
         -- Rex has no Lua call for an in-app notice, so send the pane an OSC 9 desktop notification.
-        local tty = rex.exec { 'ps', '-o', 'tty=', '-p', tostring(process.foreground.pid) }
+        local tty = rex.exec { 'ps', '-o', 'tty=', '-p', tostring(pane.foreground.pid) }
         local tty_file = tty and tty.ok and io.open('/dev/' .. tty.stdout:gsub('%s', ''), 'w')
         if not tty_file then return end
         tty_file:write(('\27]9;Copied %s\7'):format(tilde_path(dir)))
@@ -218,26 +214,21 @@ rex.action {
     name = 'open_url',
     title = 'Open URL from Pane',
     run = function(ctx)
-        local size, size_err = rex.block.call(terminal, 'size', { block_id = ctx.block_id })
-        if size_err ~= nil then error(size_err, 0) end
-        local screen, screen_err = rex.block.call(terminal, 'format', { block_id = ctx.block_id, unwrap = true, trim = true })
-        if screen_err ~= nil then error(screen_err, 0) end
+        local size = must(rex.block.call(terminal, 'size', { block_id = ctx.block_id }))
+        local screen = must(rex.block.call(terminal, 'format', { block_id = ctx.block_id, unwrap = true, trim = true }))
         local lines = {}
         for line in (screen.content .. '\n'):gmatch '(.-)\n' do
             lines[#lines + 1] = line
         end
         local visible = table.concat(lines, '\n', math.max(1, #lines - size.rows + 1))
-        local found, exec_err = rex.exec({ config_dir .. '/url-picker', '--extract' }, { stdin = visible })
-        if not found then error(exec_err, 0) end
-        if not found.ok then error(found.stderr, 0) end
         local urls = {}
-        for url in found.stdout:gmatch '[^\n]+' do
+        for url in exec_stdout({ config_dir .. '/url-picker', '--extract' }, { stdin = visible }):gmatch '[^\n]+' do
             urls[#urls + 1] = url
         end
         if #urls == 1 then
             rex.exec { 'open', urls[1] }
         elseif #urls > 1 then
-            open_centered_fzf('Open URL', { config_dir .. '/url-picker', unpack(urls) })
+            open_picker('Open URL', { config_dir .. '/url-picker', unpack(urls) })
         end
     end,
 }

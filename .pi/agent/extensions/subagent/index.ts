@@ -31,6 +31,7 @@ interface AgentConfig {
   description: string;
   hidden: boolean;
   tools: string[];
+  packs: string[];
   appendPrompt: string;
   model?: string;
   thinking?: ThinkingLevel;
@@ -264,6 +265,24 @@ function interruptedValue(run: RunEntry): Static<typeof RunValueSchema> {
   };
 }
 
+function capReturnedOutput(text: string, id: string): string {
+  const capBytes = 8 * 1024;
+  const bytes = Buffer.byteLength(text, "utf-8");
+  if (bytes <= capBytes) return text;
+  const head = Buffer.from(text, "utf-8")
+    .subarray(0, capBytes)
+    .toString("utf-8");
+  const shown = head.slice(0, Math.max(head.lastIndexOf("\n"), 0)) || head;
+  const file = path.join(os.tmpdir(), `pi-subagent-output-${id}.md`);
+  try {
+    fs.writeFileSync(file, text, { mode: 0o600 });
+  } catch (err) {
+    return `${shown}\n\n[output cut at ${capBytes / 1024} KB of ${Math.ceil(bytes / 1024)} KB, and the full text could not be saved: ${String(err)}]`;
+  }
+  const shownLines = shown.split("\n").length;
+  return `${shown}\n\n[output cut at line ${shownLines} of ${text.split("\n").length}. The full ${Math.ceil(bytes / 1024)} KB is at ${file}. Read it with offset ${shownLines + 1} for the rest.]`;
+}
+
 function extractResultBlock(
   text: string,
   id: string,
@@ -394,6 +413,12 @@ const closePanes = (blockIds: string[], files: string[] = []) =>
     rexScript({ op: "close", block_ids: blockIds, files }),
   ).catch(() => undefined);
 
+const listField = (value: unknown): string[] =>
+  (typeof value === "string" ? value : "")
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
 function loadAgents(): AgentConfig[] {
   if (!fs.existsSync(AGENTS_DIR)) return [];
   const out: AgentConfig[] = [];
@@ -424,10 +449,8 @@ function loadAgents(): AgentConfig[] {
       name: frontmatter.name,
       description: frontmatter.description,
       hidden: frontmatter.hidden === true,
-      tools: (typeof frontmatter.tools === "string" ? frontmatter.tools : "")
-        .split(",")
-        .map((t) => t.trim())
-        .filter((t) => t.length > 0),
+      tools: listField(frontmatter.tools),
+      packs: listField(frontmatter.packs),
       appendPrompt: body.trim(),
       model,
       thinking,
@@ -735,8 +758,13 @@ async function runInRex(
     "env",
     "PI_IS_SUBAGENT=1",
     `PI_SUBAGENT_RESULT_FILE=${resultFile}`,
+    ...(agent.packs.length > 0
+      ? [`PI_SKILL_PACKS=${agent.packs.join(",")}`]
+      : []),
     "pi",
     "--no-session",
+    "--no-mcp",
+    "--no-skills",
     ...(agent.appendPrompt
       ? ["--append-system-prompt", agent.appendPrompt]
       : []),
@@ -818,7 +846,7 @@ async function runInRex(
   }
 
   const extracted = extractResultBlock((outcome.output ?? "").trim(), target);
-  let finalText = headTruncate(extracted.text, MAX_OUTPUT_BYTES);
+  let finalText = capReturnedOutput(extracted.text, target);
   if (extracted.captured) {
     finalText += `\n\n[result-json cached as ${target}. Read it later with subagent_manage (action: result).]`;
   }
@@ -1104,6 +1132,12 @@ export default function (pi: ExtensionAPI) {
       if (unknownTools.length > 0)
         throw new Error(
           `agent '${agent.name}' lists tools that no extension registers: ${unknownTools.join(", ")}. Fix the tools line of this agent in ${AGENTS_DIR}.`,
+        );
+      const commands = new Set(pi.getCommands().map((c) => c.name));
+      const unknownPacks = agent.packs.filter((pack) => !commands.has(pack));
+      if (unknownPacks.length > 0)
+        throw new Error(
+          `agent '${agent.name}' lists skill packs that no extension registers: ${unknownPacks.join(", ")}. Fix the packs line of this agent in ${AGENTS_DIR}.`,
         );
       const model =
         agent.model ??
