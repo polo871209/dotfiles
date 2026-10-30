@@ -79,6 +79,22 @@ async function finalTitle(
   return capTitle(retry.ok ? cleanTitle(retry.text) : title);
 }
 
+// Pi rewrites the title as "π - name - cwd" after session_start and on every rename.
+const PI_TITLE = /\x1b\]0;\u03c0 - [^\x07]*\x07/g;
+
+function replacePiTitle(title: () => string | undefined): void {
+  const write = process.stdout.write.bind(process.stdout);
+  process.stdout.write = ((chunk: unknown, ...rest: unknown[]) => {
+    const replacement = title();
+    return (write as (...args: unknown[]) => boolean)(
+      typeof chunk === "string" && replacement !== undefined
+        ? chunk.replace(PI_TITLE, () => `\x1b]0;${replacement}\x07`)
+        : chunk,
+      ...rest,
+    );
+  }) as typeof process.stdout.write;
+}
+
 function lastAutoRename(ctx: ExtensionContext): AutoRenameEntry | undefined {
   let last: AutoRenameEntry | undefined;
   for (const entry of ctx.sessionManager.getBranch()) {
@@ -170,6 +186,8 @@ Reply with the title only.`,
 
 export default function (pi: ExtensionAPI) {
   const inFlight = new Set<string>();
+  let sessionTitle: (() => string) | undefined;
+  replacePiTitle(() => sessionTitle?.());
 
   const tryRename = async (ctx: ExtensionContext, pendingRequest?: string) => {
     if (!ctx.model) return;
@@ -220,10 +238,6 @@ export default function (pi: ExtensionAPI) {
   ) => {
     void tryRename(ctx, pendingRequest).catch(() => {});
   };
-  const showSessionNameAsTitle = (ctx: ExtensionContext) => {
-    if (ctx.mode !== "tui") return;
-    ctx.ui.setTitle(pi.getSessionName() ?? basename(ctx.cwd));
-  };
 
   // Pi emits message_end before it stores the message, so the prompt is passed along.
   pi.on("message_end", (event, ctx) => {
@@ -232,10 +246,13 @@ export default function (pi: ExtensionAPI) {
   });
   pi.on("session_start", (_e, ctx) => {
     renameInBackground(ctx);
-    // Pi writes its own "\u03c0 - name - cwd" title after session_start handlers return.
-    setTimeout(() => showSessionNameAsTitle(ctx), 0);
+    if (ctx.mode !== "tui") return;
+    sessionTitle = () => pi.getSessionName() ?? basename(ctx.cwd);
+    ctx.ui.setTitle(sessionTitle());
   });
-  pi.on("session_info_changed", (_e, ctx) => showSessionNameAsTitle(ctx));
+  pi.on("session_shutdown", () => {
+    sessionTitle = undefined;
+  });
 
   pi.registerCommand("rename", {
     description:

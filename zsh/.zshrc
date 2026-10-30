@@ -177,3 +177,24 @@ if [[ $TERM_PROGRAM == rex ]] && (( $+functions[__zoxide_hook] )); then
 fi
 
 eval "$(oh-my-posh init zsh --config "${XDG_CONFIG_HOME}/ohmyposh/config.yaml")"
+
+# Rex keeps block IDs across a server restart, so pi's rex-resume.ts extension records each pane's session by block ID.
+# A pi that exits returns to this prompt and forgets its pane, and one killed by a restart leaves the record for the restored shell.
+if [[ -n $REX_BLOCK ]]; then
+  _pi_resume_file=${XDG_STATE_HOME:-$HOME/.local/state}/pi/rex-resume/${REX_BLOCK#block:}
+  (( SHLVL == 1 )) && [[ -r $_pi_resume_file ]] && _pi_resume_pending=1
+  _pi_resume_precmd() {
+    [[ -e $_pi_resume_file ]] || return
+    if (( _pi_resume_pending )); then
+      _pi_resume_pending=0
+      local session=$(<$_pi_resume_file)
+      if [[ -f $session ]]; then
+        command pi --session "$session"
+      else
+        command pi
+      fi
+    fi
+    rm -f -- $_pi_resume_file
+  }
+  precmd_functions+=(_pi_resume_precmd)
+fi

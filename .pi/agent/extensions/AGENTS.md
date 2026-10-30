@@ -54,6 +54,7 @@ Before you change pi-native behavior, read the relevant docs in the installed `@
 - **`approval.ts`** — asks the user before a risky shell command runs, such as `kill`, `pkill`, or `killall`, and makes subagents hand those commands back to the parent agent.
 - **`caffeinate.ts`** — keeps the Mac awake while the agent works, for at most 100 minutes per run.
 - **`posthog.ts`** — sends model, token, cost, latency, and tool-call metrics to PostHog when `posthog.json` holds a token. It never sends prompts, outputs, or tool arguments.
+- **`rex-resume.ts`** — reopens the same pi session in its Rex pane after a Rex server restart or a reboot.
 - **`rex-bridge.ts`** — sends Nvim selections or diagnostics from the same Rex session to pi, and tells Nvim which file pi edited last.
 
 ### TUI
