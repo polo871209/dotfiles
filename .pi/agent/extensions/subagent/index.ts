@@ -763,6 +763,8 @@ async function runInRex(
       : []),
     "pi",
     "--no-session",
+    "--name",
+    agent.name,
     "--no-mcp",
     "--no-skills",
     ...(agent.appendPrompt

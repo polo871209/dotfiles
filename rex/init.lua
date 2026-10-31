@@ -165,6 +165,35 @@ rex.action {
 }
 
 rex.action {
+    name = 'runner',
+    title = 'Toggle Floating Shell',
+    run = function(ctx)
+        local label = 'Run'
+        for _, window in ipairs(must(rex.session.view {}).windows) do
+            for _, layer in ipairs(window.layers) do
+                for _, block in ipairs(layer.blocks) do
+                    if block.label == label then
+                        if block.block_id == ctx.block_id then
+                            must(rex.session.set_layer_state { layer_id = layer.layer_id, state = 'minimized' })
+                        elseif layer.kind == 'floating' then
+                            must(rex.session.set_layer_state { layer_id = layer.layer_id, state = 'normal', focus = true })
+                        else
+                            must(rex.session.focus_block { block_id = block.block_id })
+                        end
+                        return
+                    end
+                end
+            end
+        end
+        must(rex.session.new_layer {
+            bounds = { 0.05, 0.05, 0.9, 0.9 },
+            focus = true,
+            layout = shell_block { label = label, cwd = foreground_cwd(ctx) },
+        })
+    end,
+}
+
+rex.action {
     name = 'nvim',
     title = 'Open Neovim',
     run = function(ctx) open_zoomed(ctx, { 'nvim', '-c', ('lua require("pi").open_last_edit(%q)'):format(ctx.block_id) }) end,
@@ -248,6 +277,7 @@ rex.bind('ctrl+b>ctrl+b', 'pane.send_key', { key = 'ctrl+b' })
 
 rex.bind('shift+cmd+b', 'browse_repo')
 rex.bind('cmd+l', 'lazygit')
+rex.bind('shift+cmd+r', 'runner')
 rex.bind('cmd+n', 'nvim')
 rex.bind('cmd+u', 'open_url')
 rex.bind('cmd+p', 'browse_pr')
