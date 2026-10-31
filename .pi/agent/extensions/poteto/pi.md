@@ -1,9 +1,10 @@
 ## pstack in pi
 
-pstack is written for Cursor and lives in `~/.cache/cursor-plugins/pstack`. Translate its terms with this list. Drop a Cursor field the list does not cover.
+pstack is written for Cursor and lives in `~/.cache/cursor-plugins/pstack`. Translate its terms with this list. Drop a Cursor field the list does not cover. Every `subagent` call uses an agent name from this list.
 
 - `Task` → `subagent`. Use `subagent_manage` to wait, read results, steer, or stop.
-- `subagent_type: "poteto-agent"` or `generalPurpose` → `agent: "poteto-agent"`.
+- `subagent_type: "poteto-agent"` or `generalPurpose`, swarm lanes and verification included → `agent: "poteto-agent"`. If the step must not change the repository, say so in `task`.
+- `subagent_type: "comment-sicko"` → `agent: "comment-sicko"`.
 - `readonly: true` → `agent: "scout"` for this repository, `agent: "researcher"` for external tech.
 - `run_in_background: true` → `background: true`.
 - `model` and role slugs → no field. Every run of a route uses that route's model, so a panel shares one model. Say so once per task.

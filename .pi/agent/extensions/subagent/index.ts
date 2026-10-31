@@ -493,17 +493,12 @@ const fitLine = (text: string, maxWidth: number): string => {
   return out;
 };
 
-const buildParams = (agents: AgentConfig[]) =>
+const buildParams = () =>
   Type.Object({
-    agent:
-      agents.length === 1
-        ? Type.Literal(agents[0]!.name, {
-            description: "Agent route.",
-          })
-        : Type.Union(
-            agents.map((agent) => Type.Literal(agent.name)),
-            { description: "Agent route." },
-          ),
+    agent: Type.String({
+      description:
+        "Agent route from the Routes list, or the exact agent name a skill or instruction gives.",
+    }),
     task: Type.String({
       description:
         "Self-contained brief: scope, paths, constraints, completion criteria, and expected report. " +
@@ -763,6 +758,8 @@ async function runInRex(
       : []),
     "pi",
     "--no-session",
+    "--name",
+    agent.name,
     "--no-mcp",
     "--no-skills",
     ...(agent.appendPrompt
@@ -1059,7 +1056,7 @@ export default function (pi: ExtensionAPI) {
   const agents = loadAgents();
   if (agents.length === 0) return;
 
-  const params = buildParams(agents);
+  const params = buildParams();
 
   pi.registerTool<typeof params, Progress | undefined>({
     name: "subagent",
@@ -1118,7 +1115,14 @@ export default function (pi: ExtensionAPI) {
 
     async execute(_toolCallId, rawParams, signal, onUpdate, ctx) {
       const args = rawParams as SubagentArgs;
-      const agent = agents.find((a) => a.name === args.agent)!;
+      const agent = agents.find((a) => a.name === args.agent);
+      if (!agent)
+        throw new Error(
+          `Unknown agent '${args.agent}'. Routes: ${agents
+            .filter((a) => !a.hidden)
+            .map((a) => a.name)
+            .join(", ")}.`,
+        );
       const registered = pi.getAllTools().map((tool) => tool.name);
       const unknownTools = agent.tools.filter((entry) => {
         const pattern = new RegExp(

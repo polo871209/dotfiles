@@ -258,6 +258,7 @@ class ThemedEditor extends CustomEditor {
   }
 
   render(width: number): string[] {
+    if (process.env.PI_IS_SUBAGENT === "1") return [];
     // autocompleteState is private in pi-tui, hence the cast.
     const self = this as unknown as EditorWithOverlay;
     const state = self.autocompleteState;
@@ -394,87 +395,66 @@ const installFooter = (pi: ExtensionAPI, statuses: StatusSource) => {
       return {
         invalidate() {},
         render(width: number): string[] {
-          let pwd = ctx.cwd;
-          const home = process.env.HOME || process.env.USERPROFILE;
-          if (home && pwd.startsWith(home)) pwd = `~${pwd.slice(home.length)}`;
-          const branch = footerData.getGitBranch();
-          if (branch) pwd = `${pwd} (${branch})`;
-
           const modelName = ctx.model?.id ?? "no-model";
-          let thinkingText = "";
-          let thinkingKey: string | null = null;
-          if (ctx.model?.reasoning) {
-            const lvl = String(pi.getThinkingLevel() ?? "off");
-            thinkingText = lvl === "off" ? "thinking off" : lvl;
-            thinkingKey = `thinking${lvl.charAt(0).toUpperCase() + lvl.slice(1)}`;
-          }
+          const lvl = String(pi.getThinkingLevel() ?? "off");
+          const thinkingText = lvl === "off" ? "thinking off" : lvl;
+          const model = ctx.model?.reasoning
+            ? {
+                plain: `${modelName} • ${thinkingText}`,
+                colored: `${theme.fg("dim", `${modelName} • `)}${theme.fg(
+                  `thinking${lvl.charAt(0).toUpperCase() + lvl.slice(1)}` as never,
+                  thinkingText,
+                )}`,
+              }
+            : { plain: modelName, colored: theme.fg("dim", modelName) };
+          const dim = (text: string) => ({
+            plain: text,
+            colored: theme.fg("dim", text),
+          });
 
-          const usage = ctx.getContextUsage?.();
-          const usageText =
-            usage?.percent != null
-              ? `${usage.percent.toFixed(1)}%/${formatTokenCount(usage.contextWindow)}`
-              : "";
-
+          let segments: { plain: string; colored: string }[];
           if (process.env.PI_IS_SUBAGENT === "1") {
-            return [
-              theme.fg(
-                "dim",
-                [
-                  usageText,
-                  thinkingText ? `${modelName} • ${thinkingText}` : modelName,
-                ]
-                  .filter(Boolean)
-                  .join("   "),
+            segments = [
+              dim(ctx.sessionManager.getSessionName?.() ?? ""),
+              model,
+            ];
+          } else {
+            let pwd = ctx.cwd;
+            const home = process.env.HOME || process.env.USERPROFILE;
+            if (home && pwd.startsWith(home))
+              pwd = `~${pwd.slice(home.length)}`;
+            const branch = footerData.getGitBranch();
+            const worktree = pwd.match(/^(.*)\/\.worktree\/([^/]+)(\/.*)?$/);
+            if (worktree) {
+              const [, root, slug, subdir = ""] = worktree;
+              pwd = `${root}${subdir} (wt:${branch ?? slug})`;
+            } else if (branch) pwd = `${pwd} (${branch})`;
+
+            const usage = ctx.getContextUsage?.();
+            const active = footerData.getExtensionStatuses();
+            segments = [
+              dim(pwd),
+              dim(
+                usage?.percent != null
+                  ? `${usage.percent.toFixed(1)}%/${formatTokenCount(usage.contextWindow)}`
+                  : "",
               ),
+              model,
+              ...STATUS_BADGES.flatMap(({ key, paint }) => {
+                const text = active.get(key);
+                return text ? [{ plain: text, colored: paint(text) }] : [];
+              }),
             ];
           }
 
-          const active = footerData.getExtensionStatuses();
-          const badges = STATUS_BADGES.flatMap(({ key, paint }) => {
-            const text = active.get(key);
-            return text ? [{ text, colored: paint(text) }] : [];
-          });
-
-          const leftPlain = [
-            pwd,
-            usageText,
-            thinkingText ? `${modelName} • ${thinkingText}` : modelName,
-            ...badges.map((b) => b.text),
-          ]
-            .filter(Boolean)
-            .join("   ");
-          const dimLeft =
-            theme.fg("dim", `${pwd}   `) +
-            (usageText ? theme.fg("dim", `${usageText}   `) : "") +
-            (thinkingKey
-              ? `${theme.fg("dim", `${modelName} • `)}${theme.fg(thinkingKey as never, thinkingText)}`
-              : theme.fg("dim", modelName)) +
-            badges.map((b) => `   ${b.colored}`).join("");
-
-          const sessionName = ctx.sessionManager.getSessionName?.() ?? "";
-          const rightPlain = sessionName;
-
-          const lw = visibleWidth(leftPlain);
-          const rw = visibleWidth(rightPlain);
-          let line: string;
-          if (lw + 2 + rw <= width) {
-            line =
-              dimLeft +
-              " ".repeat(width - lw - rw) +
-              theme.fg("dim", sessionName);
-          } else if (lw < width) {
-            const avail = width - lw - 2;
-            const truncR =
-              avail > 0 ? truncateToWidth(rightPlain, avail, "") : "";
-            line =
-              dimLeft +
-              " ".repeat(Math.max(0, width - lw - visibleWidth(truncR))) +
-              theme.fg("dim", truncR);
-          } else {
-            line = theme.fg("dim", truncateToWidth(leftPlain, width, "..."));
-          }
-
-          return [line];
+          const gap = process.env.PI_IS_SUBAGENT === "1" ? " " : "   ";
+          const shown = segments.filter((segment) => segment.plain);
+          const plain = shown.map((segment) => segment.plain).join(gap);
+          return [
+            visibleWidth(plain) <= width
+              ? shown.map((segment) => segment.colored).join(gap)
+              : theme.fg("dim", truncateToWidth(plain, width, "...")),
+          ];
         },
       };
     });

@@ -39,7 +39,44 @@ local function session_with_label(label)
     end
 end
 
-local function open_session(dir)
+local history_file = (os.getenv 'XDG_STATE_HOME' or home .. '/.local/state') .. '/rex/session-history'
+
+local function session_history()
+    local ids = {}
+    local file = io.open(history_file)
+    if not file then return ids end
+    for id in file:lines() do
+        ids[#ids + 1] = id
+    end
+    file:close()
+    return ids
+end
+
+local function live_sessions()
+    local live = {}
+    for _, session in ipairs(must(rex.call 'session.list').sessions) do
+        live[session.session_id] = true
+    end
+    return live
+end
+
+local function select_session(session_id, from)
+    local live = live_sessions()
+    local visits = { session_id }
+    if from ~= session_id and live[from] then visits[2] = from end
+    for _, id in ipairs(session_history()) do
+        if #visits == 50 then break end
+        if id ~= session_id and id ~= from and live[id] then visits[#visits + 1] = id end
+    end
+    exec_stdout { 'mkdir', '-p', history_file:match '(.*)/' }
+    local file = must(io.open(history_file, 'w'))
+    file:write(table.concat(visits, '\n'), '\n')
+    file:close()
+    rex.client.queue('session.select', { session_id = session_id })
+    return { session_id = session_id }
+end
+
+local function open_session(dir, from)
     rex.exec { zoxide, 'add', dir }
     local label = tilde_path(dir)
     local session_id = session_with_label(label)
@@ -50,8 +87,7 @@ local function open_session(dir)
         })).session_id
         must(rex.call('session.attach', { session_id = session_id }))
     end
-    rex.client.queue('session.select', { session_id = session_id })
-    return { session_id = session_id }
+    return select_session(session_id, from)
 end
 
 local function ssh_hostname(alias)
@@ -83,7 +119,17 @@ local function open_zoomed(ctx, command)
     must(rex.session.zoom_block { block_id = split.block_ids[1], zoom = true })
 end
 
-local function open_picker(label, command)
+local function toggle_picker(label, command)
+    for _, window in ipairs(must(rex.session.view {}).windows) do
+        for _, layer in ipairs(window.layers) do
+            for _, block in ipairs(layer.blocks) do
+                if layer.kind == 'floating' and block.label == label then
+                    must(rex.session.close_layer { layer_id = layer.layer_id })
+                    return
+                end
+            end
+        end
+    end
     must(rex.session.new_layer {
         bounds = { 0.225, 0.2, 0.55, 0.6 },
         focus = true,
@@ -94,8 +140,29 @@ end
 rex.action {
     name = 'session_open',
     title = 'Open Directory as Session',
-    args = { dir = 'string' },
-    run = function(_, args) return open_session(args.dir) end,
+    args = { dir = 'string', from = 'string?' },
+    run = function(ctx, args) return open_session(args.dir, args.from or ctx.session_id) end,
+}
+
+rex.action {
+    name = 'session_switch',
+    title = 'Switch Session',
+    args = { session_id = 'string', block_id = 'string?', from = 'string?' },
+    run = function(ctx, args)
+        if args.block_id then must(rex.call('session.focus_block', { session_id = args.session_id, block_id = args.block_id })) end
+        return select_session(args.session_id, args.from or ctx.session_id)
+    end,
+}
+
+rex.action {
+    name = 'session_last',
+    title = 'Switch to Previous Session',
+    run = function(ctx)
+        local live = live_sessions()
+        for _, id in ipairs(session_history()) do
+            if id ~= ctx.session_id and live[id] then return select_session(id, ctx.session_id) end
+        end
+    end,
 }
 
 rex.action {
@@ -115,7 +182,7 @@ rex.action {
 rex.action {
     name = 'session_picker',
     title = 'Pick Session',
-    run = function(ctx) open_picker('Pick Session', { config_dir .. '/session-picker', ctx.client_id }) end,
+    run = function(ctx) toggle_picker('Pick Session', { config_dir .. '/session-picker', ctx.client_id, ctx.session_id }) end,
 }
 
 local listed = rex.exec { zoxide, 'query', '--list' }
@@ -131,7 +198,7 @@ if listed and listed.ok then
             title = tilde_path(dir),
             category = 'Directories',
             keywords = dir,
-            run = function() return open_session(dir) end,
+            run = function(ctx) return open_session(dir, ctx.session_id) end,
         }
     end
 end
@@ -161,6 +228,35 @@ rex.action {
             end
             must(rex.session.focus_block { block_id = lazygit.block_id })
         end
+    end,
+}
+
+rex.action {
+    name = 'runner',
+    title = 'Toggle Floating Shell',
+    run = function(ctx)
+        local label = 'Run'
+        for _, window in ipairs(must(rex.session.view {}).windows) do
+            for _, layer in ipairs(window.layers) do
+                for _, block in ipairs(layer.blocks) do
+                    if block.label == label then
+                        if block.block_id == ctx.block_id then
+                            must(rex.session.set_layer_state { layer_id = layer.layer_id, state = 'minimized' })
+                        elseif layer.kind == 'floating' then
+                            must(rex.session.set_layer_state { layer_id = layer.layer_id, state = 'normal', focus = true })
+                        else
+                            must(rex.session.focus_block { block_id = block.block_id })
+                        end
+                        return
+                    end
+                end
+            end
+        end
+        must(rex.session.new_layer {
+            bounds = { 0.05, 0.05, 0.9, 0.9 },
+            focus = true,
+            layout = shell_block { label = label, cwd = foreground_cwd(ctx) },
+        })
     end,
 }
 
@@ -228,14 +324,34 @@ rex.action {
         if #urls == 1 then
             rex.exec { 'open', urls[1] }
         elseif #urls > 1 then
-            open_picker('Open URL', { config_dir .. '/url-picker', unpack(urls) })
+            toggle_picker('Open URL', { config_dir .. '/url-picker', unpack(urls) })
+        end
+    end,
+}
+
+local function agent_working(block_id)
+    local status = rex.block.call(terminal, 'program_status', { block_id = block_id })
+    for _, record in ipairs(status and status.records or {}) do
+        if record.state == 'working' then return true end
+    end
+    return false
+end
+
+rex.action {
+    name = 'close_pane',
+    title = 'Close Pane, Confirm Only While an Agent Works',
+    run = function(ctx)
+        if not ctx.block_id or agent_working(ctx.block_id) then
+            rex.client.queue 'client.close'
+        else
+            must(rex.call('block.close', { session_id = ctx.session_id, block_id = ctx.block_id }))
         end
     end,
 }
 
 rex.bind('shift+cmd+k', 'client.palette.toggle')
 rex.bind('ctrl+alt+shift+cmd+s', 'client.sidebar.toggle')
-rex.bind('ctrl+b>shift+k', 'session_picker')
+rex.bind('cmd+k', 'session_picker')
 
 rex.bind('cmd+up', 'client.tab.previous')
 rex.bind('cmd+down', 'client.tab.next')
@@ -244,11 +360,12 @@ rex.bind('ctrl+up', 'pane.focus.up')
 rex.bind('ctrl+down', 'pane.focus.down')
 rex.bind('ctrl+left', 'pane.focus.left')
 rex.bind('ctrl+right', 'pane.focus.right')
-rex.bind('ctrl+b>ctrl+b', 'pane.send_key', { key = 'ctrl+b' })
 
 rex.bind('shift+cmd+b', 'browse_repo')
 rex.bind('cmd+l', 'lazygit')
+rex.bind('cmd+r', 'runner')
 rex.bind('cmd+n', 'nvim')
 rex.bind('cmd+u', 'open_url')
 rex.bind('cmd+p', 'browse_pr')
 rex.bind('cmd+y', 'copy_path')
+rex.bind('cmd+w', 'close_pane')
