@@ -182,7 +182,21 @@ rex.action {
 rex.action {
     name = 'session_picker',
     title = 'Pick Session',
-    run = function(ctx) toggle_picker('Pick Session', { config_dir .. '/session-picker', ctx.client_id, ctx.session_id }) end,
+    run = function(ctx)
+        if not ctx.client_id then error('Pick Session runs from the Rex app', 0) end
+        local request = rex.json.encode {
+            client = ctx.client_id,
+            session = ctx.session_id,
+            rows_script = config_dir .. '/session-rows.lua',
+            -- Rex starts from launchd with a bare PATH, so give the picker one that finds rex and zoxide.
+            path = home
+                .. '/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS:'
+                .. shims
+                .. ':/usr/bin:/bin',
+        }
+        local sent = must(rex.exec({ 'nc', '-U', home .. '/Library/Caches/rex-session-picker.sock' }, { stdin = request .. '\n', timeout = 2 }))
+        if not sent.ok then error('Rex does not load the session picker. Run `just rex patch`, then reopen Rex.', 0) end
+    end,
 }
 
 local listed = rex.exec { zoxide, 'query', '--list' }
@@ -257,6 +271,41 @@ rex.action {
             focus = true,
             layout = shell_block { label = label, cwd = foreground_cwd(ctx) },
         })
+    end,
+}
+
+rex.action {
+    name = 'sofka',
+    title = 'Toggle Sofka',
+    run = function(ctx)
+        local label = 'Sofka'
+        local bounds = { 0.05, 0.05, 0.9, 0.9 }
+        local here, sofka, sofka_layer, sofka_window
+        for _, window in ipairs(must(rex.session.view {}).windows) do
+            for _, layer in ipairs(window.layers) do
+                for _, block in ipairs(layer.blocks) do
+                    if block.block_id == ctx.block_id then here = window.window_id end
+                    if block.label == label then
+                        sofka, sofka_layer, sofka_window = block, layer, window.window_id
+                    end
+                end
+            end
+        end
+        if not sofka then
+            must(rex.session.new_layer { bounds = bounds, focus = true, layout = shell_block { label = label, command = { 'sofka' } } })
+        elseif sofka.block_id == ctx.block_id then
+            local layer_id = sofka_layer.layer_id
+            if sofka_layer.kind ~= 'floating' then layer_id = must(rex.session.float_block { block_id = sofka.block_id, bounds = bounds }).layer_id end
+            must(rex.session.set_layer_state { layer_id = layer_id, state = 'minimized' })
+        elseif sofka_window ~= here then
+            must(rex.session.move_block { block_id = sofka.block_id, anchor_block_id = ctx.block_id })
+            must(rex.session.float_block { block_id = sofka.block_id, bounds = bounds })
+            must(rex.session.focus_block { block_id = sofka.block_id })
+        elseif sofka_layer.kind == 'floating' then
+            must(rex.session.set_layer_state { layer_id = sofka_layer.layer_id, state = 'normal', focus = true })
+        else
+            must(rex.session.focus_block { block_id = sofka.block_id })
+        end
     end,
 }
 
@@ -364,6 +413,7 @@ rex.bind('ctrl+right', 'pane.focus.right')
 rex.bind('shift+cmd+b', 'browse_repo')
 rex.bind('cmd+l', 'lazygit')
 rex.bind('cmd+r', 'runner')
+rex.bind('cmd+s', 'sofka')
 rex.bind('cmd+n', 'nvim')
 rex.bind('cmd+u', 'open_url')
 rex.bind('cmd+p', 'browse_pr')

@@ -7,6 +7,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join, relative } from "node:path";
+import { fuzzyFilter } from "@earendil-works/pi-tui";
 import {
   SessionManager,
   type ExtensionAPI,
@@ -516,13 +517,17 @@ export default function (pi: ExtensionAPI) {
         description:
           "Remove this clean worktree, keep its branch, move back to the main checkout",
       };
-      return [
-        done,
-        ...r.stdout
-          .split("\n")
-          .filter(Boolean)
-          .map((b) => ({ value: b, label: b })),
-      ].filter((item) => item.value.startsWith(prefix.trim()));
+      return fuzzyFilter(
+        [
+          done,
+          ...r.stdout
+            .split("\n")
+            .filter(Boolean)
+            .map((b) => ({ value: b, label: b })),
+        ],
+        prefix,
+        (item) => item.value,
+      );
     },
     handler: async (args, ctx) => {
       const commandArgs = args.trim();

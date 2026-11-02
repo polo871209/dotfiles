@@ -1,0 +1,53 @@
+app := "/Applications/Rex Beta.app"
+support := env("HOME") / "Library/Application Support/rex-extensions"
+dylib := support / "RexExtensions.dylib"
+
+# Build the dylib and insert-dylib
+build:
+    swift build -c release
+
+# Run the Swift tests
+test:
+    swift test
+
+# Install the dylib and patch Rex to load it: back up the official app, add a weak load command, re-sign ad hoc
+patch: build
+    #!/bin/sh
+    set -eu
+    mkdir -p "{{ support }}"
+    # A new inode, so a running Rex keeps the dylib it mapped.
+    cp .build/release/libRexExtensions.dylib "{{ dylib }}.new"
+    mv -f "{{ dylib }}.new" "{{ dylib }}"
+    if .build/release/insert-dylib --check "{{ app }}/Contents/MacOS/Rex" "{{ dylib }}" >/dev/null; then
+        echo "Rex already loads the extensions. Quit Rex (⌘Q) and open it again to load the new build."
+        exit 0
+    fi
+    codesign -dv "{{ app }}" 2>&1 | grep -q 'TeamIdentifier=AG92C3PT77' || { echo "{{ app }} is not the official build" >&2; exit 1; }
+    rm -rf "{{ support }}/official"
+    mkdir -p "{{ support }}/official"
+    ditto "{{ app }}" "{{ support }}/official/Rex Beta.app"
+    stage="$(mktemp -d)"
+    trap 'rm -rf "$stage"' EXIT
+    ditto "{{ app }}" "$stage/Rex Beta.app"
+    .build/release/insert-dylib "$stage/Rex Beta.app/Contents/MacOS/Rex" "{{ dylib }}"
+    codesign -d --entitlements - --xml "{{ app }}" > "$stage/entitlements.plist"
+    /usr/libexec/PlistBuddy -c "Add :com.apple.security.cs.disable-library-validation bool true" "$stage/entitlements.plist"
+    codesign -f -s - --options runtime --entitlements "$stage/entitlements.plist" "$stage/Rex Beta.app"
+    codesign --verify --strict "$stage/Rex Beta.app"
+    # The running Rex still maps the replaced bundle, so move it aside instead of deleting it.
+    rm -rf "{{ support }}/replaced"
+    mkdir -p "{{ support }}/replaced"
+    mv "{{ app }}" "{{ support }}/replaced/"
+    mv "$stage/Rex Beta.app" "{{ app }}"
+    echo "Patched. Quit Rex (⌘Q) and open it again."
+
+# Put the official Rex back, for example before a Rex update
+unpatch:
+    #!/bin/sh
+    set -eu
+    test -d "{{ support }}/official/Rex Beta.app" || { echo "no official backup in {{ support }}/official" >&2; exit 1; }
+    rm -rf "{{ support }}/replaced"
+    mkdir -p "{{ support }}/replaced"
+    mv "{{ app }}" "{{ support }}/replaced/"
+    ditto "{{ support }}/official/Rex Beta.app" "{{ app }}"
+    echo "Official Rex restored. Quit Rex (⌘Q) and open it again."

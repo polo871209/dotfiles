@@ -15,3 +15,6 @@ update-skill:
 
 # Native markdown viewer that nvim opens with <leader>tm: `just mdview`, `just mdview test`
 mod mdview "nvim/mdview"
+
+# Rex app extensions, such as the ⌘K session picker: `just rex patch`, `just rex unpatch`
+mod rex "rex/extensions"
