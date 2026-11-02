@@ -1,10 +1,6 @@
 // Native port of @juicesharp/rpiv-ask-user-question.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import {
-  formatProgramStatus,
-  type ProgramStatus,
-} from "@earendil-works/pi-tui";
-import {
   buildQuestionnaireResponse,
   buildToolResult,
   MAX_HEADER_LENGTH,
@@ -29,12 +25,6 @@ function clamp(value: string, max: number): string {
   if (chars.length <= max) return value;
   return `${chars.slice(0, Math.max(0, max - 1)).join("")}…`;
 }
-
-// Pi reports OSC 7501 status for its built-in dialogs but not for ui.custom().
-const reportStatus = (status: ProgramStatus): void => {
-  if (process.env.TERM_PROGRAM === "rex" && process.env.PI_PROGRAM_STATUS !== "0")
-    process.stdout.write(formatProgramStatus({ ...status, app: "pi" }));
-};
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
@@ -72,7 +62,6 @@ function registerAskUserQuestionTool(pi: ExtensionAPI): void {
     label: "Ask User Question",
     description:
       "Ask an interactive user to choose when a request needs a decision among multiple valid readings or directions. Call in the same turn ambiguity appears, not after prose; do not use when available tools can determine the facts.",
-    promptSnippet: "Structured choice dialog",
     parameters: QuestionParamsSchema,
     prepareArguments: clampArguments,
     exposure: "model-only",
@@ -107,15 +96,10 @@ function registerAskUserQuestionTool(pi: ExtensionAPI): void {
       }
 
       let onAbort: (() => void) | undefined;
-      reportStatus({
-        state: "blocked",
-        kind: "question",
-        message: typed.questions[0]?.question,
-      });
       let result: QuestionnaireResult;
       try {
         result = await ctx.ui.custom<QuestionnaireResult>(
-          (tui, theme, _kb, done) => {
+          (tui, theme, keybindings, done) => {
             onAbort = () => done({ answers: [], cancelled: true });
             if (signal?.aborted) onAbort();
             else signal?.addEventListener("abort", onAbort, { once: true });
@@ -127,13 +111,17 @@ function registerAskUserQuestionTool(pi: ExtensionAPI): void {
                 buildItemsForQuestion(q),
               ) satisfies WrappingSelectItem[][],
               done,
+              keybindings,
             }).component;
+          },
+          {
+            blocked: { kind: "question", message: typed.questions[0].question },
           },
         );
       } finally {
         if (signal && onAbort) signal.removeEventListener("abort", onAbort);
-        reportStatus({ state: "working", message: pi.getSessionName() });
       }
+      if (signal?.aborted) throw new Error("Aborted before the user answered.");
 
       return buildQuestionnaireResponse(result, typed);
     },

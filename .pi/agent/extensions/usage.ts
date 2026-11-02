@@ -5,8 +5,7 @@ import {
   type Theme,
 } from "@earendil-works/pi-coding-agent";
 
-// The endpoint accepts only OAuth tokens. The registry returns the stored
-// access token and refreshes it under pi's auth lock when it has expired.
+// The endpoint accepts only OAuth tokens.
 async function oauthToken(
   ctx: ExtensionContext,
   provider: string,

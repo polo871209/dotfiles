@@ -17,4 +17,17 @@ export default function (pi: ExtensionAPI) {
     cacheDirName: "gws-skills",
     skillPaths: ["skills"],
   });
+
+  registerSkillToggle(pi, {
+    name: "obsidian",
+    label: "Obsidian skills",
+    repoUrl: "https://github.com/kepano/obsidian-skills",
+    cacheDirName: "obsidian-skills",
+    skillPaths: [
+      "skills/obsidian-cli",
+      "skills/obsidian-markdown",
+      "skills/obsidian-bases",
+      "skills/json-canvas",
+    ],
+  });
 }

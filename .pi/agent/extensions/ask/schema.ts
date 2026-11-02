@@ -69,38 +69,35 @@ export function sentinelsToAppend(question: QuestionData): SentinelKind[] {
 
 const QuestionSchema = Type.Object({
   question: Type.String({
-    description:
-      'The complete question to ask the user. Should be clear, specific, and end with a question mark. Example: "Which library should we use for date formatting?" If multiSelect is true, phrase it accordingly, e.g. "Which features do you want to enable?"',
+    description: "The full question, ending with a question mark.",
   }),
   header: Type.String({
-    description: `Very short chip/tag shown next to the question (aim for ≤${MAX_HEADER_LENGTH} chars). Examples: "Auth method", "Library", "Approach".`,
+    description: `Short tag shown next to the question, at most ${MAX_HEADER_LENGTH} characters, such as "Auth method".`,
   }),
   options: Type.Array(
     Type.Object({
       label: Type.String({
-        description: `Display text for the option (1-5 words, aim for ≤${MAX_LABEL_LENGTH} chars). If recommending one, put it first and append "(Recommended)". Reserved labels: "Other", "Type something.", "Next".`,
+        description: `Option text, 1 to 5 words, at most ${MAX_LABEL_LENGTH} characters. Put a recommended option first and end its label with "(Recommended)". "Other", "Type something.", and "Next" are reserved.`,
       }),
       description: Type.String({
         description:
-          "Explanation of what this option means or what will happen if chosen. Useful for providing context about trade-offs or implications.",
+          "What choosing this option means, including its trade-off.",
       }),
     }),
     {
-      description: `Available choices (soft limit ${2}-${MAX_OPTIONS}). Every question gets a free-text row, so a question with one authored option remains usable. Keep choices distinct unless multiSelect is enabled.`,
+      description: `1 to ${MAX_OPTIONS} distinct choices. The user can always type a free-text answer instead.`,
     },
   ),
   multiSelect: Type.Optional(
     Type.Boolean({
-      default: false,
-      description:
-        "Set to true to allow the user to select multiple options instead of just one. Use when choices are not mutually exclusive.",
+      description: "Allow several answers when the options are not exclusive.",
     }),
   ),
 });
 
 export const QuestionParamsSchema = Type.Object({
   questions: Type.Array(QuestionSchema, {
-    description: `Questions to ask the user (soft limit ${MAX_QUESTIONS})`,
+    description: `1 to ${MAX_QUESTIONS} questions.`,
   }),
 });
 

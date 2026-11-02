@@ -80,7 +80,9 @@ async function listWorkspaceFiles(
           "webm",
           "lock",
           "log",
-        ].includes(base.includes(".") ? base.split(".").pop()!.toLowerCase() : "")
+        ].includes(
+          base.includes(".") ? base.split(".").pop()!.toLowerCase() : "",
+        )
       )
         return false;
       return true;
@@ -247,7 +249,10 @@ async function runDocumentSymbols(
           `${"  ".repeat(s.depth + 1)}${s.kind} ${s.name}${s.detail ? `  ${s.detail}` : ""}  :${s.line}`,
         );
       }
-      return { text: capText(lines.join("\n")).text, details: { count: syms.length } };
+      return {
+        text: capText(lines.join("\n")).text,
+        details: { count: syms.length },
+      };
     },
   );
 }
@@ -272,9 +277,6 @@ async function runRename(
       onUpdate,
       (res, cwd) => {
         const files = res.files ?? [];
-        if (files.length === 0) {
-          return { text: "Rename returned no edits", details: { count: 0 } };
-        }
         const lines = [
           `Renamed ${res.edit_count ?? 0} edit(s) across ${files.length} file(s):`,
         ];
@@ -383,58 +385,46 @@ export const lspTool = defineTool({
     openWorldHint: false,
   },
   description:
-    "Language-server navigation, symbol outlines, diagnostics, and rename. Actions: hover (type/docs), definition (canonical declaration), references (all uses), implementation (concrete implementors), type_definition (value type), document_symbols (file outline), diagnostics (read-only file/workspace check), rename (apply/save workspace edits), restart (respawn the LSP server).",
-  promptSnippet:
-    "Navigate symbols, inspect types, rename, or check diagnostics",
-  promptGuidelines: [
-    "Anchor at a current file:line for hover/definition/references/implementation/type_definition/rename; stale lines cause misses. symbol selects the column, or omit it for the first non-whitespace token.",
-    "Use references before rename or a signature change to find every caller; rename applies and saves immediately across affected files.",
-    "Prefer document_symbols to reading a whole file when locating a member or understanding structure.",
-    "diagnostics with no file/files scans the capped workspace; post-edit diagnostics are automatic, so use this only on explicit request or a reported error.",
-    "Use restart when results look stale or the server seems wedged (missing diagnostics after config/dependency changes, repeated timeouts), then retry the failed call once.",
-  ],
+    "Language-server lookups and rename. document_symbols outlines a file for less than reading it. rename saves the edits in every affected file, so run references first. Diagnostics run automatically after each edit, so call diagnostics only on request. restart restarts the daemon that all pi sessions share, for stale results or timeouts. A line number must be current, so re-read a file after you edit it.",
   parameters: Type.Object({
-    action: Type.Union(
-      [
-        Type.Literal("hover"),
-        Type.Literal("definition"),
-        Type.Literal("references"),
-        Type.Literal("implementation"),
-        Type.Literal("type_definition"),
-        Type.Literal("document_symbols"),
-        Type.Literal("diagnostics"),
-        Type.Literal("rename"),
-        Type.Literal("restart"),
-      ],
-      { description: "Which LSP operation to run." },
-    ),
+    action: Type.Enum([
+      "hover",
+      "definition",
+      "references",
+      "implementation",
+      "type_definition",
+      "document_symbols",
+      "diagnostics",
+      "rename",
+      "restart",
+    ]),
     file: Type.Optional(
       Type.String({
         description:
-          'Abs or cwd-relative. Required for anchor/document_symbols/rename; diagnostics accepts file, files, or neither (or "*") for workspace.',
+          "Absolute or relative to the working directory. Required for every action except diagnostics and restart.",
       }),
     ),
     files: Type.Optional(
       Type.Array(Type.String(), {
         description:
-          "Abs or cwd-relative paths, for action=diagnostics on specific files. Omit both file and files for repo-wide diagnostics.",
+          "Files to check with diagnostics. Omit file and files to check the whole repository.",
       }),
     ),
     line: Type.Optional(
       Type.Number({
         minimum: 1,
         description:
-          "1-indexed line; required for hover/definition/references/implementation/type_definition/rename.",
+          "1-based line number. Required for hover, definition, references, implementation, type_definition, and rename.",
       }),
     ),
     symbol: Type.Optional(
       Type.String({
         description:
-          "Substring on the line to anchor the column. Omit to use the first non-whitespace token.",
+          "Text on the line that selects the column. Default: the first token on the line.",
       }),
     ),
     new_name: Type.Optional(
-      Type.String({ description: "New name; required for action=rename." }),
+      Type.String({ description: "Required for rename." }),
     ),
   }),
   outputSchema: Type.Object({

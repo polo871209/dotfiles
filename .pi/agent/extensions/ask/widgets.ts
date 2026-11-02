@@ -94,8 +94,6 @@ class WrappingSelect implements Component {
     this.inputCursorOffset = offset;
   }
 
-  handleInput(_data: string): void {}
-
   invalidate(): void {}
 
   render(width: number): string[] {
@@ -450,8 +448,6 @@ export class TabBar implements Component {
     this.props = props;
   }
 
-  handleInput(_data: string): void {}
-
   invalidate(): void {}
 
   render(width: number): string[] {
@@ -494,13 +490,7 @@ export class SubmitPicker implements Component {
     this.props = props;
   }
 
-  handleInput(_data: string): void {}
-
   invalidate(): void {}
-
-  naturalHeight(_width: number): number {
-    return 2;
-  }
 
   render(width: number): string[] {
     const lines: string[] = [];

@@ -69,21 +69,22 @@ export default function (pi: ExtensionAPI) {
     if (!queue.length) return;
     const batch = queue;
     queue = [];
-    let failure: string;
-    try {
-      const res = await fetch("https://us.i.posthog.com/batch/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ api_key: token, batch }),
-        signal: AbortSignal.timeout(3000),
-      });
-      if (res.ok) return;
-      if (res.status === 429 || res.status >= 500) queue.unshift(...batch);
-      failure = `HTTP ${res.status} ${await res.text()}`;
-    } catch (e) {
-      queue.unshift(...batch);
-      failure = e instanceof Error ? e.message : String(e);
-    }
+    const requeue = () => {
+      queue = [...batch, ...queue].slice(-500);
+    };
+    const res = await fetch("https://us.i.posthog.com/batch/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ api_key: token, batch }),
+      signal: AbortSignal.timeout(3000),
+    }).catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))));
+    if (!(res instanceof Error) && res.ok) return;
+    if (res instanceof Error || res.status === 429 || res.status >= 500)
+      requeue();
+    const failure =
+      res instanceof Error
+        ? res.message
+        : `HTTP ${res.status} ${await res.text().catch(() => "")}`;
     if (reportedFailure || !ctx.hasUI) return;
     reportedFailure = true;
     ctx.ui.notify(`posthog: upload failed: ${failure}`, "warning");

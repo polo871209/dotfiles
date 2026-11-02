@@ -336,7 +336,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerMessageRenderer<ReportDetails>(
     REPORT_MESSAGE,
-    (message, _options, theme) => {
+    (message, options, theme) => {
       const items = message.details?.items ?? [];
       const rows = items.map((item) => {
         const chip = describeStatus(item.status);
@@ -350,7 +350,7 @@ export default function (pi: ExtensionAPI) {
           theme.fg("accent", theme.bold("▍Runbook results sent to the agent")),
           ...rows,
         ].join("\n"),
-        0,
+        options.outputPad,
         0,
       );
     },
@@ -373,9 +373,14 @@ export default function (pi: ExtensionAPI) {
     return base && failure ? splice(base.steps, failure.key, own) : own;
   };
 
-  pi.on("agent_end", async (_event, ctx) => {
+  pi.on("agent_settled", async (event, ctx) => {
     const { failure } = history(ctx);
-    if (!failure?.answered || failure.prompts !== 1 || ctx.mode !== "tui")
+    if (
+      event.aborted ||
+      !failure?.answered ||
+      failure.prompts !== 1 ||
+      ctx.mode !== "tui"
+    )
       return;
     if (resumed.has(failure.entryId)) return;
     resumed.add(failure.entryId);

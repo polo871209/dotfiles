@@ -38,19 +38,20 @@ function barWidget(lines: string[]) {
 
 const YEET_MSG_TYPE = "yeet-marker";
 const YEET_WIDGET_KEY = "yeet-progress";
-const HOOK_TIMEOUT_MS = 600_000;
 const CONVENTIONAL_SUBJECT =
   /^(?:feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(?:\([\w.-]+\))?!?:\s/i;
 
 export default function (pi: ExtensionAPI) {
   pi.registerMessageRenderer<{ ok: boolean }>(
     YEET_MSG_TYPE,
-    (message, _opts, theme) => {
+    (message, opts, theme) => {
       const mark =
         message.details?.ok === false
           ? theme.fg("error", "✗ yeet")
           : theme.fg("success", "✓ yeet");
-      const box = new Box(1, 1, (t) => theme.bg("customMessageBg", t));
+      const box = new Box(opts.outputPad, 1, (t) =>
+        theme.bg("customMessageBg", t),
+      );
       box.addChild(new Text(`${mark} ${message.content as string}`, 0, 0));
       return box;
     },
@@ -170,7 +171,7 @@ export default function (pi: ExtensionAPI) {
 
     showProgress(1);
     const runHook = () =>
-      gitWith(HOOK_TIMEOUT_MS, ["hook", "run", "--ignore-missing", "pre-commit"]);
+      gitWith(600_000, ["hook", "run", "--ignore-missing", "pre-commit"]);
     let hook = await runHook();
     if (!(await git("diff", "--quiet", "--", ".", ...EXCLUDE)).ok) {
       const restage = await git("add", "-A", "--", ".", ...EXCLUDE);
@@ -268,8 +269,11 @@ Return the raw commit message, starting with the subject line.`,
     const cleanMessage = body.length
       ? [subject, "", ...body].join("\n")
       : subject;
-    if (!cleanMessage) {
-      ctx.ui.notify("/yeet: empty commit message", "error");
+    if (!CONVENTIONAL_SUBJECT.test(subject) || subject.length > 72) {
+      ctx.ui.notify(
+        `/yeet: the model returned no valid commit subject: ${subject.slice(0, 80) || "(empty)"}`,
+        "error",
+      );
       return;
     }
 

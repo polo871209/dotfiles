@@ -5,16 +5,12 @@ import { stripVTControlCharacters } from "node:util";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { formatDuration } from "./shared/format";
 
 const SUCCESS_TAIL = 10;
 const FAILURE_TAIL = 30;
 // 100 lines of this width stay under pi's 50KB tool-result cap.
 const MAX_LINE_CHARS = 300;
-function formatDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
-  return `${Math.floor(ms / 60_000)}m${Math.floor((ms % 60_000) / 1000)}s`;
-}
 
 function pruneOldLogs(logDir: string): void {
   const cutoff = Date.now() - 3 * 24 * 60 * 60 * 1000;
@@ -40,7 +36,7 @@ function clip(line: string): string {
 
 function collapseRuns(lines: string[]): string[] {
   const out: string[] = [];
-  for (let i = 0; i < lines.length; ) {
+  for (let i = 0; i < lines.length;) {
     let j = i + 1;
     while (j < lines.length && lines[j] === lines[i]) j++;
     out.push(j - i > 1 ? `${lines[i]}  (×${j - i})` : lines[i]!);
@@ -71,15 +67,18 @@ export default function (pi: ExtensionAPI) {
       openWorldHint: true,
     },
     description:
-      "Default tool for shell commands. Runs the command with its output kept out of context and returns one verdict line (exit, duration, line count) plus the last lines, or the `filter` matches with line numbers. " +
-      "The verdict names the log file only when output was left out; read it with offset or grep it. " +
+      "Default tool for shell commands. Returns a verdict line (exit, duration, line count) plus the last lines or the `filter` matches, and keeps the rest in a log file that the verdict names. " +
       "Use bash instead only when you need the full output of a short command, such as `git diff`. " +
       "WRONG: bash `npm test`, thousands of lines in context. RIGHT: quiet_run `npm test`.",
-    promptSnippet:
-      "Build, test suite, install, or any command that prints hundreds of lines to say one thing: quiet_run.",
     parameters: Type.Object({
       command: Type.String({ minLength: 1 }),
-      timeoutSeconds: Type.Optional(Type.Number({ minimum: 1 })),
+      timeoutSeconds: Type.Optional(
+        Type.Number({
+          minimum: 1,
+          description:
+            "Kill the command after this many seconds. Default: no limit.",
+        }),
+      ),
       tail: Type.Optional(
         Type.Number({
           minimum: 0,
@@ -245,6 +244,7 @@ export default function (pi: ExtensionAPI) {
       });
       clearTimeout(timer);
       clearTimeout(sigkillTimer);
+      if (timedOut || signal?.aborted) killTree("SIGKILL");
       signal?.removeEventListener("abort", terminate);
       if (child.pid) liveGroups.delete(child.pid);
       if (pending) addLines([pending]);

@@ -2,6 +2,7 @@ import type {
   ClassifierApi,
   ClassifierBoolQuestion,
   ClassifierModel,
+  JsonValue,
   Usage,
 } from "@earendil-works/pi-ai";
 import {
@@ -12,10 +13,12 @@ import {
   type Theme,
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
+import { Type, type Static } from "typebox";
 import { run } from "./shared/exec";
 
 const MAX_DIFF_BYTES = 48 * 1024;
+const MAX_REPORT_BYTES = 64 * 1024;
+const MAX_LISTED_FILES = 200;
 // truncateHead applies a 2000-line cap by default. These two budgets are
 // byte-only, so disable the line limit rather than add a second one.
 const NO_LINE_CAP = Number.MAX_SAFE_INTEGER;
@@ -180,6 +183,7 @@ function fmt(n: number): string {
 
 type ToolResult = {
   content: { type: "text"; text: string }[];
+  structuredContent?: JsonValue;
   details: { summary: string };
   usage?: Usage;
   isError?: boolean;
@@ -451,6 +455,16 @@ async function resolveAndHide(
   const failures = resolved.failed.length + hidden.failed.length;
   return {
     content: [{ type: "text" as const, text: out.join("\n") }],
+    structuredContent: prValue({
+      pr: num,
+      resolved: resolved.ok.length,
+      hidden: hidden.ok.length,
+      keptReviews: verdict.kept.map((r) => ({
+        id: r.id,
+        author: r.author?.login ?? "?",
+        state: r.state,
+      })),
+    }),
     details: {
       summary:
         `PR #${num} · resolved ${resolved.ok.length} thread(s) · hid ${hidden.ok.length} item(s)` +
@@ -475,33 +489,25 @@ const params = Type.Object({
   diff: Type.Optional(
     Type.Boolean({
       description:
-        "Include the unified diff. Default FALSE — the PR branch is usually checked out locally, so read files directly. Set true only when the code isn't reachable locally.",
+        "Include the unified diff. Leave it off when the PR branch is checked out locally, because reading the files is cheaper.",
     }),
   ),
   includeBots: Type.Optional(
-    Type.Boolean({ description: "Keep bot comments (default false)" }),
+    Type.Boolean({ description: "Keep bot comments." }),
   ),
   includeResolved: Type.Optional(
     Type.Boolean({
-      description: "Keep resolved/outdated review threads (default false)",
+      description: "Keep resolved and outdated review threads.",
     }),
   ),
   select: Type.Optional(
-    Type.Union(
-      [
-        Type.Literal("files"),
-        Type.Literal("checks"),
-        Type.Literal("comments"),
-        Type.Literal("diff"),
-      ],
-      {
-        description:
-          "Return only one section instead of the full report — cheaper when you already know what you need.",
-      },
-    ),
+    Type.Enum(["files", "checks", "comments", "diff"], {
+      description:
+        "Return only this section, which is cheaper than the full report.",
+    }),
   ),
   action: Type.Optional(
-    Type.Union([Type.Literal("report"), Type.Literal("resolve")], {
+    Type.Enum(["report", "resolve"], {
       description:
         "report (default) returns the PR as markdown. resolve marks every unresolved review thread as resolved on GitHub, without a reply, and hides review content that no longer holds. Call resolve as soon as you have fixed the review comments locally. Do not wait for a commit, push, or merge.",
     }),
@@ -514,18 +520,81 @@ const params = Type.Object({
   ),
 });
 
+const Author = Type.String({ description: "GitHub login" });
+const outputSchema = Type.Object({
+  pr: Type.Number(),
+  url: Type.Optional(Type.String()),
+  state: Type.Optional(Type.String()),
+  failingChecks: Type.Optional(
+    Type.Array(Type.Object({ name: Type.String(), status: Type.String() })),
+  ),
+  files: Type.Optional(
+    Type.Array(
+      Type.Object({
+        path: Type.String(),
+        additions: Type.Number(),
+        deletions: Type.Number(),
+      }),
+    ),
+  ),
+  comments: Type.Optional(
+    Type.Array(Type.Object({ author: Author, body: Type.String() })),
+  ),
+  reviews: Type.Optional(
+    Type.Array(
+      Type.Object({
+        author: Author,
+        state: Type.String(),
+        body: Type.String(),
+      }),
+    ),
+  ),
+  threads: Type.Optional(
+    Type.Array(
+      Type.Object({
+        path: Type.String(),
+        line: Type.Union([Type.Number(), Type.Null()]),
+        comments: Type.Array(
+          Type.Object({ author: Author, body: Type.String() }),
+        ),
+      }),
+    ),
+  ),
+  diff: Type.Optional(Type.String()),
+  resolved: Type.Optional(Type.Number()),
+  hidden: Type.Optional(Type.Number()),
+  keptReviews: Type.Optional(
+    Type.Array(
+      Type.Object({ id: Type.String(), author: Author, state: Type.String() }),
+    ),
+  ),
+});
+type PrValue = Static<typeof outputSchema>;
+const prValue = (v: PrValue): JsonValue => v as JsonValue;
+
 export default function (pi: ExtensionAPI) {
+  pi.on("input", (event) => {
+    const active = pi.getActiveTools();
+    if (
+      !active.includes("github_pr") &&
+      /\b(prs?|pull requests?|pulls?\/\d+|reviews?|ci|checks?)\b/i.test(
+        event.text,
+      )
+    )
+      pi.setActiveTools([...active, "github_pr"]);
+    return { action: "continue" };
+  });
+
   pi.registerTool<typeof params, { summary: string }>({
     name: "github_pr",
     label: "GitHub PR",
+    exposure: "deferred",
     annotations: {
       readOnlyHint: false,
       destructiveHint: false,
       idempotentHint: true,
       openWorldHint: true,
     },
-    promptSnippet:
-      "Fetch PR metadata, failing checks, review threads, or a diff",
     renderResult(result, _options, theme: Theme) {
       return new Text(
         theme.fg("dim", `  ${result.details?.summary ?? "github_pr"}`),
@@ -534,28 +603,15 @@ export default function (pi: ExtensionAPI) {
       );
     },
     description:
-      "Fetch a GitHub PR (URL or number) as signal-only markdown: metadata, description, changed files, failing checks, and unresolved review threads. Use instead of `gh pr view`. Pass `select` to fetch just one section, or `action: resolve` after a fix to resolve every open review thread and hide stale review content.",
+      "Fetch a GitHub PR (URL or number) as markdown: metadata, description, changed files, failing checks, and unresolved review threads, without bot noise. Use instead of `gh pr view`. Pass `select` to fetch just one section, or `action: resolve` after a fix to resolve every open review thread and hide stale review content.",
     parameters: params,
-    async execute(_id, raw, signal, _onUpdate, ctx) {
-      const a = raw as {
-        pr: string;
-        repo?: string;
-        diff?: boolean;
-        includeBots?: boolean;
-        includeResolved?: boolean;
-        select?: "files" | "checks" | "comments" | "diff";
-        action?: "report" | "resolve";
-        hide?: string[];
-      };
+    outputSchema,
+    async execute(_id, a, signal, _onUpdate, ctx) {
       const parsed = parsePr(a.pr);
-      if (!parsed) {
-        const msg = `github_pr: could not parse "${a.pr}" as a PR URL or number`;
-        return {
-          content: [{ type: "text" as const, text: msg }],
-          details: { summary: msg },
-          isError: true,
-        };
-      }
+      if (!parsed)
+        return fail(
+          `github_pr: could not parse "${a.pr}" as a PR URL or number`,
+        );
       const repo = a.repo ?? parsed.repo;
       const num = parsed.number;
       const wantDiff = a.diff === true || a.select === "diff";
@@ -591,6 +647,7 @@ export default function (pi: ExtensionAPI) {
         return resolveAndHide(ctx, glOwner, glRepo, num, a.hide ?? [], signal);
       }
 
+      const wantComments = !select || select === "comments";
       const [meta, diff, gql] = await Promise.all([
         run(
           "gh",
@@ -608,23 +665,25 @@ export default function (pi: ExtensionAPI) {
         wantDiff
           ? run("gh", ["pr", "diff", String(num), ...repoArgs], signal, ctx.cwd)
           : Promise.resolve({ stdout: "", stderr: "", code: 0 }),
-        glOwner && glRepo
+        wantComments && glOwner && glRepo
           ? queryPr(glOwner, glRepo, num, signal, ctx.cwd)
-          : Promise.resolve({
-              stdout: "",
-              stderr: "skipped (no repo)",
-              code: -1,
-            }),
+          : Promise.resolve(undefined),
       ]);
 
-      if (meta.code !== 0) {
-        const msg = `github_pr: gh pr view failed: ${meta.stderr.trim() || meta.stdout.trim()}`;
-        return {
-          content: [{ type: "text" as const, text: msg }],
-          details: { summary: msg },
-          isError: true,
-        };
-      }
+      if (meta.code !== 0)
+        return fail(
+          `github_pr: gh pr view failed: ${meta.stderr.trim() || meta.stdout.trim()}`,
+        );
+      if (select === "diff" && diff.code !== 0)
+        return fail(
+          `github_pr: gh pr diff failed: ${diff.stderr.trim() || diff.stdout.trim()}`,
+        );
+      if (select === "comments" && gql?.code !== 0)
+        return fail(
+          gql
+            ? `github_pr: comments query failed: ${gql.stderr.trim().split("\n")[0]}`
+            : "github_pr: comments need owner/repo — pass `repo`.",
+        );
 
       const m = JSON.parse(meta.stdout) as {
         number: number;
@@ -659,7 +718,7 @@ export default function (pi: ExtensionAPI) {
       };
 
       const out: string[] = [];
-      const wantComments = !select || select === "comments";
+      const value: PrValue = { pr: m.number, url: m.url, state: m.state };
 
       if (!select) {
         out.push(`# PR #${m.number}: ${m.title}`);
@@ -691,6 +750,7 @@ export default function (pi: ExtensionAPI) {
         );
         const counts: Record<string, number> = {};
         for (const c of norm) counts[c.status] = (counts[c.status] || 0) + 1;
+        value.failingChecks = bad;
         out.push(
           `\n## Checks (${Object.entries(counts)
             .map(([k, v]) => `${v} ${k.toLowerCase()}`)
@@ -712,18 +772,25 @@ export default function (pi: ExtensionAPI) {
       }
 
       if ((!select || select === "files") && m.files?.length) {
+        value.files = m.files.map(({ path, additions, deletions }) => ({
+          path,
+          additions,
+          deletions,
+        }));
         out.push(`\n## Files`);
-        for (const f of m.files) {
+        for (const f of m.files.slice(0, MAX_LISTED_FILES)) {
           out.push(
             `- \`${f.path}\` +${f.additions}/−${f.deletions} (${f.changeType.toLowerCase()})`,
           );
         }
+        if (m.files.length > MAX_LISTED_FILES)
+          out.push(`- _(+${m.files.length - MAX_LISTED_FILES} more files)_`);
       }
 
       let nComments = 0;
       let nReviews = 0;
       let nThreads = 0;
-      if (wantComments && gql.code === 0 && gql.stdout) {
+      if (gql?.code === 0 && gql.stdout) {
         try {
           const pr = parsePrData(gql.stdout);
 
@@ -734,6 +801,10 @@ export default function (pi: ExtensionAPI) {
                 !isBot(c.author?.login ?? "", c.author?.__typename)),
           );
           nComments = comments.length;
+          value.comments = comments.map((c) => ({
+            author: c.author?.login ?? "?",
+            body: cleanBody(c.body, 2 * 1024),
+          }));
           if (comments.length) {
             out.push(`\n## Comments`);
             for (const c of comments) {
@@ -750,6 +821,11 @@ export default function (pi: ExtensionAPI) {
             (r) => !r.isMinimized && r.state !== "PENDING" && hasText(r.body),
           );
           nReviews = reviews.length;
+          value.reviews = reviews.map((r) => ({
+            author: r.author?.login ?? "?",
+            state: r.state,
+            body: cleanBody(r.body, 2 * 1024),
+          }));
           if (reviews.length) {
             out.push(`\n## Review bodies`);
             for (const r of reviews) {
@@ -772,6 +848,14 @@ export default function (pi: ExtensionAPI) {
             }))
             .filter((t) => t.visible.length);
           nThreads = threads.length;
+          value.threads = threads.map((t) => ({
+            path: t.path,
+            line: t.line ?? null,
+            comments: t.visible.map((c) => ({
+              author: c.author?.login ?? "?",
+              body: cleanBody(c.body, 2 * 1024),
+            })),
+          }));
           if (threads.length) {
             out.push(`\n## Review comments (unresolved)`);
             for (const t of threads) {
@@ -805,26 +889,24 @@ export default function (pi: ExtensionAPI) {
         } catch {
           out.push(`\n_(could not parse comments/review threads)_`);
         }
-      } else if (
-        wantComments &&
-        gql.stderr &&
-        !gql.stderr.includes("skipped")
-      ) {
+      } else if (gql) {
         out.push(
           `\n_(comments unavailable: ${gql.stderr.trim().split("\n")[0]})_`,
         );
+      } else if (wantComments) {
+        out.push(`\n_(comments unavailable: pass \`repo\` as owner/repo)_`);
       }
 
-      if (
-        (!select || select === "diff") &&
-        wantDiff &&
-        diff.code === 0 &&
-        diff.stdout
-      ) {
+      if (!select && wantDiff && diff.code !== 0) {
+        out.push(
+          `\n_(diff unavailable: ${diff.stderr.trim().split("\n")[0]})_`,
+        );
+      } else if ((!select || select === "diff") && wantDiff && diff.stdout) {
         const cut = truncateHead(diff.stdout, {
           maxBytes: MAX_DIFF_BYTES,
           maxLines: NO_LINE_CAP,
         });
+        value.diff = cut.content;
         out.push(
           `\n## Diff\n\`\`\`diff\n${cut.content}\n\`\`\`${
             cut.truncated
@@ -834,8 +916,20 @@ export default function (pi: ExtensionAPI) {
         );
       }
       if (out.length === 0) out.push(`No ${select} for PR #${m.number}.`);
+      const report = truncateHead(out.join("\n"), {
+        maxBytes: MAX_REPORT_BYTES,
+        maxLines: NO_LINE_CAP,
+      });
       return {
-        content: [{ type: "text" as const, text: out.join("\n") }],
+        content: [
+          {
+            type: "text" as const,
+            text: report.truncated
+              ? `${report.content}\n…[report truncated at ${formatSize(MAX_REPORT_BYTES)}, pass select to fetch one section]`
+              : report.content,
+          },
+        ],
+        structuredContent: prValue(value),
         details: {
           summary: `PR #${m.number} · ${[
             m.state.toLowerCase(),

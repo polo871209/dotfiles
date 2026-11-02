@@ -7,9 +7,15 @@ import {
   type ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
 import { execFile } from "node:child_process";
-import { existsSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 const git = (args: string[], cwd?: string): Promise<string> =>
   new Promise((resolve, reject) => {
@@ -81,15 +87,13 @@ export function registerSkillToggle(
     return choice;
   };
 
-  const repoDefaultFile = async (cwd: string): Promise<string | undefined> => {
-    try {
-      const commonDir = await git(
-        ["rev-parse", "--path-format=absolute", "--git-common-dir"],
-        cwd,
-      );
-      return join(commonDir, `pi-${name}`);
-    } catch {
-      return undefined;
+  const folderDefaultsDir = join(getAgentDir(), "skill-packs", name);
+  const folderDefaultFile = (folder: string): string =>
+    join(folderDefaultsDir, encodeURIComponent(folder));
+  const folderWithDefault = (cwd: string): string | undefined => {
+    for (let dir = resolve(cwd); ; dir = dirname(dir)) {
+      if (existsSync(folderDefaultFile(dir))) return dir;
+      if (dirname(dir) === dir) return undefined;
     }
   };
 
@@ -159,11 +163,13 @@ export function registerSkillToggle(
   });
 
   pi.on("session_start", async (_event, ctx) => {
-    const file = await repoDefaultFile(ctx.cwd);
-    enabled =
-      process.env.PI_SKILL_PACKS?.split(",").includes(name) ||
-      (sessionChoice(ctx.sessionManager.getBranch()) ??
-        (file !== undefined && existsSync(file)));
+    const requested = process.env.PI_SKILL_PACKS?.split(",").includes(name);
+    if (process.env.PI_IS_SUBAGENT === "1") enabled = requested === true;
+    else
+      enabled =
+        requested ||
+        (sessionChoice(ctx.sessionManager.getBranch()) ??
+          folderWithDefault(ctx.cwd) !== undefined);
     if (enabled && !isCloned()) {
       try {
         await ensureClone();
@@ -202,13 +208,13 @@ export function registerSkillToggle(
   };
 
   pi.registerCommand(name, {
-    description: `Flip ${label} on/off (off by default); /${name} repo flips this repository's default; /${name} update syncs the clone`,
+    description: `Flip ${label} on/off (off by default); /${name} repo flips the default for this folder and its subfolders; /${name} update syncs the clone`,
     getArgumentCompletions: (prefix) => {
       const items = [
         {
           value: "repo",
           label: "repo",
-          description: "Flip the default for this repository",
+          description: "Flip the default for this folder and its subfolders",
         },
         { value: "update", label: "update", description: "Sync the clone" },
       ].filter((item) => item.value.startsWith(prefix.trim()));
@@ -233,19 +239,17 @@ export function registerSkillToggle(
       }
 
       if (arg === "repo") {
-        const file = await repoDefaultFile(ctx.cwd);
-        if (!file) {
-          ctx.ui.notify(`${name}: not inside a git repository`, "warning");
-          return;
-        }
-        if (existsSync(file)) {
-          rmSync(file);
-          ctx.ui.notify(`${label}: off by default in this repository`, "info");
+        const folder = folderWithDefault(ctx.cwd);
+        if (folder) {
+          rmSync(folderDefaultFile(folder));
+          ctx.ui.notify(`${label}: off by default in ${folder}`, "info");
           if (isEnabled()) await disable(ctx);
           return;
         }
-        writeFileSync(file, "");
-        ctx.ui.notify(`${label}: on by default in this repository`, "info");
+        const cwd = resolve(ctx.cwd);
+        mkdirSync(folderDefaultsDir, { recursive: true });
+        writeFileSync(folderDefaultFile(cwd), "");
+        ctx.ui.notify(`${label}: on by default in ${cwd}`, "info");
         if (!isEnabled()) await enable(ctx);
         return;
       }

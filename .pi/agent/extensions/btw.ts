@@ -10,9 +10,6 @@ import { Box, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
 
 type Btw = { question: string; answer: string };
 
-const INSTRUCTION =
-  "Side question asked with /btw. Answer briefly from the conversation so far and do not call tools. The exchange stays out of the main conversation.";
-
 const card = ({ question, answer }: Btw, theme: Theme) => {
   const box = new Box(1, 1, (t) => theme.bg("customMessageBg", t));
   box.addChild(
@@ -61,7 +58,7 @@ async function ask(
         ...transcript,
         {
           role: "user",
-          content: `${INSTRUCTION}\n\n${question}`,
+          content: `Side question asked with /btw. Answer briefly from the conversation so far and do not call tools. The exchange stays out of the main conversation.\n\n${question}`,
           timestamp: Date.now(),
         },
       ],

@@ -26,8 +26,8 @@ public struct Theme {
         theme.background = palette.background.color
         theme.foreground = palette.foreground.color
         theme.selection = palette.selectionBackground.color
+        theme.muted = theme.foreground.mix(with: theme.background, by: 0.3)
         if palette.ansi.count == 16 {
-            theme.muted = palette.ansi[8].color
             theme.red = palette.ansi[9].color
             theme.green = palette.ansi[10].color
             theme.yellow = palette.ansi[11].color

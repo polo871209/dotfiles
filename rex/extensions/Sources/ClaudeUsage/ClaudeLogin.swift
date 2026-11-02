@@ -86,7 +86,7 @@ enum ClaudeLogin {
         return try await body()
     }
 
-    // Adapted from pi-ai 1.4.0 dist/auth/oauth/anthropic.js, refreshAnthropicToken.
+    // Adapted from pi-ai 1.5.0 dist/auth/oauth/anthropic.js, refreshAnthropicToken.
     private static func refresh(_ refreshToken: String) async throws -> OAuthCredential {
         var request = URLRequest(url: URL(string: "https://platform.claude.com/v1/oauth/token")!)
         request.httpMethod = "POST"

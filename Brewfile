@@ -1,3 +1,4 @@
+tap "anomalyco/tap"
 tap "crmne/tap", trusted: true
 tap "polo871209/nanocast", "https://github.com/polo871209/nanocast", trusted: true
 brew "cocoapods"
@@ -22,6 +23,7 @@ cask "font-fira-code-nerd-font"
 cask "gcloud-cli"
 cask "google-chrome"
 cask "google-drive"
+cask "anomalyco/tap/hex", trusted: true
 cask "lark"
 cask "logi-options+"
 cask "microsoft-teams"

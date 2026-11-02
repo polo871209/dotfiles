@@ -291,7 +291,9 @@ async function describeWorktrees(
   const worktrees = await listWorktrees(cwd, signal);
   const root = worktrees[0]!;
   const session = process.env.REX_SESSION;
-  const windows = session ? await rexWindows(session, signal) : [];
+  const windows = session
+    ? await rexWindows(session, signal).catch(() => [])
+    : [];
   return Promise.all(
     worktrees.map(async (w) => {
       const main = w === root;
@@ -410,8 +412,8 @@ async function finishWorktree(
   await ctx.waitForIdle();
   const { root, path, branch } = await finishableWorktree(ctx.cwd);
   const sessionFile = forkSession(ctx, root);
-  await clearTabLabel(branch);
   await removeWorktree(root, path);
+  await clearTabLabel(branch).catch(() => {});
   await switchToSession(
     ctx,
     sessionFile,
@@ -459,6 +461,7 @@ function createdText(wt: CreatedWorktree): string {
 
 export default function (pi: ExtensionAPI) {
   let pendingMove: PendingMove | undefined;
+  let repoUsesWorktrees = false;
 
   const offerTool = (offered: boolean) => {
     const active = pi.getActiveTools();
@@ -473,7 +476,8 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     // Pi keeps its launch directory when a session moves, and Rex reads the process directory for new panes.
     if (existsSync(ctx.cwd)) process.chdir(ctx.cwd);
-    offerTool(await usesWorktrees(ctx.cwd));
+    repoUsesWorktrees = await usesWorktrees(ctx.cwd);
+    offerTool(repoUsesWorktrees);
   });
 
   pi.on("input", (event) => {
@@ -483,7 +487,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("agent_settled", (event, ctx) => {
     if (!pendingMove) {
-      offerTool(false);
+      offerTool(repoUsesWorktrees);
       return;
     }
     if (event.aborted) {
@@ -568,24 +572,17 @@ export default function (pi: ExtensionAPI) {
   pi.registerTool({
     name: TOOL_NAME,
     label: "Worktree",
+    defaultActive: false,
     annotations: {
       readOnlyHint: false,
       destructiveHint: true,
       idempotentHint: false,
       openWorldHint: false,
     },
-    promptSnippet:
-      "List, enter, leave, and remove git worktrees, or start an agent in one",
     description:
       "Git worktrees of this repo, under `.worktree/`. `list` shows each worktree with its branch, changed files, commits ahead and behind the main checkout, and open Rex tab. Use the other actions when the user asks for them or when the repo's AGENTS.md or plan says to. `enter` moves this session into the worktree of `branch`, creating it if missing; end your turn after it. `spawn` starts a separate agent on `task` in the worktree of `branch`, in a background Rex tab, and this session keeps working. `done` removes the current clean worktree, keeps its branch, and returns to the main checkout; end your turn after it. `remove` deletes the clean worktree of another `branch`, keeps the branch, and closes its Rex tab. Use instead of `git worktree`.",
     parameters: Type.Object({
-      action: Type.Union([
-        Type.Literal("list"),
-        Type.Literal("enter"),
-        Type.Literal("spawn"),
-        Type.Literal("done"),
-        Type.Literal("remove"),
-      ]),
+      action: Type.Enum(["list", "enter", "spawn", "done", "remove"]),
       branch: Type.Optional(
         Type.String({
           description: "Required for enter, spawn, and remove, e.g. feat/login",
@@ -663,13 +660,23 @@ export default function (pi: ExtensionAPI) {
           );
         await assertRemovable(worktree, signal);
         await removeWorktree(root, worktree.path, signal);
-        const tab = session
-          ? tabOf(await rexWindows(session, signal), branch)
-          : undefined;
-        if (tab && session)
-          await rex(["window", "close", "-s", session, tab.window_id], signal);
+        let tabNote = "";
+        if (session) {
+          try {
+            const tab = tabOf(await rexWindows(session, signal), branch);
+            if (tab) {
+              await rex(
+                ["window", "close", "-s", session, tab.window_id],
+                signal,
+              );
+              tabNote = " Closed its Rex tab.";
+            }
+          } catch {
+            tabNote = " Could not close its Rex tab.";
+          }
+        }
         return reply(
-          `Removed worktree ${worktree.path}. Branch ${branch} is kept.${tab ? " Closed its Rex tab." : ""}`,
+          `Removed worktree ${worktree.path}. Branch ${branch} is kept.${tabNote}`,
           { path: worktree.path, branch },
         );
       }

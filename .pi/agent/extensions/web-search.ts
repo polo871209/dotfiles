@@ -59,15 +59,11 @@ const MAX_TREE_ENTRIES = 200;
 const MAX_FILE_CHARS = 30_000;
 const YT_DLP_TIMEOUT_MS = 90_000;
 
-function disableMarkdownEscaping(service: TurndownService): void {
-  service.escape = (text: string) => text;
-}
-
 const turndown = new TurndownService({
   headingStyle: "atx",
   codeBlockStyle: "fenced",
 });
-disableMarkdownEscaping(turndown);
+turndown.escape = (text: string) => text;
 
 function errMsg(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -338,6 +334,12 @@ async function callMcpTool(
   const text = payload.result?.content?.find(
     (c) => c.type === "text" && c.text,
   )?.text;
+  if (payload.result?.isError) {
+    const detail = `${label} search error: ${(text ?? "unknown").slice(0, 300)}`;
+    throw /rate|limit|429/i.test(detail)
+      ? new RetryableSearchError(detail)
+      : new Error(detail);
+  }
   if (!text) throw new Error(`${label} search returned no content`);
   return text;
 }
@@ -930,6 +932,8 @@ function withContinuationFooter(
     content,
     offset,
   );
+  if (offset >= totalChars && totalChars > 0)
+    return `[offset ${offset} is past the end: the page has ${totalChars} chars]`;
   if (!truncated) return text;
   return `${text}\n\n[chars ${offset}-${nextOffset} of ${totalChars}. To continue: fetch_content({ url: "${url}", offset: ${nextOffset} })]`;
 }
@@ -1077,10 +1081,10 @@ function execCapture(
   signal?: AbortSignal,
 ): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const child = execFile(
+    execFile(
       file,
       args,
-      { timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 },
+      { timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, signal },
       (err, stdout, stderr) => {
         if (err) {
           const detail = stderr
@@ -1098,12 +1102,6 @@ function execCapture(
         resolve({ stdout, stderr });
       },
     );
-    if (signal) {
-      const onAbort = () => child.kill();
-      if (signal.aborted) onAbort();
-      signal.addEventListener("abort", onAbort, { once: true });
-      child.once("exit", () => signal.removeEventListener("abort", onAbort));
-    }
   });
 }
 
@@ -1363,13 +1361,14 @@ function pidAlive(pid: number): boolean {
 
 const cloneCache = new Map<string, Promise<string>>();
 
-function execGitClone(args: string[]): Promise<void> {
+function execGitClone(args: string[], signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     execFile(
       "git",
       args,
       {
         timeout: 30_000,
+        signal,
         env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "echo" },
       },
       (err) => (err ? reject(err) : resolve()),
@@ -1381,6 +1380,7 @@ async function cloneGitHubRepo(
   owner: string,
   repo: string,
   ref: string | undefined,
+  signal?: AbortSignal,
 ): Promise<string> {
   const key = ref ? `${owner}/${repo}@${ref}` : `${owner}/${repo}`;
   const cached = cloneCache.get(key);
@@ -1393,13 +1393,13 @@ async function cloneGitHubRepo(
   );
   const promise = (async () => {
     if (existsSync(join(localPath, ".git"))) return localPath;
-    rmSync(localPath, { recursive: true, force: true });
-    mkdirSync(dirname(localPath), { recursive: true });
     const args = ["clone", "--depth", "1", "--single-branch"];
     if (ref) args.push("--branch", ref);
     args.push(`https://github.com/${owner}/${repo}.git`, localPath);
     try {
-      await execGitClone(args);
+      rmSync(localPath, { recursive: true, force: true });
+      mkdirSync(dirname(localPath), { recursive: true });
+      await execGitClone(args, signal);
     } catch (err) {
       rmSync(localPath, { recursive: true, force: true });
       cloneCache.delete(key);
@@ -1651,7 +1651,7 @@ async function fetchGitHubIssue(
   if ((issue.comments ?? 0) > 0) {
     const { stdout: commentsJson } = await execCapture(
       "gh",
-      ["api", `${base}/comments?per_page=${30}`],
+      ["api", `${base}/comments?per_page=30`],
       GH_TIMEOUT_MS,
       signal,
     );
@@ -1720,7 +1720,7 @@ async function fetchOne(
           ? `${gh.owner}/${gh.repo} - ${gh.path}`
           : `${gh.owner}/${gh.repo}`,
         content: describeGithubPath(
-          await cloneGitHubRepo(gh.owner, gh.repo, gh.ref),
+          await cloneGitHubRepo(gh.owner, gh.repo, gh.ref, signal),
           gh,
         ),
       };
@@ -1765,12 +1765,18 @@ async function fetchOneCached(
 
 const nonEmptyText = Type.String({ minLength: 1 });
 
+function resultText(result: {
+  content: Array<{ type: string; text?: string }>;
+}): string {
+  return result.content.find((c) => c.type === "text")?.text ?? "";
+}
+
 function errorLine(
   name: string,
   result: { content: Array<{ type: string; text?: string }> },
   theme: Theme,
 ): Text {
-  const text = result.content.find((c) => c.type === "text")?.text ?? "";
+  const text = resultText(result);
   return new Text(
     theme.fg(
       "error",
@@ -1795,10 +1801,10 @@ export default function (pi: ExtensionAPI) {
     name: "web_search",
     label: "Web Search",
     description: `Search the web. Each result is a title, a URL, a publish date when known, and a snippet, so fetch a result when the snippet does not settle the question. The current year is ${new Date().getFullYear()}; put it in the query when recency matters.`,
-    promptSnippet: "Search the web for external facts",
     annotations: { readOnlyHint: true, openWorldHint: true },
-    renderResult(result, _options, theme: Theme, context) {
+    renderResult(result, options, theme: Theme, context) {
       if (context.isError) return errorLine("web_search", result, theme);
+      if (options.expanded) return new Text(resultText(result), 0, 0);
       const d = result.details as
         | { queries?: string[]; totalResults?: number }
         | undefined;
@@ -1814,7 +1820,12 @@ export default function (pi: ExtensionAPI) {
     // Root must be a plain Type.Object: pi-ai sends Anthropic only the root
     // `properties`, so an Intersect or Union root reaches the model as `{}`.
     parameters: Type.Object({
-      query: Type.Optional(nonEmptyText),
+      query: Type.Optional(
+        Type.String({
+          minLength: 1,
+          description: "One query. Use queries for several.",
+        }),
+      ),
       queries: Type.Optional(
         Type.Array(nonEmptyText, {
           minItems: 1,
@@ -1826,7 +1837,7 @@ export default function (pi: ExtensionAPI) {
           minimum: 1,
           maximum: 10,
           default: 5,
-          description: "Keep the default of 5 unless the task needs breadth.",
+          description: "Results per query. Raise it only when the task needs breadth.",
         }),
       ),
       domains: Type.Optional(
@@ -1836,13 +1847,7 @@ export default function (pi: ExtensionAPI) {
         }),
       ),
       recency: Type.Optional(
-        Type.Union(
-          [
-            Type.Literal("day"),
-            Type.Literal("week"),
-            Type.Literal("month"),
-            Type.Literal("year"),
-          ],
+        Type.Enum(["day", "week", "month", "year"],
           { description: "Only pages published in this period." },
         ),
       ),
@@ -2000,15 +2005,15 @@ export default function (pi: ExtensionAPI) {
     label: "Fetch Content",
     description:
       "Fetch web content as markdown. A PDF returns its text by page. A GitHub code link returns a local path to read files from. A GitHub issue or pull link returns the thread with its comments. A video link returns the transcript. For PR diffs, checks, or review threads, use github_pr instead.",
-    promptSnippet: "Read a web page, GitHub link, or video transcript",
     annotations: {
       readOnlyHint: false,
       destructiveHint: false,
       idempotentHint: true,
       openWorldHint: true,
     },
-    renderResult(result, _options, theme: Theme, context) {
+    renderResult(result, options, theme: Theme, context) {
       if (context.isError) return errorLine("fetch_content", result, theme);
+      if (options.expanded) return new Text(resultText(result), 0, 0);
       const d = result.details as { urls?: string[]; ok?: number } | undefined;
       return new Text(
         theme.fg(
@@ -2020,7 +2025,12 @@ export default function (pi: ExtensionAPI) {
       );
     },
     parameters: Type.Object({
-      url: Type.Optional(nonEmptyText),
+      url: Type.Optional(
+        Type.String({
+          minLength: 1,
+          description: "One URL. Use urls for several.",
+        }),
+      ),
       urls: Type.Optional(
         Type.Array(nonEmptyText, {
           minItems: 1,
@@ -2028,13 +2038,18 @@ export default function (pi: ExtensionAPI) {
         }),
       ),
       mode: Type.Optional(
-        Type.Union([Type.Literal("readable"), Type.Literal("raw")], {
-          default: "readable",
+        Type.Enum(["readable", "raw"], {
           description:
             'Use "raw" for the unprocessed body when the target is JSON or the extraction looks wrong.',
         }),
       ),
-      offset: Type.Optional(Type.Number({ minimum: 0, default: 0 })),
+      offset: Type.Optional(
+        Type.Number({
+          minimum: 0,
+          description:
+            "Character position to continue from. Ignored when find is set.",
+        }),
+      ),
       find: Type.Optional(
         Type.Array(nonEmptyText, {
           minItems: 1,

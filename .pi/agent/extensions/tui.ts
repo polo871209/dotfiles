@@ -7,7 +7,6 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { Theme as PiTheme } from "@earendil-works/pi-coding-agent";
 import {
-  Editor,
   Marked,
   type Component,
   type EditorTheme,
@@ -211,16 +210,6 @@ const syncOverlay = (editor: EditorWithOverlay, editorHeight: number) => {
   }
 };
 
-const AC_TAG = "__acOverlay";
-const removeLegacyPrototypePatch = () => {
-  const proto = Editor.prototype as unknown as {
-    render: { [AC_TAG]?: { orig: unknown } };
-  };
-  let render = proto.render;
-  while (render[AC_TAG]) render = render[AC_TAG].orig as typeof render;
-  proto.render = render;
-};
-
 type Paint = (text: string) => string;
 
 const rgbFg =
@@ -231,6 +220,7 @@ const rgbFg =
 const STATUS_BADGES = [
   { key: "lark", paint: rgbFg("51;112;255"), tintsEditor: false },
   { key: "gws", paint: rgbFg("66;133;244"), tintsEditor: false },
+  { key: "obsidian", paint: rgbFg("124;58;237"), tintsEditor: false },
   { key: "poteto", paint: rgbFg("177;212;228"), tintsEditor: true },
 ];
 
@@ -396,15 +386,12 @@ const installFooter = (pi: ExtensionAPI, statuses: StatusSource) => {
         invalidate() {},
         render(width: number): string[] {
           const modelName = ctx.model?.id ?? "no-model";
-          const lvl = String(pi.getThinkingLevel() ?? "off");
+          const lvl = pi.getThinkingLevel();
           const thinkingText = lvl === "off" ? "thinking off" : lvl;
           const model = ctx.model?.reasoning
             ? {
                 plain: `${modelName} • ${thinkingText}`,
-                colored: `${theme.fg("dim", `${modelName} • `)}${theme.fg(
-                  `thinking${lvl.charAt(0).toUpperCase() + lvl.slice(1)}` as never,
-                  thinkingText,
-                )}`,
+                colored: `${theme.fg("dim", `${modelName} • `)}${theme.getThinkingBorderColor(lvl)(thinkingText)}`,
               }
             : { plain: modelName, colored: theme.fg("dim", modelName) };
           const dim = (text: string) => ({
@@ -414,10 +401,7 @@ const installFooter = (pi: ExtensionAPI, statuses: StatusSource) => {
 
           let segments: { plain: string; colored: string }[];
           if (process.env.PI_IS_SUBAGENT === "1") {
-            segments = [
-              dim(ctx.sessionManager.getSessionName?.() ?? ""),
-              model,
-            ];
+            segments = [dim(ctx.sessionManager.getSessionName() ?? ""), model];
           } else {
             let pwd = ctx.cwd;
             const home = process.env.HOME || process.env.USERPROFILE;
@@ -430,7 +414,7 @@ const installFooter = (pi: ExtensionAPI, statuses: StatusSource) => {
               pwd = `${root}${subdir} (wt:${branch ?? slug})`;
             } else if (branch) pwd = `${pwd} (${branch})`;
 
-            const usage = ctx.getContextUsage?.();
+            const usage = ctx.getContextUsage();
             const active = footerData.getExtensionStatuses();
             segments = [
               dim(pwd),
@@ -499,10 +483,13 @@ const fitMermaid = (src: string, width: number): MermaidArt | undefined => {
     return art && art.width <= width ? art : undefined;
   };
   const kind = diagramKind(src);
-  if (kind === "flowchart")
-    return fitting(
-      src.replace(/^(\s*(?:flowchart|graph)\s+)(?:LR|RL)\b/m, "$1TD"),
+  if (kind === "flowchart") {
+    const vertical = src.replace(
+      /^(\s*(?:flowchart|graph)\s+)(?:LR|RL)\b/m,
+      "$1TD",
     );
+    return vertical === src ? undefined : fitting(vertical);
+  }
   if (kind !== "sequence") return undefined;
   let best: MermaidArt | undefined;
   let low = MIN_LABEL_WIDTH;
@@ -593,8 +580,6 @@ const installWideMermaid = (pi: ExtensionAPI) => {
       .join("");
   });
 };
-
-removeLegacyPrototypePatch();
 
 export default function (pi: ExtensionAPI) {
   installWideMermaid(pi);

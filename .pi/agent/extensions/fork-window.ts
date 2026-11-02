@@ -79,8 +79,17 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
+    let window_id: string;
+    try {
+      ({ window_id } = JSON.parse(r.stdout) as { window_id: string });
+    } catch {
+      ctx.ui.notify(
+        "Fork window opened, but Rex returned no window ID, so it was not selected.",
+        "warning",
+      );
+      return { cancel: true };
+    }
     // Rex.app ignores the server's active window, so only an app action switches its visible tab: https://discord.com/channels/1546797889009881158/1559289044439932949
-    const { window_id } = JSON.parse(r.stdout) as { window_id: string };
     const select = await run(
       "rex",
       [

@@ -1,53 +1,50 @@
 app := "/Applications/Rex Beta.app"
 support := env("HOME") / "Library/Application Support/rex-extensions"
-dylib := support / "RexExtensions.dylib"
+label := "local.rex-extensions"
+agent := env("HOME") / "Library/LaunchAgents" / label + ".plist"
 
-# Build the dylib and insert-dylib
-build:
-    swift build -c release
-
-# Run the Swift tests
-test:
-    swift test
-
-# Install the dylib and patch Rex to load it: back up the official app, add a weak load command, re-sign ad hoc
-patch: build
+# Build and install the extensions, patch Rex, and start a launch agent that patches Rex again after each Rex update
+patch:
     #!/bin/sh
     set -eu
+    swift build -c release
     mkdir -p "{{ support }}"
     # A new inode, so a running Rex keeps the dylib it mapped.
-    cp .build/release/libRexExtensions.dylib "{{ dylib }}.new"
-    mv -f "{{ dylib }}.new" "{{ dylib }}"
-    if .build/release/insert-dylib --check "{{ app }}/Contents/MacOS/Rex" "{{ dylib }}" >/dev/null; then
-        echo "Rex already loads the extensions. Quit Rex (⌘Q) and open it again to load the new build."
-        exit 0
-    fi
-    codesign -dv "{{ app }}" 2>&1 | grep -q 'TeamIdentifier=AG92C3PT77' || { echo "{{ app }} is not the official build" >&2; exit 1; }
-    rm -rf "{{ support }}/official"
-    mkdir -p "{{ support }}/official"
-    ditto "{{ app }}" "{{ support }}/official/Rex Beta.app"
-    stage="$(mktemp -d)"
-    trap 'rm -rf "$stage"' EXIT
-    ditto "{{ app }}" "$stage/Rex Beta.app"
-    .build/release/insert-dylib "$stage/Rex Beta.app/Contents/MacOS/Rex" "{{ dylib }}"
-    codesign -d --entitlements - --xml "{{ app }}" > "$stage/entitlements.plist"
-    /usr/libexec/PlistBuddy -c "Add :com.apple.security.cs.disable-library-validation bool true" "$stage/entitlements.plist"
-    codesign -f -s - --options runtime --entitlements "$stage/entitlements.plist" "$stage/Rex Beta.app"
-    codesign --verify --strict "$stage/Rex Beta.app"
-    # The running Rex still maps the replaced bundle, so move it aside instead of deleting it.
-    rm -rf "{{ support }}/replaced"
-    mkdir -p "{{ support }}/replaced"
-    mv "{{ app }}" "{{ support }}/replaced/"
-    mv "$stage/Rex Beta.app" "{{ app }}"
-    echo "Patched. Quit Rex (⌘Q) and open it again."
+    install -m 755 .build/release/libRexExtensions.dylib "{{ support }}/RexExtensions.dylib.new"
+    mv -f "{{ support }}/RexExtensions.dylib.new" "{{ support }}/RexExtensions.dylib"
+    install -m 755 .build/release/insert-dylib patch-rex "{{ support }}/"
+    "{{ support }}/patch-rex"
+    launchctl bootout "gui/$(id -u)/{{ label }}" 2>/dev/null || true
+    cat > "{{ agent }}" <<EOF
+    <?xml version="1.0" encoding="UTF-8"?>
+    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+    <plist version="1.0">
+    <dict>
+        <key>Label</key><string>{{ label }}</string>
+        <key>ProgramArguments</key><array><string>{{ support }}/patch-rex</string></array>
+        <key>WatchPaths</key><array><string>/Applications</string></array>
+        <key>StartInterval</key><integer>600</integer>
+        <key>StandardOutPath</key><string>{{ env("HOME") }}/Library/Logs/rex-extensions.log</string>
+        <key>StandardErrorPath</key><string>{{ env("HOME") }}/Library/Logs/rex-extensions.log</string>
+    </dict>
+    </plist>
+    EOF
+    plutil -lint -s "{{ agent }}"
+    launchctl bootstrap "gui/$(id -u)" "{{ agent }}"
 
-# Put the official Rex back, for example before a Rex update
+# Stop the launch agent and put the official Rex back
 unpatch:
     #!/bin/sh
     set -eu
+    launchctl bootout "gui/$(id -u)/{{ label }}" 2>/dev/null || true
+    rm -f "{{ agent }}"
     test -d "{{ support }}/official/Rex Beta.app" || { echo "no official backup in {{ support }}/official" >&2; exit 1; }
     rm -rf "{{ support }}/replaced"
     mkdir -p "{{ support }}/replaced"
     mv "{{ app }}" "{{ support }}/replaced/"
     ditto "{{ support }}/official/Rex Beta.app" "{{ app }}"
     echo "Official Rex restored. Quit Rex (⌘Q) and open it again."
+
+# Run the Swift tests
+test:
+    swift test

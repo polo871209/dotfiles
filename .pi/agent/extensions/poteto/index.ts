@@ -24,7 +24,7 @@ export default function (pi: ExtensionAPI) {
   const adapterFile = join(import.meta.dirname, "pi.md");
 
   pi.on("before_agent_start", (event) => {
-    if (!pstack.isEnabled()) return;
+    if (process.env.PI_IS_SUBAGENT === "1" || !pstack.isEnabled()) return;
     const { body } = parseFrontmatter(readFileSync(skillFile, "utf-8"));
     event.systemPromptOptions.sections["poteto-mode"] = [
       `Poteto mode is on for this session. Follow the skill below on every task. Its file is \`${skillFile}\`, so \`../<name>/SKILL.md\` resolves next to it.`,

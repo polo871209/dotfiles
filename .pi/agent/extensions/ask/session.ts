@@ -1,9 +1,4 @@
-import {
-  getKeybindings,
-  type Input,
-  Key,
-  matchesKey,
-} from "@earendil-works/pi-tui";
+import { type Input, Key, matchesKey } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import {
   type QuestionAnswer,
@@ -110,11 +105,12 @@ function buildSingleSelectAnswer(
   const item = runtime.currentItem;
   if (state.inputMode) {
     const label = runtime.inputBuffer;
+    if (label.trim().length === 0) return null;
     return {
       questionIndex: state.currentTab,
       question: q.question,
       kind: "custom",
-      answer: label.length > 0 ? label : null,
+      answer: label,
     };
   }
   if (!item) return null;
@@ -508,6 +504,7 @@ interface QuestionnaireSessionConfig {
   params: QuestionParams;
   itemsByTab: WrappingSelectItem[][];
   done: (result: QuestionnaireResult) => void;
+  keybindings: QuestionnaireRuntime["keybindings"];
 }
 
 interface QuestionnaireSessionComponent {
@@ -540,12 +537,14 @@ export class QuestionnaireSession {
 
   private readonly tui: QuestionnaireSessionConfig["tui"];
   private readonly done: QuestionnaireSessionConfig["done"];
+  private readonly keybindings: QuestionnaireSessionConfig["keybindings"];
 
   readonly component: QuestionnaireSessionComponent;
 
   constructor(config: QuestionnaireSessionConfig) {
     this.tui = config.tui;
     this.done = config.done;
+    this.keybindings = config.keybindings;
     this.questions = config.params.questions;
     this.isMulti = this.questions.length > 1;
     this.itemsByTab = config.itemsByTab;
@@ -619,7 +618,7 @@ export class QuestionnaireSession {
 
   private runtime(): QuestionnaireRuntime {
     return {
-      keybindings: getKeybindings(),
+      keybindings: this.keybindings,
       inputBuffer: this.inlineInput.getValue(),
       questions: this.questions,
       isMulti: this.isMulti,

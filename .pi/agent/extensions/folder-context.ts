@@ -113,6 +113,16 @@ export default function (pi: ExtensionAPI) {
       startDir = dirname(absPath);
     }
 
+    const { offset, limit } = event.input as {
+      offset?: unknown;
+      limit?: unknown;
+    };
+    const readInFull =
+      event.toolName === "read" &&
+      !event.isError &&
+      offset === undefined &&
+      limit === undefined;
+
     const ancestors: string[] = [];
     let cur = startDir;
     while (cur !== ctx.cwd) {
@@ -137,6 +147,7 @@ export default function (pi: ExtensionAPI) {
         const previous = injected.get(candidate);
         if (previous === identity) continue;
         injected.set(candidate, identity);
+        if (readInFull && canonical(absPath) === candidate) continue;
         pending.push({
           text: frameContext(rawCandidate, content, previous !== undefined),
           details: { path: candidate, identity },

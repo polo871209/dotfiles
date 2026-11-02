@@ -195,7 +195,7 @@ rex.action {
                 .. ':/usr/bin:/bin',
         }
         local sent = must(rex.exec({ 'nc', '-U', home .. '/Library/Caches/rex-session-picker.sock' }, { stdin = request .. '\n', timeout = 2 }))
-        if not sent.ok then error('Rex does not load the session picker. Run `just rex patch`, then reopen Rex.', 0) end
+        if not sent.ok then error('Rex does not load the session picker. Run `just rex`, then reopen Rex.', 0) end
     end,
 }
 
@@ -223,23 +223,40 @@ rex.action {
     run = function(ctx)
         local bounds = { 0.05, 0.05, 0.9, 0.9 }
         local label = 'Lazygit'
+        local blocks = must(rex.session.list_blocks {}).blocks
+        local windows, window_id = {}, nil
+        for _, block in ipairs(blocks) do
+            if block.window_id then windows[block.window_id] = true end
+            if block.block_id == ctx.block_id then window_id = block.window_id end
+        end
+        if not window_id then error('Open Lazygit runs from a pane', 0) end
+        -- A detached block has no window_id, so its label records the window that hid it.
+        local hidden_label = label .. ' ' .. window_id
         local lazygit
-        for _, block in ipairs(must(rex.session.list_blocks {}).blocks) do
-            if block.label == label then lazygit = block end
+        for _, block in ipairs(blocks) do
+            local hidden_in = block.placement ~= 'placed' and (block.label == label and '' or block.label:match '^Lazygit (window:%S+)$')
+            if block.label == hidden_label or block.label == label and block.window_id == window_id then
+                lazygit = block
+            elseif hidden_in and not windows[hidden_in] then
+                must(rex.call('block.close', { session_id = ctx.session_id, block_id = block.block_id }))
+            end
         end
         if not lazygit then
             must(rex.session.new_layer {
+                window_id = window_id,
                 bounds = bounds,
                 focus = true,
                 layout = shell_block { label = label, cwd = foreground_cwd(ctx), command = { 'lazygit' } },
             })
         elseif lazygit.block_id == ctx.block_id then
+            must(rex.session.set_block_label { block_id = lazygit.block_id, label = hidden_label })
             must(rex.session.detach_block { block_id = lazygit.block_id })
         else
             if lazygit.placement ~= 'placed' then
                 must(rex.session.move_block { block_id = lazygit.block_id, anchor_block_id = ctx.block_id })
                 must(rex.session.float_block { block_id = lazygit.block_id, bounds = bounds })
             end
+            if lazygit.label ~= label then must(rex.session.set_block_label { block_id = lazygit.block_id, label = label }) end
             must(rex.session.focus_block { block_id = lazygit.block_id })
         end
     end,

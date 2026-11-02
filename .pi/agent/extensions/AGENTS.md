@@ -34,8 +34,8 @@ Before you change pi-native behavior, read the relevant docs in the installed `@
 
 ### Cleaner context
 
-- **`skill-packs.ts`** — enables Lark/Feishu or Google Workspace skills only on request, for one session or as a repository default.
-- **`poteto/`** — on `/poteto`, switches the current session into pstack's poteto mode with the latest pstack skills, and switches it back off on the next `/poteto`. `/poteto repo` flips the default for every new session in the repository.
+- **`skill-packs.ts`** — enables Lark/Feishu, Google Workspace, or Obsidian skills only on request, for one session or as the default for a folder and its subfolders.
+- **`poteto/`** — on `/poteto`, switches the current session into pstack's poteto mode with the latest pstack skills, and switches it back off on the next `/poteto`. `/poteto repo` flips the default for every new session in the current folder and its subfolders.
 - **`folder-context.ts`** — loads scoped agent instructions when files are touched, and refreshes them after edits.
 - **`btw.ts`** — answers a `/btw` side question with the session as context, outside the main agent's history.
 

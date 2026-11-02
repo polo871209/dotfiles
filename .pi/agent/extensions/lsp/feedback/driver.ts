@@ -2,7 +2,12 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { callLua, type Lane, loadLuaOnce } from "../nvim";
-import type { DriverResult } from "./types";
+import type { Diag } from "../utils";
+
+interface DriverResult {
+  formatted: string[];
+  diagnostics: Diag[];
+}
 
 const FEEDBACK_LUA = path.join(import.meta.dirname, "..", "feedback.lua");
 

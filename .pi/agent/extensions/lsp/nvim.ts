@@ -316,14 +316,17 @@ return f(...)`;
 const isBusy = (res: unknown): boolean =>
   typeof res === "object" && res !== null && "__pi_busy" in res;
 
+const abortReason = (signal: AbortSignal): Error =>
+  signal.reason instanceof Error ? signal.reason : new Error("aborted");
+
 const callGuarded = async <T>(
   client: NeovimClient,
   code: string,
   args: unknown[],
-  aborted: () => boolean,
+  signal: AbortSignal,
 ): Promise<T> => {
   for (;;) {
-    if (aborted()) throw new Error("aborted");
+    if (signal.aborted) throw abortReason(signal);
     const res = await client.lua(guarded(code), args as never);
     if (!isBusy(res)) return res as T;
     await new Promise((r) => setTimeout(r, 40));
@@ -342,16 +345,16 @@ export const callLua = async <T = unknown>(
   const combined = signal
     ? AbortSignal.any([signal, laneAborts[lane].signal])
     : laneAborts[lane].signal;
-  if (combined.aborted) throw new Error("aborted");
+  if (combined.aborted) throw abortReason(combined);
   return new Promise<T>((resolve, reject) => {
     const onAbort = () => {
       combined.removeEventListener("abort", onAbort);
-      reject(new Error("aborted"));
+      reject(abortReason(combined));
     };
     combined.addEventListener("abort", onAbort, { once: true });
     enqueue(lane, () => {
-      if (combined.aborted) throw new Error("aborted");
-      return callGuarded<T>(client, code, args, () => combined.aborted);
+      if (combined.aborted) throw abortReason(combined);
+      return callGuarded<T>(client, code, args, combined);
     }).then(
       (v) => {
         combined.removeEventListener("abort", onAbort);
@@ -402,7 +405,7 @@ export const loadLuaOnce = async (
   const flag = `pi_lua_${key}`;
   if ((await client.lua(`return vim.g[...]`, [flag] as never)) !== hash) {
     const deadline = AbortSignal.timeout(20_000);
-    await callGuarded(client, src, [], () => deadline.aborted);
+    await callGuarded(client, src, [], deadline);
     await client.lua(`local k, v = ...; vim.g[k] = v`, [flag, hash] as never);
   }
   loadedHere.add(cacheKey);

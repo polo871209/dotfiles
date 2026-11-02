@@ -130,8 +130,6 @@ class OneLineClippedText implements Component {
   }
 
   invalidate(): void {}
-
-  handleInput(_data: string): void {}
 }
 
 interface QuestionTabStrategyConfig {

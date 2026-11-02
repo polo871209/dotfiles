@@ -1,8 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { spawn, type ChildProcess } from "node:child_process";
 
-const MAX_HOLD_MS = 100 * 60_000;
-const QUIET_LIMIT_MS = 5 * 60_000;
 const ASSERTION_TTL_MS = 60_000;
 
 export default function (pi: ExtensionAPI) {
@@ -19,8 +17,8 @@ export default function (pi: ExtensionAPI) {
     runStartedAt === null || prompting
       ? 0
       : Math.min(
-          runStartedAt + MAX_HOLD_MS,
-          runningTools > 0 ? Infinity : lastActivityAt + QUIET_LIMIT_MS,
+          runStartedAt + 100 * 60_000,
+          runningTools > 0 ? Infinity : lastActivityAt + 5 * 60_000,
           Date.now() + ASSERTION_TTL_MS,
         );
 

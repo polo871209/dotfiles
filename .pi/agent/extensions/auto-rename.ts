@@ -5,6 +5,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { isForkName } from "./shared/fork-name";
 import { extractText } from "./shared/message";
+import { surviveReload } from "./shared/reload";
 import {
   sideChannelComplete,
   sideChannelWithLoader,
@@ -13,7 +14,6 @@ import {
 
 const MAX_WORDS = 5;
 const MAX_CHARS = 40;
-const RENAME_AT_USER_TURNS = [1, 3];
 const ENTRY_TYPE = "auto-rename";
 
 interface AutoRenameEntry {
@@ -81,6 +81,14 @@ async function finalTitle(
 
 // Pi rewrites the title as "π - name - cwd" after session_start and on every rename.
 const PI_TITLE = /\x1b\]0;\u03c0 - [^\x07]*\x07/g;
+
+const titleSource = surviveReload(
+  "dotfiles.pi.auto-rename.title",
+  (): { current?: () => string } => {
+    replacePiTitle(() => titleSource.current?.());
+    return {};
+  },
+);
 
 function replacePiTitle(title: () => string | undefined): void {
   const write = process.stdout.write.bind(process.stdout);
@@ -186,8 +194,6 @@ Reply with the title only.`,
 
 export default function (pi: ExtensionAPI) {
   const inFlight = new Set<string>();
-  let sessionTitle: (() => string) | undefined;
-  replacePiTitle(() => sessionTitle?.());
 
   const tryRename = async (ctx: ExtensionContext, pendingRequest?: string) => {
     if (!ctx.model) return;
@@ -204,8 +210,7 @@ export default function (pi: ExtensionAPI) {
       dueTurns = userTurns;
       digest += `\n\nThis session branched off a session about "${currentName}". Name the topic of the latest request, because that is where this branch goes. Pick a title that tells this branch apart from that session.`;
     } else {
-      dueTurns =
-        RENAME_AT_USER_TURNS.filter((turns) => userTurns >= turns).at(-1) ?? 0;
+      dueTurns = [1, 3].filter((turns) => userTurns >= turns).at(-1) ?? 0;
       const last = lastAutoRename(ctx);
       const namedByHand = !!currentName && currentName !== last?.name;
       if (namedByHand || dueTurns <= (last?.turns ?? 0)) return;
@@ -247,11 +252,12 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", (_e, ctx) => {
     renameInBackground(ctx);
     if (ctx.mode !== "tui") return;
-    sessionTitle = () => pi.getSessionName() ?? basename(ctx.cwd);
-    ctx.ui.setTitle(sessionTitle());
+    const title = () => pi.getSessionName() ?? basename(ctx.cwd);
+    titleSource.current = title;
+    ctx.ui.setTitle(title());
   });
   pi.on("session_shutdown", () => {
-    sessionTitle = undefined;
+    titleSource.current = undefined;
   });
 
   pi.registerCommand("rename", {

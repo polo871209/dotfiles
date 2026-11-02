@@ -152,6 +152,12 @@ export default function (pi: ExtensionAPI) {
       );
       return { ok: false, error: "malformed JSON" };
     }
+    if (
+      typeof payload !== "object" ||
+      payload === null ||
+      Array.isArray(payload)
+    )
+      return { ok: false, error: "payload must be a JSON object" };
 
     if (payload.query === "last_edit") {
       if (!currentCtx) return { ok: false, error: "no session context" };
@@ -231,12 +237,15 @@ export default function (pi: ExtensionAPI) {
     }
   };
 
+  const sockets = new Set<net.Socket>();
   const start = (ctx: ExtensionContext) => {
     sessionCwd = ctx.cwd;
     currentCtx = ctx;
     if (server || !ctx.hasUI) return;
     fs.rmSync(sockPath, { force: true });
     server = net.createServer((socket: net.Socket) => {
+      sockets.add(socket);
+      socket.on("close", () => sockets.delete(socket));
       let buf = "";
       socket.setEncoding("utf8");
       socket.on("data", (chunk: string) => {
@@ -254,14 +263,23 @@ export default function (pi: ExtensionAPI) {
         while (idx !== -1) {
           const line = buf.slice(0, idx);
           buf = buf.slice(idx + 1);
-          socket.write(`${JSON.stringify(handleLine(line))}\n`);
+          let reply: ReturnType<typeof handleLine>;
+          try {
+            reply = handleLine(line);
+          } catch (e) {
+            reply = {
+              ok: false,
+              error: e instanceof Error ? e.message : String(e),
+            };
+          }
+          socket.write(`${JSON.stringify(reply)}\n`);
           idx = buf.indexOf("\n");
         }
       });
       socket.on("error", () => {});
     });
     server.on("error", (err: Error) => {
-      ctx.ui?.notify?.(`rex-bridge: ${err.message}`, "error");
+      currentCtx?.ui.notify(`rex-bridge: ${err.message}`, "error");
     });
     server.listen(sockPath, () => {
       try {
@@ -271,7 +289,10 @@ export default function (pi: ExtensionAPI) {
   };
 
   const stop = () => {
+    currentCtx = undefined;
     if (!server) return;
+    for (const socket of sockets) socket.destroy();
+    sockets.clear();
     server.close();
     server = undefined;
     try {

@@ -75,6 +75,7 @@ export class Pane {
   private readonly statuses = new Map<string, StepStatus>();
   private readonly active = new Map<string, string>();
   private readonly runs = new Map<string, ChildProcess>();
+  private disposed = false;
 
   constructor(
     private readonly session: string,
@@ -218,6 +219,7 @@ export class Pane {
       this.statuses.set(key, status);
       this.onChange(key);
     };
+    child.on("error", (e) => (stderr += e.message));
     this.runs.set(key, child);
     update({});
     this.syncTicker();
@@ -253,6 +255,7 @@ export class Pane {
           output: failedToStart ? [failedToStart] : status.output,
           transcript: failedToStart || transcript,
         };
+        if (this.disposed) return resolve(exited);
         this.statuses.set(key, exited);
         this.onSettle(key, exited);
         this.syncTicker();
@@ -354,6 +357,7 @@ export class Pane {
   }
 
   dispose(): void {
+    this.disposed = true;
     for (const [key, child] of this.runs) {
       const status = this.statuses.get(key);
       if (status?.state === "inline" && status.block && !status.inPane)
@@ -369,7 +373,9 @@ export class Pane {
             }),
           ],
           { stdio: "ignore", detached: true },
-        ).unref();
+        )
+          .on("error", () => {})
+          .unref();
       child.kill();
     }
     this.runs.clear();

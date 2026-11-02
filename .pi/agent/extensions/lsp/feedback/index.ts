@@ -21,7 +21,10 @@ const isRebasing = (cwd: string): boolean => {
       const gitDir = fs.statSync(dotGit).isFile()
         ? path.resolve(
             dir,
-            fs.readFileSync(dotGit, "utf8").replace(/^gitdir:\s*/, "").trim(),
+            fs
+              .readFileSync(dotGit, "utf8")
+              .replace(/^gitdir:\s*/, "")
+              .trim(),
           )
         : dotGit;
       return (
@@ -130,11 +133,7 @@ export function registerFeedback(pi: ExtensionAPI): void {
         if (!(await formatFile(abs, cwd))) return;
         const after = fs.readFileSync(abs, "utf8");
         if (after === before) return;
-        return changeNote(
-          before,
-          after,
-          displayPath(abs, cwd),
-        );
+        return changeNote(before, after, displayPath(abs, cwd));
       } catch {
         return;
       }
@@ -170,7 +169,12 @@ export function registerFeedback(pi: ExtensionAPI): void {
     const changed = result.formatted.length
       ? `[lsp-feedback] auto-fixed and saved ${result.formatted.map((f) => `\`${displayPath(f, projectCwd)}\``).join(", ")}. Re-read before the next edit to them.`
       : "";
-    if (result.diagnostics.length === 0) {
+    const diagnostics = sortDiagnostics(
+      result.diagnostics.filter(
+        (d) => d.severity === "error" || d.severity === "warn",
+      ),
+    );
+    if (diagnostics.length === 0) {
       touched.clear();
       if (!changed) return;
       return {
@@ -194,9 +198,13 @@ export function registerFeedback(pi: ExtensionAPI): void {
           customType: "lsp-feedback-diagnostics",
           content:
             "Deterministic LSP feedback still reports diagnostics across the files touched in this task. Fix them, then finish the task. Do not delegate this repair.\n" +
-            sortDiagnostics(result.diagnostics)
+            diagnostics
+              .slice(0, 50)
               .map((d) => formatDiagLine(d, projectCwd))
               .join("\n") +
+            (diagnostics.length > 50
+              ? `\n… ${diagnostics.length - 50} more. Run lsp diagnostics on the touched files for the rest.`
+              : "") +
             (changed ? `\n${changed}` : ""),
           display: false,
         },

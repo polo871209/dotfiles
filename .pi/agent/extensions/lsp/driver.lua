@@ -244,14 +244,15 @@ function M.rename(file, line, symbol, new_name)
     params.newName = new_name
     local ok, res = pcall(vim.lsp.buf_request_sync, b, 'textDocument/rename', params, REQ_TIMEOUT_MS)
     if not ok then return { ok = false, error = 'request failed' } end
-    local edit
+    local edit, server_err
     for _, r in pairs(res or {}) do
         if r.result and (r.result.changes or r.result.documentChanges) then
             edit = r.result
             break
         end
+        server_err = server_err or (r.error and r.error.message)
     end
-    if not edit then return { ok = true, files = {}, edit_count = 0 } end
+    if not edit then return { ok = false, error = server_err or 'server returned no rename edits' } end
 
     local uris = collect_edit_uris(edit)
     local enc = 'utf-16'
