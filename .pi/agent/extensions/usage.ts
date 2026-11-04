@@ -4,6 +4,7 @@ import {
   type ExtensionContext,
   type Theme,
 } from "@earendil-works/pi-coding-agent";
+import { errorMessage } from "./shared/error";
 
 // The endpoint accepts only OAuth tokens.
 async function oauthToken(
@@ -20,9 +21,7 @@ async function oauthToken(
   try {
     token = (await ctx.modelRegistry.getProviderAuth(provider))?.auth.apiKey;
   } catch (e) {
-    throw new Error(
-      `token refresh failed: ${e instanceof Error ? e.message : String(e)}`,
-    );
+    throw new Error(`token refresh failed: ${errorMessage(e)}`);
   }
   if (!token) throw new Error("token refresh failed");
   return token;
@@ -90,9 +89,7 @@ async function claudeUsageLines(ctx: ExtensionContext): Promise<string[]> {
       signal: AbortSignal.timeout(10_000),
     });
   } catch (e) {
-    throw new Error(
-      `request failed: ${e instanceof Error ? e.message : String(e)}`,
-    );
+    throw new Error(`request failed: ${errorMessage(e)}`);
   }
   if (!res.ok) {
     throw new Error(
@@ -139,7 +136,7 @@ export default function (pi: ExtensionAPI) {
           "info",
         );
       } catch (e) {
-        ctx.ui.notify(`Claude usage: ${(e as Error).message}`, "error");
+        ctx.ui.notify(`Claude usage: ${errorMessage(e)}`, "error");
       }
     },
   });

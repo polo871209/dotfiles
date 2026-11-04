@@ -28,6 +28,14 @@ touch ~/.hushlogin
 ./zen-browser/install.sh
 ```
 
+### Setup Hex
+
+Open Hex and finish onboarding, then link its settings:
+
+```bash
+just link
+```
+
 ### Setup Atuin
 
 ```bash

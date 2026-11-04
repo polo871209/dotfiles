@@ -48,11 +48,11 @@ export function sentinelLabel(kind: SentinelKind): string {
   return ROW_INTENT_META[kind].label;
 }
 
-const RESERVED_LABELS = [
+const RESERVED_LABELS: readonly string[] = [
   "Other",
   ROW_INTENT_META.other.label,
   ROW_INTENT_META.next.label,
-] as const;
+];
 
 export function sentinelsToAppend(question: QuestionData): SentinelKind[] {
   const out: SentinelKind[] = [];
@@ -104,28 +104,37 @@ export const QuestionParamsSchema = Type.Object({
 export type QuestionData = Static<typeof QuestionSchema>;
 export type QuestionParams = Static<typeof QuestionParamsSchema>;
 
-export interface QuestionAnswer {
-  questionIndex: number;
-  question: string;
-  kind: "option" | "custom" | "multi";
-  answer: string | null;
-  selected?: string[];
-  custom?: string;
-}
+const QuestionnaireErrorSchema = Type.Union([
+  Type.Literal("no_ui"),
+  Type.Literal("no_questions"),
+  Type.Literal("empty_options"),
+  Type.Literal("duplicate_question"),
+  Type.Literal("duplicate_option_label"),
+  Type.Literal("reserved_label"),
+]);
 
-type QuestionnaireError =
-  | "no_ui"
-  | "no_questions"
-  | "empty_options"
-  | "duplicate_question"
-  | "duplicate_option_label"
-  | "reserved_label";
+const QuestionAnswerSchema = Type.Object({
+  questionIndex: Type.Number(),
+  question: Type.String(),
+  kind: Type.Union([
+    Type.Literal("option"),
+    Type.Literal("custom"),
+    Type.Literal("multi"),
+  ]),
+  answer: Type.Union([Type.String(), Type.Null()]),
+  selected: Type.Optional(Type.Array(Type.String())),
+  custom: Type.Optional(Type.String()),
+});
 
-export interface QuestionnaireResult {
-  answers: QuestionAnswer[];
-  cancelled: boolean;
-  error?: QuestionnaireError;
-}
+export const QuestionnaireResultSchema = Type.Object({
+  answers: Type.Array(QuestionAnswerSchema),
+  cancelled: Type.Boolean(),
+  error: Type.Optional(QuestionnaireErrorSchema),
+});
+
+export type QuestionAnswer = Static<typeof QuestionAnswerSchema>;
+export type QuestionnaireResult = Static<typeof QuestionnaireResultSchema>;
+type QuestionnaireError = Static<typeof QuestionnaireErrorSchema>;
 
 type ValidationResult =
   { ok: true } | { ok: false; error: QuestionnaireError; message: string };
@@ -161,9 +170,7 @@ export function validateQuestionnaire(typed: QuestionParams): ValidationResult {
     }
     const seenLabels = new Set<string>();
     for (const o of q.options) {
-      if (
-        (new Set(RESERVED_LABELS) satisfies ReadonlySet<string>).has(o.label)
-      ) {
+      if (RESERVED_LABELS.includes(o.label)) {
         return {
           ok: false,
           error: "reserved_label",
@@ -206,16 +213,20 @@ function buildAnswerSegment(a: QuestionAnswer, echoQuestion: boolean): string {
 }
 
 export function buildToolResult(text: string, details: QuestionnaireResult) {
-  return { content: [{ type: "text" as const, text }], details };
+  return {
+    content: [{ type: "text" as const, text }],
+    details,
+    structuredContent: details,
+  };
 }
 
 export function buildQuestionnaireResponse(
-  result: QuestionnaireResult | null | undefined,
+  result: QuestionnaireResult,
   params: QuestionParams,
 ) {
-  if (!result || result.cancelled) {
+  if (result.cancelled) {
     return buildToolResult(DECLINE_MESSAGE, {
-      answers: result?.answers ?? [],
+      answers: result.answers,
       cancelled: true,
     });
   }

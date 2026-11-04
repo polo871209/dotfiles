@@ -5,7 +5,6 @@ import {
   Input,
   Spacer,
   Text,
-  truncateToWidth,
 } from "@earendil-works/pi-tui";
 import {
   type QuestionAnswer,
@@ -24,32 +23,15 @@ import {
   MultiSelectView,
   type OptionListViewProps,
   OptionListView,
-  SubmitPicker,
-  type SubmitPickerProps,
   TabBar,
   type TabBarProps,
   type WrappingSelectItem,
   type WrappingSelectTheme,
 } from "./widgets";
-const HINT_PART_CANCEL = "Esc to cancel";
-export const COLLAPSED_HINT = ["Ctrl+] to expand", HINT_PART_CANCEL].join(
-  " · ",
-);
+export const COLLAPSED_HINT = "Ctrl+] to expand · Esc to cancel";
 
 function tabLabel(q: QuestionData, i: number): string {
-  return q.header && q.header.length > 0 ? q.header : `Q${i + 1}`;
-}
-
-function buildHintText(
-  question: QuestionData | undefined,
-  isMulti: boolean,
-): string {
-  const parts: string[] = ["Enter to select", "↑/↓ to navigate"];
-  if (question?.multiSelect === true) parts.push("Space to toggle");
-  if (isMulti) parts.push("Tab to switch questions");
-  parts.push(HINT_PART_CANCEL);
-  parts.push("Ctrl+] to collapse");
-  return parts.join(" · ");
+  return q.header || `Q${i + 1}`;
 }
 
 function selectActiveTabIndex(
@@ -97,39 +79,14 @@ interface TabComponents {
   bodyHeight: (width: number) => number;
 }
 
-type DialogState = QuestionnaireState;
-
 interface TabContentStrategy {
-  readonly footerRowCount: number;
-  headingRows(state: DialogState): Component[];
-  bodyComponent(state: DialogState): Component;
-  bodyHeight(width: number, state: DialogState): number;
-  footerRows(state: DialogState): Component[];
+  headingRows(state: QuestionnaireState): Component[];
+  bodyComponent(state: QuestionnaireState): Component;
+  bodyHeight(width: number, state: QuestionnaireState): number;
   focusedItemRowRange(
     width: number,
-    state: DialogState,
+    state: QuestionnaireState,
   ): [number, number] | undefined;
-}
-
-class OneLineClippedText implements Component {
-  constructor(
-    private readonly text: string,
-    private readonly paddingLeft = 0,
-  ) {}
-
-  render(width: number): string[] {
-    return [
-      " ".repeat(this.paddingLeft) +
-        truncateToWidth(
-          this.text,
-          Math.max(0, width - this.paddingLeft),
-          "…",
-          false,
-        ),
-    ];
-  }
-
-  invalidate(): void {}
 }
 
 interface QuestionTabStrategyConfig {
@@ -142,18 +99,12 @@ interface QuestionTabStrategyConfig {
 }
 
 class QuestionTabStrategy implements TabContentStrategy {
-  readonly footerRowCount = 2;
-
   constructor(private readonly config: QuestionTabStrategyConfig) {}
 
-  headingRows(state: DialogState): Component[] {
+  headingRows(state: QuestionnaireState): Component[] {
     const out: Component[] = [];
     const question = this.config.questions[state.currentTab];
-    if (
-      !this.config.isMulti &&
-      question?.header &&
-      question.header.length > 0
-    ) {
+    if (!this.config.isMulti && question?.header) {
       out.push(
         new Text(
           this.config.theme.bg("selectedBg", ` ${question.header} `),
@@ -170,36 +121,20 @@ class QuestionTabStrategy implements TabContentStrategy {
     return out;
   }
 
-  bodyComponent(state: DialogState): Component {
+  bodyComponent(state: QuestionnaireState): Component {
     const mso = this.config.tabsByIndex[state.currentTab]?.multiSelect;
     if (this.config.questions[state.currentTab]?.multiSelect === true && mso)
       return mso;
     return this.config.getActiveOptionList();
   }
 
-  bodyHeight(width: number, _state: DialogState): number {
+  bodyHeight(width: number, _state: QuestionnaireState): number {
     return this.config.getCurrentBodyHeight(width);
-  }
-
-  footerRows(state: DialogState): Component[] {
-    return [
-      new Spacer(1),
-      new OneLineClippedText(
-        this.config.theme.fg(
-          "dim",
-          buildHintText(
-            this.config.questions[state.currentTab],
-            this.config.isMulti,
-          ),
-        ),
-        1,
-      ),
-    ];
   }
 
   focusedItemRowRange(
     width: number,
-    state: DialogState,
+    state: QuestionnaireState,
   ): [number, number] | undefined {
     const mso = this.config.tabsByIndex[state.currentTab]?.multiSelect;
     if (this.config.questions[state.currentTab]?.multiSelect === true && mso)
@@ -211,15 +146,12 @@ class QuestionTabStrategy implements TabContentStrategy {
 interface SubmitTabStrategyConfig {
   theme: Theme;
   questions: readonly QuestionData[];
-  submitPicker: Component | undefined;
 }
 
 class SubmitTabStrategy implements TabContentStrategy {
-  readonly footerRowCount = 5;
-
   constructor(private readonly config: SubmitTabStrategyConfig) {}
 
-  headingRows(_state: DialogState): Component[] {
+  headingRows(_state: QuestionnaireState): Component[] {
     return [
       new Text(
         this.config.theme.bold(
@@ -232,75 +164,56 @@ class SubmitTabStrategy implements TabContentStrategy {
     ];
   }
 
-  bodyComponent(state: DialogState): Component {
+  bodyComponent(state: QuestionnaireState): Component {
+    const { theme, questions } = this.config;
     const c = new Container();
-    for (let i = 0; i < this.config.questions.length; i++) {
-      const a = state.answers.get(i);
-      if (!a) continue;
-      c.addChild(
-        new Text(
-          this.config.theme.fg(
-            "muted",
-            ` ● ${tabLabel(this.config.questions[i]!, i)}`,
-          ),
-          1,
-          0,
-        ),
-      );
-      c.addChild(
-        new Text(
-          `   ${this.config.theme.fg("muted", "→")} ${this.config.theme.fg("text", formatAnswerScalar(a))}`,
-          1,
-          0,
-        ),
-      );
-    }
-    return c;
-  }
-
-  bodyHeight(width: number, state: DialogState): number {
-    return this.bodyComponent(state).render(width).length;
-  }
-
-  footerRows(state: DialogState): Component[] {
     const missing: string[] = [];
-    for (let i = 0; i < this.config.questions.length; i++) {
-      if (!state.answers.has(i))
-        missing.push(tabLabel(this.config.questions[i]!, i));
+    for (let i = 0; i < questions.length; i++) {
+      const label = tabLabel(questions[i]!, i);
+      const a = state.answers.get(i);
+      if (!a) {
+        missing.push(label);
+        continue;
+      }
+      c.addChild(new Text(theme.fg("muted", ` ● ${label}`), 1, 0));
+      c.addChild(
+        new Text(
+          `   ${theme.fg("muted", "→")} ${theme.fg("text", formatAnswerScalar(a))}`,
+          1,
+          0,
+        ),
+      );
     }
-    const out: Component[] = [
-      new Spacer(1),
+    c.addChild(new Spacer(1));
+    c.addChild(
       new Text(
         missing.length === 0
-          ? this.config.theme.fg("muted", "Ready to submit your answers?")
-          : this.config.theme.fg(
+          ? theme.fg("accent", "→ Submit answers")
+          : theme.fg(
               "warning",
               `⚠ Answer remaining questions before submitting: ${missing.join(", ")}`,
             ),
         1,
         0,
       ),
-      new Spacer(1),
-    ];
-    if (this.config.submitPicker) {
-      out.push(this.config.submitPicker);
-    } else {
-      out.push(new Spacer(1));
-      out.push(new Spacer(1));
-    }
-    return out;
+    );
+    return c;
+  }
+
+  bodyHeight(width: number, state: QuestionnaireState): number {
+    return this.bodyComponent(state).render(width).length;
   }
 
   focusedItemRowRange(
     _width: number,
-    _state: DialogState,
+    _state: QuestionnaireState,
   ): [number, number] | undefined {
     return undefined;
   }
 }
 
 interface DialogProps {
-  state: DialogState;
+  state: QuestionnaireState;
   activeOptionList: OptionListView;
 }
 
@@ -310,7 +223,6 @@ interface DialogConfig {
   tabBar: TabBar | undefined;
   isMulti: boolean;
   tabsByIndex: ReadonlyArray<TabComponents>;
-  submitPicker?: Component;
   getBodyHeight: (width: number) => number;
   getCurrentBodyHeight: (width: number) => number;
   getTerminalRows: () => number;
@@ -321,7 +233,6 @@ class DialogView {
   private readonly config: DialogConfig;
   private readonly questionStrategy: QuestionTabStrategy;
   private readonly submitStrategy: SubmitTabStrategy | undefined;
-  private readonly maxFooterRowCount: number;
 
   constructor(config: DialogConfig, initialProps: DialogProps) {
     this.config = config;
@@ -338,13 +249,8 @@ class DialogView {
       ? new SubmitTabStrategy({
           theme: config.theme,
           questions: config.questions,
-          submitPicker: config.submitPicker,
         })
       : undefined;
-    this.maxFooterRowCount = Math.max(
-      this.questionStrategy.footerRowCount,
-      this.submitStrategy?.footerRowCount ?? 0,
-    );
   }
 
   setProps(props: DialogProps): void {
@@ -368,15 +274,12 @@ class DialogView {
 
     const topFixed =
       1 + (this.config.isMulti && this.config.tabBar ? 2 : 0) + 1;
-    const bottomFixed = 1 + strategy.footerRowCount;
+    const bottomFixed = 1;
     const middleRows = natural.length - topFixed - bottomFixed;
 
     const spacerRows = Math.max(
       0,
-      this.config.getBodyHeight(width) +
-        this.maxFooterRowCount -
-        strategy.bodyHeight(width, state) -
-        strategy.footerRowCount,
+      this.config.getBodyHeight(width) - strategy.bodyHeight(width, state),
     );
 
     const termRows = this.config.getTerminalRows();
@@ -462,7 +365,6 @@ class DialogView {
     container.addChild(new Spacer(1));
 
     container.addChild(border());
-    for (const c of strategy.footerRows(state)) container.addChild(c);
 
     return container;
   }
@@ -476,7 +378,6 @@ export class QuestionnairePropsAdapter {
     private readonly tabsByIndex: ReadonlyArray<TabComponents>,
     private readonly inlineInput: Input,
     private readonly dialog: DialogView,
-    private readonly submitPicker: SubmitPicker | undefined,
     private readonly tabBar: TabBar | undefined,
   ) {}
 
@@ -492,16 +393,6 @@ export class QuestionnairePropsAdapter {
         this.tabsByIndex[tabIndex]?.optionList ??
         this.tabsByIndex[0]!.optionList,
     });
-
-    if (this.submitPicker) {
-      const focused = activeView === "submit";
-      this.submitPicker.setProps({
-        rows: [
-          { active: focused && state.submitChoiceIndex === 0 },
-          { active: focused && state.submitChoiceIndex === 1 },
-        ],
-      } satisfies SubmitPickerProps);
-    }
 
     if (this.tabBar) {
       this.tabBar.setProps({
@@ -590,7 +481,6 @@ export class QuestionnairePropsAdapter {
 
   invalidate(): void {
     this.tabBar?.invalidate();
-    this.submitPicker?.invalidate();
     for (const tab of this.tabsByIndex) {
       tab.optionList.invalidate();
       tab.multiSelect?.invalidate();
@@ -649,7 +539,6 @@ export function buildQuestionnaire(
     };
   });
 
-  const submitPicker = isMulti ? new SubmitPicker(theme) : undefined;
   const tabBar = isMulti ? new TabBar(theme) : undefined;
   const dialog = new DialogView(
     {
@@ -658,7 +547,6 @@ export function buildQuestionnaire(
       tabBar,
       isMulti,
       tabsByIndex,
-      submitPicker,
       getBodyHeight: (width: number): number => {
         let max = 0;
         for (const tab of tabsByIndex) {
@@ -693,7 +581,6 @@ export function buildQuestionnaire(
     tabsByIndex,
     inlineInput,
     dialog,
-    submitPicker,
     tabBar,
   );
 

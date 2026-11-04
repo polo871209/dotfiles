@@ -12,6 +12,7 @@ import {
   getMarkdownTheme,
   parseFrontmatter,
   type ExtensionAPI,
+  type SessionEntry,
   type Theme,
 } from "@earendil-works/pi-coding-agent";
 import {
@@ -25,6 +26,8 @@ import {
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { JsonValue } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
+import { customEntries, isCustom } from "../shared/session";
+import { rexDoArgs } from "../shared/rex";
 
 interface AgentConfig {
   name: string;
@@ -232,18 +235,13 @@ function persist(sessionId: string, type: string, data: unknown): void {
 
 let persistResult: ((id: string, value: unknown) => void) | undefined;
 
-function hydrateResultStore(entries: readonly { type: string }[]): void {
+function hydrateResultStore(entries: readonly SessionEntry[]): void {
+  for (const entry of customEntries<ResultEntry>(entries, RESULT_ENTRY_TYPE)) {
+    if (entry.data?.id) resultStore.set(entry.data.id, entry.data.value);
+  }
   const lastRun = new Map<string, RunEntry>();
-  for (const entry of entries) {
-    if (entry.type !== "custom") continue;
-    const custom = entry as { customType?: string; data?: unknown };
-    if (custom.customType === RESULT_ENTRY_TYPE) {
-      const data = custom.data as ResultEntry | undefined;
-      if (data?.id) resultStore.set(data.id, data.value);
-    } else if (custom.customType === RUN_ENTRY_TYPE) {
-      const data = custom.data as RunEntry | undefined;
-      if (data?.id) lastRun.set(data.id, data);
-    }
+  for (const entry of customEntries<RunEntry>(entries, RUN_ENTRY_TYPE)) {
+    if (entry.data?.id) lastRun.set(entry.data.id, entry.data);
   }
   interruptedRuns.clear();
   for (const run of lastRun.values()) {
@@ -266,18 +264,17 @@ function interruptedValue(run: RunEntry): Static<typeof RunValueSchema> {
 }
 
 function capReturnedOutput(text: string, id: string): string {
-  const capBytes = 8 * 1024;
   const bytes = Buffer.byteLength(text, "utf-8");
-  if (bytes <= capBytes) return text;
+  if (bytes <= MAX_OUTPUT_BYTES) return text;
   const head = Buffer.from(text, "utf-8")
-    .subarray(0, capBytes)
+    .subarray(0, MAX_OUTPUT_BYTES)
     .toString("utf-8");
   const shown = head.slice(0, Math.max(head.lastIndexOf("\n"), 0)) || head;
   const file = path.join(os.tmpdir(), `pi-subagent-output-${id}.md`);
   try {
     fs.writeFileSync(file, text, { mode: 0o600 });
   } catch (err) {
-    return `${shown}\n\n[output cut at ${capBytes / 1024} KB of ${Math.ceil(bytes / 1024)} KB, and the full text could not be saved: ${String(err)}]`;
+    return `${shown}\n\n[output cut at ${MAX_OUTPUT_BYTES / 1024} KB of ${Math.ceil(bytes / 1024)} KB, and the full text could not be saved: ${String(err)}]`;
   }
   const shownLines = shown.split("\n").length;
   return `${shown}\n\n[output cut at line ${shownLines} of ${text.split("\n").length}. The full ${Math.ceil(bytes / 1024)} KB is at ${file}. Read it with offset ${shownLines + 1} for the rest.]`;
@@ -360,11 +357,10 @@ function rexScript<T>(
   options: { signal?: AbortSignal } = {},
 ): Promise<T> {
   return new Promise((resolve, reject) => {
-    const child = spawn(
-      "rex",
-      ["do", REX_SCRIPT, "--args", JSON.stringify(args)],
-      { signal: options.signal, stdio: ["ignore", "pipe", "pipe"] },
-    );
+    const child = spawn("rex", rexDoArgs(REX_SCRIPT, args), {
+      signal: options.signal,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     let result: unknown;
     let stderr = "";
     createInterface({ input: child.stdout }).on("line", (line) => {
@@ -458,30 +454,23 @@ const headTruncate = (s: string, maxBytes: number): string => {
 const fitLine = (text: string, maxWidth: number): string =>
   truncateToWidth(text.replace(/\r?\n/g, " "), maxWidth);
 
-const buildParams = () =>
-  Type.Object({
-    agent: Type.String({
+const SubagentParams = Type.Object({
+  agent: Type.String({
+    description:
+      "Agent route from the Routes list, or the exact agent name a skill or instruction gives.",
+  }),
+  task: Type.String({
+    description:
+      "Self-contained brief: scope, paths, constraints, completion criteria, and expected report. " +
+      "No session history carries over.",
+  }),
+  background: Type.Optional(
+    Type.Boolean({
       description:
-        "Agent route from the Routes list, or the exact agent name a skill or instruction gives.",
+        "Return a run id at once and deliver the result later as a message, for work that runs alongside yours.",
     }),
-    task: Type.String({
-      description:
-        "Self-contained brief: scope, paths, constraints, completion criteria, and expected report. " +
-        "No session history carries over.",
-    }),
-    background: Type.Optional(
-      Type.Boolean({
-        description:
-          "Return a run id at once and deliver the result later as a message, for work that runs alongside yours.",
-      }),
-    ),
-  });
-
-type SubagentArgs = {
-  agent: string;
-  task: string;
-  background?: boolean;
-};
+  ),
+});
 
 const statusIcon = (theme: Theme, p: Progress): string => {
   if (p.status === "running" && p.background) return theme.fg("muted", "•");
@@ -493,7 +482,7 @@ const statusIcon = (theme: Theme, p: Progress): string => {
   return theme.fg("success", "✓");
 };
 
-const pendingProgress = (args: Partial<SubagentArgs>): Progress => ({
+const pendingProgress = (args: Partial<Static<typeof SubagentParams>>): Progress => ({
   agent: args.agent ?? "",
   task: args.task ?? "",
   model: "",
@@ -600,51 +589,35 @@ const initialProgress = (
 // so a near-miss argument returns a per-branch error dump the model burns turns
 // retrying. Flat schema plus runtime field checks give one actionable error
 // line.
-const MANAGE_ACTIONS = [
-  "wait",
-  "result",
-  "steer",
-  "stop",
-] as const satisfies readonly ManageAction[];
+const MANAGE_ACTIONS = ["wait", "result", "steer", "stop"] as const;
 
-const manageParams = () =>
-  Type.Object({
-    action: Type.Enum(MANAGE_ACTIONS, {
+const ManageParams = Type.Object({
+  action: Type.Enum(MANAGE_ACTIONS, {
+    description:
+      "wait: block until the given runs (or all running ones) finish or one needs attention, then return each one's output. result: re-read a finished run's output later. steer: send follow-up text into the run. stop: abort the run.",
+  }),
+  id: Type.Optional(
+    Type.String({
       description:
-        "wait: block until the given runs (or all running ones) finish or one needs attention, then return each one's output. result: re-read a finished run's output later. steer: send follow-up text into the run. stop: abort the run.",
+        "Run id as printed by the subagent call. Required for result, steer, stop. wait and result take a comma-separated list. For wait, omit it to cover every running run.",
     }),
-    id: Type.Optional(
-      Type.String({
-        description:
-          "Run id as printed by the subagent call. Required for result, steer, stop. wait and result take a comma-separated list. For wait, omit it to cover every running run.",
-      }),
-    ),
-    timeoutSeconds: Type.Optional(
-      Type.Number({
-        description:
-          "wait only: give up after this many seconds and report what is still running. Default waits for the runs' own duration cap.",
-      }),
-    ),
-    path: Type.Optional(
-      Type.String({
-        description:
-          'result only: dot path into captured result-json, e.g. "findings.0.path". Omit it for the whole object.',
-      }),
-    ),
-    message: Type.Optional(
-      Type.String({ description: "steer only: follow-up text." }),
-    ),
-  });
-
-type ManageAction = "wait" | "result" | "steer" | "stop";
-
-type ManageArgs = {
-  action: ManageAction;
-  id?: string;
-  path?: string;
-  message?: string;
-  timeoutSeconds?: number;
-};
+  ),
+  timeoutSeconds: Type.Optional(
+    Type.Number({
+      description:
+        "wait only: give up after this many seconds and report what is still running. Default waits for the runs' own duration cap.",
+    }),
+  ),
+  path: Type.Optional(
+    Type.String({
+      description:
+        'result only: dot path into captured result-json, e.g. "findings.0.path". Omit it for the whole object.',
+    }),
+  ),
+  message: Type.Optional(
+    Type.String({ description: "steer only: follow-up text." }),
+  ),
+});
 
 const formatRunLine = (r: RunRecord): string => {
   const p = r.progress;
@@ -1007,10 +980,7 @@ export default function (pi: ExtensionAPI) {
     hydrateResultStore(branch);
     if (
       branch.some(
-        (e) =>
-          e.type === "custom" &&
-          (e.customType === RUN_ENTRY_TYPE ||
-            e.customType === RESULT_ENTRY_TYPE),
+        (e) => isCustom(e, RUN_ENTRY_TYPE) || isCustom(e, RESULT_ENTRY_TYPE),
       )
     )
       offerManage();
@@ -1026,20 +996,15 @@ export default function (pi: ExtensionAPI) {
     try {
       execFileSync(
         "rex",
-        [
-          "do",
-          REX_SCRIPT,
-          "--args",
-          JSON.stringify({
-            op: "close",
-            block_ids: blockIds,
-            files: running.flatMap((record) =>
-              record.resultFile
-                ? [record.resultFile, activityFileOf(record.resultFile)]
-                : [],
-            ),
-          }),
-        ],
+        rexDoArgs(REX_SCRIPT, {
+          op: "close",
+          block_ids: blockIds,
+          files: running.flatMap((record) =>
+            record.resultFile
+              ? [record.resultFile, activityFileOf(record.resultFile)]
+              : [],
+          ),
+        }),
         { timeout: 5_000 },
       );
     } catch {}
@@ -1048,9 +1013,7 @@ export default function (pi: ExtensionAPI) {
   const agents = loadAgents();
   if (agents.length === 0) return;
 
-  const params = buildParams();
-
-  pi.registerTool<typeof params, Progress | undefined>({
+  pi.registerTool<typeof SubagentParams, Progress | undefined>({
     name: "subagent",
     label: "Subagent",
     annotations: {
@@ -1070,14 +1033,14 @@ export default function (pi: ExtensionAPI) {
         .join("\n")}\n\n` +
       "A background run's result arrives as a message when it finishes, so end the turn when nothing else is left to do.\n\n" +
       "For a compact hand-back, tell the subagent to end with a fenced ```result-json ... ``` block: the result returns it, and subagent_manage (action: result, path) pulls one field.",
-    parameters: params,
+    parameters: SubagentParams,
     outputSchema: RunValueSchema,
     renderShell: "self",
 
     renderCall(args, theme, context) {
       if (context.executionStarted)
         return { render: () => [], invalidate() {} };
-      const p = pendingProgress(args as Partial<SubagentArgs>);
+      const p = pendingProgress(args);
       return padded(context.outputPad, (width) =>
         renderProgressComponent(p, theme, width, false, context.keyText),
       );
@@ -1091,7 +1054,7 @@ export default function (pi: ExtensionAPI) {
       const p = record?.progress.background
         ? record.progress
         : (result.details ??
-          pendingProgress(context.args as Partial<SubagentArgs>));
+          pendingProgress(context.args));
       return padded(context.outputPad, (width) =>
         renderProgressComponent(
           p,
@@ -1103,8 +1066,7 @@ export default function (pi: ExtensionAPI) {
       );
     },
 
-    async execute(_toolCallId, rawParams, signal, onUpdate, ctx) {
-      const args = rawParams as SubagentArgs;
+    async execute(_toolCallId, args, signal, onUpdate, ctx) {
       const agent = agents.find((a) => a.name === args.agent);
       if (!agent)
         throw new Error(
@@ -1231,7 +1193,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  pi.registerTool<ReturnType<typeof manageParams>, undefined>({
+  pi.registerTool<typeof ManageParams, undefined>({
     name: "subagent_manage",
     label: "Subagent Manage",
     exposure: "deferred",
@@ -1245,16 +1207,13 @@ export default function (pi: ExtensionAPI) {
       "Inspect or control background subagent runs started this session. A foreground run already returned its output, and a background run's output arrives as a message when it finishes, so neither needs a call here.\n\n" +
       "WRONG: sleep in a shell, or call wait or result for output a message already delivered. Each spends a turn on information you already have.\n" +
       "RIGHT: keep working or end the turn. Call wait only when your next step needs a background result before its message arrives.",
-    parameters: manageParams(),
+    parameters: ManageParams,
     outputSchema: ManageValueSchema,
-    async execute(_toolCallId, rawParams, signal) {
-      const {
-        action,
-        id,
-        path: fieldPath,
-        message,
-        timeoutSeconds,
-      } = rawParams as ManageArgs;
+    async execute(
+      _toolCallId,
+      { action, id, path: fieldPath, message, timeoutSeconds },
+      signal,
+    ) {
 
       const fail = (text: string) => ({
         content: [{ type: "text" as const, text }],
@@ -1263,10 +1222,7 @@ export default function (pi: ExtensionAPI) {
       });
 
       if (action === "wait") {
-        const wanted = (id ?? "")
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean);
+        const wanted = listField(id);
         const interrupted = wanted
           .filter((runId) => !runsStore.has(runId))
           .map((runId) => interruptedRuns.get(runId))
@@ -1406,10 +1362,7 @@ export default function (pi: ExtensionAPI) {
       if (action === "result") {
         const blocks: string[] = [];
         const values: Static<typeof RunValueSchema>[] = [];
-        for (const runId of id
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean)) {
+        for (const runId of listField(id)) {
           const run = runsStore.get(runId);
           if (!run) {
             if (resultStore.has(runId)) {

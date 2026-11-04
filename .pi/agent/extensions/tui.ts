@@ -4,8 +4,8 @@ import {
   type ExtensionContext,
   type KeybindingsManager,
   SettingsManager,
+  type Theme as PiTheme,
 } from "@earendil-works/pi-coding-agent";
-import type { Theme as PiTheme } from "@earendil-works/pi-coding-agent";
 import {
   Marked,
   type Component,
@@ -19,7 +19,7 @@ import {
   visibleWidth,
 } from "@earendil-works/pi-tui";
 import { diagramKind, type MermaidArt, render, type Span } from "grok-mermaid";
-import { LINK_OPEN, LINK_READY, PI_LINK_PREFIX } from "./shared/link";
+import { LINK_OPEN, LINK_READY } from "./shared/link";
 import { WORKING_FRAME_MS, workingFrames } from "./shared/working-indicator";
 
 const SGR_RESET = "\x1b[0m";
@@ -84,7 +84,9 @@ interface EditorWithOverlay {
   };
 }
 
-const isAutocompleteOpen = (editor: EditorWithOverlay): boolean =>
+const isAutocompleteOpen = (
+  editor: EditorWithOverlay,
+): editor is EditorWithOverlay & { autocompleteList: SelectListLike } =>
   Boolean(editor.autocompleteState && editor.autocompleteList);
 
 const normalizeToSingleLine = (text: string) =>
@@ -97,10 +99,7 @@ class DropdownOverlay implements Component {
 
   render(width: number): string[] {
     if (!isAutocompleteOpen(this.editor)) return [];
-    return this.renderList(
-      this.editor.autocompleteList as SelectListLike,
-      width,
-    ).map((line) =>
+    return this.renderList(this.editor.autocompleteList, width).map((line) =>
       wrapWithBg(
         line,
         width,
@@ -161,7 +160,7 @@ class DropdownOverlay implements Component {
 
   handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
     if (!isAutocompleteOpen(this.editor)) return undefined;
-    const list = this.editor.autocompleteList as SelectListLike;
+    const list = this.editor.autocompleteList;
     if (event.type === "wheel") return list.handleMouse?.(event);
     if (event.button !== "left") return undefined;
     if (event.type !== "press" && event.type !== "click") return undefined;
@@ -178,9 +177,6 @@ class DropdownOverlay implements Component {
 }
 
 const syncOverlay = (editor: EditorWithOverlay, editorHeight: number) => {
-  const tui = editor.tui;
-  if (!tui) return;
-
   let s = editor.__overlay;
   if (!s) {
     s = {
@@ -203,7 +199,7 @@ const syncOverlay = (editor: EditorWithOverlay, editorHeight: number) => {
   s.opts.maxHeight = (editor.autocompleteMaxVisible ?? 5) + 1;
 
   if (isAutocompleteOpen(editor)) {
-    if (!s.handle) s.handle = tui.showOverlay(s.comp, s.opts);
+    if (!s.handle) s.handle = editor.tui.showOverlay(s.comp, s.opts);
   } else if (s.handle) {
     s.handle.hide();
     s.handle = null;
@@ -291,24 +287,53 @@ const installLinkRouter = (tui: TUI, pi: ExtensionAPI) => {
     const created = { emit };
     host[LINK_ROUTER] = created;
     host.openUrl = (url) =>
-      url.startsWith(PI_LINK_PREFIX) ? created.emit(url) : openUrl(url);
+      url.startsWith("pi-") ? created.emit(url) : openUrl(url);
   }
   pi.events.emit(LINK_READY, undefined);
+};
+
+interface StackEntryLike {
+  component: Component & { children?: Component[]; entries?: StackEntryLike[] };
+  visible?: (viewport: { width: number }) => boolean;
+}
+
+const rendersNothing = (component: Component, width: number) =>
+  component.render(width).every((line) => visibleWidth(line) === 0);
+
+// Pi's fullscreen dock keeps 3 rows for the editor (`minSize: 3` in createChatViewport) and has no API to drop them.
+const collapseBlankDockRows = (tui: TUI, editor: Component) => {
+  const root = (tui as unknown as { layoutRoot?: StackEntryLike["component"] })
+    .layoutRoot;
+  const dock = root?.entries
+    ?.map((entry) => entry.component)
+    .find((stack) =>
+      stack.entries?.some((entry) =>
+        entry.component.children?.includes(editor),
+      ),
+    );
+  for (const entry of dock?.entries ?? [])
+    entry.visible = (viewport) =>
+      !rendersNothing(entry.component, viewport.width);
 };
 
 const installEditor = (pi: ExtensionAPI, statuses: StatusSource) => {
   pi.on("session_start", async (_event, ctx) => {
     if (ctx.mode !== "tui") return;
+    let mounted: { tui: TUI; editor: ThemedEditor } | undefined;
     ctx.ui.setEditorComponent((tui, editorTheme, keybindings) => {
       installLinkRouter(tui, pi);
-      return new ThemedEditor(
+      const editor = new ThemedEditor(
         tui,
         editorTheme,
         keybindings,
         () => ctx.ui.theme,
         () => editorTint(statuses.read()),
       );
+      mounted = { tui, editor };
+      return editor;
     });
+    if (mounted && process.env.PI_IS_SUBAGENT === "1")
+      collapseBlankDockRows(mounted.tui, mounted.editor);
   });
 };
 
@@ -349,7 +374,7 @@ const installWorking = (pi: ExtensionAPI) => {
     };
     tick();
     timer = setInterval(tick, 1000);
-    timer.unref?.();
+    timer.unref();
   });
 
   pi.on("agent_settled", async (_event, ctx) => {

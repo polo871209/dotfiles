@@ -10,11 +10,11 @@ import {
   type QuestionParams,
   QuestionParamsSchema,
   type QuestionnaireResult,
+  QuestionnaireResultSchema,
   validateQuestionnaire,
 } from "./schema";
 
 import { buildItemsForQuestion, QuestionnaireSession } from "./session";
-import type { WrappingSelectItem } from "./widgets";
 
 function capItems<T>(items: T[], max: number): T[] {
   return items.length > max ? items.slice(0, max) : items;
@@ -64,11 +64,11 @@ function registerAskUserQuestionTool(pi: ExtensionAPI): void {
       "Ask an interactive user to choose when a request needs a decision among multiple valid readings or directions. Call in the same turn ambiguity appears, not after prose; do not use when available tools can determine the facts.",
     parameters: QuestionParamsSchema,
     prepareArguments: clampArguments,
+    outputSchema: QuestionnaireResultSchema,
     exposure: "model-only",
     annotations: { readOnlyHint: true, openWorldHint: false },
 
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const typed = params as unknown as QuestionParams;
       // RPC reports hasUI but its ui.custom() returns undefined at once.
       if (ctx.mode !== "tui")
         return {
@@ -83,7 +83,7 @@ function registerAskUserQuestionTool(pi: ExtensionAPI): void {
           isError: true,
         };
 
-      const validation = validateQuestionnaire(typed);
+      const validation = validateQuestionnaire(params);
       if (!validation.ok) {
         return {
           ...buildToolResult(validation.message, {
@@ -106,16 +106,14 @@ function registerAskUserQuestionTool(pi: ExtensionAPI): void {
             return new QuestionnaireSession({
               tui,
               theme,
-              params: typed,
-              itemsByTab: typed.questions.map((q) =>
-                buildItemsForQuestion(q),
-              ) satisfies WrappingSelectItem[][],
+              params,
+              itemsByTab: params.questions.map(buildItemsForQuestion),
               done,
               keybindings,
             }).component;
           },
           {
-            blocked: { kind: "question", message: typed.questions[0].question },
+            blocked: { kind: "question", message: params.questions[0].question },
           },
         );
       } finally {
@@ -123,7 +121,7 @@ function registerAskUserQuestionTool(pi: ExtensionAPI): void {
       }
       if (signal?.aborted) throw new Error("Aborted before the user answered.");
 
-      return buildQuestionnaireResponse(result, typed);
+      return buildQuestionnaireResponse(result, params);
     },
   });
 }

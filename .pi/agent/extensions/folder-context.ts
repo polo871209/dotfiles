@@ -90,12 +90,12 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  pi.on("tool_result", async (event, ctx) => {
+  pi.on("tool_result", (event, ctx) => {
     if (
       !["read", "edit", "write", "grep", "find", "ls"].includes(event.toolName)
     )
       return;
-    const rawPath = (event.input as { path?: unknown }).path;
+    const { path: rawPath, offset, limit } = event.input;
     if (typeof rawPath !== "string" || rawPath === "") return;
 
     const absPath = resolve(
@@ -113,10 +113,6 @@ export default function (pi: ExtensionAPI) {
       startDir = dirname(absPath);
     }
 
-    const { offset, limit } = event.input as {
-      offset?: unknown;
-      limit?: unknown;
-    };
     const readInFull =
       event.toolName === "read" &&
       !event.isError &&

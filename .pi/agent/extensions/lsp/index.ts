@@ -2,13 +2,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { callDriver, daemonInfo, disconnectNvim, restartDaemons } from "./nvim";
 import { registerFeedback } from "./feedback";
 import { lspTool } from "./tool";
-import { displayPath } from "./utils";
-
-interface StatusResult {
-  ok: boolean;
-  files?: { file: string; bufnr: number; clients: string[] }[];
-  servers?: { name: string; id: number; root?: string; bufs: number }[];
-}
+import { displayPath, type StatusResult } from "./utils";
+import { errorMessage } from "../shared/error";
 
 export default function (pi: ExtensionAPI) {
   pi.registerTool(lspTool);
@@ -44,7 +39,7 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify(lines.join("\n") || "nvim running, nothing open", "info");
       } catch (e) {
         ctx.ui.notify(
-          `lsp-status failed: ${e instanceof Error ? e.message : String(e)}`,
+          `lsp-status failed: ${errorMessage(e)}`,
           "error",
         );
       }

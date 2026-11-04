@@ -1,11 +1,11 @@
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { AgentSession } from "@earendil-works/pi-coding-agent";
 import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { errorMessage } from "./shared/error";
 import { surviveReload } from "./shared/reload";
-
-type AgentMessage = AgentSession["agent"]["state"]["messages"][number];
 
 // Pi's ExtensionContext has no session handle, so this patches AgentSession once per process to map each sessionManager to its session.
 const sessions = surviveReload("dotfiles.pi.go.sessions", () => {
@@ -36,7 +36,7 @@ function omitAbandoned(session: AgentSession): void {
     if (messages.length === 0) continue;
     if (
       !messages.every(
-        (m: AgentMessage): boolean =>
+        (m) =>
           m.role === "assistant" &&
           (m.stopReason === "aborted" || m.stopReason === "error"),
       )
@@ -107,7 +107,7 @@ async function go(ctx: ExtensionContext): Promise<void> {
   try {
     await resume(session, start);
   } catch (e) {
-    ctx.ui.notify(`Retrigger failed: ${(e as Error).message}`, "error");
+    ctx.ui.notify(`Retrigger failed: ${errorMessage(e)}`, "error");
   }
 }
 
@@ -115,7 +115,7 @@ export default function goExtension(pi: ExtensionAPI): void {
   pi.registerCommand("go", {
     description:
       "Re-run the agent on the current transcript (no message appended)",
-    handler: async (_args, ctx) => go(ctx),
+    handler: (_args, ctx) => go(ctx),
   });
 
   pi.registerShortcut("ctrl+alt+g", {

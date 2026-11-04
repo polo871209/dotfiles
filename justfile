@@ -3,11 +3,22 @@ dotfiles := justfile_directory()
 default:
     @just --list
 
-# Stow + link global skills
+# Stow, link global skills, and link Hex settings.json
 link:
-    @stow .
-    @rm -rf ~/.pi
-    @ln -sfn {{dotfiles}}/.pi ~/.pi
+    #!/usr/bin/env bash
+    set -euo pipefail
+    stow .
+    rm -rf ~/.pi
+    ln -sfn {{dotfiles}}/.pi ~/.pi
+    hex_settings="$HOME/Library/Application Support/hex/settings.json"
+    hex_source="{{dotfiles}}/hex/settings.json"
+    # Hex skips onboarding (permissions, model download) when settings.json already exists.
+    if [[ ! -f "$HOME/Library/Application Support/hex/onboarding-complete" ]]; then
+        echo "Skipped Hex: open Hex, finish onboarding, then run just link again"
+    elif [[ "$(readlink "$hex_settings")" != "$hex_source" ]]; then
+        ln -sfn "$hex_source" "$hex_settings"
+        /Applications/Hex.app/Contents/MacOS/hex restart
+    fi
 
 # Update third-party skills in .agents/skills from skills-lock.json
 update-skill:

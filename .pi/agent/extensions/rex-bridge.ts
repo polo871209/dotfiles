@@ -8,6 +8,7 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
+import { errorMessage } from "./shared/error";
 
 // The temp directory keeps the path under the 104-byte macOS socket limit, and
 // macOS clears the sockets that a pi killed with its pane leaves behind.
@@ -231,7 +232,7 @@ export default function (pi: ExtensionAPI) {
             : "steering the running turn",
       };
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
+      const msg = errorMessage(e);
       currentCtx?.ui.notify(`rex-bridge: ${msg}`, "error");
       return { ok: false, error: msg };
     }
@@ -243,12 +244,12 @@ export default function (pi: ExtensionAPI) {
     currentCtx = ctx;
     if (server || !ctx.hasUI) return;
     fs.rmSync(sockPath, { force: true });
-    server = net.createServer((socket: net.Socket) => {
+    server = net.createServer((socket) => {
       sockets.add(socket);
       socket.on("close", () => sockets.delete(socket));
       let buf = "";
       socket.setEncoding("utf8");
-      socket.on("data", (chunk: string) => {
+      socket.on("data", (chunk) => {
         buf += chunk;
         if (buf.length > 2 * 1024 * 1024) {
           currentCtx?.ui.notify("rex-bridge: oversize line dropped", "warning");
@@ -267,10 +268,7 @@ export default function (pi: ExtensionAPI) {
           try {
             reply = handleLine(line);
           } catch (e) {
-            reply = {
-              ok: false,
-              error: e instanceof Error ? e.message : String(e),
-            };
+            reply = { ok: false, error: errorMessage(e) };
           }
           socket.write(`${JSON.stringify(reply)}\n`);
           idx = buf.indexOf("\n");
@@ -278,7 +276,7 @@ export default function (pi: ExtensionAPI) {
       });
       socket.on("error", () => {});
     });
-    server.on("error", (err: Error) => {
+    server.on("error", (err) => {
       currentCtx?.ui.notify(`rex-bridge: ${err.message}`, "error");
     });
     server.listen(sockPath, () => {
@@ -300,10 +298,6 @@ export default function (pi: ExtensionAPI) {
     } catch {}
   };
 
-  pi.on("session_start", async (_event: unknown, ctx: ExtensionContext) => {
-    start(ctx);
-  });
-  pi.on("session_shutdown", async () => {
-    stop();
-  });
+  pi.on("session_start", (_event, ctx) => start(ctx));
+  pi.on("session_shutdown", stop);
 }

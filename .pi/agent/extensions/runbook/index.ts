@@ -2,22 +2,27 @@ import {
   copyToClipboard,
   type ExtensionAPI,
   type ExtensionContext,
+  type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import {
   Container,
   matchesKey,
   Text,
   type TUI,
+  TuiAltScreen,
   truncateToWidth,
 } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
+import { errorMessage } from "../shared/error";
 import { LINK_OPEN, LINK_READY } from "../shared/link";
-import { lastAssistantText, textMessages } from "../shared/message";
+import { extractText } from "../shared/message";
+import { customEntries, isCustom } from "../shared/session";
 import {
   type Action,
   describeStatus,
   duration,
   failed,
+  INTERRUPTED,
   SELECTED_LINK,
   StepsCard,
 } from "./card";
@@ -25,8 +30,8 @@ import { type Exited, Pane, type SettledStatus } from "./pane";
 import {
   fenceSteps,
   type RunbookStep,
-  runbookSteps,
   parseFences,
+  runbookSteps,
   type Step,
   textSteps,
 } from "./steps";
@@ -46,9 +51,6 @@ const RunbookParams = Type.Object({
   ),
 });
 
-const errorText = (e: unknown): string =>
-  e instanceof Error ? e.message : String(e);
-
 const ANSI = /\x1b\[[0-9;]*m/g;
 
 const preview = (text: string, limit = 60): string => {
@@ -59,21 +61,6 @@ const preview = (text: string, limit = 60): string => {
   const compact = (line ?? "(empty)").replace(/\s+/g, " ");
   return compact.length <= limit ? compact : `${compact.slice(0, limit - 1)}…`;
 };
-
-type BranchEntry = {
-  type?: string;
-  id: string;
-  customType?: string;
-  data?: unknown;
-  details?: unknown;
-  message?: {
-    role?: string;
-    content?: unknown;
-  };
-};
-type ContentPart =
-  | { type: "text"; text: string }
-  | { type: "toolCall"; id: string; name: string; arguments: unknown };
 
 const FAILED_ENTRY = "runbook-failed";
 const RESULT_ENTRY = "runbook-result";
@@ -100,21 +87,20 @@ const pendingReport = (
   const attaches = new Map<string, { id: string; attach: boolean }>();
   const handedBack = new Set<string>();
   const reported = new Set<string>();
-  for (const entry of ctx.sessionManager.getBranch() as BranchEntry[]) {
+  for (const entry of ctx.sessionManager.getBranch()) {
     if (entry.type === "custom_message" && entry.customType === REPORT_MESSAGE)
       for (const id of (entry.details as ReportDetails).reported)
         reported.add(id);
-    if (entry.type !== "custom") continue;
-    if (entry.customType === RESULT_ENTRY) {
-      const { key, status } = entry.data as StepResult;
+    if (isCustom<StepResult>(entry, RESULT_ENTRY)) {
+      const { key, status } = entry.data!;
       results.set(key, { id: entry.id, status });
       attaches.delete(key);
       handedBack.delete(key);
-    } else if (entry.customType === ATTACH_ENTRY) {
-      const { key, attach } = entry.data as LogAttach;
+    } else if (isCustom<LogAttach>(entry, ATTACH_ENTRY)) {
+      const { key, attach } = entry.data!;
       attaches.set(key, { id: entry.id, attach });
-    } else if (entry.customType === FAILED_ENTRY)
-      handedBack.add((entry.data as { key: string }).key);
+    } else if (isCustom<{ key: string }>(entry, FAILED_ENTRY))
+      handedBack.add(entry.data!.key);
   }
   const items: ReportItem[] = [];
   const ids: string[] = [];
@@ -140,7 +126,7 @@ const outcome = (status: SettledStatus): string => {
   if (status.state === "finished")
     return `sent to a pane and finished after ${took}, exit code unknown`;
   if (status.code === undefined) return `ended after ${took} with no exit code`;
-  if (status.code === 130) return `stopped by the user after ${took}`;
+  if (status.code === INTERRUPTED) return `stopped by the user after ${took}`;
   return `exit ${status.code} in ${took}`;
 };
 
@@ -174,9 +160,9 @@ const history = (ctx: ExtensionContext): History => {
       for (const card of turns[t].cards)
         if (card.steps.some((step) => step.key === key)) return card.steps;
   };
-  for (const entry of ctx.sessionManager.getBranch() as BranchEntry[]) {
-    if (entry.type === "custom" && entry.customType === FAILED_ENTRY) {
-      const { key } = entry.data as { key: string };
+  for (const entry of ctx.sessionManager.getBranch()) {
+    if (isCustom<{ key: string }>(entry, FAILED_ENTRY)) {
+      const { key } = entry.data!;
       failure = { entryId: entry.id, key, prompts: 0, answered: false };
       continue;
     }
@@ -184,12 +170,12 @@ const history = (ctx: ExtensionContext): History => {
     if (!message) continue;
     if (message.role === "user" && failure && ++failure.prompts > 1)
       failure = undefined;
-    if (message.role !== "assistant" || !Array.isArray(message.content)) {
+    if (message.role !== "assistant") {
       turns.push({ role: message.role, cards: [] });
       continue;
     }
     if (failure) failure.answered = true;
-    const cards = (message.content as ContentPart[]).flatMap((part): Card[] => {
+    const cards = message.content.flatMap((part): Card[] => {
       if (part.type === "text") return [{ steps: textSteps(part.text) }];
       if (part.type !== "toolCall" || part.name !== TOOL) return [];
       const own = ownSteps(part.id, part.arguments);
@@ -221,6 +207,20 @@ const cardWithKey = (ctx: ExtensionContext, key: string): Card | undefined =>
     .turns.flatMap((turn) => turn.cards)
     .find((card) => card.steps.some((step) => step.key === key));
 
+type TextMessage = { role: "user" | "assistant"; text: string };
+
+const textMessages = (branch: readonly SessionEntry[]): TextMessage[] => {
+  const out: TextMessage[] = [];
+  for (const entry of branch) {
+    if (entry.type !== "message") continue;
+    const { role } = entry.message;
+    if (role !== "user" && role !== "assistant") continue;
+    const text = extractText(entry.message.content).trim();
+    if (text) out.push({ role, text });
+  }
+  return out;
+};
+
 const formatSession = (
   ctx: ExtensionContext,
 ): { text: string; turns: number } => {
@@ -241,7 +241,7 @@ const copyWithNotify = async (
     await copyToClipboard(value);
     ctx.ui.notify(`Copied ${label} to clipboard`, "info");
   } catch (e) {
-    ctx.ui.notify(errorText(e), "error");
+    ctx.ui.notify(errorMessage(e), "error");
   }
 };
 
@@ -274,11 +274,13 @@ export default function (pi: ExtensionAPI) {
     currentCtx = ctx;
     merged.clear();
     syncAttached(ctx);
-    for (const entry of ctx.sessionManager.getBranch())
-      if (entry.type === "custom" && entry.customType === RESULT_ENTRY) {
-        const { key, status } = entry.data as StepResult;
-        pane?.restore(key, status);
-      }
+    for (const entry of customEntries<StepResult>(
+      ctx.sessionManager.getBranch(),
+      RESULT_ENTRY,
+    )) {
+      const { key, status } = entry.data!;
+      pane?.restore(key, status);
+    }
     refresh();
   });
   pi.on("session_shutdown", async () => pane?.dispose());
@@ -400,7 +402,7 @@ export default function (pi: ExtensionAPI) {
         Math.max(40, (process.stdout.columns ?? 100) - 10),
       );
     } catch (e) {
-      ctx.ui.notify(errorText(e), "error");
+      ctx.ui.notify(errorMessage(e), "error");
     }
   };
 
@@ -462,7 +464,7 @@ export default function (pi: ExtensionAPI) {
       }
       return true;
     } catch (e) {
-      ctx.ui.notify(errorText(e), "error");
+      ctx.ui.notify(errorMessage(e), "error");
       return false;
     }
   };
@@ -535,27 +537,22 @@ export default function (pi: ExtensionAPI) {
   });
 
   const reveal = (tui: TUI, step: Step, direction: 1 | -1) => {
-    const screen = tui as unknown as {
-      getScreenLines?: () => string[];
-      scrollBy?: (lines: number) => void;
-    };
-    if (!screen.getScreenLines || !screen.scrollBy) return;
-    const scrollBy = (lines: number) => screen.scrollBy?.(lines);
+    if (!(tui instanceof TuiAltScreen)) return;
     const marker = `${SELECTED_LINK}${step.key}`;
     const editorAndFooterRows = 8;
     const height = step.code.split("\n").length + editorAndFooterRows;
     let tries = 0;
     const check = () => {
       if (selectedKey !== step.key) return;
-      const lines = screen.getScreenLines?.() ?? [];
+      const lines = tui.getScreenLines();
       const row = lines.findIndex((line) => line.includes(marker));
       if (row === -1) {
         if (++tries > 100) return;
-        scrollBy(direction * 4);
+        tui.scrollBy(direction * 4);
       } else {
         const overflow = row + height - lines.length;
-        if (row < 1) scrollBy(row - 1);
-        else if (overflow > 0) scrollBy(Math.min(overflow, row - 1));
+        if (row < 1) tui.scrollBy(row - 1);
+        else if (overflow > 0) tui.scrollBy(Math.min(overflow, row - 1));
         else return;
         tries = 100;
       }
@@ -572,7 +569,9 @@ export default function (pi: ExtensionAPI) {
   ): Promise<void> => {
     const { steps } = card;
     if (steps.length === 0) {
-      const text = lastAssistantText(ctx.sessionManager.getBranch());
+      const text = textMessages(ctx.sessionManager.getBranch())
+        .filter((m) => m.role === "assistant")
+        .at(-1)?.text;
       if (text) await copyWithNotify(ctx, text, "response");
       else ctx.ui.notify("No assistant messages yet", "warning");
       return;
@@ -826,7 +825,7 @@ export default function (pi: ExtensionAPI) {
       try {
         await pane.pick(ctx);
       } catch (e) {
-        ctx.ui.notify(errorText(e), "error");
+        ctx.ui.notify(errorMessage(e), "error");
       }
     },
   });

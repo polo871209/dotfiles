@@ -7,6 +7,7 @@ import {
   type Theme,
 } from "@earendil-works/pi-coding-agent";
 import { Box, Markdown, Spacer, Text } from "@earendil-works/pi-tui";
+import { errorMessage } from "./shared/error";
 
 type Btw = { question: string; answer: string };
 
@@ -111,10 +112,7 @@ export default function (pi: ExtensionAPI) {
       if (ctx.mode !== "tui") ctx.ui.notify(answer, "info");
     } catch (error) {
       if (!controller.signal.aborted) {
-        ctx.ui.notify(
-          `btw: ${error instanceof Error ? error.message : String(error)}`,
-          "error",
-        );
+        ctx.ui.notify(`btw: ${errorMessage(error)}`, "error");
       }
     } finally {
       if (running === controller) {

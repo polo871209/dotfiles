@@ -17,7 +17,7 @@ import type { Step } from "./steps";
 
 export type Action = "copy" | "send" | "run" | "stop" | "pop" | "debug" | "log";
 
-export type CardHost = {
+type CardHost = {
   status: (key: string) => StepStatus | undefined;
   canSend: boolean;
   selected: () => string | undefined;
@@ -33,7 +33,7 @@ const INDENT = "     ";
 
 export const SELECTED_LINK = "pi-block:sel/";
 
-const INTERRUPTED = 130;
+export const INTERRUPTED = 130;
 
 const KEYS: Record<Action, string> = {
   run: "i",

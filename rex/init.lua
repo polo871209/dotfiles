@@ -119,15 +119,23 @@ local function open_zoomed(ctx, command)
     must(rex.session.zoom_block { block_id = split.block_ids[1], zoom = true })
 end
 
-local function toggle_picker(label, command)
+local function view_blocks()
+    local found = {}
     for _, window in ipairs(must(rex.session.view {}).windows) do
         for _, layer in ipairs(window.layers) do
             for _, block in ipairs(layer.blocks) do
-                if layer.kind == 'floating' and block.label == label then
-                    must(rex.session.close_layer { layer_id = layer.layer_id })
-                    return
-                end
+                found[#found + 1] = { window_id = window.window_id, layer = layer, block = block }
             end
+        end
+    end
+    return found
+end
+
+local function toggle_picker(label, command)
+    for _, entry in ipairs(view_blocks()) do
+        if entry.layer.kind == 'floating' and entry.block.label == label then
+            must(rex.session.close_layer { layer_id = entry.layer.layer_id })
+            return
         end
     end
     must(rex.session.new_layer {
@@ -267,20 +275,17 @@ rex.action {
     title = 'Toggle Floating Shell',
     run = function(ctx)
         local label = 'Run'
-        for _, window in ipairs(must(rex.session.view {}).windows) do
-            for _, layer in ipairs(window.layers) do
-                for _, block in ipairs(layer.blocks) do
-                    if block.label == label then
-                        if block.block_id == ctx.block_id then
-                            must(rex.session.set_layer_state { layer_id = layer.layer_id, state = 'minimized' })
-                        elseif layer.kind == 'floating' then
-                            must(rex.session.set_layer_state { layer_id = layer.layer_id, state = 'normal', focus = true })
-                        else
-                            must(rex.session.focus_block { block_id = block.block_id })
-                        end
-                        return
-                    end
+        for _, entry in ipairs(view_blocks()) do
+            local block, layer = entry.block, entry.layer
+            if block.label == label then
+                if block.block_id == ctx.block_id then
+                    must(rex.session.set_layer_state { layer_id = layer.layer_id, state = 'minimized' })
+                elseif layer.kind == 'floating' then
+                    must(rex.session.set_layer_state { layer_id = layer.layer_id, state = 'normal', focus = true })
+                else
+                    must(rex.session.focus_block { block_id = block.block_id })
                 end
+                return
             end
         end
         must(rex.session.new_layer {
@@ -298,14 +303,10 @@ rex.action {
         local label = 'Sofka'
         local bounds = { 0.05, 0.05, 0.9, 0.9 }
         local here, sofka, sofka_layer, sofka_window
-        for _, window in ipairs(must(rex.session.view {}).windows) do
-            for _, layer in ipairs(window.layers) do
-                for _, block in ipairs(layer.blocks) do
-                    if block.block_id == ctx.block_id then here = window.window_id end
-                    if block.label == label then
-                        sofka, sofka_layer, sofka_window = block, layer, window.window_id
-                    end
-                end
+        for _, entry in ipairs(view_blocks()) do
+            if entry.block.block_id == ctx.block_id then here = entry.window_id end
+            if entry.block.label == label then
+                sofka, sofka_layer, sofka_window = entry.block, entry.layer, entry.window_id
             end
         end
         if not sofka then
@@ -338,6 +339,18 @@ rex.action {
     run = function(ctx)
         local remote = exec_stdout({ 'git', 'ls-remote', '--get-url' }, { cwd = foreground_cwd(ctx) })
         rex.exec { 'open', remote_web_url(remote) }
+    end,
+}
+
+rex.action {
+    name = 'pending_prs',
+    title = 'Show Pending PRs',
+    keywords = 'pull request github review merge stray branch',
+    run = function(ctx)
+        if not ctx.client_id then error('Show Pending PRs runs from the Rex app', 0) end
+        local request = rex.json.encode { path = shims .. ':/usr/bin:/bin' }
+        local sent = must(rex.exec({ 'nc', '-U', home .. '/Library/Caches/rex-pending.sock' }, { stdin = request .. '\n', timeout = 2 }))
+        if not sent.ok then error('Rex does not load the Pending PRs extension. Run `just rex`, then reopen Rex.', 0) end
     end,
 }
 
@@ -434,5 +447,6 @@ rex.bind('cmd+s', 'sofka')
 rex.bind('cmd+n', 'nvim')
 rex.bind('cmd+u', 'open_url')
 rex.bind('cmd+p', 'browse_pr')
+rex.bind('shift+cmd+p', 'pending_prs')
 rex.bind('cmd+y', 'copy_path')
 rex.bind('cmd+w', 'close_pane')

@@ -1,8 +1,9 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { callLua, type Lane, loadLuaOnce } from "../nvim";
+import { callLua, type Lane, loadLuaFile } from "../nvim";
 import type { Diag } from "../utils";
+import { errorMessage } from "../../shared/error";
 
 interface DriverResult {
   formatted: string[];
@@ -21,16 +22,10 @@ const logDriver = (msg: string) => {
   } catch {}
 };
 
-let feedbackSrc: { mtimeMs: number; src: string } | null = null;
-export const ensureFeedbackLoaded = async (
+export const ensureFeedbackLoaded = (
   cwd: string,
   lane: Lane = "main",
-): Promise<void> => {
-  const mtimeMs = fs.statSync(FEEDBACK_LUA).mtimeMs;
-  if (feedbackSrc?.mtimeMs !== mtimeMs)
-    feedbackSrc = { mtimeMs, src: fs.readFileSync(FEEDBACK_LUA, "utf8") };
-  await loadLuaOnce(cwd, "feedback", feedbackSrc.src, lane);
-};
+): Promise<void> => loadLuaFile(cwd, "feedback", FEEDBACK_LUA, lane);
 const nvimCallTimeoutMs = (fileCount: number): number =>
   Math.min(3_000 + Math.max(1, fileCount) * 5_500, 30_000);
 export const MAX_FILE_BYTES = 64 * 1024;
@@ -48,11 +43,9 @@ export const runDriver = async (
       "return PiFeedback.run(...)",
       [files],
       signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal,
-      undefined,
-      "main",
     );
   } catch (e) {
-    logDriver(`run failed: ${e instanceof Error ? e.message : String(e)}`);
+    logDriver(`run failed: ${errorMessage(e)}`);
     return null;
   }
 };
@@ -88,7 +81,7 @@ export const formatFile = async (
     );
     return !!res && res.formatted.length > 0;
   } catch (e) {
-    logDriver(`format failed: ${e instanceof Error ? e.message : String(e)}`);
+    logDriver(`format failed: ${errorMessage(e)}`);
     return false;
   }
 };

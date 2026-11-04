@@ -1,9 +1,9 @@
 import Foundation
 
-final class Listener: Sendable {
+public final class Listener: Sendable {
     private let source: DispatchSourceRead
 
-    init?(path: String, handle: @escaping @Sendable (Data) -> String) {
+    public init?(path: String, handle: @escaping @Sendable (Data) -> String) {
         let server = socket(AF_UNIX, SOCK_STREAM, 0)
         guard server >= 0 else { return nil }
         var address = sockaddr_un()
@@ -22,7 +22,7 @@ final class Listener: Sendable {
             return nil
         }
         source = DispatchSource.makeReadSource(
-            fileDescriptor: server, queue: DispatchQueue(label: "rex-session-picker.listener"))
+            fileDescriptor: server, queue: DispatchQueue(label: "rex-extensions.listener.\(path)"))
         source.setEventHandler {
             let connection = accept(server, nil, nil)
             guard connection >= 0 else { return }

@@ -8,10 +8,6 @@ local PROGRESS_TIMEOUT_MS = 8000
 local bufs = {}
 local mtimes = {}
 
-local function touch(bufnr)
-    if _G.PiDaemon and _G.PiDaemon.touch then _G.PiDaemon.touch(bufnr) end
-end
-
 local in_flight = 0
 local seen_tokens = {}
 vim.api.nvim_create_autocmd('LspProgress', {
@@ -45,14 +41,14 @@ local function open_buf_nowait(file)
     local existing = bufs[file]
     local current_mtime = file_mtime(file)
     if existing and vim.api.nvim_buf_is_valid(existing) and mtimes[file] == current_mtime then
-        touch(existing)
+        PiDaemon.touch(existing)
         return existing
     end
     vim.cmd('silent! edit ' .. vim.fn.fnameescape(file))
     local b = vim.api.nvim_get_current_buf()
     bufs[file] = b
     mtimes[file] = current_mtime
-    touch(b)
+    PiDaemon.touch(b)
     pcall(function() vim.cmd 'filetype detect' end)
     pcall(function() vim.cmd 'doautocmd BufRead' end)
     pcall(function() vim.cmd 'doautocmd FileType' end)
@@ -88,8 +84,6 @@ local function make_position_params(bufnr, line_1idx, symbol)
         position = { line = line_1idx - 1, character = vim.str_utfindex(line, clients[1].offset_encoding, byte_col, false) },
     }
 end
-
-local function uri_to_path(uri) return vim.uri_to_fname(uri) end
 
 local function range_start(range)
     local s = range.start
@@ -149,7 +143,7 @@ local function normalize_locations(res)
                 local uri = loc.uri or loc.targetUri
                 local range = loc.range or loc.targetSelectionRange or loc.targetRange
                 if uri and range then
-                    local file = uri_to_path(uri)
+                    local file = vim.uri_to_fname(uri)
                     local line, col = range_start(range)
                     table.insert(out, { file = file, line = line, col = col, context = read_line(file, line) })
                 end
@@ -266,7 +260,7 @@ function M.rename(file, line, symbol, new_name)
     local out_files = {}
     local total = 0
     for _, uri in ipairs(uris) do
-        local f = uri_to_path(uri)
+        local f = vim.uri_to_fname(uri)
         local n = edits_for_uri(edit, uri)
         total = total + n
         table.insert(out_files, { file = f, edits = n })
@@ -276,7 +270,7 @@ function M.rename(file, line, symbol, new_name)
             vim.api.nvim_buf_call(nbuf, function() vim.cmd 'silent! write' end)
             bufs[f] = nbuf
             mtimes[f] = file_mtime(f)
-            touch(nbuf)
+            PiDaemon.touch(nbuf)
         end
     end
     return { ok = true, files = out_files, edit_count = total }
@@ -352,17 +346,7 @@ local function run_fast_lint(bufnr)
     pcall(function() require('linting').run(bufnr, false) end)
 end
 
-local function pull_diagnostics(bufnr)
-    local method = vim.lsp.protocol.Methods.textDocument_diagnostic
-    local clients = vim.lsp.get_clients { bufnr = bufnr, method = method }
-    for _, client in ipairs(clients) do
-        local params = { textDocument = vim.lsp.util.make_text_document_params(bufnr) }
-        pcall(client.request, client, method, params, nil, bufnr)
-    end
-end
-
 function M.diagnostics(files)
-    local sev = { 'error', 'warn', 'info', 'hint' }
     local out = { ok = true, diagnostics = {} }
     local opened = {}
     local seen = {}
@@ -380,7 +364,7 @@ function M.diagnostics(files)
     end, 50)
     wait_progress_done(PROGRESS_TIMEOUT_MS)
     for _, b in ipairs(opened) do
-        pull_diagnostics(b)
+        PiDaemon.pull_diagnostics(b)
         run_fast_lint(b)
     end
     local function total_diags()
@@ -401,19 +385,7 @@ function M.diagnostics(files)
         return stable >= 2 and elapsed_ms >= 300
     end, 150)
     for _, bufnr in ipairs(opened) do
-        if vim.api.nvim_buf_is_valid(bufnr) then
-            for _, d in ipairs(vim.diagnostic.get(bufnr)) do
-                table.insert(out.diagnostics, {
-                    file = vim.api.nvim_buf_get_name(bufnr),
-                    line = (d.lnum or 0) + 1,
-                    col = (d.col or 0) + 1,
-                    severity = sev[d.severity] or 'info',
-                    source = d.source,
-                    code = d.code and tostring(d.code) or nil,
-                    message = (d.message or ''):gsub('\r?\n', ' '),
-                })
-            end
-        end
+        if vim.api.nvim_buf_is_valid(bufnr) then vim.list_extend(out.diagnostics, PiDaemon.diagnostics(bufnr)) end
     end
     return out
 end

@@ -5,6 +5,7 @@ import {
   SettingsManager,
   type ExtensionAPI,
   type ExtensionCommandContext,
+  type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import { execFile } from "node:child_process";
 import {
@@ -16,6 +17,8 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { errorMessage } from "./error";
+import { customEntries } from "./session";
 
 const git = (args: string[], cwd?: string): Promise<string> =>
   new Promise((resolve, reject) => {
@@ -46,7 +49,7 @@ interface SkillToggleConfig {
   sparsePaths?: string[];
 }
 
-export interface SkillToggle {
+interface SkillToggle {
   isEnabled: () => boolean;
   cloneDir: string;
 }
@@ -74,15 +77,11 @@ export function registerSkillToggle(
   };
 
   const sessionChoice = (
-    entries: readonly { type: string }[],
+    entries: readonly SessionEntry[],
   ): boolean | undefined => {
     let choice: boolean | undefined;
-    for (const entry of entries) {
-      if (entry.type !== "custom") continue;
-      const custom = entry as { customType?: string; data?: unknown };
-      if (custom.customType !== ENTRY_TYPE) continue;
-      const data = custom.data as ToggleEntry | undefined;
-      if (data?.name === name) choice = data.enabled === true;
+    for (const entry of customEntries<ToggleEntry>(entries, ENTRY_TYPE)) {
+      if (entry.data?.name === name) choice = entry.data.enabled === true;
     }
     return choice;
   };
@@ -124,7 +123,7 @@ export function registerSkillToggle(
     try {
       await git(["pull", "--ff-only"], cloneDir);
     } catch (err) {
-      return `pull failed, using cached copy: ${(err as Error).message.split("\n")[0]}`;
+      return `pull failed, using cached copy: ${errorMessage(err).split("\n")[0]}`;
     }
     return (await git(["rev-parse", "HEAD"], cloneDir)) === before
       ? "up to date"
@@ -175,10 +174,7 @@ export function registerSkillToggle(
         await ensureClone();
       } catch (e) {
         enabled = false;
-        ctx.ui.notify(
-          `${name} clone failed: ${e instanceof Error ? e.message : String(e)}`,
-          "error",
-        );
+        ctx.ui.notify(`${name} clone failed: ${errorMessage(e)}`, "error");
       }
     }
     ctx.ui.setStatus(name, isEnabled() ? `${name}:on` : undefined);
@@ -190,10 +186,7 @@ export function registerSkillToggle(
     try {
       outcome = await syncClone();
     } catch (e) {
-      ctx.ui.notify(
-        `${name} clone failed: ${e instanceof Error ? e.message : String(e)}`,
-        "error",
-      );
+      ctx.ui.notify(`${name} clone failed: ${errorMessage(e)}`, "error");
       return;
     }
     setEnabled(true);
@@ -228,10 +221,7 @@ export function registerSkillToggle(
         try {
           ctx.ui.notify(`${label}: ${await syncClone()}`, "info");
         } catch (e) {
-          ctx.ui.notify(
-            `${name} update failed: ${e instanceof Error ? e.message : String(e)}`,
-            "error",
-          );
+          ctx.ui.notify(`${name} update failed: ${errorMessage(e)}`, "error");
           return;
         }
         if (isEnabled()) await ctx.reload();

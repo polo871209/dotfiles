@@ -181,7 +181,7 @@ export function registerFeedback(pi: ExtensionAPI): void {
         entries: [
           ...event.entries,
           {
-            type: "custom_message" as const,
+            type: "custom_message",
             customType: "lsp-feedback-changed",
             content: changed,
             display: false,
@@ -194,7 +194,7 @@ export function registerFeedback(pi: ExtensionAPI): void {
       entries: [
         ...event.entries,
         {
-          type: "custom_message" as const,
+          type: "custom_message",
           customType: "lsp-feedback-diagnostics",
           content:
             "Deterministic LSP feedback still reports diagnostics across the files touched in this task. Fix them, then finish the task. Do not delegate this repair.\n" +

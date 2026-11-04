@@ -31,6 +31,7 @@ mkdir -p "$support/replaced"
 mv "$app" "$support/replaced/"
 mv "$stage/Rex Beta.app" "$app"
 echo "Patched $(defaults read "$app/Contents/Info.plist" CFBundleVersion). Quit Rex (⌘Q) and open it again."
-if pgrep -xq Rex; then
+# `just rex` runs in a terminal and reopens Rex itself, so only the launch agent notifies.
+if pgrep -xq Rex && [ ! -t 1 ]; then
     osascript -e 'display notification "Quit Rex (⌘Q) and open it again to load the extensions." with title "Rex was patched"'
 fi

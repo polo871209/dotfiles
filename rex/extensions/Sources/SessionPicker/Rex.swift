@@ -1,10 +1,11 @@
 import Foundation
+import RexKit
 
 struct RexError: LocalizedError {
     let errorDescription: String?
 }
 
-/// Runs the `rex` CLI with `path` as PATH, because Rex starts from launchd with a bare PATH.
+/// Runs the `rex` CLI with `path` as PATH.
 struct Rex: Sendable {
     let client: String
     let current: String
@@ -41,24 +42,12 @@ struct Rex: Sendable {
     }
 
     private func run(_ arguments: [String]) throws -> Data {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["rex"] + arguments
-        process.environment = ProcessInfo.processInfo.environment.merging(["PATH": path]) { $1 }
-        let output = Pipe()
-        let errors = Pipe()
-        process.standardOutput = output
-        process.standardError = errors
-        try process.run()
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        let message = errors.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            let text = (String(bytes: message, encoding: .utf8) ?? "").trimmingCharacters(
-                in: .whitespacesAndNewlines)
+        do {
+            return try RexKit.run(["rex"] + arguments, path: path)
+        } catch let failure as ProcessFailure {
+            let text = failure.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
             throw RexError(
                 errorDescription: text.isEmpty ? "rex \(arguments.first ?? "") failed" : text)
         }
-        return data
     }
 }

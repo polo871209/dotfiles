@@ -8,6 +8,7 @@ import type {
 import {
   formatSize,
   truncateHead,
+  type AgentToolResult,
   type ExtensionAPI,
   type ExtensionContext,
   type Theme,
@@ -181,17 +182,11 @@ function fmt(n: number): string {
   return n.toLocaleString("en-US");
 }
 
-type ToolResult = {
-  content: { type: "text"; text: string }[];
-  structuredContent?: JsonValue;
-  details: { summary: string };
-  usage?: Usage;
-  isError?: boolean;
-};
+type ToolResult = AgentToolResult<{ summary: string }>;
 
 function fail(msg: string): ToolResult {
   return {
-    content: [{ type: "text" as const, text: msg }],
+    content: [{ type: "text", text: msg }],
     details: { summary: msg },
     isError: true,
   };
@@ -454,7 +449,7 @@ async function resolveAndHide(
 
   const failures = resolved.failed.length + hidden.failed.length;
   return {
-    content: [{ type: "text" as const, text: out.join("\n") }],
+    content: [{ type: "text", text: out.join("\n") }],
     structuredContent: prValue({
       pr: num,
       resolved: resolved.ok.length,
@@ -618,12 +613,11 @@ export default function (pi: ExtensionAPI) {
       const select = a.select;
 
       const repoArgs = repo ? ["--repo", repo] : [];
-      const ownerRepo = repo ?? "";
 
       let glOwner = "";
       let glRepo = "";
-      if (ownerRepo.includes("/")) {
-        [glOwner, glRepo] = ownerRepo.split("/");
+      if (repo?.includes("/")) {
+        [glOwner, glRepo] = repo.split("/");
       } else {
         const r = await run(
           "gh",
@@ -681,7 +675,7 @@ export default function (pi: ExtensionAPI) {
       if (select === "comments" && gql?.code !== 0)
         return fail(
           gql
-            ? `github_pr: comments query failed: ${gql.stderr.trim().split("\n")[0]}`
+            ? `github_pr: comments query failed: ${firstLine(gql.stderr)}`
             : "github_pr: comments need owner/repo — pass `repo`.",
         );
 
@@ -722,7 +716,7 @@ export default function (pi: ExtensionAPI) {
 
       if (!select) {
         out.push(`# PR #${m.number}: ${m.title}`);
-        out.push(`${m.url}`);
+        out.push(m.url);
         out.push(
           `**${m.state}${m.isDraft ? " (draft)" : ""}** · \`${m.baseRefName}\` ← \`${m.headRefName}\` · @${m.author?.login ?? "?"} · ${m.mergeable}${m.reviewDecision ? `, ${m.reviewDecision}` : ""}`,
         );
@@ -891,7 +885,7 @@ export default function (pi: ExtensionAPI) {
         }
       } else if (gql) {
         out.push(
-          `\n_(comments unavailable: ${gql.stderr.trim().split("\n")[0]})_`,
+          `\n_(comments unavailable: ${firstLine(gql.stderr)})_`,
         );
       } else if (wantComments) {
         out.push(`\n_(comments unavailable: pass \`repo\` as owner/repo)_`);
@@ -899,7 +893,7 @@ export default function (pi: ExtensionAPI) {
 
       if (!select && wantDiff && diff.code !== 0) {
         out.push(
-          `\n_(diff unavailable: ${diff.stderr.trim().split("\n")[0]})_`,
+          `\n_(diff unavailable: ${firstLine(diff.stderr)})_`,
         );
       } else if ((!select || select === "diff") && wantDiff && diff.stdout) {
         const cut = truncateHead(diff.stdout, {
@@ -923,7 +917,7 @@ export default function (pi: ExtensionAPI) {
       return {
         content: [
           {
-            type: "text" as const,
+            type: "text",
             text: report.truncated
               ? `${report.content}\n…[report truncated at ${formatSize(MAX_REPORT_BYTES)}, pass select to fetch one section]`
               : report.content,

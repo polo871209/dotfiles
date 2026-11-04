@@ -15,6 +15,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { run } from "./shared/exec";
+import { errorMessage } from "./shared/error";
 
 const WORKTREE_DIR = ".worktree";
 const TOOL_NAME = "worktree";
@@ -25,11 +26,8 @@ interface Worktree {
   branch?: string;
 }
 
-interface Target extends Worktree {
+interface CreatedWorktree extends Worktree {
   root: string;
-}
-
-interface CreatedWorktree extends Target {
   branch: string;
   created: boolean;
   copied: string[];
@@ -74,9 +72,6 @@ interface Tab {
   window_id: string;
   block_id: string;
 }
-
-const errorMessage = (e: unknown) =>
-  e instanceof Error ? e.message : String(e);
 
 async function git(
   cwd: string,
@@ -332,7 +327,7 @@ async function describeWorktrees(
             : null,
         ahead: ahead ?? null,
         behind: behind ?? null,
-        tab: tab ? tab.window_id : null,
+        tab: tab?.window_id ?? null,
       };
     }),
   );
@@ -375,16 +370,6 @@ function forkSession(ctx: ExtensionCommandContext, target: string): string {
     : writeEmptySession(target);
   if (!sessionFile) throw new Error("pi created no session file");
   return sessionFile;
-}
-
-async function moveSessionInPlace(
-  ctx: ExtensionCommandContext,
-  target: string,
-  notice: string,
-  continuation?: string,
-): Promise<void> {
-  await ctx.waitForIdle();
-  await switchToSession(ctx, forkSession(ctx, target), notice, continuation);
 }
 
 async function switchToSession(
@@ -557,9 +542,10 @@ export default function (pi: ExtensionAPI) {
           ctx.ui.notify(`Session is already in ${target.path}`, "info");
           return;
         }
-        await moveSessionInPlace(
+        await ctx.waitForIdle();
+        await switchToSession(
           ctx,
-          target.path,
+          forkSession(ctx, target.path),
           `Session moved to ${target.path}`,
           continuation,
         );

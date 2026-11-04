@@ -74,6 +74,32 @@ local last_used = {}
 
 function D.touch(bufnr) last_used[bufnr] = vim.uv.now() end
 
+function D.pull_diagnostics(bufnr)
+    local method = vim.lsp.protocol.Methods.textDocument_diagnostic
+    for _, client in ipairs(vim.lsp.get_clients { bufnr = bufnr, method = method }) do
+        local params = { textDocument = vim.lsp.util.make_text_document_params(bufnr) }
+        pcall(client.request, client, method, params, nil, bufnr)
+    end
+end
+
+local SEVERITIES = { 'error', 'warn', 'info', 'hint' }
+
+function D.diagnostics(bufnr)
+    local out = {}
+    for _, d in ipairs(vim.diagnostic.get(bufnr)) do
+        table.insert(out, {
+            file = vim.api.nvim_buf_get_name(bufnr),
+            line = (d.lnum or 0) + 1,
+            col = (d.col or 0) + 1,
+            severity = SEVERITIES[d.severity] or 'info',
+            source = d.source,
+            code = d.code and tostring(d.code) or nil,
+            message = (d.message or ''):gsub('\r?\n', ' '),
+        })
+    end
+    return out
+end
+
 local function live_buf_count(client)
     local n = 0
     for bufnr in pairs(client.attached_buffers or {}) do

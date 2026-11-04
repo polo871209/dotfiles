@@ -8,6 +8,7 @@ import {
   type ExtensionAPI,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { errorMessage } from "./shared/error";
 
 interface CapturedEvent {
   event: string;
@@ -77,7 +78,7 @@ export default function (pi: ExtensionAPI) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ api_key: token, batch }),
       signal: AbortSignal.timeout(3000),
-    }).catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))));
+    }).catch((e: unknown) => new Error(errorMessage(e)));
     if (!(res instanceof Error) && res.ok) return;
     if (res instanceof Error || res.status === 429 || res.status >= 500)
       requeue();
@@ -183,12 +184,10 @@ export default function (pi: ExtensionAPI) {
     captureSummary(ctx, "branch_summary", event.summaryEntry?.usage),
   );
 
-  pi.on("agent_settled", async (_event, ctx) => {
+  pi.on("agent_settled", (_event, ctx) => {
     traceId = undefined;
-    await flush(ctx);
+    return flush(ctx);
   });
 
-  pi.on("session_shutdown", async (_event, ctx) => {
-    await flush(ctx);
-  });
+  pi.on("session_shutdown", (_event, ctx) => flush(ctx));
 }

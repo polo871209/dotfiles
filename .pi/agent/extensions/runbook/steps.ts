@@ -8,7 +8,7 @@ export type Step = {
   shell: boolean;
 };
 
-export type Fence = {
+type Fence = {
   indent: string;
   marker: string;
   lang?: string;

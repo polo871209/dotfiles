@@ -3,7 +3,7 @@ support := env("HOME") / "Library/Application Support/rex-extensions"
 label := "local.rex-extensions"
 agent := env("HOME") / "Library/LaunchAgents" / label + ".plist"
 
-# Build and install the extensions, patch Rex, and start a launch agent that patches Rex again after each Rex update
+# Build and install the extensions, patch Rex, start a launch agent that patches Rex again after each Rex update, reload init.lua, and reopen Rex
 patch:
     #!/bin/sh
     set -eu
@@ -31,6 +31,13 @@ patch:
     EOF
     plutil -lint -s "{{ agent }}"
     launchctl bootstrap "gui/$(id -u)" "{{ agent }}"
+    "$HOME/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex" config reload
+    # Panes belong to the Rex server, so quitting the app keeps them and this shell.
+    pgrep -xq Rex || exit 0
+    osascript -e 'tell application id "com.superlogical.rex" to quit'
+    for _ in $(seq 50); do pgrep -xq Rex || break; sleep 0.2; done
+    pgrep -xq Rex && { echo "Rex did not quit. Quit it (⌘Q) and open it again." >&2; exit 1; }
+    open "{{ app }}"
 
 # Stop the launch agent and put the official Rex back
 unpatch:

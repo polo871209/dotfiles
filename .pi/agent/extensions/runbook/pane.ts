@@ -6,6 +6,7 @@ import * as path from "node:path";
 import { createInterface } from "node:readline";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { run } from "../shared/exec";
+import { rexDoArgs } from "../shared/rex";
 
 const SCRIPT = path.join(import.meta.dirname, "rex.lua");
 const SHELLS = new Set(["zsh", "bash", "fish", "sh", "dash", "ksh", "nu"]);
@@ -95,15 +96,11 @@ export class Pane {
   private async lua<T>(args: Record<string, unknown>): Promise<T> {
     const r = await run(
       "rex",
-      [
-        "do",
-        "-s",
-        this.session,
+      rexDoArgs(
         SCRIPT,
-        "--json",
-        "--args",
-        JSON.stringify({ self: this.self, ...args }),
-      ],
+        { self: this.self, ...args },
+        { session: this.session, json: true },
+      ),
       undefined,
       undefined,
       15_000,
@@ -179,13 +176,9 @@ export class Pane {
     const exitFile = path.join(os.tmpdir(), `pi-runbook-${randomUUID()}`);
     const child = spawn(
       "rex",
-      [
-        "do",
-        "-s",
-        this.session,
+      rexDoArgs(
         SCRIPT,
-        "--args",
-        JSON.stringify({
+        {
           op: "run",
           label: "runbook",
           cwd,
@@ -201,8 +194,9 @@ export class Pane {
             code,
             exitFile,
           ],
-        }),
-      ],
+        },
+        { session: this.session },
+      ),
       { stdio: ["ignore", "pipe", "pipe"] },
     );
     const since = Date.now();
@@ -287,14 +281,7 @@ export class Pane {
     if (this.watcher) return;
     const child = spawn(
       "rex",
-      [
-        "do",
-        "-s",
-        this.session,
-        SCRIPT,
-        "--args",
-        JSON.stringify({ op: "watch" }),
-      ],
+      rexDoArgs(SCRIPT, { op: "watch" }, { session: this.session }),
       { stdio: ["ignore", "pipe", "ignore"] },
     );
     this.watcher = child;

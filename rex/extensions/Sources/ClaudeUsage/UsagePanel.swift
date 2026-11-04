@@ -20,8 +20,9 @@ public final class UsagePanels {
         ) { _ in MainActor.assumeIsolated { UsagePanels.shared.attach() } }
     }
 
-    private func attach() {
-        panels = panels.filter { $0.value.isAttached }
+    /// Rex makes its window key before it builds the sidebar, so retry until the key window has a panel.
+    private func attach(retries: Int = 50) {
+        panels = panels.filter { $0.value.window != nil }
         for window in NSApp.windows {
             guard let root = window.contentView?.superview ?? window.contentView else { continue }
             for footer in Self.views(in: root, classSuffix: "SidebarFooterView")
@@ -30,6 +31,12 @@ public final class UsagePanels {
                     panels[ObjectIdentifier(footer)] = panel
                 }
             }
+        }
+        let keyWindow = NSApp.keyWindow
+        guard retries > 0, !panels.values.contains(where: { $0.window === keyWindow }) else { return }
+        Task {
+            try? await Task.sleep(for: .milliseconds(100))
+            attach(retries: retries - 1)
         }
     }
 
@@ -68,7 +75,7 @@ private final class UsagePanel {
         hosting.removeFromSuperview()
     }
 
-    var isAttached: Bool { footer?.window != nil }
+    var window: NSWindow? { footer?.window }
 
     private func layout() {
         guard let footer, footer.superview === hosting.superview, let container = footer.superview

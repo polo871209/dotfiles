@@ -39,6 +39,8 @@ import {
   resolve as resolvePath,
   sep as pathSep,
 } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
+import { errorMessage } from "./shared/error";
 
 const EXA_MCP_URL = "https://mcp.exa.ai/mcp";
 const EXA_TEXT_CHARS = 1_500;
@@ -64,10 +66,6 @@ const turndown = new TurndownService({
   codeBlockStyle: "fenced",
 });
 turndown.escape = (text: string) => text;
-
-function errMsg(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 async function mapLimit<T, R>(
   items: T[],
@@ -271,9 +269,7 @@ function isoDate(raw: string | undefined): string | undefined {
 
 class RetryableSearchError extends Error {}
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+type FetchMode = "readable" | "raw";
 
 async function callMcpTool(
   endpoint: string,
@@ -344,6 +340,15 @@ async function callMcpTool(
   return text;
 }
 
+function requireResults(
+  results: SearchResult[],
+  label: string,
+): SearchResult[] {
+  if (results.length === 0)
+    throw new Error(`${label} returned no parseable results`);
+  return results;
+}
+
 // Exa's public MCP endpoint exposes the advanced tool only when the query string asks for it.
 async function exaAdvancedSearch(
   query: string,
@@ -386,8 +391,8 @@ async function exaAdvancedSearch(
       }
     ).results ?? []
   )
-    .map((r): SearchResult => {
-      return {
+    .map(
+      (r): SearchResult => ({
         title: r.title?.trim() ?? "",
         url: r.url?.trim() ?? "",
         published: isoDate(r.publishedDate),
@@ -397,12 +402,10 @@ async function exaAdvancedSearch(
         )
           .trim()
           .slice(0, EXA_TEXT_CHARS),
-      };
-    })
+      }),
+    )
     .filter((r) => r.url);
-  if (results.length === 0)
-    throw new Error("Exa search returned no parseable results");
-  return results;
+  return requireResults(results, "Exa search");
 }
 
 async function exaBasicSearch(
@@ -444,9 +447,7 @@ async function exaBasicSearch(
       };
     })
     .filter((r) => r.url);
-  if (results.length === 0)
-    throw new Error("Exa search returned no parseable results");
-  return results;
+  return requireResults(results, "Exa search");
 }
 
 async function parallelSearch(
@@ -478,8 +479,8 @@ async function parallelSearch(
       }
     ).results ?? []
   )
-    .map((r): SearchResult => {
-      return {
+    .map(
+      (r): SearchResult => ({
         title: r.title?.trim() ?? "",
         url: r.url?.trim() ?? "",
         published: isoDate(r.publish_date),
@@ -487,13 +488,11 @@ async function parallelSearch(
           .join("\n")
           .trim()
           .slice(0, EXA_TEXT_CHARS),
-      };
-    })
+      }),
+    )
     .filter((r) => r.url)
     .slice(0, numResults);
-  if (results.length === 0)
-    throw new Error("Parallel search returned no parseable results");
-  return results;
+  return requireResults(results, "Parallel search");
 }
 
 let duckDuckGoQueue: Promise<unknown> = Promise.resolve();
@@ -609,7 +608,7 @@ function dedupResults(results: SearchResult[]): SearchResult[] {
 
 function isTransient(err: unknown): boolean {
   if (err instanceof RetryableSearchError) return true;
-  const message = errMsg(err).toLowerCase();
+  const message = errorMessage(err).toLowerCase();
   return (
     message.includes("fetch failed") ||
     message.includes("terminated") ||
@@ -645,7 +644,7 @@ async function runSearch(
           await sleep(500 + Math.floor(Math.random() * 250));
           continue;
         }
-        failures.push(`${provider.name}: ${errMsg(err)}`);
+        failures.push(`${provider.name}: ${errorMessage(err)}`);
         break;
       }
     }
@@ -969,7 +968,7 @@ function extractFallbackContent(document: Document): string {
 async function fetchReadable(
   url: string,
   signal?: AbortSignal,
-  mode: "readable" | "raw" = "readable",
+  mode: FetchMode = "readable",
 ): Promise<{ title: string; content: string }> {
   const { res, finalUrl } = await fetchSafely(
     url,
@@ -1403,7 +1402,7 @@ async function cloneGitHubRepo(
     } catch (err) {
       rmSync(localPath, { recursive: true, force: true });
       cloneCache.delete(key);
-      throw new Error(`git clone failed: ${errMsg(err)}`);
+      throw new Error(`git clone failed: ${errorMessage(err)}`);
     }
     return localPath;
   })();
@@ -1693,7 +1692,7 @@ async function fetchGitHubIssue(
 async function fetchOne(
   url: string,
   signal?: AbortSignal,
-  mode: "readable" | "raw" = "readable",
+  mode: FetchMode = "readable",
 ): Promise<{ title: string; content: string }> {
   const videoId = parseYouTubeVideoId(url);
   if (videoId) {
@@ -1701,7 +1700,7 @@ async function fetchOne(
       return await fetchYouTubeTranscript(videoId, signal);
     } catch (err) {
       if ((err as NodeJS.ErrnoException)?.code !== "ENOENT")
-        throw new Error(`YouTube transcript failed: ${errMsg(err)}`);
+        throw new Error(`YouTube transcript failed: ${errorMessage(err)}`);
     }
   }
 
@@ -1740,7 +1739,7 @@ const extractCache = new Map<string, CachedExtraction>();
 async function fetchOneCached(
   url: string,
   signal?: AbortSignal,
-  mode: "readable" | "raw" = "readable",
+  mode: FetchMode = "readable",
 ): Promise<{ title: string; content: string }> {
   const key = `${mode}:${url}`;
   const hit = extractCache.get(key);
@@ -1765,6 +1764,23 @@ async function fetchOneCached(
 
 const nonEmptyText = Type.String({ minLength: 1 });
 
+function nonBlank(many: string[] | undefined, one: string | undefined) {
+  return (many ?? (one ? [one] : [])).filter((s) => s.trim().length > 0);
+}
+
+function missingInput(one: string, many: string) {
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: `Error: no ${one} provided. Use '${one}' or '${many}'.`,
+      },
+    ],
+    details: {},
+    isError: true,
+  };
+}
+
 function resultText(result: {
   content: Array<{ type: string; text?: string }>;
 }): string {
@@ -1787,6 +1803,77 @@ function errorLine(
   );
 }
 
+// Root must be a plain Type.Object: pi-ai sends Anthropic only the root
+// `properties`, so an Intersect or Union root reaches the model as `{}`.
+const searchParams = Type.Object({
+  query: Type.Optional(
+    Type.String({
+      minLength: 1,
+      description: "One query. Use queries for several.",
+    }),
+  ),
+  queries: Type.Optional(
+    Type.Array(nonEmptyText, {
+      minItems: 1,
+      description: "Varied queries for broad research.",
+    }),
+  ),
+  numResults: Type.Optional(
+    Type.Number({
+      minimum: 1,
+      maximum: 10,
+      default: 5,
+      description: "Results per query. Raise it only when the task needs breadth.",
+    }),
+  ),
+  domains: Type.Optional(
+    Type.Array(nonEmptyText, {
+      description:
+        'Only these domains, or "-domain" to exclude one. Applies to every query.',
+    }),
+  ),
+  recency: Type.Optional(
+    Type.Enum(["day", "week", "month", "year"],
+      { description: "Only pages published in this period." },
+    ),
+  ),
+});
+
+const fetchParams = Type.Object({
+  url: Type.Optional(
+    Type.String({
+      minLength: 1,
+      description: "One URL. Use urls for several.",
+    }),
+  ),
+  urls: Type.Optional(
+    Type.Array(nonEmptyText, {
+      minItems: 1,
+      description: "URLs to fetch in one call.",
+    }),
+  ),
+  mode: Type.Optional(
+    Type.Enum(["readable", "raw"], {
+      description:
+        'Use "raw" for the unprocessed body when the target is JSON or the extraction looks wrong.',
+    }),
+  ),
+  offset: Type.Optional(
+    Type.Number({
+      minimum: 0,
+      description:
+        "Character position to continue from. Ignored when find is set.",
+    }),
+  ),
+  find: Type.Optional(
+    Type.Array(nonEmptyText, {
+      minItems: 1,
+      description:
+        "Return only passages around these strings, ignoring case, instead of the whole page.",
+    }),
+  ),
+});
+
 export default function (pi: ExtensionAPI) {
   pi.on("session_start", (event) => {
     if (event.reason === "startup") sweepDeadClones();
@@ -1797,7 +1884,10 @@ export default function (pi: ExtensionAPI) {
     rmSync(GITHUB_CLONE_DIR, { recursive: true, force: true });
   });
 
-  pi.registerTool({
+  pi.registerTool<
+    typeof searchParams,
+    { queries?: string[]; totalResults?: number; providers?: string[] }
+  >({
     name: "web_search",
     label: "Web Search",
     description: `Search the web. Each result is a title, a URL, a publish date when known, and a snippet, so fetch a result when the snippet does not settle the question. The current year is ${new Date().getFullYear()}; put it in the query when recency matters.`,
@@ -1805,53 +1895,17 @@ export default function (pi: ExtensionAPI) {
     renderResult(result, options, theme: Theme, context) {
       if (context.isError) return errorLine("web_search", result, theme);
       if (options.expanded) return new Text(resultText(result), 0, 0);
-      const d = result.details as
-        | { queries?: string[]; totalResults?: number }
-        | undefined;
+      const d = result.details;
       return new Text(
         theme.fg(
           "dim",
-          `  web_search "${d?.queries?.join(", ") ?? ""}" — ${d?.totalResults ?? 0} results`,
+          `  web_search "${d.queries?.join(", ") ?? ""}" — ${d.totalResults ?? 0} results`,
         ),
         0,
         0,
       );
     },
-    // Root must be a plain Type.Object: pi-ai sends Anthropic only the root
-    // `properties`, so an Intersect or Union root reaches the model as `{}`.
-    parameters: Type.Object({
-      query: Type.Optional(
-        Type.String({
-          minLength: 1,
-          description: "One query. Use queries for several.",
-        }),
-      ),
-      queries: Type.Optional(
-        Type.Array(nonEmptyText, {
-          minItems: 1,
-          description: "Varied queries for broad research.",
-        }),
-      ),
-      numResults: Type.Optional(
-        Type.Number({
-          minimum: 1,
-          maximum: 10,
-          default: 5,
-          description: "Results per query. Raise it only when the task needs breadth.",
-        }),
-      ),
-      domains: Type.Optional(
-        Type.Array(nonEmptyText, {
-          description:
-            'Only these domains, or "-domain" to exclude one. Applies to every query.',
-        }),
-      ),
-      recency: Type.Optional(
-        Type.Enum(["day", "week", "month", "year"],
-          { description: "Only pages published in this period." },
-        ),
-      ),
-    }),
+    parameters: searchParams,
     outputSchema: Type.Object({
       queries: Type.Array(
         Type.Object({
@@ -1871,27 +1925,9 @@ export default function (pi: ExtensionAPI) {
       ),
     }),
     async execute(_callId, params, signal, _onUpdate, ctx) {
-      const queryList = (
-        Array.isArray(params.queries)
-          ? params.queries
-          : params.query
-            ? [params.query]
-            : []
-      ).filter(
-        (q): q is string => typeof q === "string" && q.trim().length > 0,
-      );
-      if (queryList.length === 0) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "Error: no query provided. Use 'query' or 'queries'.",
-            },
-          ],
-          details: {},
-          isError: true,
-        };
-      }
+      const queryList = nonBlank(params.queries, params.query);
+      if (queryList.length === 0)
+        return missingInput("query", "queries");
       const numResults = Math.min(
         Math.max(Math.floor(params.numResults ?? 5), 1),
         10,
@@ -1910,7 +1946,6 @@ export default function (pi: ExtensionAPI) {
             filters,
             signal,
           );
-          // DuckDuckGo snippets are too short to judge relevance on.
           const ranked = await rerankResults(
             ctx,
             provider === "duckduckgo" ? undefined : ranker,
@@ -1933,7 +1968,7 @@ export default function (pi: ExtensionAPI) {
             results: [] as SearchResult[],
             dropped: 0,
             provider: "none",
-            error: errMsg(err),
+            error: errorMessage(err),
             usage: undefined,
           };
         }
@@ -2000,7 +2035,7 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  pi.registerTool({
+  pi.registerTool<typeof fetchParams, { urls?: string[]; ok?: number }>({
     name: "fetch_content",
     label: "Fetch Content",
     description:
@@ -2014,50 +2049,17 @@ export default function (pi: ExtensionAPI) {
     renderResult(result, options, theme: Theme, context) {
       if (context.isError) return errorLine("fetch_content", result, theme);
       if (options.expanded) return new Text(resultText(result), 0, 0);
-      const d = result.details as { urls?: string[]; ok?: number } | undefined;
+      const d = result.details;
       return new Text(
         theme.fg(
           "dim",
-          `  fetch_content — ${d?.ok ?? 0}/${d?.urls?.length ?? 0} ok`,
+          `  fetch_content — ${d.ok ?? 0}/${d.urls?.length ?? 0} ok`,
         ),
         0,
         0,
       );
     },
-    parameters: Type.Object({
-      url: Type.Optional(
-        Type.String({
-          minLength: 1,
-          description: "One URL. Use urls for several.",
-        }),
-      ),
-      urls: Type.Optional(
-        Type.Array(nonEmptyText, {
-          minItems: 1,
-          description: "URLs to fetch in one call.",
-        }),
-      ),
-      mode: Type.Optional(
-        Type.Enum(["readable", "raw"], {
-          description:
-            'Use "raw" for the unprocessed body when the target is JSON or the extraction looks wrong.',
-        }),
-      ),
-      offset: Type.Optional(
-        Type.Number({
-          minimum: 0,
-          description:
-            "Character position to continue from. Ignored when find is set.",
-        }),
-      ),
-      find: Type.Optional(
-        Type.Array(nonEmptyText, {
-          minItems: 1,
-          description:
-            "Return only passages around these strings, ignoring case, instead of the whole page.",
-        }),
-      ),
-    }),
+    parameters: fetchParams,
     outputSchema: Type.Object({
       pages: Type.Array(
         Type.Object({
@@ -2069,34 +2071,15 @@ export default function (pi: ExtensionAPI) {
       ),
     }),
     async execute(_callId, params, signal) {
-      const urlList = (
-        Array.isArray(params.urls)
-          ? params.urls
-          : params.url
-            ? [params.url]
-            : []
-      ).filter(
-        (u): u is string => typeof u === "string" && u.trim().length > 0,
-      );
-      if (urlList.length === 0) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "Error: no url provided. Use 'url' or 'urls'.",
-            },
-          ],
-          details: {},
-          isError: true,
-        };
-      }
+      const urlList = nonBlank(params.urls, params.url);
+      if (urlList.length === 0) return missingInput("url", "urls");
 
       const results = await mapLimit(urlList, 3, async (url) => {
         try {
           const { title, content } = await fetchOneCached(
             url,
             signal,
-            params.mode === "raw" ? "raw" : "readable",
+            params.mode ?? "readable",
           );
           return {
             url,
@@ -2111,7 +2094,7 @@ export default function (pi: ExtensionAPI) {
             error: null as string | null,
           };
         } catch (err) {
-          return { url, title: "", content: "", error: errMsg(err) };
+          return { url, title: "", content: "", error: errorMessage(err) };
         }
       });
 

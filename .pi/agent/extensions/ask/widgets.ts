@@ -9,6 +9,9 @@ import {
 import type { QuestionData } from "./schema";
 import { sentinelLabel } from "./schema";
 
+const ACTIVE_POINTER = "→ ";
+const INACTIVE_POINTER = "  ";
+
 function wrapInlineInput(
   buffer: string,
   cursorOffset: number | undefined,
@@ -42,8 +45,6 @@ export interface WrappingSelectTheme {
 }
 
 class WrappingSelect implements Component {
-  private static readonly ACTIVE_POINTER = "→ ";
-  private static readonly INACTIVE_POINTER = "  ";
   private static readonly CONFIRMED_MARK = " ✔";
   private static readonly MIN_CONTENT_WIDTH = 1;
 
@@ -169,8 +170,8 @@ class WrappingSelect implements Component {
     width: number,
   ): string[] {
     const rowPrefix = isActive
-      ? WrappingSelect.ACTIVE_POINTER
-      : WrappingSelect.INACTIVE_POINTER;
+      ? ACTIVE_POINTER
+      : INACTIVE_POINTER;
     const continuationPrefix = " ".repeat(visibleWidth(rowPrefix));
     const contentWidth = Math.max(
       WrappingSelect.MIN_CONTENT_WIDTH,
@@ -294,8 +295,6 @@ export class OptionListView {
 
 export const MULTI_SUBMIT_LABEL = "Submit";
 
-const MS_ACTIVE_POINTER = "→ ";
-const MS_INACTIVE_POINTER = "  ";
 const MS_UNCHECKED = "[ ]";
 const MS_BOX_LABEL_GAP = " ";
 
@@ -376,8 +375,8 @@ export class MultiSelectView {
       truncateToWidth(
         `${
           this.props.nextActive
-            ? this.theme.fg("accent", MS_ACTIVE_POINTER)
-            : MS_INACTIVE_POINTER
+            ? this.theme.fg("accent", ACTIVE_POINTER)
+            : INACTIVE_POINTER
         }${
           this.props.nextActive
             ? this.theme.fg("accent", this.props.nextLabel)
@@ -416,7 +415,7 @@ export class MultiSelectView {
 
   private rowPrefix(active: boolean, checked: boolean): string {
     return `${
-      active ? this.theme.fg("accent", MS_ACTIVE_POINTER) : MS_INACTIVE_POINTER
+      active ? this.theme.fg("accent", ACTIVE_POINTER) : INACTIVE_POINTER
     }${
       checked
         ? this.theme.fg("accent", "[✔]")
@@ -426,7 +425,7 @@ export class MultiSelectView {
 
   private prefixVisibleWidth(): number {
     return visibleWidth(
-      `${MS_INACTIVE_POINTER}${MS_UNCHECKED}${MS_BOX_LABEL_GAP}`,
+      `${INACTIVE_POINTER}${MS_UNCHECKED}${MS_BOX_LABEL_GAP}`,
     );
   }
 }
@@ -451,7 +450,7 @@ export class TabBar implements Component {
   invalidate(): void {}
 
   render(width: number): string[] {
-    const pieces: string[] = [" ← "];
+    const pieces: string[] = [" "];
     for (const tab of this.props.tabs) {
       const rawSeg = ` ${tab.answered ? "■" : "□"} ${tab.label} `;
       pieces.push(
@@ -470,43 +469,6 @@ export class TabBar implements Component {
             submitText,
           ),
     );
-    pieces.push(" →");
     return [truncateToWidth(pieces.join(""), width, ""), ""];
-  }
-}
-
-export interface SubmitPickerProps {
-  rows: ReadonlyArray<{ active: boolean }>;
-}
-
-export class SubmitPicker implements Component {
-  private props: SubmitPickerProps = {
-    rows: [{ active: false }, { active: false }],
-  };
-
-  constructor(private readonly theme: Theme) {}
-
-  setProps(props: SubmitPickerProps): void {
-    this.props = props;
-  }
-
-  invalidate(): void {}
-
-  render(width: number): string[] {
-    const lines: string[] = [];
-    for (let i = 0; i < 2; i++) {
-      const text = i === 0 ? "Submit answers" : "Cancel";
-      const active = this.props.rows[i]?.active ?? false;
-      lines.push(
-        truncateToWidth(
-          `${active ? "→ " : "  "}${
-            active ? this.theme.fg("accent", text) : this.theme.fg("text", text)
-          }`,
-          width,
-          "",
-        ),
-      );
-    }
-    return lines;
   }
 }

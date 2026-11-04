@@ -1,7 +1,4 @@
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -22,7 +19,7 @@ export default function (pi: ExtensionAPI) {
   if (!blockId || process.env.PI_IS_SUBAGENT === "1") return;
   const resumeFile = resumeFileForBlock(blockId);
 
-  pi.on("session_start", async (_event: unknown, ctx: ExtensionContext) => {
+  pi.on("session_start", (_event, ctx) => {
     if (!ctx.hasUI) return;
     const sessionFile = ctx.sessionManager.getSessionFile();
     if (!sessionFile) {

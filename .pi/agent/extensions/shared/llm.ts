@@ -3,6 +3,7 @@ import {
   BorderedLoader,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
+import { errorMessage } from "./error";
 
 export interface SideChannelOpts {
   systemPrompt: string;
@@ -77,7 +78,7 @@ export async function sideChannelComplete(
     return {
       ok: false,
       reason: "error",
-      error: e instanceof Error ? e.message : String(e),
+      error: errorMessage(e),
     };
   }
 }

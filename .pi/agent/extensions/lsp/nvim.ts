@@ -4,6 +4,7 @@ import * as fs from "node:fs";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { attach, type NeovimClient } from "neovim";
 import { surviveReload } from "../shared/reload";
 
@@ -83,6 +84,11 @@ const connect = (lane: Lane): Promise<net.Socket | null> =>
     socket.once("error", () => settle(false));
   });
 
+const abortLane = (lane: Lane): void => {
+  laneAborts[lane].abort(new Error(`nvim[${lane}] disconnected`));
+  laneAborts[lane] = new AbortController();
+};
+
 const openSession = async (
   lane: Lane,
   socket: net.Socket,
@@ -108,8 +114,7 @@ const openSession = async (
     session.dead = true;
     if (sessions[lane] === session) {
       sessions[lane] = null;
-      laneAborts[lane].abort(new Error(`nvim[${lane}] disconnected`));
-      laneAborts[lane] = new AbortController();
+      abortLane(lane);
     }
   };
   socket.once("close", drop);
@@ -161,7 +166,7 @@ const waitForDaemon = async (lane: Lane): Promise<net.Socket | null> => {
   while (Date.now() < deadline) {
     const socket = await connect(lane);
     if (socket) return socket;
-    await new Promise((r) => setTimeout(r, 100));
+    await sleep(100);
   }
   return null;
 };
@@ -228,8 +233,7 @@ const dropLane = (lane: Lane): void => {
   const session = sessions[lane];
   if (!session) return;
   sessions[lane] = null;
-  laneAborts[lane].abort(new Error(`nvim[${lane}] disconnected`));
-  laneAborts[lane] = new AbortController();
+  abortLane(lane);
   try {
     // end(), not destroy(): the msgpack decoder the client wraps around this
     // socket rejects with ERR_STREAM_PREMATURE_CLOSE on an abrupt teardown,
@@ -284,7 +288,7 @@ export const restartDaemons = async (): Promise<boolean> => {
     adhoc?.end();
     if (pid) {
       for (let i = 0; i < 20 && alive(pid); i++)
-        await new Promise((r) => setTimeout(r, 100));
+        await sleep(100);
       if (alive(pid)) {
         try {
           process.kill(pid, "SIGKILL");
@@ -329,7 +333,7 @@ const callGuarded = async <T>(
     if (signal.aborted) throw abortReason(signal);
     const res = await client.lua(guarded(code), args as never);
     if (!isBusy(res)) return res as T;
-    await new Promise((r) => setTimeout(r, 40));
+    await sleep(40);
   }
 };
 
@@ -375,7 +379,9 @@ export const callDriver = async <T = unknown>(
   signal: AbortSignal | undefined,
   onProgress?: ProgressFn,
 ): Promise<T> => {
-  await ensureDriverLoaded(cwd, onProgress);
+  await loadLuaFile(cwd, "driver", DRIVER_PATH, "main", () =>
+    onProgress?.("loading lsp driver…"),
+  );
   const timeoutSignal = AbortSignal.timeout(
     15_000 + (Array.isArray(args[0]) ? Math.max(1, args[0].length) : 1) * 8_000,
   );
@@ -411,17 +417,22 @@ export const loadLuaOnce = async (
   loadedHere.add(cacheKey);
 };
 
-let driverSrc: { mtimeMs: number; src: string } | null = null;
-const ensureDriverLoaded = async (
+const luaSources = new Map<string, { mtimeMs: number; src: string }>();
+export const loadLuaFile = async (
   cwd: string,
-  onProgress?: ProgressFn,
+  key: string,
+  file: string,
+  lane: Lane = "main",
+  onChanged?: () => void,
 ): Promise<void> => {
-  const mtimeMs = fs.statSync(DRIVER_PATH).mtimeMs;
-  if (driverSrc?.mtimeMs !== mtimeMs) {
-    driverSrc = { mtimeMs, src: fs.readFileSync(DRIVER_PATH, "utf8") };
-    onProgress?.("loading lsp driver…");
+  const mtimeMs = fs.statSync(file).mtimeMs;
+  let cached = luaSources.get(file);
+  if (cached?.mtimeMs !== mtimeMs) {
+    cached = { mtimeMs, src: fs.readFileSync(file, "utf8") };
+    luaSources.set(file, cached);
+    onChanged?.();
   }
-  await loadLuaOnce(cwd, "driver", driverSrc.src, "main");
+  await loadLuaOnce(cwd, key, cached.src, lane);
 };
 
 interface DaemonInfo {

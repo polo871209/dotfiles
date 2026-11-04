@@ -7,28 +7,33 @@ local function check(result, err)
     return result
 end
 
-local function placed(block_id)
+local function view_blocks()
+    local out = {}
     for _, window in ipairs(check(rex.session.view {}).windows) do
         for _, layer in ipairs(window.layers) do
             for _, block in ipairs(layer.blocks) do
-                if block.block_id == block_id then return true end
+                out[#out + 1] = { window_id = window.window_id, block = block }
             end
         end
+    end
+    return out
+end
+
+local function placed(block_id)
+    for _, entry in ipairs(view_blocks()) do
+        if entry.block.block_id == block_id then return true end
     end
     return false
 end
 
 local function terminals()
     local out, own_window = {}, nil
-    for _, window in ipairs(check(rex.session.view {}).windows) do
-        for _, layer in ipairs(window.layers) do
-            for _, block in ipairs(layer.blocks) do
-                if block.block_id == args.self then
-                    own_window = window.window_id
-                elseif block.creator_name == terminal then
-                    out[#out + 1] = { block_id = block.block_id, label = block.label, window_id = window.window_id }
-                end
-            end
+    for _, entry in ipairs(view_blocks()) do
+        local block = entry.block
+        if block.block_id == args.self then
+            own_window = entry.window_id
+        elseif block.creator_name == terminal then
+            out[#out + 1] = { block_id = block.block_id, label = block.label, window_id = entry.window_id }
         end
     end
     for _, t in ipairs(out) do
@@ -63,13 +68,7 @@ local function open_pane()
         direction = 'horizontal',
         side = 'after',
         ratio = 0.6,
-        layout = {
-            block = {
-                flavor = 'com.superlogical.terminal.shell',
-                label = 'run',
-                options = { cwd = args.cwd },
-            },
-        },
+        layout = rex.layout.block { flavor = 'com.superlogical.terminal.shell', label = 'run', options = { cwd = args.cwd } },
     })
     local block_id = split.block_ids[1]
     for _ = 1, 30 do

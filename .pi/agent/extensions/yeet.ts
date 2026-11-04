@@ -108,7 +108,7 @@ export default function (pi: ExtensionAPI) {
         { placement: "aboveEditor" },
       );
     };
-    const EXCLUDE = ["git/"].map((p) => `:(exclude,top)${p}`);
+    const EXCLUDE = [":(exclude,top)git/"];
 
     const gitWith = async (timeout: number | undefined, gargs: string[]) => {
       const r = await pi.exec("git", ["-c", "color.ui=never", ...gargs], {
@@ -236,7 +236,7 @@ Return the raw commit message, starting with the subject line.`,
           content: [
             {
               type: "text",
-              text: `${args?.trim() ? `\nUser hint: ${args.trim()}\n` : ""}${branch ? `Current branch: ${branch}\n\n` : ""}${
+              text: `${args.trim() ? `\nUser hint: ${args.trim()}\n` : ""}${branch ? `Current branch: ${branch}\n\n` : ""}${
                 log.ok && log.out
                   ? `Recent commit subjects (style reference):\n${log.out}\n\n`
                   : ""

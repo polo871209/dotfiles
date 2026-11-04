@@ -94,13 +94,7 @@ local function open()
         direction = last and 'vertical' or 'horizontal',
         side = 'after',
         ratio = not last and 0.75 or nil,
-        layout = {
-            block = {
-                flavor = 'com.superlogical.terminal.shell',
-                label = args.label,
-                options = { cwd = args.cwd, command = args.command },
-            },
-        },
+        layout = rex.layout.block { flavor = 'com.superlogical.terminal.shell', label = args.label, options = { cwd = args.cwd, command = args.command } },
     })
     rebalance()
     return { block_id = split.block_ids[1] }
@@ -150,7 +144,7 @@ local function watch()
         end
         local remaining = deadline - os.time()
         if remaining <= 0 then return { state = 'timeout' } end
-        rex.wait('block_event', function(ev) return ev.block_id == args.block_id end, math.min(remaining, 2))
+        rex.wait('block_event', { block_id = args.block_id }, math.min(remaining, 2))
     end
 end
 

@@ -65,33 +65,33 @@ export default function (pi: ExtensionAPI) {
     release();
   };
 
-  pi.on("agent_start", async () => {
+  pi.on("agent_start", () => {
     runStartedAt ??= Date.now();
     onActivity();
   });
-  pi.on("turn_start", async () => onActivity());
-  pi.on("turn_end", async () => onActivity());
-  pi.on("message_start", async () => onActivity());
-  pi.on("message_update", async () => onActivity());
-  pi.on("message_end", async () => onActivity());
-  pi.on("tool_execution_update", async () => onActivity());
-  pi.on("tool_execution_start", async () => {
+  pi.on("turn_start", onActivity);
+  pi.on("turn_end", onActivity);
+  pi.on("message_start", onActivity);
+  pi.on("message_update", onActivity);
+  pi.on("message_end", onActivity);
+  pi.on("tool_execution_update", onActivity);
+  pi.on("tool_execution_start", () => {
     runningTools++;
     onActivity();
   });
-  pi.on("tool_execution_end", async () => {
+  pi.on("tool_execution_end", () => {
     runningTools = Math.max(0, runningTools - 1);
     onActivity();
   });
-  pi.on("ui_prompt_start", async () => {
+  pi.on("ui_prompt_start", () => {
     prompting = true;
     release();
   });
-  pi.on("ui_prompt_end", async () => {
+  pi.on("ui_prompt_end", () => {
     prompting = false;
     onActivity();
   });
-  pi.on("agent_settled", async () => endRun());
-  pi.on("session_start", async () => endRun());
-  pi.on("session_shutdown", async () => endRun());
+  pi.on("agent_settled", endRun);
+  pi.on("session_start", endRun);
+  pi.on("session_shutdown", endRun);
 }

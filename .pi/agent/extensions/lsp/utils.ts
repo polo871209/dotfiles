@@ -7,6 +7,7 @@ import {
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { callDriver } from "./nvim";
+import { errorMessage } from "../shared/error";
 
 export const capText = (full: string): { text: string; truncated: boolean } => {
   const t = truncateHead(full, {
@@ -32,6 +33,17 @@ export interface DriverErr {
   error?: string;
 }
 
+export const toolError = (text: string): AgentToolResult<unknown> => ({
+  content: [{ type: "text", text }],
+  details: { success: false },
+  isError: true,
+});
+
+export interface StatusResult extends DriverErr {
+  files?: { file: string; bufnr: number; clients: string[] }[];
+  servers?: { name: string; id: number; root?: string; bufs: number }[];
+}
+
 export async function withDriver<R extends DriverErr>(
   ctx: ExtensionContext,
   driverFn: string,
@@ -50,26 +62,9 @@ export async function withDriver<R extends DriverErr>(
       onUpdate?.({ content: [{ type: "text", text }], details: {} }),
     );
   } catch (e) {
-    return {
-      content: [
-        {
-          type: "text",
-          text: `${errorPrefix}: ${e instanceof Error ? e.message : String(e)}`,
-        },
-      ],
-      details: { success: false },
-      isError: true,
-    };
+    return toolError(`${errorPrefix}: ${errorMessage(e)}`);
   }
-  if (!res.ok) {
-    return {
-      content: [
-        { type: "text", text: `${errorPrefix}: ${res.error ?? "unknown"}` },
-      ],
-      details: { success: false },
-      isError: true,
-    };
-  }
+  if (!res.ok) return toolError(`${errorPrefix}: ${res.error ?? "unknown"}`);
   const out = render(res, ctx.cwd);
   return {
     content: [{ type: "text", text: out.text }],
@@ -90,7 +85,7 @@ export const toAbs = (p: string, cwd: string): string =>
 export const normalizeAtPath = (p: string): string =>
   p.startsWith("@") ? p.slice(1) : p;
 
-export type Severity = "error" | "warn" | "info" | "hint";
+type Severity = "error" | "warn" | "info" | "hint";
 
 export interface Diag {
   file: string;

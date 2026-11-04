@@ -1,9 +1,11 @@
 import * as fs from "node:fs";
-import { Type } from "typebox";
+import { type Static, Type } from "typebox";
 import {
   defineTool,
   withFileMutationQueue,
   type AgentToolResult,
+  type AgentToolUpdateCallback,
+  type ExtensionToolContext,
 } from "@earendil-works/pi-coding-agent";
 import { run } from "../shared/exec";
 import { restartDaemons } from "./nvim";
@@ -15,10 +17,12 @@ import {
   normalizeAtPath,
   sortDiagnostics,
   toAbs,
+  toolError,
   withDriver,
   type Diag,
   type DriverErr,
   type LspLocation,
+  type StatusResult,
 } from "./utils";
 
 async function listWorkspaceFiles(
@@ -102,30 +106,8 @@ async function listWorkspaceFiles(
   return { files, totalCandidates: candidates.length };
 }
 
-const ANCHOR_ACTIONS = [
-  "hover",
-  "definition",
-  "references",
-  "implementation",
-  "type_definition",
-] as const;
-type AnchorAction = (typeof ANCHOR_ACTIONS)[number];
-
-interface LspParams {
-  action:
-    AnchorAction | "document_symbols" | "diagnostics" | "rename" | "restart";
-  file?: string;
-  files?: string[];
-  line?: number;
-  symbol?: string;
-  new_name?: string;
-}
-
-const err = (text: string): AgentToolResult<unknown> => ({
-  content: [{ type: "text", text }],
-  details: { success: false },
-  isError: true,
-});
+type AnchorAction =
+  "hover" | "definition" | "references" | "implementation" | "type_definition";
 
 interface DriverLocResult extends DriverErr {
   locations?: LspLocation[];
@@ -155,24 +137,16 @@ interface RenameResult extends DriverErr {
   files?: RenameFileEdit[];
   edit_count?: number;
 }
-interface StatusFile {
-  file: string;
-  bufnr: number;
-  clients: string[];
-}
-interface StatusResult extends DriverErr {
-  files?: StatusFile[];
-}
 
 async function runAnchor(
   action: AnchorAction,
   params: LspParams,
-  ctx: Parameters<Parameters<typeof defineTool>[0]["execute"]>[4],
+  ctx: ExtensionToolContext,
   signal: AbortSignal | undefined,
-  onUpdate: Parameters<Parameters<typeof defineTool>[0]["execute"]>[3],
+  onUpdate: AgentToolUpdateCallback | undefined,
 ): Promise<AgentToolResult<unknown>> {
-  if (!params.file) return err(`LSP error: action "${action}" requires file`);
-  if (!params.line) return err(`LSP error: action "${action}" requires line`);
+  if (!params.file) return toolError(`LSP error: action "${action}" requires file`);
+  if (!params.line) return toolError(`LSP error: action "${action}" requires line`);
   const file = toAbs(normalizeAtPath(params.file), ctx.cwd);
 
   if (action === "hover") {
@@ -225,12 +199,12 @@ async function runAnchor(
 
 async function runDocumentSymbols(
   params: LspParams,
-  ctx: Parameters<Parameters<typeof defineTool>[0]["execute"]>[4],
+  ctx: ExtensionToolContext,
   signal: AbortSignal | undefined,
-  onUpdate: Parameters<Parameters<typeof defineTool>[0]["execute"]>[3],
+  onUpdate: AgentToolUpdateCallback | undefined,
 ): Promise<AgentToolResult<unknown>> {
   if (!params.file)
-    return err('LSP error: action "document_symbols" requires file');
+    return toolError('LSP error: action "document_symbols" requires file');
   const file = toAbs(normalizeAtPath(params.file), ctx.cwd);
   return withDriver<DocResult>(
     ctx,
@@ -259,14 +233,14 @@ async function runDocumentSymbols(
 
 async function runRename(
   params: LspParams,
-  ctx: Parameters<Parameters<typeof defineTool>[0]["execute"]>[4],
+  ctx: ExtensionToolContext,
   signal: AbortSignal | undefined,
-  onUpdate: Parameters<Parameters<typeof defineTool>[0]["execute"]>[3],
+  onUpdate: AgentToolUpdateCallback | undefined,
 ): Promise<AgentToolResult<unknown>> {
-  if (!params.file) return err('LSP error: action "rename" requires file');
-  if (!params.line) return err('LSP error: action "rename" requires line');
+  if (!params.file) return toolError('LSP error: action "rename" requires file');
+  if (!params.line) return toolError('LSP error: action "rename" requires line');
   if (!params.new_name)
-    return err('LSP error: action "rename" requires new_name');
+    return toolError('LSP error: action "rename" requires new_name');
   const file = toAbs(normalizeAtPath(params.file), ctx.cwd);
   return withFileMutationQueue(file, () =>
     withDriver<RenameResult>(
@@ -293,9 +267,9 @@ async function runRename(
 }
 
 async function runRestart(
-  ctx: Parameters<Parameters<typeof defineTool>[0]["execute"]>[4],
+  ctx: ExtensionToolContext,
   signal: AbortSignal | undefined,
-  onUpdate: Parameters<Parameters<typeof defineTool>[0]["execute"]>[3],
+  onUpdate: AgentToolUpdateCallback | undefined,
 ): Promise<AgentToolResult<unknown>> {
   const was = await restartDaemons();
   return withDriver<StatusResult>(
@@ -317,9 +291,9 @@ async function runRestart(
 
 async function runDiagnostics(
   params: LspParams,
-  ctx: Parameters<Parameters<typeof defineTool>[0]["execute"]>[4],
+  ctx: ExtensionToolContext,
   signal: AbortSignal | undefined,
-  onUpdate: Parameters<Parameters<typeof defineTool>[0]["execute"]>[3],
+  onUpdate: AgentToolUpdateCallback | undefined,
 ): Promise<AgentToolResult<unknown>> {
   let files: string[];
   let workspaceNote = "";
@@ -334,7 +308,7 @@ async function runDiagnostics(
     );
     files = wsFiles;
     if (files.length === 0) {
-      return err("LSP error: no workspace files found (not a git repo?)");
+      return toolError("LSP error: no workspace files found (not a git repo?)");
     }
     if (totalCandidates > files.length) {
       workspaceNote = `[workspace: showing ${files.length}/${totalCandidates} files]\n\n`;
@@ -375,6 +349,50 @@ async function runDiagnostics(
   );
 }
 
+const parameters = Type.Object({
+  action: Type.Enum([
+    "hover",
+    "definition",
+    "references",
+    "implementation",
+    "type_definition",
+    "document_symbols",
+    "diagnostics",
+    "rename",
+    "restart",
+  ]),
+  file: Type.Optional(
+    Type.String({
+      description:
+        "Absolute or relative to the working directory. Required for every action except diagnostics and restart.",
+    }),
+  ),
+  files: Type.Optional(
+    Type.Array(Type.String(), {
+      description:
+        "Files to check with diagnostics. Omit file and files to check the whole repository.",
+    }),
+  ),
+  line: Type.Optional(
+    Type.Number({
+      minimum: 1,
+      description:
+        "1-based line number. Required for hover, definition, references, implementation, type_definition, and rename.",
+    }),
+  ),
+  symbol: Type.Optional(
+    Type.String({
+      description:
+        "Text on the line that selects the column. Default: the first token on the line.",
+    }),
+  ),
+  new_name: Type.Optional(
+    Type.String({ description: "Required for rename." }),
+  ),
+});
+
+type LspParams = Static<typeof parameters>;
+
 export const lspTool = defineTool({
   name: "lsp",
   label: "LSP",
@@ -386,47 +404,7 @@ export const lspTool = defineTool({
   },
   description:
     "Language-server lookups and rename. document_symbols outlines a file for less than reading it. rename saves the edits in every affected file, so run references first. Diagnostics run automatically after each edit, so call diagnostics only on request. restart restarts the daemon that all pi sessions share, for stale results or timeouts. A line number must be current, so re-read a file after you edit it.",
-  parameters: Type.Object({
-    action: Type.Enum([
-      "hover",
-      "definition",
-      "references",
-      "implementation",
-      "type_definition",
-      "document_symbols",
-      "diagnostics",
-      "rename",
-      "restart",
-    ]),
-    file: Type.Optional(
-      Type.String({
-        description:
-          "Absolute or relative to the working directory. Required for every action except diagnostics and restart.",
-      }),
-    ),
-    files: Type.Optional(
-      Type.Array(Type.String(), {
-        description:
-          "Files to check with diagnostics. Omit file and files to check the whole repository.",
-      }),
-    ),
-    line: Type.Optional(
-      Type.Number({
-        minimum: 1,
-        description:
-          "1-based line number. Required for hover, definition, references, implementation, type_definition, and rename.",
-      }),
-    ),
-    symbol: Type.Optional(
-      Type.String({
-        description:
-          "Text on the line that selects the column. Default: the first token on the line.",
-      }),
-    ),
-    new_name: Type.Optional(
-      Type.String({ description: "Required for rename." }),
-    ),
-  }),
+  parameters,
   outputSchema: Type.Object({
     success: Type.Boolean(),
     text: Type.String({ description: "The result as the model sees it" }),
@@ -443,7 +421,7 @@ export const lspTool = defineTool({
     truncated: Type.Optional(Type.Boolean()),
   }),
   async execute(_id, params, signal, onUpdate, ctx) {
-    const result = await dispatch(params as LspParams, ctx, signal, onUpdate);
+    const result = await dispatch(params, ctx, signal, onUpdate);
     const details = (result.details ?? {}) as Record<string, unknown>;
     const pick = (key: string) =>
       details[key] === undefined ? {} : { [key]: details[key] };
@@ -465,24 +443,20 @@ export const lspTool = defineTool({
 
 async function dispatch(
   p: LspParams,
-  ctx: Parameters<Parameters<typeof defineTool>[0]["execute"]>[4],
+  ctx: ExtensionToolContext,
   signal: AbortSignal | undefined,
-  onUpdate: Parameters<Parameters<typeof defineTool>[0]["execute"]>[3],
+  onUpdate: AgentToolUpdateCallback | undefined,
 ): Promise<AgentToolResult<unknown>> {
-  if (p.action === "restart") {
-    return runRestart(ctx, signal, onUpdate);
+  switch (p.action) {
+    case "restart":
+      return runRestart(ctx, signal, onUpdate);
+    case "rename":
+      return runRename(p, ctx, signal, onUpdate);
+    case "document_symbols":
+      return runDocumentSymbols(p, ctx, signal, onUpdate);
+    case "diagnostics":
+      return runDiagnostics(p, ctx, signal, onUpdate);
+    default:
+      return runAnchor(p.action, p, ctx, signal, onUpdate);
   }
-  if (p.action === "rename") {
-    return runRename(p, ctx, signal, onUpdate);
-  }
-  if ((ANCHOR_ACTIONS as readonly string[]).includes(p.action)) {
-    return runAnchor(p.action as AnchorAction, p, ctx, signal, onUpdate);
-  }
-  if (p.action === "document_symbols") {
-    return runDocumentSymbols(p, ctx, signal, onUpdate);
-  }
-  if (p.action === "diagnostics") {
-    return runDiagnostics(p, ctx, signal, onUpdate);
-  }
-  return err(`LSP error: unknown action "${p.action}"`);
 }

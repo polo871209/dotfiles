@@ -6,6 +6,7 @@ import type {
 import { isForkName } from "./shared/fork-name";
 import { extractText } from "./shared/message";
 import { surviveReload } from "./shared/reload";
+import { customEntries } from "./shared/session";
 import {
   sideChannelComplete,
   sideChannelWithLoader,
@@ -22,21 +23,6 @@ interface AutoRenameEntry {
 }
 const DANGLING_WORD =
   /^(and|or|for|with|without|of|the|a|an|to|in|into|on|at|by|via|vs|from)$/i;
-
-interface FileEditCall {
-  type: "toolCall";
-  name: "edit" | "write";
-  arguments: { path: string };
-}
-
-function isFileEditCall(c: unknown): c is FileEditCall {
-  const call = c as Partial<FileEditCall> | null;
-  return (
-    call?.type === "toolCall" &&
-    (call.name === "edit" || call.name === "write") &&
-    typeof call.arguments?.path === "string"
-  );
-}
 
 function clip(text: string, max: number): string {
   const flat = text.replace(/\s+/g, " ").trim();
@@ -104,12 +90,10 @@ function replacePiTitle(title: () => string | undefined): void {
 }
 
 function lastAutoRename(ctx: ExtensionContext): AutoRenameEntry | undefined {
-  let last: AutoRenameEntry | undefined;
-  for (const entry of ctx.sessionManager.getBranch()) {
-    if (entry.type === "custom" && entry.customType === ENTRY_TYPE)
-      last = entry.data as AutoRenameEntry;
-  }
-  return last;
+  return customEntries<AutoRenameEntry>(
+    ctx.sessionManager.getBranch(),
+    ENTRY_TYPE,
+  ).at(-1)?.data;
 }
 
 function sessionDigest(
@@ -123,16 +107,16 @@ function sessionDigest(
   const edits = new Map<string, number>();
   for (const entry of ctx.sessionManager.getBranch()) {
     if (entry.type !== "message") continue;
-    const { role, content } = entry.message as {
-      role?: string;
-      content?: unknown;
-    };
-    if (role === "user") {
-      const text = extractText(content).trim();
+    const { message } = entry;
+    if (message.role === "user") {
+      const text = extractText(message.content).trim();
       if (text) requests.push(text);
-    } else if (role === "assistant" && Array.isArray(content)) {
-      for (const call of content.filter(isFileEditCall)) {
+    } else if (message.role === "assistant") {
+      for (const call of message.content) {
+        if (call.type !== "toolCall") continue;
+        if (call.name !== "edit" && call.name !== "write") continue;
         const path = call.arguments.path;
+        if (typeof path !== "string") continue;
         const rel = isAbsolute(path) ? relative(ctx.cwd, path) : path;
         const shown = rel.startsWith("..") ? path : rel;
         edits.set(shown, (edits.get(shown) ?? 0) + 1);
@@ -264,7 +248,7 @@ export default function (pi: ExtensionAPI) {
     description:
       "Regenerate the session name ('-': clear it and re-arm the automatic rename)",
     handler: async (args, ctx) => {
-      const arg = (args ?? "").trim();
+      const arg = args.trim();
       const sessionFile = ctx.sessionManager.getSessionFile();
 
       if (arg === "-" || arg.toLowerCase() === "clear") {

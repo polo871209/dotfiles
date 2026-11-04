@@ -70,18 +70,6 @@ local function try_format(bufnr, budget_ms)
     return ok and autoformat.format(bufnr, budget_ms)
 end
 
-local function pull_diagnostics(bufnr)
-    local method = vim.lsp.protocol.Methods.textDocument_diagnostic
-    for _, client in ipairs(vim.lsp.get_clients { bufnr = bufnr, method = method }) do
-        local params = { textDocument = vim.lsp.util.make_text_document_params(bufnr) }
-        pcall(client.request, client, method, params, nil, bufnr)
-    end
-end
-
-local function touch(bufnr)
-    if _G.PiDaemon and _G.PiDaemon.touch then _G.PiDaemon.touch(bufnr) end
-end
-
 local function dedupe_files(files)
     local seen = {}
     local out = {}
@@ -100,7 +88,7 @@ function M.format(files, timeout_ms)
         if vim.uv.fs_stat(file) then
             vim.cmd('silent! edit ' .. vim.fn.fnameescape(file))
             local bufnr = vim.api.nvim_get_current_buf()
-            touch(bufnr)
+            PiDaemon.touch(bufnr)
             pcall(function() vim.cmd 'filetype detect' end)
             if try_format(bufnr, timeout_ms) then
                 pcall(function()
@@ -123,7 +111,7 @@ function M.run(files)
             local function remaining() return math.max(0, PER_FILE_BUDGET_MS - (vim.uv.now() - file_started)) end
             vim.cmd('silent! edit ' .. vim.fn.fnameescape(file))
             local bufnr = vim.api.nvim_get_current_buf()
-            touch(bufnr)
+            PiDaemon.touch(bufnr)
             table.insert(bufs, bufnr)
 
             pcall(function() vim.cmd 'filetype detect' end)
@@ -133,7 +121,7 @@ function M.run(files)
 
             vim.wait(math.min(2000, remaining()), function() return #vim.lsp.get_clients { bufnr = bufnr } > 0 end, 50)
 
-            pull_diagnostics(bufnr)
+            PiDaemon.pull_diagnostics(bufnr)
             vim.wait(math.min(800, remaining()), function() return false end, 50)
 
             local fixed = apply_code_actions(bufnr, remaining)
@@ -143,28 +131,15 @@ function M.run(files)
             end) end
             if fixed or refmt then table.insert(formatted, vim.api.nvim_buf_get_name(bufnr)) end
 
-            pull_diagnostics(bufnr)
+            PiDaemon.pull_diagnostics(bufnr)
         end
     end
 
     vim.wait(SETTLE_MS, function() return false end, 50)
 
     local out = { formatted = formatted, diagnostics = {} }
-    local sev = { 'error', 'warn', 'info', 'hint' }
     for _, bufnr in ipairs(bufs) do
-        if vim.api.nvim_buf_is_valid(bufnr) then
-            for _, d in ipairs(vim.diagnostic.get(bufnr)) do
-                table.insert(out.diagnostics, {
-                    file = vim.api.nvim_buf_get_name(bufnr),
-                    line = (d.lnum or 0) + 1,
-                    col = (d.col or 0) + 1,
-                    severity = sev[d.severity] or 'info',
-                    source = d.source,
-                    code = d.code and tostring(d.code) or nil,
-                    message = (d.message or ''):gsub('\r?\n', ' '),
-                })
-            end
-        end
+        if vim.api.nvim_buf_is_valid(bufnr) then vim.list_extend(out.diagnostics, PiDaemon.diagnostics(bufnr)) end
     end
     return out
 end

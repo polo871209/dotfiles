@@ -1,4 +1,4 @@
-import { type Input, Key, matchesKey } from "@earendil-works/pi-tui";
+import { type Component, type Input, Key, matchesKey } from "@earendil-works/pi-tui";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import {
   type QuestionAnswer,
@@ -22,7 +22,6 @@ export interface QuestionnaireState {
   inputMode: boolean;
   answers: ReadonlyMap<number, QuestionAnswer>;
   multiSelectChecked: ReadonlySet<number>;
-  submitChoiceIndex: number;
   collapsed: boolean;
 }
 
@@ -67,7 +66,6 @@ type QuestionnaireAction =
   | { kind: "custom_text"; text: string }
   | { kind: "cancel" }
   | { kind: "submit" }
-  | { kind: "submit_nav"; nextIndex: 0 | 1 }
   | { kind: "toggle_collapsed" }
   | { kind: "ignore" };
 
@@ -207,23 +205,11 @@ function routeKey(
     if (kb.matches(data, KEYBIND_CANCEL)) return { kind: "cancel" };
     const tab = tabSwitchAction(data, state, runtime);
     if (tab) return tab;
-    if (kb.matches(data, KEYBIND_UP) || kb.matches(data, KEYBIND_DOWN)) {
-      return {
-        kind: "submit_nav",
-        nextIndex: (wrapTab(
-          state.submitChoiceIndex + (kb.matches(data, KEYBIND_DOWN) ? 1 : -1),
-          2,
-        ) === 1
-          ? 1
-          : 0) as 0 | 1,
-      };
-    }
-    if (kb.matches(data, KEYBIND_CONFIRM)) {
-      if (state.submitChoiceIndex === 1) return { kind: "cancel" };
-      return state.answers.size < runtime.questions.length
-        ? { kind: "ignore" }
-        : { kind: "submit" };
-    }
+    if (
+      kb.matches(data, KEYBIND_CONFIRM) &&
+      state.answers.size === runtime.questions.length
+    )
+      return { kind: "submit" };
     return { kind: "ignore" };
   }
 
@@ -353,7 +339,6 @@ function switchTabResult(
       currentTab: nextTab,
       optionIndex: 0,
       inputMode: false,
-      submitChoiceIndex: 0,
       multiSelectChecked: syncMultiSelectFromAnswers(
         state.answers,
         ctx.questions,
@@ -484,10 +469,6 @@ function reduce(
         })) satisfies Handler<"custom_text">,
         cancel: (s, _a, c) => doneFor(s, c, true),
         submit: (s, _a, c) => doneFor(s, c, false),
-        submit_nav: (s, a) => ({
-          state: { ...s, submitChoiceIndex: a.nextIndex },
-          effects: [],
-        }),
         toggle_collapsed: (s) => ({
           state: { ...s, collapsed: !s.collapsed },
           effects: [],
@@ -507,12 +488,6 @@ interface QuestionnaireSessionConfig {
   keybindings: QuestionnaireRuntime["keybindings"];
 }
 
-interface QuestionnaireSessionComponent {
-  render(width: number): string[];
-  invalidate(): void;
-  handleInput(data: string): void;
-}
-
 function initialState(): QuestionnaireState {
   return {
     currentTab: 0,
@@ -520,7 +495,6 @@ function initialState(): QuestionnaireState {
     inputMode: false,
     answers: new Map(),
     multiSelectChecked: new Set(),
-    submitChoiceIndex: 0,
     collapsed: false,
   };
 }
@@ -539,7 +513,7 @@ export class QuestionnaireSession {
   private readonly done: QuestionnaireSessionConfig["done"];
   private readonly keybindings: QuestionnaireSessionConfig["keybindings"];
 
-  readonly component: QuestionnaireSessionComponent;
+  readonly component: Component;
 
   constructor(config: QuestionnaireSessionConfig) {
     this.tui = config.tui;
@@ -561,13 +535,12 @@ export class QuestionnaireSession {
 
     this.inlineInput = built.inlineInput;
     this.viewAdapter = built.adapter;
-    const collapsedRender = (_width: number): string[] => [
-      config.theme.fg("dim", ` ${COLLAPSED_HINT} `),
-    ];
 
     this.component = {
       render: (width) =>
-        this.state.collapsed ? collapsedRender(width) : built.render(width),
+        this.state.collapsed
+          ? [config.theme.fg("dim", ` ${COLLAPSED_HINT} `)]
+          : built.render(width),
       invalidate: built.invalidate,
       handleInput: (data) => this.dispatch(data),
     };

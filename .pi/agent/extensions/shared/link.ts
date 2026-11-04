@@ -1,6 +1,3 @@
-/** A link whose URL starts with this prefix is handled inside pi instead of being opened by the OS. */
-export const PI_LINK_PREFIX = "pi-";
-
 /** Emitted on `pi.events` with the clicked URL (a string) for every click on a `pi-` link. */
 export const LINK_OPEN = "link:open";
 
