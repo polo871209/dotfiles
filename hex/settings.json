@@ -251,15 +251,25 @@
     },
     {
       "term": "justfile",
-      "sounds_like": ["just file", "just-file"]
+      "sounds_like": [
+        "just file",
+        "just-file"
+      ]
     },
     {
       "term": "Vitest",
-      "sounds_like": ["V test", "Vee test", "Vi test"]
+      "sounds_like": [
+        "V test",
+        "Vee test",
+        "Vi test"
+      ]
     },
     {
       "term": "Pi",
-      "sounds_like": ["Py", "PY", "pie"]
+      "sounds_like": [
+        "Py",
+        "pie"
+      ]
     }
   ],
   "vocabulary_boost": "normal",

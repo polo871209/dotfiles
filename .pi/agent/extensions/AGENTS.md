@@ -31,6 +31,7 @@ Before you change pi-native behavior, read the relevant docs in the installed `@
 - **`subagent/`** — delegates external research, read-only repo recon, or parallel review to an isolated agent. It runs in the foreground or background, returns compact structured results, shows each run's live status in pi without Rex status or notifications, and delivers background results as a message.
 - **`quiet-run.ts`** — the default way to run shell commands. Output goes to a log, and the agent gets the verdict and the requested slice.
 - **`ask/`** — structured choices when a request needs clarification.
+- **`browser/`** — on `/browser`, offers a background browser on your Helium profile for the rest of the session that finishes concrete web tasks such as searches and forms in seconds, and shows `browser:` in the footer while it is on.
 
 ### Cleaner context
 

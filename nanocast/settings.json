@@ -117,6 +117,8 @@
     "showInLauncher": true,
     "gap": 0,
     "cycle": "off",
+    "wrapDisplays": true,
+    "keepProportions": true,
     "layoutsShowInLauncher": true,
     "roomsShowInLauncher": true,
     "shortcuts": {
@@ -150,6 +152,10 @@
       "move-right": null,
       "move-up": null,
       "move-down": null,
+      "move-to-left-edge": null,
+      "move-to-right-edge": null,
+      "move-to-top-edge": null,
+      "move-to-bottom-edge": null,
       "next-display": null,
       "previous-display": null,
       "toggle-fullscreen": null,
@@ -180,10 +186,24 @@
   },
   "screenshot": {
     "saveFolder": "~/Downloads",
-    "recordingFormat": "mov",
     "commands": {
       "capture-screenshot": {
         "shortcut": "hyper+x",
+        "alias": null,
+        "showInLauncher": true
+      }
+    }
+  },
+  "screenRecording": {
+    "saveFolder": "~/Downloads",
+    "format": "mov",
+    "systemAudio": false,
+    "microphone": false,
+    "showsClicks": true,
+    "camera": true,
+    "commands": {
+      "record-screen": {
+        "shortcut": "hyper+z",
         "alias": null,
         "showInLauncher": true
       }

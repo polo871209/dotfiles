@@ -217,6 +217,7 @@ const STATUS_BADGES = [
   { key: "lark", paint: rgbFg("51;112;255"), tintsEditor: false },
   { key: "gws", paint: rgbFg("66;133;244"), tintsEditor: false },
   { key: "obsidian", paint: rgbFg("124;58;237"), tintsEditor: false },
+  { key: "browser", paint: rgbFg("45;212;191"), tintsEditor: false },
   { key: "poteto", paint: rgbFg("177;212;228"), tintsEditor: true },
 ];
 
