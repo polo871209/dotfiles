@@ -84,12 +84,13 @@ local function resolve_target()
     for _, t in ipairs(all) do
         if t.block_id == args.target then return t.block_id end
     end
-    local siblings = {}
+    local idle = {}
     for _, t in ipairs(all) do
-        if t.sibling then siblings[#siblings + 1] = t end
+        local fg = t.sibling and foreground(t.block_id)
+        if fg and shells[fg.name or ''] then idle[#idle + 1] = t.block_id end
     end
-    if #siblings == 1 then return siblings[1].block_id end
-    if #siblings == 0 then return open_pane() end
+    if #idle == 1 then return idle[1] end
+    if #idle == 0 then return open_pane() end
 end
 
 local function targets()
@@ -129,10 +130,16 @@ end
 
 local function tail(text, count)
     local lines = {}
-    for line in (text .. '\n'):gmatch('(.-)\r?\n') do lines[#lines + 1] = line end
-    while #lines > 0 and lines[#lines] == '' do lines[#lines] = nil end
+    for line in (text .. '\n'):gmatch '(.-)\r?\n' do
+        lines[#lines + 1] = line
+    end
+    while #lines > 0 and lines[#lines] == '' do
+        lines[#lines] = nil
+    end
     local out = {}
-    for i = math.max(1, #lines - count + 1), #lines do out[#out + 1] = lines[i] end
+    for i = math.max(1, #lines - count + 1), #lines do
+        out[#out + 1] = lines[i]
+    end
     return out
 end
 
@@ -168,8 +175,12 @@ local function run()
         end
         rex.stop()
     end
-    rex.on('terminal.child_exited', function(ctx) if ctx.block_id == id then finish(false) end end)
-    rex.on('block_closed', function(_, ev) if ev.block_id == id then finish(true) end end)
+    rex.on('terminal.child_exited', function(ctx)
+        if ctx.block_id == id then finish(false) end
+    end)
+    rex.on('block_closed', function(_, ev)
+        if ev.block_id == id then finish(true) end
+    end)
 end
 
 local function write()

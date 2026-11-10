@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import RexKit
 
 enum Loadable<Value> {
     case loading
@@ -33,6 +34,25 @@ enum Item: Identifiable {
         switch self {
         case .pullRequest(let pullRequest): pullRequest.repo
         case .stray(let branch): branch.repo
+        }
+    }
+
+    var stage: PullRequest.Stage? {
+        if case .pullRequest(let pullRequest) = self { pullRequest.stage } else { nil }
+    }
+
+    var changed: Date {
+        switch self {
+        case .pullRequest(let pullRequest): pullRequest.updated
+        case .stray(let branch): branch.committed
+        }
+    }
+
+    var searchText: String {
+        switch self {
+        case .pullRequest(let pullRequest):
+            "\(pullRequest.title) \(pullRequest.repo) #\(pullRequest.number) \(pullRequest.reason)"
+        case .stray(let branch): "\(branch.name) \(branch.repo)"
         }
     }
 }
@@ -85,6 +105,9 @@ final class PendingModel {
     private(set) var refreshing = false
     private(set) var fetchedAt: Date?
     var selection = 0
+    var query = "" {
+        didSet { selection = 0 }
+    }
     @ObservationIgnored var onDone: () -> Void = {}
 
     var grouping = Grouping.saved {
@@ -95,33 +118,55 @@ final class PendingModel {
         didSet { UserDefaults.standard.set(collapsed.sorted(), forKey: collapsedKey) }
     }
 
-    /// The loaded rows in display order, grouped by merge status or by repository.
+    var isFiltering: Bool { query.contains { !$0.isWhitespace } }
+
+    var hasNoMatch: Bool {
+        isFiltering && rows.isEmpty && pullRequests.value != nil && strays.value != nil
+    }
+
+    /// The loaded items that match `query`, grouped by merge status or by repository.
     var sections: [ItemSection] {
-        let pullRequests = (pullRequests.value ?? []).sorted {
-            $0.stage.rawValue < $1.stage.rawValue
+        guard isFiltering else { return groupedSections }
+        return groupedSections.compactMap { section in
+            let items = section.items.enumerated()
+                .compactMap { index, item in
+                    Fuzzy.score(query, in: item.searchText).map {
+                        (score: $0, index: index, item: item)
+                    }
+                }
+                .sorted { ($0.score, $0.index) < ($1.score, $1.index) }
+                .map(\.item)
+            return items.isEmpty
+                ? nil : ItemSection(id: section.id, title: section.title, items: items)
         }
-        let strays = strays.value ?? []
+    }
+
+    /// Lists the most recent change first, both for items and for repositories.
+    private var groupedSections: [ItemSection] {
+        let items =
+            ((pullRequests.value ?? []).map(Item.pullRequest)
+            + (strays.value ?? []).map(Item.stray))
+            .sorted { $0.changed > $1.changed }
         switch grouping {
         case .status:
             let stages = PullRequest.Stage.allCases.map { stage in
                 ItemSection(
                     id: "stage-\(stage)", title: stage.title,
-                    items: pullRequests.filter { $0.stage == stage }.map(Item.pullRequest))
+                    items: items.filter { $0.stage == stage })
             }
             let branches = ItemSection(
-                id: "strays", title: "Stray branches", items: strays.map(Item.stray))
+                id: "strays", title: "Stray branches", items: items.filter { $0.stage == nil })
             return (stages + [branches]).filter { !$0.items.isEmpty }
         case .repository:
-            let items = pullRequests.map(Item.pullRequest) + strays.map(Item.stray)
             return Dictionary(grouping: items, by: \.repo)
-                .sorted { $0.key < $1.key }
+                .sorted { $0.value[0].changed > $1.value[0].changed }
                 .map { repo, items in ItemSection(id: "repo-\(repo)", title: repo, items: items) }
         }
     }
 
     var rows: [Row] {
         sections.flatMap { section in
-            let folded = collapsed.contains(section.id)
+            let folded = collapsed.contains(section.id) && !isFiltering
             let items = folded ? [] : section.items.map { Row.item($0, section: section.id) }
             return [Row.title(section, collapsed: folded)] + items
         }

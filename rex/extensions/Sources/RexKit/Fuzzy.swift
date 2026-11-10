@@ -1,6 +1,7 @@
-/// A description
-enum Fuzzy {
-    static func score(_ query: String, in text: String) -> Int? {
+/// Matches each whitespace-separated term of `query` as a subsequence of `text`.
+/// Returns nil if a term does not match, and a lower score for a tighter match.
+public enum Fuzzy {
+    public static func score(_ query: String, in text: String) -> Int? {
         let haystack = Array(text.lowercased())
         var total = 0
         for term in query.lowercased().split(whereSeparator: \.isWhitespace) {

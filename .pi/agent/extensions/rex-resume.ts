@@ -18,6 +18,12 @@ export default function (pi: ExtensionAPI) {
   const blockId = process.env.REX_BLOCK;
   if (!blockId || process.env.PI_IS_SUBAGENT === "1") return;
   const resumeFile = resumeFileForBlock(blockId);
+  let killedBySignal = false;
+  const markKilled = () => {
+    killedBySignal = true;
+  };
+  process.on("SIGTERM", markKilled);
+  process.on("SIGHUP", markKilled);
 
   pi.on("session_start", (_event, ctx) => {
     if (!ctx.hasUI) return;
@@ -28,5 +34,13 @@ export default function (pi: ExtensionAPI) {
     }
     fs.mkdirSync(path.dirname(resumeFile), { recursive: true });
     fs.writeFileSync(resumeFile, sessionFile);
+  });
+
+  pi.on("session_shutdown", (event) => {
+    process.off("SIGTERM", markKilled);
+    process.off("SIGHUP", markKilled);
+    if (event.reason === "quit" && !killedBySignal) {
+      fs.rmSync(resumeFile, { force: true });
+    }
   });
 }

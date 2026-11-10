@@ -110,7 +110,10 @@ export class Pane {
     return JSON.parse(r.stdout) as T;
   }
 
-  async pick(ctx: ExtensionContext): Promise<string | undefined> {
+  async pick(
+    ctx: ExtensionContext,
+    title = "Send commands to",
+  ): Promise<string | undefined> {
     const { targets } = await this.lua<{ targets: Target[] }>({
       op: "targets",
     });
@@ -126,7 +129,7 @@ export class Pane {
         .join(" · "),
     );
     const NEW = "New pane beside pi";
-    const choice = await ctx.ui.select("Send commands to", [...labels, NEW]);
+    const choice = await ctx.ui.select(title, [...labels, NEW]);
     if (!choice) return undefined;
     this.target =
       choice === NEW ? "new" : targets[labels.indexOf(choice)]?.block_id;
@@ -138,12 +141,15 @@ export class Pane {
     const request = (target: string | undefined) =>
       this.lua<SendResult>({ op: "send", target, text: code, cwd: ctx.cwd });
     let result = await request(this.target);
-    if (result.status === "pick") {
-      if (!(await this.pick(ctx))) return;
+    if (result.status === "pick" || result.status === "busy") {
+      const title =
+        result.status === "busy"
+          ? `The target pane runs ${result.program ?? "no program"}. Send commands to`
+          : undefined;
+      if (!(await this.pick(ctx, title))) return;
       result = await request(this.target);
       if (result.status === "pick") return;
     }
-    this.target = result.block_id;
     if (result.status === "busy") {
       ctx.ui.notify(
         `The target pane runs ${result.program ?? "no program"}, so nothing was sent. Pick another pane with /send-target.`,
@@ -151,6 +157,7 @@ export class Pane {
       );
       return;
     }
+    this.target = result.block_id;
     if (result.status === "no_bracketed_paste") {
       ctx.ui.notify(
         `${result.program} in the target pane has bracketed paste off, so a multi-line send would run each line.`,

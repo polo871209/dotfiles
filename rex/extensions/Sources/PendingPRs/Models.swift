@@ -14,6 +14,7 @@ struct PullRequest: Identifiable, Sendable {
     let title: String
     let url: URL
     let stage: Stage
+    let updated: Date
     let reason: String
     let details: [String]
     var id: URL { url }
@@ -26,7 +27,7 @@ struct StrayBranch: Identifiable, Sendable {
 
     let repo: String
     let name: String
-    let committed: String
+    let committed: Date
     let kind: Kind
     let pullRequests: [Int]
     let url: URL

@@ -2,8 +2,9 @@ import RexKit
 import SwiftUI
 
 struct PendingView: View {
-    let model: PendingModel
+    @Bindable var model: PendingModel
     let theme: Theme
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         let selectedID = model.selectedRow?.id
@@ -28,7 +29,7 @@ struct PendingView: View {
                 Text(model.grouping == .status ? "⇥ by repository" : "⇥ by status")
                 Text("← → fold")
                 Text("↩ open")
-                Text("R refresh")
+                Text("⌘R refresh")
                 Text("esc close")
             }
             .font(.system(size: 11))
@@ -39,23 +40,31 @@ struct PendingView: View {
         .background(theme.background, in: .rect(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(theme.muted.opacity(0.35)))
         .shadow(color: .black.opacity(0.35), radius: 24, y: 8)
+        .onAppear { searchFocused = true }
     }
 
     private var divider: some View { theme.muted.opacity(0.25).frame(height: 1) }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text("Pending").font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(theme.foreground)
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass").foregroundStyle(theme.muted)
+            TextField(
+                "", text: $model.query,
+                prompt: Text("Search pending PRs and branches").foregroundStyle(theme.muted)
+            )
+            .textFieldStyle(.plain)
+            .font(.system(size: 15))
+            .foregroundStyle(theme.foreground)
+            .focused($searchFocused)
             HStack(spacing: 4) {
-                Text("· by \(model.grouping.rawValue)")
-                Image(systemName: "chevron.up.chevron.down").font(.system(size: 8, weight: .semibold))
+                Text("by \(model.grouping.rawValue)")
+                Image(systemName: "chevron.up.chevron.down").font(
+                    .system(size: 8, weight: .semibold))
             }
             .font(.system(size: 12))
             .foregroundStyle(theme.muted)
             .contentShape(Rectangle())
             .onTapGesture { model.toggleGrouping() }
-            Spacer()
             if model.refreshing {
                 ProgressView().controlSize(.small)
             } else if let fetchedAt = model.fetchedAt {
@@ -104,6 +113,8 @@ struct PendingView: View {
         }
         if model.pullRequests.value?.isEmpty == true, model.strays.value?.isEmpty == true {
             Placeholder(text: "Nothing pending", theme: theme)
+        } else if model.hasNoMatch {
+            Placeholder(text: "No match for “\(model.query)”", theme: theme)
         }
     }
 }
@@ -184,9 +195,12 @@ private struct PullRequestRow: View {
             }
             VStack(alignment: .leading, spacing: 3) {
                 Text(pullRequest.title).foregroundStyle(theme.foreground)
-                Text(showsRepo ? "\(pullRequest.repo) #\(pullRequest.number)" : "#\(pullRequest.number)")
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.muted)
+                Text(
+                    showsRepo
+                        ? "\(pullRequest.repo) #\(pullRequest.number)" : "#\(pullRequest.number)"
+                )
+                .font(.system(size: 11))
+                .foregroundStyle(theme.muted)
                 if selected, !pullRequest.details.isEmpty {
                     Text(pullRequest.details.joined(separator: " · "))
                         .font(.system(size: 11))
@@ -220,7 +234,7 @@ private struct StrayRow: View {
                 .frame(width: 7)
             VStack(alignment: .leading, spacing: 3) {
                 Text(branch.name).foregroundStyle(theme.foreground)
-                Text((showsRepo ? "\(branch.repo) · " : "") + "last commit \(branch.committed)")
+                Text((showsRepo ? "\(branch.repo) · " : "") + "last commit \(committedDay)")
                     .font(.system(size: 11))
                     .foregroundStyle(theme.muted)
             }
@@ -232,6 +246,10 @@ private struct StrayRow: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(selected ? theme.selection : .clear, in: .rect(cornerRadius: 7))
+    }
+
+    private var committedDay: String {
+        branch.committed.formatted(.iso8601.year().month().day())
     }
 
     private var status: String {

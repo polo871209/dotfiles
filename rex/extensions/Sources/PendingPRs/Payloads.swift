@@ -72,6 +72,7 @@ struct OpenNode: Decodable {
     let title: String
     let url: URL
     let isDraft: Bool
+    let updatedAt: Date
     let repository: Repository
     let mergeable: String
     let mergeStateStatus: String
@@ -105,14 +106,14 @@ struct ClosedNode: Decodable {
 struct Branch: Sendable {
     let repo: String
     let name: String
-    let committed: String
+    let committed: Date
     let headAuthoredByMe: Bool
 }
 
 struct RefNode: Decodable, Sendable {
     struct Author: Decodable, Sendable { let user: Login? }
     struct Target: Decodable, Sendable {
-        let committedDate: String
+        let committedDate: Date
         let authors: Connection<Author>
     }
     struct Rule: Decodable, Sendable { let id: String }

@@ -11,6 +11,10 @@
 # node_modules/ inside still ignored by the global `node_modules/` rule.
 !.pi/agent/npm/
 
+# pgcli writes these next to its config when stow links the whole directory
+pgcli/history
+pgcli/log
+
 # Hex regenerates these on update
 hex/AGENTS.md
 hex/hex.d.ts

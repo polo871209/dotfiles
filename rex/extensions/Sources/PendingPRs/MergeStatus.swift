@@ -70,7 +70,7 @@ extension OpenNode {
     func make(_ stage: PullRequest.Stage, _ reason: String, _ details: [String]) -> PullRequest {
         PullRequest(
             repo: repository.name, number: number, title: title, url: url, stage: stage,
-            reason: reason, details: details)
+            updated: updatedAt, reason: reason, details: details)
     }
 
     private func reviewers(_ state: String) -> [String] {

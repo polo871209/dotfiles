@@ -1,30 +1,30 @@
 {
-  "version": 1,
+  "version": 2,
   "skills": {
     "how": {
       "source": "cursor/plugins",
       "ref": "main",
       "sourceType": "github",
       "skillPath": "pstack/skills/how/SKILL.md",
-      "computedHash": "1eedca26dced34439d87e9e636fe161cfeea0d3143e61983aa8567c6b99f8294"
+      "computedHash": "b0dcd53c5491a24d3bf16dd251f65334e7fc21137e0cd60907c2728b44d5541b"
     },
     "humanizer": {
       "source": "blader/humanizer",
       "sourceType": "github",
       "skillPath": "SKILL.md",
-      "computedHash": "1e67c3a4a675bd0c961b1fd8ebb718174f9a61a547d9bedad2ade5eb99cce831"
+      "computedHash": "04cdabbcceaa7b5d4bd4b1ea02339013503d623b270b5b3b2e274837494d7134"
     },
     "show-me": {
       "source": "humanlayer/skills",
       "sourceType": "github",
       "skillPath": "plugins/show-me/skills/show-me/SKILL.md",
-      "computedHash": "43766f53afe7eb9feba0bb7716590c35cbb8d39d4a91eddef50e9566a6f6ae19"
+      "computedHash": "0904362ca0f13fc69d88822bb1e7a72f27fd80b992b57ef89ef8a12c3fecce35"
     },
     "writing-for-agents": {
       "source": "mattpocock/skills",
       "sourceType": "github",
       "skillPath": "skills/productivity/writing-for-agents/SKILL.md",
-      "computedHash": "95da47fc97af998e85b7d7e6d57b3ac76727c1e290cfe9ea09005aacb826959f"
+      "computedHash": "e79a2476b2417b228922453478d9505a6b9af19f3a412e560728ce62ed3555ca"
     }
   }
 }

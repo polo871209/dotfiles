@@ -17,11 +17,21 @@ struct GitHub: Sendable {
         self.token = text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// GitHub computes merge state in the background and answers UNKNOWN until it is done.
     func openPullRequests() async throws -> [PullRequest] {
-        let nodes: [OpenNode] = try await search(
+        var nodes = try await openNodes()
+        for _ in 0..<5 where nodes.contains(where: { $0.mergeStateStatus == "UNKNOWN" }) {
+            try await Task.sleep(for: .seconds(2))
+            nodes = try await openNodes()
+        }
+        return nodes.map(\.pullRequest)
+    }
+
+    private func openNodes() async throws -> [OpenNode] {
+        try await search(
             "is:pr is:open author:@me archived:false sort:updated-desc",
             fields: """
-                number title url isDraft repository{name}
+                number title url isDraft updatedAt repository{name}
                 mergeable mergeStateStatus reviewDecision
                 reviewRequests(first:20){nodes{requestedReviewer{
                   ... on User{login} ... on Team{name}}}}
@@ -31,7 +41,6 @@ struct GitHub: Sendable {
                   ... on CheckRun{name status conclusion}
                   ... on StatusContext{context state}}}}}}}
                 """)
-        return nodes.map(\.pullRequest)
     }
 
     func strayBranches() async throws -> [StrayBranch] {
@@ -50,7 +59,6 @@ struct GitHub: Sendable {
             $0.headAuthoredByMe || closedHeads.contains("\($0.repo)\t\($0.name)")
         }
         return try await classify(candidates, login: login)
-            .sorted { ($0.repo, $1.committed) < ($1.repo, $0.committed) }
     }
 
     private func graphql<T: Decodable>(_ query: String, _ vars: Variables = [:]) async throws -> T {
@@ -62,7 +70,9 @@ struct GitHub: Sendable {
             "query": query, "variables": vars.mapValues { $0 ?? NSNull() as Any },
         ])
         let (data, response) = try await URLSession.shared.data(for: request)
-        let envelope = try JSONDecoder().decode(Envelope<T>.self, from: data)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let envelope = try decoder.decode(Envelope<T>.self, from: data)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard status == 200, envelope.errors == nil, let result = envelope.data else {
             let errors = envelope.errors?.map(\.message).joined(separator: "; ")
@@ -171,7 +181,7 @@ struct GitHub: Sendable {
             throw GitHubError(errorDescription: message)
         }
         return Branch(
-            repo: repo, name: ref.name, committed: String(ref.target.committedDate.prefix(10)),
+            repo: repo, name: ref.name, committed: ref.target.committedDate,
             headAuthoredByMe: authors.nodes.contains { $0.user?.login == login })
     }
 

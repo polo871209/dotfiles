@@ -351,7 +351,15 @@ rex.action {
                 },
             }
         )
-        if shown then rex.exec { shims .. 'nvim', '--server', nvim_socket_prefix .. shown:match(block_id_suffix) .. '.sock', '--remote-send', '<Cmd>' .. open_last_edit .. '<CR>' } end
+        if shown then
+            rex.exec {
+                shims .. 'nvim',
+                '--server',
+                nvim_socket_prefix .. shown:match(block_id_suffix) .. '.sock',
+                '--remote-send',
+                '<Cmd>' .. open_last_edit .. '<CR>',
+            }
+        end
     end,
 }
 
@@ -469,6 +477,6 @@ rex.bind('cmd+s', 'sofka')
 rex.bind('cmd+n', 'nvim')
 rex.bind('cmd+u', 'open_url')
 rex.bind('cmd+p', 'browse_pr')
-rex.bind('shift+cmd+p', 'pending_prs')
+rex.bind('shift+cmd+s', 'pending_prs')
 rex.bind('cmd+y', 'copy_path')
 rex.bind('cmd+w', 'close_pane')

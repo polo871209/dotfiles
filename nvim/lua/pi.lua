@@ -39,11 +39,14 @@ local function listener_alive(sock)
     return ok
 end
 
+---@return table?
+local function session_layout() return rex { 'window', 'ls', '-s', vim.env.REX_SESSION, '--json' } end
+
+---@param layout table?
 ---@return { block_id: string, window_id: string, sock: string, window: string, label: string }[]
-local function live_bridges()
-    local session = vim.env.REX_SESSION
-    local layout = rex { 'window', 'ls', '-s', session, '--json' }
+local function live_bridges(layout)
     if not layout then return {} end
+    local session = vim.env.REX_SESSION
     local out = {}
     for index, window in ipairs(layout.windows) do
         for _, layer in ipairs(window.layers) do
@@ -65,22 +68,37 @@ local function live_bridges()
     return out
 end
 
----@param cb fun(target: table?)
+---@param layout table
+---@return string?
+local function editor_floating_layer(layout)
+    for _, window in ipairs(layout.windows) do
+        for _, layer in ipairs(window.layers) do
+            if layer.kind == 'floating' then
+                for _, block in ipairs(layer.blocks) do
+                    if block.block_id == vim.env.REX_BLOCK then return layer.layer_id end
+                end
+            end
+        end
+    end
+end
+
+---@param cb fun(target: table?, layout: table?)
 local function resolve_target(cb)
     if vim.env.REX_SESSION == nil then
         notify('pi integration requires Rex', vim.log.levels.ERROR)
         return cb(nil)
     end
-    local live = live_bridges()
+    local layout = session_layout()
+    local live = live_bridges(layout)
     if #live == 0 then
         notify('No pi listener in this Rex session. Is rex-bridge.ts loaded?', vim.log.levels.ERROR)
         return cb(nil)
     end
-    if #live == 1 then return cb(live[1]) end
+    if #live == 1 then return cb(live[1], layout) end
     vim.ui.select(live, {
         prompt = 'Send to which pi agent?',
         format_item = function(p) return ('%s %s'):format(p.window, p.label) end,
-    }, function(choice) cb(choice) end)
+    }, function(choice) cb(choice, layout) end)
 end
 
 ---@param args string[]
@@ -94,12 +112,18 @@ end
 
 -- The Rex app keeps its own visible tab per client, so `rex focus` alone leaves the app on the old tab.
 ---@param target { block_id: string, window_id: string }
-local function show_target(target)
+---@param layout table
+local function show_target(target, layout)
     local session = vim.env.REX_SESSION
-    rex_async(
-        { 'focus', '-s', session, target.block_id },
-        function() rex_async { 'do', 'session.select', 'session_id=' .. session, 'window_id=' .. target.window_id } end
-    )
+    local function focus_target()
+        rex_async(
+            { 'focus', '-s', session, target.block_id },
+            function() rex_async { 'do', 'session.select', 'session_id=' .. session, 'window_id=' .. target.window_id } end
+        )
+    end
+    local layer_id = editor_floating_layer(layout)
+    if not layer_id then return focus_target() end
+    rex_async({ 'api', 'call', '-s', session, 'session.set_layer_state', vim.json.encode { layer_id = layer_id, state = 'minimized' } }, focus_target)
 end
 
 ---@param sock string
@@ -202,7 +226,7 @@ function M.send_selection()
     local total = vim.api.nvim_buf_line_count(buf)
     eline = math.min(eline, total)
 
-    resolve_target(function(target)
+    resolve_target(function(target, layout)
         if not target then return end
         local selected = table.concat(vim.api.nvim_buf_get_lines(buf, sline - 1, eline, false), '\n')
         if #selected <= MAX_PAYLOAD / 2 then
@@ -210,14 +234,14 @@ function M.send_selection()
         else
             send(target.sock, { paste = ('Re: %s lines %d-%d. Read the file for full context.'):format(filepath, sline, eline) })
         end
-        show_target(target)
+        show_target(target, layout)
     end)
 end
 
 ---@return { sock: string, window: string, label: string }[]?, string? error when there is no list
 function M.listeners()
     if vim.env.REX_SESSION == nil then return nil, 'nvim does not run inside Rex' end
-    local live = live_bridges()
+    local live = live_bridges(session_layout())
     if #live == 0 then return nil, 'no pi listener in this Rex session' end
     return vim.tbl_map(function(p) return { sock = p.sock, window = p.window, label = p.label } end, live)
 end
@@ -234,8 +258,18 @@ function M.send_comment(sock, file, comment, on_done)
     end)
 end
 
+---@return boolean
+local function has_file_buffer()
+    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+        if vim.bo[buf].buflisted and vim.bo[buf].buftype == '' and vim.api.nvim_buf_get_name(buf) ~= '' then return true end
+    end
+    return false
+end
+
+--- Open the file that pi last edited, unless the editor already has a file open.
 ---@param block_id string
 function M.open_last_edit(block_id)
+    if has_file_buffer() then return end
     local path, replied = nil, false
     request(socket_for_block(block_id), { query = 'last_edit' }, function(ack)
         path = ack and ack.ok and ack.path
@@ -269,10 +303,10 @@ function M.send_diagnostics()
     local filepath = vim.fn.fnamemodify(bufname, ':p')
     local text = 'Please review these diagnostics and help me fix them.\n\n' .. filepath .. ':\n' .. table.concat(lines, '\n')
 
-    resolve_target(function(target)
+    resolve_target(function(target, layout)
         if not target then return end
         send(target.sock, { text = text })
-        show_target(target)
+        show_target(target, layout)
     end)
 end
 

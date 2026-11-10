@@ -33,7 +33,10 @@ public final class PendingHost {
                 return PendingView(model: model, theme: theme)
             },
             handleKey: { press in Self.handle(press, model: model, path: path) })
-        if opened { model.refresh(path: path) }
+        if opened {
+            model.query = ""
+            model.refresh(path: path)
+        }
     }
 
     private static func handle(_ press: KeyPress, model: PendingModel, path: String) -> KeyResult {
@@ -42,12 +45,12 @@ public final class PendingHost {
             return .handled
         }
         switch (press.modifiers, press.keyCode, press.key.lowercased()) {
-        case ([.command, .shift], _, "p"): return .close
+        case ([.command, .shift], _, "s"): return .close
         case ([], 36, _), ([], 76, _): model.activate()
-        case ([], 123, _): model.collapseSelected()
-        case ([], 124, _): model.expandSelected()
+        case ([], 123, _) where model.query.isEmpty: model.collapseSelected()
+        case ([], 124, _) where model.query.isEmpty: model.expandSelected()
         case ([], 48, _): model.toggleGrouping()
-        case ([], _, "r"): model.refresh(path: path)
+        case ([.command], _, "r"): model.refresh(path: path)
         default: return .ignored
         }
         return .handled

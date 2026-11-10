@@ -113,6 +113,13 @@ alias sz="source ${ZDOTDIR:-$HOME}/.zshrc"
 alias tf="terraform"
 alias up="brew update && brew upgrade -y && brew cleanup && mise upgrade && mise prune -y && pi update && pi update --extensions"
 alias brewdump="brew bundle dump --force --file=~/dotfiles/Brewfile --formula --cask --tap --mas --no-describe"
+db() {
+  docker start pg18 >/dev/null 2>&1 ||
+    docker run -d --name pg18 -e POSTGRES_PASSWORD=pg -e POSTGRES_DB=default \
+      -v pgdata18:/var/lib/postgresql -p 127.0.0.1::5432 postgres:18 >/dev/null || return
+  until docker exec pg18 pg_isready -h localhost -q 2>/dev/null; do sleep 1; done
+  pgcli "postgres://postgres:pg@$(docker port pg18 5432/tcp)/default"
+}
 
 ## Bat
 export BAT_PAGER="less -iRFK"
@@ -176,22 +183,17 @@ fi
 eval "$(oh-my-posh init zsh --config "${XDG_CONFIG_HOME}/ohmyposh/config.yaml")"
 
 # Rex keeps block IDs across a server restart, so pi's rex-resume.ts extension records each pane's session by block ID.
-# A pi that exits returns to this prompt and forgets its pane, and one killed by a restart leaves the record for the restored shell.
-if [[ -n $REX_BLOCK ]]; then
-  _pi_resume_file=${XDG_STATE_HOME:-$HOME/.local/state}/pi/rex-resume/${REX_BLOCK#block:}
-  (( SHLVL == 1 )) && [[ -r $_pi_resume_file ]] && _pi_resume_pending=1
+_pi_resume_file=${XDG_STATE_HOME:-$HOME/.local/state}/pi/rex-resume/${REX_BLOCK#block:}
+if [[ -n $REX_BLOCK ]] && (( SHLVL == 1 )) && [[ -r $_pi_resume_file ]]; then
+  _pi_resume_session=$(<$_pi_resume_file)
   _pi_resume_precmd() {
-    [[ -e $_pi_resume_file ]] || return
-    if (( _pi_resume_pending )); then
-      _pi_resume_pending=0
-      local session=$(<$_pi_resume_file)
-      if [[ -f $session ]]; then
-        command pi --session "$session"
-      else
-        command pi
-      fi
+    precmd_functions=(${precmd_functions:#_pi_resume_precmd})
+    if [[ -f $_pi_resume_session ]]; then
+      command pi --session "$_pi_resume_session"
+    else
+      command pi
     fi
-    rm -f -- $_pi_resume_file
   }
   precmd_functions+=(_pi_resume_precmd)
 fi
+unset _pi_resume_file
