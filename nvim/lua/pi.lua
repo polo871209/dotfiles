@@ -242,7 +242,7 @@ function M.open_last_edit(block_id)
         replied = true
     end)
     vim.wait(TIMEOUT, function() return replied end, 5)
-    if path then vim.cmd.edit(vim.fn.fnameescape(path)) end
+    if path then vim.cmd.drop(vim.fn.fnameescape(path)) end
 end
 
 function M.send_diagnostics()

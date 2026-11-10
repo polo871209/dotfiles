@@ -60,6 +60,34 @@
       "browser_hosts": [],
       "replacements": [
         {
+          "matched_phrase": "agent MD",
+          "output": "AGENTS.md"
+        },
+        {
+          "matched_phrase": "agents MD",
+          "output": "AGENTS.md"
+        },
+        {
+          "matched_phrase": "Agents MD",
+          "output": "AGENTS.md"
+        },
+        {
+          "matched_phrase": "agents.md",
+          "output": "AGENTS.md"
+        },
+        {
+          "matched_phrase": "Claude MD",
+          "output": "AGENTS.md"
+        },
+        {
+          "matched_phrase": "cloud MD",
+          "output": "AGENTS.md"
+        },
+        {
+          "matched_phrase": "Cloud MD",
+          "output": "AGENTS.md"
+        },
+        {
           "matched_phrase": "just file",
           "output": "justfile"
         },
@@ -68,15 +96,11 @@
           "output": "justfile"
         },
         {
-          "matched_phrase": "Neil Vin",
-          "output": "NeoVim"
-        },
-        {
           "matched_phrase": "Neil Vim",
           "output": "NeoVim"
         },
         {
-          "matched_phrase": "Neo Vin",
+          "matched_phrase": "Neil Vin",
           "output": "NeoVim"
         },
         {
@@ -84,7 +108,7 @@
           "output": "NeoVim"
         },
         {
-          "matched_phrase": "Nio Vim",
+          "matched_phrase": "Neo Vin",
           "output": "NeoVim"
         },
         {
@@ -92,15 +116,27 @@
           "output": "NeoVim"
         },
         {
+          "matched_phrase": "Nio Vim",
+          "output": "NeoVim"
+        },
+        {
+          "matched_phrase": "pie",
+          "output": "Pi"
+        },
+        {
+          "matched_phrase": "Py",
+          "output": "Pi"
+        },
+        {
+          "matched_phrase": "PY",
+          "output": "Pi"
+        },
+        {
           "matched_phrase": "V test",
           "output": "Vitest"
         },
         {
           "matched_phrase": "V-test",
-          "output": "Vitest"
-        },
-        {
-          "matched_phrase": "VTest",
           "output": "Vitest"
         },
         {
@@ -112,16 +148,8 @@
           "output": "Vitest"
         },
         {
-          "matched_phrase": "Py",
-          "output": "Pi"
-        },
-        {
-          "matched_phrase": "PY",
-          "output": "Pi"
-        },
-        {
-          "matched_phrase": "pie",
-          "output": "Pi"
+          "matched_phrase": "VTest",
+          "output": "Vitest"
         }
       ],
       "transformations": [],
@@ -239,14 +267,12 @@
   },
   "vocabulary": [
     {
-      "term": "NeoVim",
+      "term": "AGENTS.md",
       "sounds_like": [
-        "Neil Vin",
-        "NeoVid",
-        "Neo Vim",
-        "Neil Vim",
-        "Nio Vim",
-        "Neo Vin"
+        "agent MD",
+        "agents MD",
+        "Claude MD",
+        "cloud MD"
       ]
     },
     {
@@ -257,18 +283,31 @@
       ]
     },
     {
-      "term": "Vitest",
+      "term": "NeoVim",
       "sounds_like": [
-        "V test",
-        "Vee test",
-        "Vi test"
+        "Neil Vim",
+        "Neil Vin",
+        "Neo Vim",
+        "Neo Vin",
+        "NeoVid",
+        "Nio Vim"
       ]
     },
     {
       "term": "Pi",
       "sounds_like": [
-        "Py",
-        "pie"
+        "pie",
+        "Py"
+      ]
+    },
+    {
+      "term": "Vitest",
+      "sounds_like": [
+        "V test",
+        "V-test",
+        "Vee test",
+        "Vi test",
+        "VTest"
       ]
     }
   ],

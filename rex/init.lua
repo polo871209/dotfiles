@@ -107,18 +107,6 @@ local function remote_web_url(remote)
     return 'https://' .. host .. '/' .. path
 end
 
-local function open_zoomed(ctx, command)
-    -- A floating layer leaves cells with the default background transparent, so zoom a split instead.
-    local split = must(rex.session.new_split {
-        anchor_id = ctx.block_id,
-        direction = 'horizontal',
-        side = 'after',
-        focus = true,
-        layout = shell_block { cwd = foreground_cwd(ctx), command = command },
-    })
-    must(rex.session.zoom_block { block_id = split.block_ids[1], zoom = true })
-end
-
 local function view_blocks()
     local found = {}
     for _, window in ipairs(must(rex.session.view {}).windows) do
@@ -129,6 +117,37 @@ local function view_blocks()
         end
     end
     return found
+end
+
+-- Returns the panel's block_id when it shows a panel that already runs.
+local function toggle_panel(ctx, label, bounds, layout)
+    local here, panel, panel_layer, panel_window
+    for _, entry in ipairs(view_blocks()) do
+        if entry.block.block_id == ctx.block_id then here = entry.window_id end
+        if entry.block.label == label then
+            panel, panel_layer, panel_window = entry.block, entry.layer, entry.window_id
+        end
+    end
+    if not panel then
+        must(rex.session.new_layer { bounds = bounds, focus = true, layout = layout })
+        return
+    end
+    if panel.block_id == ctx.block_id then
+        local layer_id = panel_layer.layer_id
+        if panel_layer.kind ~= 'floating' then layer_id = must(rex.session.float_block { block_id = panel.block_id, bounds = bounds }).layer_id end
+        must(rex.session.set_layer_state { layer_id = layer_id, state = 'minimized' })
+        return
+    end
+    if panel_window ~= here then
+        must(rex.session.move_block { block_id = panel.block_id, anchor_block_id = ctx.block_id })
+        must(rex.session.float_block { block_id = panel.block_id, bounds = bounds })
+        must(rex.session.focus_block { block_id = panel.block_id })
+    elseif panel_layer.kind == 'floating' then
+        must(rex.session.set_layer_state { layer_id = panel_layer.layer_id, state = 'normal', focus = true })
+    else
+        must(rex.session.focus_block { block_id = panel.block_id })
+    end
+    return panel.block_id
 end
 
 local function toggle_picker(label, command)
@@ -299,38 +318,41 @@ rex.action {
 rex.action {
     name = 'sofka',
     title = 'Toggle Sofka',
-    run = function(ctx)
-        local label = 'Sofka'
-        local bounds = { 0.05, 0.05, 0.9, 0.9 }
-        local here, sofka, sofka_layer, sofka_window
-        for _, entry in ipairs(view_blocks()) do
-            if entry.block.block_id == ctx.block_id then here = entry.window_id end
-            if entry.block.label == label then
-                sofka, sofka_layer, sofka_window = entry.block, entry.layer, entry.window_id
-            end
-        end
-        if not sofka then
-            must(rex.session.new_layer { bounds = bounds, focus = true, layout = shell_block { label = label, command = { 'sofka' } } })
-        elseif sofka.block_id == ctx.block_id then
-            local layer_id = sofka_layer.layer_id
-            if sofka_layer.kind ~= 'floating' then layer_id = must(rex.session.float_block { block_id = sofka.block_id, bounds = bounds }).layer_id end
-            must(rex.session.set_layer_state { layer_id = layer_id, state = 'minimized' })
-        elseif sofka_window ~= here then
-            must(rex.session.move_block { block_id = sofka.block_id, anchor_block_id = ctx.block_id })
-            must(rex.session.float_block { block_id = sofka.block_id, bounds = bounds })
-            must(rex.session.focus_block { block_id = sofka.block_id })
-        elseif sofka_layer.kind == 'floating' then
-            must(rex.session.set_layer_state { layer_id = sofka_layer.layer_id, state = 'normal', focus = true })
-        else
-            must(rex.session.focus_block { block_id = sofka.block_id })
-        end
-    end,
+    run = function(ctx) toggle_panel(ctx, 'Sofka', { 0.05, 0.05, 0.9, 0.9 }, shell_block { label = 'Sofka', command = { 'sofka' } }) end,
 }
+
+local nvim_socket_prefix = home .. '/Library/Caches/rex-nvim-'
+-- Neovim reads an address with a colon as host:port, so the socket name drops the "block:" prefix.
+local block_id_suffix = '[^:]+$'
 
 rex.action {
     name = 'nvim',
-    title = 'Open Neovim',
-    run = function(ctx) open_zoomed(ctx, { 'nvim', '-c', ('lua require("pi").open_last_edit(%q)'):format(ctx.block_id) }) end,
+    title = 'Toggle Neovim',
+    run = function(ctx)
+        local cwd = foreground_cwd(ctx)
+        local label = 'Neovim ' .. tilde_path(cwd)
+        local open_last_edit = ('lua require("pi").open_last_edit(%q)'):format(ctx.block_id)
+        local shown = toggle_panel(
+            ctx,
+            label,
+            { 0, 0, 1, 1 },
+            shell_block {
+                label = label,
+                cwd = cwd,
+                command = {
+                    'nvim',
+                    -- Rex leaves the unpainted cells of a floating layer transparent, so Neovim must paint its background.
+                    '--cmd',
+                    'let g:opaque_background = v:true',
+                    '--cmd',
+                    ('lua vim.fn.serverstart(%q .. vim.env.REX_BLOCK:match %q .. ".sock")'):format(nvim_socket_prefix, block_id_suffix),
+                    '-c',
+                    open_last_edit,
+                },
+            }
+        )
+        if shown then rex.exec { shims .. 'nvim', '--server', nvim_socket_prefix .. shown:match(block_id_suffix) .. '.sock', '--remote-send', '<Cmd>' .. open_last_edit .. '<CR>' } end
+    end,
 }
 
 rex.action {

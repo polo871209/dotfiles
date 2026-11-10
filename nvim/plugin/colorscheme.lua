@@ -4,6 +4,8 @@ vim.pack.add {
     { src = 'https://github.com/catppuccin/nvim', name = 'catppuccin' },
 }
 
+local rex_background = '#282828'
+
 require('catppuccin').setup {
     transparent_background = true,
 
@@ -24,10 +26,14 @@ require('catppuccin').setup {
 
     custom_highlights = function()
         return {
-            NormalFloat = { bg = '#282828' },
-            FloatBorder = { bg = '#282828', fg = '#fabd2f' },
+            NormalFloat = { bg = rex_background },
+            FloatBorder = { bg = rex_background, fg = '#fabd2f' },
         }
     end,
 }
 
 vim.cmd.colorscheme 'catppuccin-mocha'
+
+if vim.g.opaque_background then
+    vim.api.nvim_set_hl(0, 'Normal', vim.tbl_extend('force', vim.api.nvim_get_hl(0, { name = 'Normal' }), { bg = rex_background }))
+end

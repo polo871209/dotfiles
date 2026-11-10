@@ -17,7 +17,7 @@
   },
   "quietStartup": true,
   "collapseChangelog": true,
-  "lastChangelogVersion": "1.5.0",
+  "lastChangelogVersion": "1.5.1",
   "warnings": {
     "anthropicExtraUsage": false
   },

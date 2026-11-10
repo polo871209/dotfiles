@@ -198,9 +198,9 @@
     "saveFolder": "~/Downloads",
     "format": "mov",
     "systemAudio": false,
-    "microphone": false,
+    "microphone": true,
     "showsClicks": true,
-    "camera": true,
+    "camera": false,
     "commands": {
       "record-screen": {
         "shortcut": "hyper+z",
