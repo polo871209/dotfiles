@@ -57,7 +57,7 @@ const describe = (arg: RemoteObject) =>
 const at = (url?: string, line?: number) =>
   url ? `${url}${line === undefined ? "" : `:${line + 1}`}` : undefined;
 
-/** Collects console messages and network requests from CDP events of one tab. */
+/** Collects console messages and network requests from CDP events of several tabs. */
 export class DevtoolsRecorder {
   readonly console: ConsoleEntry[] = [];
   private readonly requests: RequestEntry[] = [];
@@ -67,8 +67,9 @@ export class DevtoolsRecorder {
   >();
   private lastActivity = Date.now();
 
-  handle(method: string, params: Record<string, any>) {
+  handle(method: string, params: Record<string, any>, sessionId: string) {
     this.lastActivity = Date.now();
+    const key = `${sessionId}:${params.requestId}`;
     switch (method) {
       case "Runtime.consoleAPICalled": {
         const frame: CallFrame | undefined = params.stackTrace?.callFrames?.[0];
@@ -101,7 +102,7 @@ export class DevtoolsRecorder {
         break;
       }
       case "Network.requestWillBeSent": {
-        const previous = this.open.get(params.requestId);
+        const previous = this.open.get(key);
         if (previous && params.redirectResponse) {
           previous.entry.status = params.redirectResponse.status;
           previous.entry.ms = Math.round(
@@ -114,28 +115,28 @@ export class DevtoolsRecorder {
           type: params.type,
         };
         this.requests.push(entry);
-        this.open.set(params.requestId, { entry, start: params.timestamp });
+        this.open.set(key, { entry, start: params.timestamp });
         break;
       }
       case "Network.responseReceived": {
-        const request = this.open.get(params.requestId);
+        const request = this.open.get(key);
         if (!request) break;
         request.entry.status = params.response.status;
         request.entry.type ??= params.type;
         break;
       }
       case "Network.loadingFinished": {
-        const request = this.open.get(params.requestId);
+        const request = this.open.get(key);
         if (!request) break;
         request.entry.bytes = params.encodedDataLength;
         request.entry.ms = Math.round(
           (params.timestamp - request.start) * 1000,
         );
-        this.open.delete(params.requestId);
+        this.open.delete(key);
         break;
       }
       case "Network.loadingFailed": {
-        const request = this.open.get(params.requestId);
+        const request = this.open.get(key);
         if (!request) break;
         request.entry.failure = params.blockedReason
           ? `blocked: ${params.blockedReason}`
@@ -145,7 +146,7 @@ export class DevtoolsRecorder {
         request.entry.ms = Math.round(
           (params.timestamp - request.start) * 1000,
         );
-        this.open.delete(params.requestId);
+        this.open.delete(key);
         break;
       }
     }

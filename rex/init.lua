@@ -248,7 +248,7 @@ rex.action {
     name = 'lazygit',
     title = 'Open Lazygit',
     run = function(ctx)
-        local bounds = { 0.05, 0.05, 0.9, 0.9 }
+        local bounds = { 0.02, 0.02, 0.96, 0.96 }
         local label = 'Lazygit'
         local blocks = must(rex.session.list_blocks {}).blocks
         local windows, window_id = {}, nil
@@ -318,7 +318,7 @@ rex.action {
 rex.action {
     name = 'sofka',
     title = 'Toggle Sofka',
-    run = function(ctx) toggle_panel(ctx, 'Sofka', { 0.05, 0.05, 0.9, 0.9 }, shell_block { label = 'Sofka', command = { 'sofka' } }) end,
+    run = function(ctx) toggle_panel(ctx, 'Sofka', { 0.02, 0.02, 0.96, 0.96 }, shell_block { label = 'Sofka', command = { 'sofka' } }) end,
 }
 
 local nvim_socket_prefix = home .. '/Library/Caches/rex-nvim-'

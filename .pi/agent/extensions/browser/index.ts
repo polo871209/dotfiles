@@ -5,30 +5,25 @@ import type {
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { customEntries } from "../shared/session.ts";
+import { BrowserUse, type Llm } from "./bridge.ts";
 import { Helium, resolveProfile } from "./helium.ts";
 import type { DevtoolsReport } from "./devtools.ts";
-import { runGoal, type Models, type Outcome, type Step } from "./jev.ts";
 
 const TOOL_NAME = "browser";
 const TOGGLE_ENTRY = "browser-toggle";
 
-const describe = (step: Step) =>
-  `${step.operation} ${step.action}${step.text === undefined ? "" : ` ← ${JSON.stringify(step.text)}`}`;
-
-async function resolveModels(ctx: ExtensionContext): Promise<Models> {
-  const jev = (
-    await ctx.modelRegistry.getAvailableOfType("classifier", "typesafe")
-  ).find((model) => model.id === "jev-latest");
-  if (!jev)
-    throw new Error(
-      "Jev is unavailable. Set TYPESAFE_API_KEY to a TypeSafe key and restart pi.",
-    );
-  const writer = ctx.modelRegistry.find("anthropic", "claude-haiku-5-5");
-  if (!writer || !ctx.modelRegistry.hasConfiguredAuth(writer))
+async function resolveLlm(ctx: ExtensionContext): Promise<Llm> {
+  const model = ctx.modelRegistry.find("anthropic", "claude-haiku-5-5");
+  const auth = model && (await ctx.modelRegistry.getApiKeyAndHeaders(model));
+  if (!model || !auth?.ok || !auth.apiKey)
     throw new Error(
       "anthropic/claude-haiku-5-5 is unavailable. Log in to Anthropic with /login.",
     );
-  return { registry: ctx.modelRegistry, jev, writer };
+  return {
+    model: model.id,
+    key: auth.apiKey,
+    oauth: ctx.modelRegistry.isUsingOAuth(model),
+  };
 }
 
 const params = Type.Object({
@@ -36,7 +31,7 @@ const params = Type.Object({
     Type.String({
       minLength: 1,
       description:
-        "One natural-language goal with every value it needs, e.g. 'Search one-way flights from Zurich to London on 2026-12-20 for one adult'. Omit it to only open `url` with `devtools`.",
+        "One natural-language goal with every value it needs and the answer it must return, e.g. 'Search one-way flights from Zurich to London on 2026-12-20 for one adult and list the three cheapest'. Omit it to only open `url` with `devtools`.",
     }),
   ),
   url: Type.Optional(
@@ -80,6 +75,7 @@ const formatDevtools = (report: DevtoolsReport) => {
 export default function (pi: ExtensionAPI) {
   let helium: Helium | undefined;
   let heliumProfile: string | undefined;
+  let browserUse: BrowserUse | undefined;
   let queue: Promise<unknown> = Promise.resolve();
 
   const showStatus = (ctx: ExtensionContext) => {
@@ -89,9 +85,12 @@ export default function (pi: ExtensionAPI) {
   };
 
   const closeHelium = async () => {
+    const agent = browserUse;
     const running = helium;
+    browserUse = undefined;
     helium = undefined;
     heliumProfile = undefined;
+    await agent?.close();
     await running?.close();
   };
 
@@ -145,11 +144,10 @@ export default function (pi: ExtensionAPI) {
       openWorldHint: true,
     },
     description:
-      "Finish one concrete web task in the background in the user's Helium browser, signed in as the user: search, fill and submit forms, pick options, open results. " +
-      "Pass `url` to start there. Without `url`, it continues on the page of the previous browser call in the same turn. " +
-      "Returns the status, the steps taken, and the visible page text. A `done` status is the browser's own claim, so make sure that the page text shows the result before you rely on it. " +
-      "Set `devtools` to also get the console errors and warnings and the failed network requests, like the browser's developer tools. With `devtools` and `url` but no `goal`, it only opens the page and reports them. " +
-      "It cannot use frames, shadow DOM, file uploads, or popup windows.",
+      "Finish one web task in the background in the user's Helium browser, signed in as the user: search, fill and submit forms, pick options, open results, read and extract page data. " +
+      "Pass `url` to start there. Without `url`, it continues on the page and with the memory of the previous browser call in the same turn. " +
+      "Returns the status, the browser agent's answer, and the steps taken. The answer is the browser agent's own claim, so make sure that it holds before you rely on it. " +
+      "Set `devtools` to also get the console errors and warnings and the failed network requests, like the browser's developer tools. With `devtools` and `url` but no `goal`, it only opens the page and reports them.",
     parameters: params,
     outputSchema: Type.Object({
       status: Type.Union([
@@ -160,10 +158,10 @@ export default function (pi: ExtensionAPI) {
       reason: Type.Optional(Type.String()),
       url: Type.String(),
       title: Type.String(),
-      steps: Type.Array(Type.String()),
-      page_text: Type.Optional(
-        Type.String({ description: "Visible text of the final page" }),
+      result: Type.Optional(
+        Type.String({ description: "The browser agent's answer to the goal" }),
       ),
+      steps: Type.Array(Type.String()),
       devtools: Type.Optional(
         Type.Object({
           console: Type.Array(
@@ -224,7 +222,7 @@ export default function (pi: ExtensionAPI) {
       if (!goal && !(params.devtools && params.url))
         throw new Error("Pass a goal, or devtools: true with a url.");
       const run = async () => {
-        const models = goal ? await resolveModels(ctx) : undefined;
+        const llm = goal ? await resolveLlm(ctx) : undefined;
         const profile = await resolveProfile(params.profile);
         if (!helium || (params.profile && heliumProfile !== profile.dir)) {
           await closeHelium();
@@ -233,42 +231,40 @@ export default function (pi: ExtensionAPI) {
           showStatus(ctx);
         }
         const browser = helium;
+        if (!browserUse?.alive)
+          browserUse = await BrowserUse.start(
+            browser.endpoint,
+            browser.shared,
+          );
         const started = Date.now();
         const recorder = params.devtools
           ? await browser.recordDevtools()
           : undefined;
         try {
-          if (params.url) await browser.navigate(params.url);
-          const lines: string[] = [];
-          const outcome: Outcome =
-            goal && models
-              ? await runGoal(
-                  browser,
-                  models,
-                  goal,
-                  (step) => {
-                    lines.push(describe(step));
-                    onUpdate?.({
-                      content: [{ type: "text", text: lines.join("\n") }],
-                      details: { summary: `${lines.length} steps` },
-                    });
-                  },
-                  signal,
-                )
-              : { status: "done", page: await browser.observe(), steps: [] };
+          const steps: string[] = [];
+          const outcome = await browserUse.run(
+            { url: params.url, goal, llm },
+            (step) => {
+              steps.push(step);
+              onUpdate?.({
+                content: [{ type: "text", text: steps.join("\n") }],
+                details: { summary: `${steps.length} steps` },
+              });
+            },
+            signal,
+          );
           await recorder?.quiet();
           const devtools = await recorder?.report();
-          return { outcome, devtools, elapsed: Date.now() - started };
+          return { outcome, steps, devtools, elapsed: Date.now() - started };
         } finally {
           if (recorder) await browser.stopDevtools();
         }
       };
       const pending = queue.then(run);
       queue = pending.catch(() => undefined);
-      const { outcome, devtools, elapsed } = await pending;
+      const { outcome, steps, devtools, elapsed } = await pending;
 
-      const steps = outcome.steps.map(describe);
-      const summary = `${outcome.status} · ${steps.length} steps · ${(elapsed / 1000).toFixed(1)} s · ${outcome.page.url}`;
+      const summary = `${outcome.status} · ${steps.length} steps · ${(elapsed / 1000).toFixed(1)} s · ${outcome.url}`;
       return {
         content: [
           {
@@ -276,10 +272,10 @@ export default function (pi: ExtensionAPI) {
             text: [
               summary,
               ...(outcome.reason ? [outcome.reason] : []),
-              `Title: ${outcome.page.title}`,
+              `Title: ${outcome.title}`,
               ...steps.map((line, i) => `${i + 1}. ${line}`),
               ...(devtools ? formatDevtools(devtools) : []),
-              ...(goal ? ["Page text:", outcome.page.text] : []),
+              ...(outcome.result ? ["Result:", outcome.result] : []),
             ].join("\n"),
           },
         ],
@@ -287,10 +283,10 @@ export default function (pi: ExtensionAPI) {
         structuredContent: {
           status: outcome.status,
           ...(outcome.reason && { reason: outcome.reason }),
-          url: outcome.page.url,
-          title: outcome.page.title,
+          url: outcome.url,
+          title: outcome.title,
+          ...(outcome.result && { result: outcome.result }),
           steps,
-          ...(goal && { page_text: outcome.page.text }),
           ...(devtools && { devtools }),
           elapsed_ms: elapsed,
         },

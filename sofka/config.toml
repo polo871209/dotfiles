@@ -2,3 +2,23 @@
 [skin]
 name = "catppuccin-mocha"
 background = false
+
+# A is free for other bindings; S picks AGE.
+[keys.table]
+sort_age = []
+
+[views."v1/pods"]
+replace = true
+columns = [
+  { name = "NAME", builtin = "NAME" },
+  { name = "READY", builtin = "READY" },
+  { name = "STATUS", builtin = "STATUS" },
+  { name = "%CPU/R", metric = "cpu-request-utilization" },
+  { name = "CPU", metric = "cpu" },
+  { name = "%MEM/R", metric = "memory-request-utilization" },
+  { name = "MEM", metric = "memory" },
+  { name = "RESTARTS", builtin = "RESTARTS" },
+  { name = "IP", builtin = "IP", wide = true },
+  { name = "NODE", builtin = "NODE", wide = true },
+  { name = "AGE", builtin = "AGE" },
+]

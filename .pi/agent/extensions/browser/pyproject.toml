@@ -1,0 +1,2 @@
+[tool.pyrefly]
+python-interpreter-path = "../../../../../.local/share/mise/installs/pipx-browser-use/latest/browser-use/bin/python"
