@@ -107,11 +107,12 @@ local function send()
     local fg = foreground(block_id)
     local program = fg and fg.name
     if not shells[program or ''] then return { status = 'busy', block_id = block_id, program = program } end
-    if args.text:find('\n', 1, true) and not bracketed_paste(block_id) then return { status = 'no_bracketed_paste', block_id = block_id, program = program } end
+    local text = fg.cwd == args.cwd and args.text or args.text_in_folder
+    if text:find('\n', 1, true) and not bracketed_paste(block_id) then return { status = 'no_bracketed_paste', block_id = block_id, program = program } end
     check(rex.call('block.event', {
         session_id = rex.session_id,
         block_id = block_id,
-        event = { type = 'paste', payload = { text = args.text } },
+        event = { type = 'paste', payload = { text = text } },
     }))
     check(rex.session.focus_block { block_id = block_id })
     return { status = 'sent', block_id = block_id, program = program }

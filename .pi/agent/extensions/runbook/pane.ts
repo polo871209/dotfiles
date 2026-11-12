@@ -17,6 +17,12 @@ const NON_SGR_ESCAPE =
 // Rex starts every terminal through /usr/bin/login, which always exits 0, so the wrapper writes the real status to a file.
 const WITH_EXIT_FILE = '"$0" -lic "$1"; echo $? > "$2"';
 
+const shellWord = (text: string): string =>
+  /^[\w@%+=:,./-]+$/.test(text) ? text : `'${text.replaceAll("'", `'\\''`)}'`;
+
+export const inFolder = (cwd: string, code: string): string =>
+  `cd ${shellWord(cwd)} && ${code}`;
+
 export type StepStatus =
   | { state: "sent"; block: string; since: number }
   | { state: "running"; block: string; since: number; program: string }
@@ -139,7 +145,13 @@ export class Pane {
   async send(ctx: ExtensionContext, key: string, code: string): Promise<void> {
     this.ensureWatcher();
     const request = (target: string | undefined) =>
-      this.lua<SendResult>({ op: "send", target, text: code, cwd: ctx.cwd });
+      this.lua<SendResult>({
+        op: "send",
+        target,
+        text: code,
+        cwd: ctx.cwd,
+        text_in_folder: inFolder(ctx.cwd, code),
+      });
     let result = await request(this.target);
     if (result.status === "pick" || result.status === "busy") {
       const title =

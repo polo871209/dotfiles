@@ -2,6 +2,7 @@
 gui:
   commandLogSize: 6
   sidePanelWidth: 0.35
+  expandFocusedSidePanel: true
   commitHashLength: 0
   theme:
     activeBorderColor:
@@ -30,3 +31,32 @@ gui:
       - "#fb4934"
     defaultFgColor:
       - "#ebdbb2"
+customCommands:
+  - key: n
+    context: localBranches
+    description: New branch, in its own folder when the repo has one folder per branch
+    prompts:
+      - type: input
+        title: "New branch from {{.SelectedLocalBranch.Name}}:"
+        key: Branch
+    command: |
+      common=$(git rev-parse --path-format=absolute --git-common-dir)
+      if [ "${common##*/}" = .bare ]; then
+        git worktree add -b {{.Form.Branch | quote}} "${common%/.bare}/"{{.Form.Branch | quote}} {{.SelectedLocalBranch.Name | quote}}
+      else
+        git checkout -b {{.Form.Branch | quote}} {{.SelectedLocalBranch.Name | quote}}
+      fi
+  - key: d
+    context: worktrees
+    description: Remove worktree and its empty parent folders, keep the branch
+    prompts:
+      - type: confirm
+        title: Remove worktree
+        body: "Remove {{.SelectedWorktree.Path}}? Branch {{.SelectedWorktree.Branch}} is kept."
+    command: |
+      {{if or .SelectedWorktree.IsMain .SelectedWorktree.IsCurrent}}echo "lazygit runs in this worktree, or it is the main one." >&2; exit 1{{end}}
+      path={{.SelectedWorktree.Path | quote}}
+      root=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
+      git worktree remove "$path" || exit 1
+      dir=$(dirname "$path")
+      while [ "${dir#"$root"/}" != "$dir" ] && rmdir "$dir" 2>/dev/null; do dir=$(dirname "$dir"); done

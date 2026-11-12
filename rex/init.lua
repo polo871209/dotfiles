@@ -4,10 +4,28 @@ local home = os.getenv 'HOME'
 local shims = home .. '/.local/share/mise/shims/'
 local zoxide = shims .. 'zoxide'
 local config_dir = (os.getenv 'XDG_CONFIG_HOME' or home .. '/.config') .. '/rex'
+local rex_bin_dir = home .. '/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS'
 
 local function must(result, err)
     if err ~= nil then error(err, 0) end
     return result
+end
+
+-- Rex keeps a failure notice on screen until dismissed, and the configuration file has no rex.after.
+local function action(spec)
+    local run = spec.run
+    spec.run = function(ctx, args)
+        local result = { pcall(run, ctx, args) }
+        if result[1] then return unpack(result, 2) end
+        if ctx.client_id then
+            rex.exec.start(
+                { '/bin/sh', '-c', 'sleep 2 && exec "$0" -C "$1" do client.notice.dismiss', rex_bin_dir .. '/rex', ctx.client_id },
+                { detach = true }
+            )
+        end
+        error(result[2], 0)
+    end
+    rex.action(spec)
 end
 
 local function exec_stdout(argv, opts)
@@ -76,6 +94,29 @@ local function select_session(session_id, from)
     return { session_id = session_id }
 end
 
+local function exists(path)
+    local file = io.open(path)
+    if file then file:close() end
+    return file ~= nil
+end
+
+-- A clone-set-up repo has only the bare repository outside its branch folders, so git tools there need the default branch's folder.
+local function work_folder(dir)
+    local path = dir:gsub('(.)/+$', '%1')
+    while path ~= '' do
+        local head = io.open(path .. '/.bare/refs/remotes/origin/HEAD')
+        if head then
+            local branch = (head:read() or ''):match '^ref: refs/remotes/origin/(.+)$'
+            head:close()
+            local folder = branch and path .. '/' .. branch
+            return folder and exists(folder .. '/.git') and folder or dir
+        end
+        if exists(path .. '/.git/HEAD') or exists(path .. '/.git') then return dir end
+        path = path:match '^(.*)/[^/]*$'
+    end
+    return dir
+end
+
 local function open_session(dir, from)
     rex.exec { zoxide, 'add', dir }
     local label = tilde_path(dir)
@@ -83,7 +124,7 @@ local function open_session(dir, from)
     if not session_id then
         session_id = must(rex.call('session.create', {
             label = label,
-            initial_windows = { { layout = shell_block { cwd = dir, command = { '/bin/zsh', '-ic', 'p' } } } },
+            initial_windows = { { layout = shell_block { cwd = work_folder(dir), command = { '/bin/zsh', '-ic', 'p' } } } },
         })).session_id
         must(rex.call('session.attach', { session_id = session_id }))
     end
@@ -119,6 +160,18 @@ local function view_blocks()
     return found
 end
 
+-- move_block splits the anchor's layer, so an anchor in a floating layer would put the block into that float.
+local function float_into_window(block_id, window_id, bounds)
+    for _, entry in ipairs(view_blocks()) do
+        if entry.window_id == window_id and entry.layer.kind == 'tiled' then
+            must(rex.session.move_block { block_id = block_id, anchor_block_id = entry.block.block_id })
+            must(rex.session.float_block { block_id = block_id, bounds = bounds })
+            return
+        end
+    end
+    error('The window has no tiled pane to float beside', 0)
+end
+
 -- Returns the panel's block_id when it shows a panel that already runs.
 local function toggle_panel(ctx, label, bounds, layout)
     local here, panel, panel_layer, panel_window
@@ -139,8 +192,7 @@ local function toggle_panel(ctx, label, bounds, layout)
         return
     end
     if panel_window ~= here then
-        must(rex.session.move_block { block_id = panel.block_id, anchor_block_id = ctx.block_id })
-        must(rex.session.float_block { block_id = panel.block_id, bounds = bounds })
+        float_into_window(panel.block_id, here, bounds)
         must(rex.session.focus_block { block_id = panel.block_id })
     elseif panel_layer.kind == 'floating' then
         must(rex.session.set_layer_state { layer_id = panel_layer.layer_id, state = 'normal', focus = true })
@@ -148,6 +200,24 @@ local function toggle_panel(ctx, label, bounds, layout)
         must(rex.session.focus_block { block_id = panel.block_id })
     end
     return panel.block_id
+end
+
+-- Returns the panel's block_id when it shows a panel that already runs.
+local function toggle_detached_panel(ctx, label, bounds, layout)
+    local here, panel
+    for _, block in ipairs(must(rex.session.list_blocks {}).blocks) do
+        if block.block_id == ctx.block_id then here = block.window_id end
+        if block.label == label then panel = block end
+    end
+    if not panel then
+        must(rex.session.new_layer { bounds = bounds, focus = true, layout = layout })
+    elseif panel.block_id == ctx.block_id then
+        must(rex.session.detach_block { block_id = panel.block_id })
+    else
+        if panel.placement ~= 'placed' or panel.window_id ~= here then float_into_window(panel.block_id, here, bounds) end
+        must(rex.session.focus_block { block_id = panel.block_id })
+        return panel.block_id
+    end
 end
 
 local function toggle_picker(label, command)
@@ -164,14 +234,14 @@ local function toggle_picker(label, command)
     })
 end
 
-rex.action {
+action {
     name = 'session_open',
     title = 'Open Directory as Session',
     args = { dir = 'string', from = 'string?' },
     run = function(ctx, args) return open_session(args.dir, args.from or ctx.session_id) end,
 }
 
-rex.action {
+action {
     name = 'session_switch',
     title = 'Switch Session',
     args = { session_id = 'string', block_id = 'string?', from = 'string?' },
@@ -181,7 +251,7 @@ rex.action {
     end,
 }
 
-rex.action {
+action {
     name = 'session_last',
     title = 'Switch to Previous Session',
     run = function(ctx)
@@ -192,7 +262,7 @@ rex.action {
     end,
 }
 
-rex.action {
+action {
     name = 'session_default',
     title = 'Name Only Session After Its Folder',
     args = { dir = 'string' },
@@ -206,7 +276,7 @@ rex.action {
     end,
 }
 
-rex.action {
+action {
     name = 'session_picker',
     title = 'Pick Session',
     run = function(ctx)
@@ -216,10 +286,7 @@ rex.action {
             session = ctx.session_id,
             rows_script = config_dir .. '/session-rows.lua',
             -- Rex starts from launchd with a bare PATH, so give the picker one that finds rex and zoxide.
-            path = home
-                .. '/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS:'
-                .. shims
-                .. ':/usr/bin:/bin',
+            path = rex_bin_dir .. ':' .. shims .. ':/usr/bin:/bin',
         }
         local sent = must(rex.exec({ 'nc', '-U', home .. '/Library/Caches/rex-session-picker.sock' }, { stdin = request .. '\n', timeout = 2 }))
         if not sent.ok then error('Rex does not load the session picker. Run `just rex`, then reopen Rex.', 0) end
@@ -234,7 +301,7 @@ end
 
 if listed and listed.ok then
     for dir in listed.stdout:gmatch '[^\n]+' do
-        rex.action {
+        action {
             name = action_name(dir),
             title = tilde_path(dir),
             category = 'Directories',
@@ -244,7 +311,7 @@ if listed and listed.ok then
     end
 end
 
-rex.action {
+action {
     name = 'lazygit',
     title = 'Open Lazygit',
     run = function(ctx)
@@ -273,23 +340,20 @@ rex.action {
                 window_id = window_id,
                 bounds = bounds,
                 focus = true,
-                layout = shell_block { label = label, cwd = foreground_cwd(ctx), command = { 'lazygit' } },
+                layout = shell_block { label = label, cwd = work_folder(foreground_cwd(ctx)), command = { 'lazygit' } },
             })
         elseif lazygit.block_id == ctx.block_id then
             must(rex.session.set_block_label { block_id = lazygit.block_id, label = hidden_label })
             must(rex.session.detach_block { block_id = lazygit.block_id })
         else
-            if lazygit.placement ~= 'placed' then
-                must(rex.session.move_block { block_id = lazygit.block_id, anchor_block_id = ctx.block_id })
-                must(rex.session.float_block { block_id = lazygit.block_id, bounds = bounds })
-            end
+            if lazygit.placement ~= 'placed' then float_into_window(lazygit.block_id, window_id, bounds) end
             if lazygit.label ~= label then must(rex.session.set_block_label { block_id = lazygit.block_id, label = label }) end
             must(rex.session.focus_block { block_id = lazygit.block_id })
         end
     end,
 }
 
-rex.action {
+action {
     name = 'runner',
     title = 'Toggle Floating Shell',
     run = function(ctx)
@@ -315,7 +379,7 @@ rex.action {
     end,
 }
 
-rex.action {
+action {
     name = 'sofka',
     title = 'Toggle Sofka',
     run = function(ctx) toggle_panel(ctx, 'Sofka', { 0.02, 0.02, 0.96, 0.96 }, shell_block { label = 'Sofka', command = { 'sofka' } }) end,
@@ -325,14 +389,14 @@ local nvim_socket_prefix = home .. '/Library/Caches/rex-nvim-'
 -- Neovim reads an address with a colon as host:port, so the socket name drops the "block:" prefix.
 local block_id_suffix = '[^:]+$'
 
-rex.action {
+action {
     name = 'nvim',
     title = 'Toggle Neovim',
     run = function(ctx)
         local cwd = foreground_cwd(ctx)
         local label = 'Neovim ' .. tilde_path(cwd)
         local open_last_edit = ('lua require("pi").open_last_edit(%q)'):format(ctx.block_id)
-        local shown = toggle_panel(
+        local shown = toggle_detached_panel(
             ctx,
             label,
             { 0, 0, 1, 1 },
@@ -363,7 +427,7 @@ rex.action {
     end,
 }
 
-rex.action {
+action {
     name = 'browse_repo',
     title = 'Open Git Remote in Browser',
     run = function(ctx)
@@ -372,7 +436,7 @@ rex.action {
     end,
 }
 
-rex.action {
+action {
     name = 'pending_prs',
     title = 'Show Pending PRs',
     keywords = 'pull request github review merge stray branch',
@@ -384,7 +448,7 @@ rex.action {
     end,
 }
 
-rex.action {
+action {
     name = 'browse_pr',
     title = 'Open PR',
     keywords = 'pull request github browser branch',
@@ -398,7 +462,7 @@ rex.action {
     end,
 }
 
-rex.action {
+action {
     name = 'copy_path',
     title = 'Copy Pane Directory',
     run = function(ctx)
@@ -415,7 +479,7 @@ rex.action {
     end,
 }
 
-rex.action {
+action {
     name = 'open_url',
     title = 'Open URL from Pane',
     run = function(ctx)
@@ -446,7 +510,7 @@ local function agent_working(block_id)
     return false
 end
 
-rex.action {
+action {
     name = 'close_pane',
     title = 'Close Pane, Confirm Only While an Agent Works',
     run = function(ctx)

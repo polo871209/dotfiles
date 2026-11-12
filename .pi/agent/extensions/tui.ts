@@ -434,11 +434,15 @@ const installFooter = (pi: ExtensionAPI, statuses: StatusSource) => {
             if (home && pwd.startsWith(home))
               pwd = `~${pwd.slice(home.length)}`;
             const branch = footerData.getGitBranch();
-            const worktree = pwd.match(/^(.*)\/\.worktree\/([^/]+)(\/.*)?$/);
-            if (worktree) {
-              const [, root, slug, subdir = ""] = worktree;
-              pwd = `${root}${subdir} (wt:${branch ?? slug})`;
-            } else if (branch) pwd = `${pwd} (${branch})`;
+            if (branch) {
+              const folder = `/${branch}`;
+              const at = pwd.indexOf(folder);
+              const end = at + folder.length;
+              pwd =
+                at >= 0 && (end === pwd.length || pwd[end] === "/")
+                  ? `${pwd.slice(0, at)}${pwd.slice(end)} (${branch})`
+                  : `${pwd} (${branch})`;
+            }
 
             const usage = ctx.getContextUsage();
             const active = footerData.getExtensionStatuses();

@@ -26,7 +26,7 @@ import {
   SELECTED_LINK,
   StepsCard,
 } from "./card";
-import { type Exited, Pane, type SettledStatus } from "./pane";
+import { type Exited, inFolder, Pane, type SettledStatus } from "./pane";
 import {
   fenceSteps,
   type RunbookStep,
@@ -44,7 +44,7 @@ const RunbookParams = Type.Object({
       title: Type.String({ description: "What the step does, in a few words" }),
       command: Type.String({
         description:
-          "The shell commands of this step, pasted at once into an interactive zsh. Start with cd when the directory matters.",
+          "The shell commands of this step, pasted at once into an interactive zsh in this session's folder.",
       }),
     }),
     { minItems: 1 },
@@ -435,10 +435,10 @@ export default function (pi: ExtensionAPI) {
     try {
       switch (action) {
         case "copy":
-          await copyToClipboard(step.code);
+          await copyToClipboard(inFolder(ctx.cwd, step.code));
           break;
         case "send":
-          await copyToClipboard(step.code);
+          await copyToClipboard(inFolder(ctx.cwd, step.code));
           await pane?.send(ctx, step.key, step.code);
           break;
         case "run":

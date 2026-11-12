@@ -9,7 +9,7 @@ Two-axis review of the diff between `HEAD` and a fixed point (default branch unl
 - **Standards** (always): does the code conform to this repo's documented coding standards?
 - **Spec** (only when a spec exists): does the code faithfully implement the originating issue / PRD / spec?
 
-Each axis runs as a **`reviewer` sub-agent** (read-only, hidden: invoke via the `subagent` tool with `agent: "reviewer"`) so they don't pollute each other's context (in parallel when both run), then this skill aggregates the findings. The reviewer carries the Fowler smell baseline in its own system prompt. Don't paste it.
+Each axis runs as a **`reviewer` sub-agent** (read-only, hidden: invoke via the `subagent` tool with `agent: "reviewer"`) so they don't pollute each other's context (in parallel when both run), then this skill verifies and aggregates the findings. The reviewer carries the Fowler smell baseline in its own system prompt. Don't paste it.
 
 ## Process
 
@@ -53,11 +53,24 @@ Standards always runs. Spec runs only when step 2 found a spec, then send both `
 - The path or fetched contents of the spec.
 - The brief: "Report: (a) requirements the spec asked for that are missing or partial. (b) behaviour in the diff that the spec did not ask for (scope creep). (c) requirements that look implemented but where the implementation looks wrong. Quote the spec line for each finding. Under 400 words."
 
-### 5. Aggregate
+### 5. Verify every finding
 
-Note the fixed point used, then present each report that ran under `## Standards` and `## Spec` headings, verbatim or lightly cleaned. Do **not** merge or rerank findings because the two axes are deliberately separate (see _Why two axes_).
+Sub-agent findings are often false. Treat each one as a claim and check it yourself against the repository:
 
-End with a one-line summary: total findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes because that's the reranking the separation exists to prevent.
+- The quoted hunk exists in the diff at the cited file.
+- The cited standard exists in the cited file and says what the finding claims. For a Spec finding, the quoted spec line exists and asks for what the finding claims.
+- The code does what the finding describes. Read the code around the hunk, because the guard or behaviour the finding calls missing often lives outside it.
+- For a "missing" or "partial" requirement, search the whole branch for the implementation before you accept that it is absent.
+
+A finding is verified only when every check passes. Drop every other finding without a trace: no mention, no count, no "dismissed" section. If a finding is partly true, keep only the verified part, rewritten to match what the code does.
+
+The step is done when every finding of every report is verified or dropped.
+
+### 6. Aggregate
+
+Note the fixed point used, then present the verified findings of each report that ran under `## Standards` and `## Spec` headings. Do **not** merge or rerank findings because the two axes are deliberately separate (see _Why two axes_).
+
+End with a one-line summary: total verified findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes because that's the reranking the separation exists to prevent.
 
 ## Why two axes (when both run)
 
