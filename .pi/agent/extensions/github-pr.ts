@@ -24,15 +24,6 @@ const MAX_LISTED_FILES = 200;
 // byte-only, so disable the line limit rather than add a second one.
 const NO_LINE_CAP = Number.MAX_SAFE_INTEGER;
 
-function isBot(login: string, typename?: string): boolean {
-  if (typename === "Bot") return true;
-  const l = login.toLowerCase();
-  if (l.endsWith("[bot]")) return true;
-  if (["dependabot", "github-actions", "codecov", "sonarcloud"].includes(l))
-    return true;
-  return l.includes("coderabbit") || l.includes("sonarqube");
-}
-
 function stripHtmlComments(s: string): string {
   return s
     .replace(/<!--[\s\S]*?-->/g, "")
@@ -59,7 +50,7 @@ function parsePr(pr: string): { number: number; repo?: string } | null {
   return null;
 }
 
-type Author = { login: string; __typename: string } | null;
+type Author = { login: string } | null;
 type ThreadComment = {
   id: string;
   isMinimized: boolean;
@@ -75,7 +66,13 @@ type Thread = {
   line: number | null;
   comments: { totalCount: number; nodes: ThreadComment[] };
 };
-type IssueComment = { isMinimized: boolean; author: Author; body: string };
+type IssueComment = {
+  id: string;
+  isMinimized: boolean;
+  author: Author;
+  body: string;
+  createdAt: string;
+};
 type Review = {
   id: string;
   isMinimized: boolean;
@@ -95,14 +92,14 @@ const PR_QUERY = `
 query($owner:String!,$repo:String!,$number:Int!){
   repository(owner:$owner,name:$repo){
     pullRequest(number:$number){
-      comments(last:100){ totalCount nodes{ isMinimized author{login __typename} body } }
+      comments(last:100){ totalCount nodes{ id isMinimized author{login} body createdAt } }
       reviews(last:100){ totalCount nodes{
-        id isMinimized author{login __typename} state body submittedAt comments{ totalCount }
+        id isMinimized author{login} state body submittedAt comments{ totalCount }
       } }
       reviewThreads(last:100){ totalCount nodes{
         id isResolved isOutdated path line
         comments(first:100){ totalCount nodes{
-          id isMinimized author{login __typename} body pullRequestReview{ id }
+          id isMinimized author{login} body pullRequestReview{ id }
         } }
       } }
     }
@@ -192,37 +189,133 @@ function fail(msg: string): ToolResult {
   };
 }
 
+type Kind = "thread" | "review" | "comment";
+type Seen = { kind: Kind; id: string; lastCommentId?: string };
+type PrHandles = {
+  byHandle: Map<string, Seen>;
+  byId: Map<string, string>;
+  next: Record<Kind, number>;
+};
+
+const HANDLE_PREFIX: Record<Kind, string> = {
+  thread: "t",
+  review: "r",
+  comment: "c",
+};
+
+function newHandles(): PrHandles {
+  return {
+    byHandle: new Map(),
+    byId: new Map(),
+    next: { thread: 0, review: 0, comment: 0 },
+  };
+}
+
+function markSeen(
+  h: PrHandles,
+  kind: Kind,
+  id: string,
+  lastCommentId?: string,
+): string {
+  let handle = h.byId.get(id);
+  if (!handle) {
+    handle = `${HANDLE_PREFIX[kind]}${++h.next[kind]}`;
+    h.byId.set(id, handle);
+  }
+  h.byHandle.set(handle, { kind, id, lastCommentId });
+  return handle;
+}
+
+function visibleComments(t: Thread): ThreadComment[] {
+  return t.comments.nodes.filter((c) => !c.isMinimized);
+}
+
+function lastVisibleId(t: Thread): string | undefined {
+  return visibleComments(t).at(-1)?.id;
+}
+
+function commentsAfter(t: Thread, seenId?: string): ThreadComment[] {
+  const at = t.comments.nodes.findIndex((c) => c.id === seenId);
+  return t.comments.nodes.slice(at + 1).filter((c) => !c.isMinimized);
+}
+
+function threadLoc(t: Thread): string {
+  return `${t.path}${t.line ? `:${t.line}` : ""}`;
+}
+
+type Post = {
+  kind: "review" | "comment";
+  id: string;
+  isMinimized: boolean;
+  author: Author;
+  at: string | null;
+  body: string;
+  state?: string;
+};
+
+function postsOf(pr: PrData): Post[] {
+  return [
+    ...pr.reviews.nodes
+      .filter((r) => r.state !== "PENDING")
+      .map(
+        (r): Post => ({
+          kind: "review",
+          id: r.id,
+          isMinimized: r.isMinimized,
+          author: r.author,
+          at: r.submittedAt,
+          body: r.body,
+          state: r.state,
+        }),
+      ),
+    ...pr.comments.nodes.map(
+      (c): Post => ({
+        kind: "comment",
+        id: c.id,
+        isMinimized: c.isMinimized,
+        author: c.author,
+        at: c.createdAt,
+        body: c.body,
+      }),
+    ),
+  ].sort((a, b) => (a.at ?? "").localeCompare(b.at ?? ""));
+}
+
+function postLabel(p: Post): string {
+  return `${p.kind} by @${p.author?.login ?? "?"}`;
+}
+
+type Classifier = "RESOLVED" | "OUTDATED";
+type Group = "named" | "jev" | "cleanup";
 type HideTarget = {
   id: string;
   label: string;
-  classifier: "RESOLVED" | "OUTDATED";
+  classifier: Classifier;
+  group: Group;
 };
 
-type ReviewVerdict = {
-  hide: HideTarget[];
-  kept: Review[];
+type Verdict = {
+  hidePosts: Map<string, Classifier>;
+  settledThreads: Set<string>;
   usage?: Usage;
   note?: string;
 };
 
 const HIDE_CONFIDENCE = 0.8;
 
-function reviewLabel(r: Review): string {
-  return `review by @${r.author?.login ?? "?"}`;
-}
-
-async function judgeReviews(
+async function judge(
   ctx: ExtensionContext,
-  candidates: Review[],
-  all: Review[],
+  posts: Post[],
+  timeline: Post[],
+  outdatedThreads: Thread[],
   signal?: AbortSignal,
-): Promise<ReviewVerdict> {
-  if (!candidates.length) return { hide: [], kept: [] };
-  const keepAll = (note: string, usage?: Usage): ReviewVerdict => ({
-    hide: [],
-    kept: candidates,
+): Promise<Verdict> {
+  const verdict: Verdict = { hidePosts: new Map(), settledThreads: new Set() };
+  if (!posts.length && !outdatedThreads.length) return verdict;
+  const keepAll = (note: string, usage?: Usage): Verdict => ({
+    ...verdict,
     usage,
-    note: `${note}, so every review with a body was kept.`,
+    note: `${note}, so every unseen review, comment, and outdated thread was kept.`,
   });
 
   let jev: ClassifierModel<ClassifierApi> | undefined;
@@ -235,35 +328,43 @@ async function judgeReviews(
   }
   if (!jev) return keepAll("No review classifier is available");
 
-  const timeline = all
-    .filter((r) => r.state !== "PENDING")
-    .sort((a, b) => (a.submittedAt ?? "").localeCompare(b.submittedAt ?? ""));
   const questions: Record<string, ClassifierBoolQuestion> = {};
-  for (const r of candidates) {
-    const i = timeline.indexOf(r);
+  for (const p of posts) {
+    const i = timeline.indexOf(p);
     questions[`own${i}`] = {
       type: "bool",
-      instructions: `Does \`reviews[${i}].body\` raise a finding of its own?`,
+      instructions: `Does \`posts[${i}].body\` raise a finding of its own?`,
       criteria: {
         true: "The body names a problem, risk, question, or requested change, including nitpicks or comments outside the diff.",
         false:
-          "The body only approves, summarizes or counts its inline comments, or reports tool status.",
+          "The body only approves, summarizes or counts inline comments, or reports tool status.",
       },
     };
     if (
-      timeline.slice(i + 1).some((l) => l.author?.login === r.author?.login)
+      timeline.slice(i + 1).some((l) => l.author?.login === p.author?.login)
     ) {
       questions[`replaced${i}`] = {
         type: "bool",
-        instructions: `Does a later review by \`reviews[${i}].author\` replace everything that \`reviews[${i}].body\` says?`,
+        instructions: `Does a later post by \`posts[${i}].author\` replace everything that \`posts[${i}].body\` says?`,
         criteria: {
-          true: "Every finding and status in the body is repeated, updated, or withdrawn in a later review by the same author.",
+          true: "Every finding and status in the body is repeated, updated, or withdrawn in a later post by the same author.",
           false:
-            "At least one finding or status in the body appears in no later review by the same author.",
+            "At least one finding or status in the body appears in no later post by the same author.",
         },
       };
     }
   }
+  outdatedThreads.forEach((_, k) => {
+    questions[`settled${k}`] = {
+      type: "bool",
+      instructions: `The code under \`threads[${k}]\` changed after its comments. Do its comments show that it needs no more work?`,
+      criteria: {
+        true: "A comment says the finding is fixed, answered, or withdrawn, or the thread only acknowledges, praises, or reports tool status.",
+        false:
+          "The thread names a problem, risk, question, or requested change that no comment settles.",
+      },
+    };
+  });
 
   const timeout = AbortSignal.timeout(15_000);
   let result: Awaited<ReturnType<typeof ctx.modelRegistry.classify>>;
@@ -272,11 +373,21 @@ async function judgeReviews(
       jev,
       {
         state: {
-          reviews: timeline.map((r) => ({
-            author: r.author?.login ?? "?",
-            submittedAt: r.submittedAt,
-            state: r.state,
-            body: cleanBody(r.body, 1536),
+          posts: posts.length
+            ? timeline.map((p) => ({
+                kind: p.kind,
+                author: p.author?.login ?? "?",
+                at: p.at,
+                ...(p.state ? { state: p.state } : {}),
+                body: cleanBody(p.body, 1536),
+              }))
+            : [],
+          threads: outdatedThreads.map((t) => ({
+            path: t.path,
+            comments: visibleComments(t).map((c) => ({
+              author: c.author?.login ?? "?",
+              body: cleanBody(c.body, 1536),
+            })),
           })),
         },
         questions,
@@ -297,40 +408,68 @@ async function judgeReviews(
     const answer = result.answers[key];
     return answer?.type === "bool" ? answer.probability : undefined;
   };
-  const verdict: ReviewVerdict = { hide: [], kept: [], usage: result.usage };
-  for (const r of candidates) {
-    const i = timeline.indexOf(r);
-    const replaced = probability(`replaced${i}`) ?? 0;
-    const own = probability(`own${i}`) ?? 1;
-    if (replaced >= HIDE_CONFIDENCE) {
-      verdict.hide.push({
-        id: r.id,
-        label: reviewLabel(r),
-        classifier: "OUTDATED",
-      });
-    } else if (own <= 1 - HIDE_CONFIDENCE) {
-      verdict.hide.push({
-        id: r.id,
-        label: reviewLabel(r),
-        classifier: "RESOLVED",
-      });
-    } else {
-      verdict.kept.push(r);
-    }
+  verdict.usage = result.usage;
+  for (const p of posts) {
+    const i = timeline.indexOf(p);
+    if ((probability(`replaced${i}`) ?? 0) >= HIDE_CONFIDENCE)
+      verdict.hidePosts.set(p.id, "OUTDATED");
+    else if ((probability(`own${i}`) ?? 1) <= 1 - HIDE_CONFIDENCE)
+      verdict.hidePosts.set(p.id, "RESOLVED");
   }
+  outdatedThreads.forEach((t, k) => {
+    if ((probability(`settled${k}`) ?? 0) >= HIDE_CONFIDENCE)
+      verdict.settledThreads.add(t.id);
+  });
   return verdict;
 }
 
-async function resolveAndHide(
+type AttentionReason = "changed" | "new" | "outdated";
+type Attention = {
+  handle: string;
+  reason: AttentionReason;
+  location: string;
+  comments: { author: string; body: string }[];
+};
+
+function threadAttention(
+  handle: string,
+  reason: AttentionReason,
+  t: Thread,
+  comments: ThreadComment[],
+): Attention {
+  return {
+    handle,
+    reason,
+    location: threadLoc(t),
+    comments: comments.map((c) => ({
+      author: c.author?.login ?? "?",
+      body: cleanBody(c.body, 2 * 1024),
+    })),
+  };
+}
+
+const ATTENTION_HEADINGS: Record<AttentionReason, string> = {
+  changed: "Changed since your report",
+  new: "New since your report",
+  outdated: "Kept outdated threads",
+};
+
+async function resolveHandled(
   ctx: ExtensionContext,
   owner: string,
   repo: string,
   num: number,
-  requestedIds: string[],
+  handles: PrHandles | undefined,
+  ids: string[],
   signal?: AbortSignal,
 ): Promise<ToolResult> {
   if (!owner || !repo) {
     return fail("github_pr: resolve needs owner/repo — pass `repo`.");
+  }
+  if (!handles) {
+    return fail(
+      `github_pr: no report for PR #${num} in this session. Call github_pr with action "report" first.`,
+    );
   }
   const gql = await queryPr(owner, repo, num, signal);
   if (gql.code !== 0) {
@@ -346,61 +485,155 @@ async function resolveAndHide(
   }
 
   const threads = pr.reviewThreads.nodes;
+  const threadById = new Map(threads.map((t) => [t.id, t]));
+  const posts = postsOf(pr);
+  const postById = new Map(posts.map((p) => [p.id, p]));
+
+  const errors: string[] = [];
+  const alreadyClosed: string[] = [];
+  const attention: Attention[] = [];
+  const namedThreads: { handle: string; thread: Thread }[] = [];
+  const targets = new Map<string, HideTarget>();
+  const named = new Set<string>();
+
+  for (const handle of new Set(ids)) {
+    const seen = handles.byHandle.get(handle);
+    if (!seen) {
+      errors.push(`${handle}: unknown handle`);
+      continue;
+    }
+    named.add(seen.id);
+    if (seen.kind === "thread") {
+      const t = threadById.get(seen.id);
+      if (!t) errors.push(`${handle}: not among the last 100 threads`);
+      else if (t.isResolved) alreadyClosed.push(handle);
+      else if (!commentsAfter(t, seen.lastCommentId).length)
+        namedThreads.push({ handle, thread: t });
+      continue;
+    }
+    const p = postById.get(seen.id);
+    if (!p) errors.push(`${handle}: not among the last 100 ${seen.kind}s`);
+    else if (p.isMinimized) alreadyClosed.push(handle);
+    else
+      targets.set(p.id, {
+        id: p.id,
+        label: `${handle} ${postLabel(p)}`,
+        classifier: "RESOLVED",
+        group: "named",
+      });
+  }
+
+  const stillOpen: string[] = [];
+  for (const [handle, seen] of handles.byHandle) {
+    if (seen.kind === "thread") {
+      const t = threadById.get(seen.id);
+      if (!t || t.isResolved) continue;
+      const fresh = commentsAfter(t, seen.lastCommentId);
+      if (fresh.length) {
+        attention.push(threadAttention(handle, "changed", t, fresh));
+        markSeen(handles, "thread", t.id, lastVisibleId(t));
+      } else if (!named.has(seen.id)) stillOpen.push(handle);
+    } else {
+      const p = postById.get(seen.id);
+      if (p && !p.isMinimized && !named.has(seen.id)) stillOpen.push(handle);
+    }
+  }
+
+  const unseenThreads = threads.filter(
+    (t) =>
+      !t.isResolved && !handles.byId.has(t.id) && visibleComments(t).length > 0,
+  );
+  const outdatedUnseen = unseenThreads.filter((t) => t.isOutdated);
+  const unseenPosts = posts.filter(
+    (p) => !p.isMinimized && hasText(p.body) && !handles.byId.has(p.id),
+  );
+
+  const reviewsSettledBy = (closed: Thread[]) => {
+    const settledPerReview = new Map<string, number>();
+    for (const c of closed.flatMap((t) => t.comments.nodes)) {
+      const id = c.pullRequestReview?.id;
+      if (id) settledPerReview.set(id, (settledPerReview.get(id) ?? 0) + 1);
+    }
+    return new Set(
+      pr.reviews.nodes
+        .filter(
+          (r) => (settledPerReview.get(r.id) ?? 0) === r.comments.totalCount,
+        )
+        .map((r) => r.id),
+    );
+  };
+  const mayClose = new Set([
+    ...namedThreads.map((n) => n.thread.id),
+    ...outdatedUnseen.map((t) => t.id),
+  ]);
+  const maySettle = reviewsSettledBy(
+    threads.filter((t) => t.isResolved || mayClose.has(t.id)),
+  );
+  const verdict = await judge(
+    ctx,
+    unseenPosts.filter((p) => p.kind === "comment" || maySettle.has(p.id)),
+    posts,
+    outdatedUnseen,
+    signal,
+  );
+
+  const resolveList: { handle?: string; thread: Thread; group: Group }[] = [
+    ...namedThreads.map((n) => ({ ...n, group: "named" as const })),
+    ...outdatedUnseen
+      .filter((t) => verdict.settledThreads.has(t.id))
+      .map((thread) => ({ thread, group: "jev" as const })),
+  ];
   const resolved = await mutateEach(
-    threads.filter((t) => !t.isResolved),
-    (t) => [
+    resolveList,
+    ({ thread }) => [
       "-f",
       "query=mutation($id:ID!){ resolveReviewThread(input:{threadId:$id}){ thread{ id } } }",
       "-f",
-      `id=${t.id}`,
+      `id=${thread.id}`,
     ],
     signal,
   );
-  const resolvedNow = new Set(resolved.ok.map((t) => t.id));
+  const resolvedNow = new Set(resolved.ok.map((r) => r.thread.id));
   const closed = threads.filter((t) => t.isResolved || resolvedNow.has(t.id));
+  const settled = reviewsSettledBy(closed);
 
-  const settledPerReview = new Map<string, number>();
-  for (const c of closed.flatMap((t) => t.comments.nodes)) {
-    const id = c.pullRequestReview?.id;
-    if (id) settledPerReview.set(id, (settledPerReview.get(id) ?? 0) + 1);
-  }
-  const requested = new Set(requestedIds);
-  const settledReviews = pr.reviews.nodes.filter(
-    (r) =>
-      !r.isMinimized &&
-      r.state !== "PENDING" &&
-      !requested.has(r.id) &&
-      (settledPerReview.get(r.id) ?? 0) === r.comments.totalCount,
-  );
-  const verdict = await judgeReviews(
-    ctx,
-    settledReviews.filter((r) => hasText(r.body)),
-    pr.reviews.nodes,
-    signal,
-  );
-
-  const targets = new Map<string, HideTarget>();
   for (const t of closed) {
-    for (const c of t.comments.nodes) {
-      if (c.isMinimized) continue;
+    for (const c of visibleComments(t)) {
       targets.set(c.id, {
         id: c.id,
-        label: `\`${t.path}${t.line ? `:${t.line}` : ""}\` comment by @${c.author?.login ?? "?"}`,
+        label: `\`${threadLoc(t)}\` comment by @${c.author?.login ?? "?"}`,
         classifier: "RESOLVED",
+        group: "cleanup",
       });
     }
   }
-  for (const r of settledReviews.filter((r) => !hasText(r.body))) {
-    targets.set(r.id, {
-      id: r.id,
-      label: reviewLabel(r),
-      classifier: "OUTDATED",
-    });
+  for (const r of pr.reviews.nodes) {
+    if (
+      !r.isMinimized &&
+      r.state !== "PENDING" &&
+      !hasText(r.body) &&
+      settled.has(r.id)
+    )
+      targets.set(r.id, {
+        id: r.id,
+        label: `review by @${r.author?.login ?? "?"}`,
+        classifier: "OUTDATED",
+        group: "cleanup",
+      });
   }
-  for (const t of verdict.hide) targets.set(t.id, t);
-  for (const id of requestedIds) {
-    targets.set(id, { id, label: `\`${id}\``, classifier: "OUTDATED" });
+  const newPosts: Post[] = [];
+  for (const p of unseenPosts) {
+    const classifier = verdict.hidePosts.get(p.id);
+    if (classifier && (p.kind === "comment" || settled.has(p.id)))
+      targets.set(p.id, {
+        id: p.id,
+        label: postLabel(p),
+        classifier,
+        group: "jev",
+      });
+    else newPosts.push(p);
   }
+
   const hidden = await mutateEach(
     [...targets.values()],
     (t) => [
@@ -414,55 +647,106 @@ async function resolveAndHide(
     signal,
   );
 
-  const loc = (t: Thread) => `${t.path}${t.line ? `:${t.line}` : ""}`;
-  const attempted =
-    resolved.ok.length + resolved.failed.length + resolved.skipped;
-  const out = [
-    `# PR #${num}: resolved ${resolved.ok.length}/${attempted} thread(s), hid ${hidden.ok.length}/${targets.size} item(s)`,
-  ];
-  for (const t of resolved.ok) out.push(`- ✅ \`${loc(t)}\``);
-  for (const f of resolved.failed)
-    out.push(`- ⚠️ resolve \`${loc(f.item)}\`: ${f.error}`);
-  for (const f of hidden.failed)
-    out.push(`- ⚠️ hide ${f.item.label}: ${f.error}`);
-  const skipped = resolved.skipped + hidden.skipped;
-  if (skipped) out.push(`- ⏹ ${skipped} not attempted: aborted`);
-
-  const unseenThreads = pr.reviewThreads.totalCount - threads.length;
-  if (unseenThreads > 0)
-    out.push(
-      `\n${unseenThreads} older thread(s) were not checked. Resolve them on GitHub.`,
-    );
-  if (verdict.note) out.push(`\n${verdict.note}`);
-  if (verdict.kept.length) {
-    out.push(`\n## Kept reviews`);
-    for (const r of verdict.kept) {
-      const line = firstLine(stripHtmlComments(r.body)).slice(0, 120);
-      out.push(
-        `- \`${r.id}\` @${r.author?.login ?? "?"} (${r.state}): ${line}`,
-      );
-    }
-    out.push(
-      `\nIf a kept review no longer holds, call resolve again with its id in \`hide\`.`,
+  for (const t of unseenThreads) {
+    if (t.isOutdated && verdict.settledThreads.has(t.id)) continue;
+    const handle = markSeen(handles, "thread", t.id, lastVisibleId(t));
+    attention.push(
+      threadAttention(
+        handle,
+        t.isOutdated ? "outdated" : "new",
+        t,
+        visibleComments(t),
+      ),
     );
   }
+  for (const p of newPosts) {
+    const handle = markSeen(handles, p.kind, p.id);
+    attention.push({
+      handle,
+      reason: "new",
+      location: postLabel(p),
+      comments: [
+        {
+          author: p.author?.login ?? "?",
+          body: cleanBody(p.body, 2 * 1024),
+        },
+      ],
+    });
+  }
 
+  const closedByAgent = [
+    ...resolved.ok
+      .filter((r) => r.group === "named")
+      .map((r) => `${r.handle} \`${threadLoc(r.thread)}\``),
+    ...hidden.ok.filter((t) => t.group === "named").map((t) => t.label),
+  ];
+  const count = (group: Group) =>
+    hidden.ok.filter((t) => t.group === group).length;
+  const jevResolved = resolved.ok.filter((r) => r.group === "jev").length;
+  const skipped = resolved.skipped + hidden.skipped;
   const failures = resolved.failed.length + hidden.failed.length;
+
+  const out = [
+    `# PR #${num}: resolved ${resolved.ok.length} thread(s), hid ${hidden.ok.length} item(s)`,
+  ];
+  for (const line of closedByAgent) out.push(`- ✅ ${line}`);
+  if (jevResolved || count("jev"))
+    out.push(
+      `Jev resolved ${jevResolved} outdated thread(s) and hid ${count("jev")} summary item(s).`,
+    );
+  if (count("cleanup"))
+    out.push(`Cleanup hid ${count("cleanup")} resolved item(s).`);
+  if (verdict.note) out.push(verdict.note);
+  if (alreadyClosed.length)
+    out.push(`Already closed: ${alreadyClosed.join(", ")}`);
+  if (stillOpen.length)
+    out.push(`Still open (you skipped): ${stillOpen.join(", ")}`);
+  for (const e of errors) out.push(`- ⚠️ ${e}`);
+  for (const f of resolved.failed)
+    out.push(
+      `- ⚠️ resolve ${f.item.handle ?? ""} \`${threadLoc(f.item.thread)}\`: ${f.error}`,
+    );
+  for (const f of hidden.failed)
+    out.push(`- ⚠️ hide ${f.item.label}: ${f.error}`);
+  if (skipped) out.push(`- ⏹ ${skipped} not attempted: aborted`);
+  const unfetched = pr.reviewThreads.totalCount - threads.length;
+  if (unfetched > 0)
+    out.push(
+      `${unfetched} older thread(s) were not checked. Resolve them on GitHub.`,
+    );
+
+  for (const reason of ["changed", "new", "outdated"] as const) {
+    const items = attention.filter((a) => a.reason === reason);
+    if (!items.length) continue;
+    out.push(`\n## ${ATTENTION_HEADINGS[reason]}`);
+    for (const a of items) {
+      out.push(`\n\`${a.handle}\` ${a.location}`);
+      for (const c of a.comments) out.push(`- **@${c.author}**: ${c.body}`);
+    }
+  }
+
+  const open =
+    stillOpen.length + attention.length + errors.length + failures + skipped;
+  out.push(
+    open
+      ? `\nHandle the items above, then call resolve again with their handles in \`ids\`.`
+      : `\nNothing is open.`,
+  );
+
   return {
     content: [{ type: "text", text: out.join("\n") }],
     structuredContent: prValue({
       pr: num,
       resolved: resolved.ok.length,
       hidden: hidden.ok.length,
-      keptReviews: verdict.kept.map((r) => ({
-        id: r.id,
-        author: r.author?.login ?? "?",
-        state: r.state,
-      })),
+      closed: closedByAgent,
+      stillOpen,
+      attention,
     }),
     details: {
       summary:
         `PR #${num} · resolved ${resolved.ok.length} thread(s) · hid ${hidden.ok.length} item(s)` +
+        (open ? ` · ${stillOpen.length + attention.length} open` : "") +
         (failures ? ` · ${failures} failed` : "") +
         (skipped ? ` · ${skipped} skipped` : ""),
     },
@@ -487,14 +771,6 @@ const params = Type.Object({
         "Include the unified diff. Leave it off when the PR branch is checked out locally, because reading the files is cheaper.",
     }),
   ),
-  includeBots: Type.Optional(
-    Type.Boolean({ description: "Keep bot comments." }),
-  ),
-  includeResolved: Type.Optional(
-    Type.Boolean({
-      description: "Keep resolved and outdated review threads.",
-    }),
-  ),
   select: Type.Optional(
     Type.Enum(["files", "checks", "comments", "diff"], {
       description:
@@ -504,13 +780,13 @@ const params = Type.Object({
   action: Type.Optional(
     Type.Enum(["report", "resolve"], {
       description:
-        "report (default) returns the PR as markdown. resolve marks every unresolved review thread as resolved on GitHub, without a reply, and hides review content that no longer holds. Call resolve as soon as you have fixed the review comments locally. Do not wait for a commit, push, or merge.",
+        "report (default) returns the PR as markdown, with a handle such as t1, r1, or c1 on each review thread, review, and comment. resolve closes only the items whose handles you pass in `ids`, without a reply. Items you skip, and items that changed or arrived after the report, stay open and are returned. Call resolve after you handle every item in the latest report, and again until it reports nothing open. Do not wait for a commit, push, or merge.",
     }),
   ),
-  hide: Type.Optional(
+  ids: Type.Optional(
     Type.Array(Type.String(), {
       description:
-        "With action resolve: ids from the resolve report's kept reviews to hide as outdated.",
+        "With action resolve: handles of every item you fixed, answered, or found to need no action.",
     }),
   ),
 });
@@ -533,11 +809,18 @@ const outputSchema = Type.Object({
     ),
   ),
   comments: Type.Optional(
-    Type.Array(Type.Object({ author: Author, body: Type.String() })),
+    Type.Array(
+      Type.Object({
+        handle: Type.String(),
+        author: Author,
+        body: Type.String(),
+      }),
+    ),
   ),
   reviews: Type.Optional(
     Type.Array(
       Type.Object({
+        handle: Type.String(),
         author: Author,
         state: Type.String(),
         body: Type.String(),
@@ -547,6 +830,7 @@ const outputSchema = Type.Object({
   threads: Type.Optional(
     Type.Array(
       Type.Object({
+        handle: Type.String(),
         path: Type.String(),
         line: Type.Union([Type.Number(), Type.Null()]),
         comments: Type.Array(
@@ -558,9 +842,18 @@ const outputSchema = Type.Object({
   diff: Type.Optional(Type.String()),
   resolved: Type.Optional(Type.Number()),
   hidden: Type.Optional(Type.Number()),
-  keptReviews: Type.Optional(
+  closed: Type.Optional(Type.Array(Type.String())),
+  stillOpen: Type.Optional(Type.Array(Type.String())),
+  attention: Type.Optional(
     Type.Array(
-      Type.Object({ id: Type.String(), author: Author, state: Type.String() }),
+      Type.Object({
+        handle: Type.String(),
+        reason: Type.Enum(["changed", "new", "outdated"]),
+        location: Type.String(),
+        comments: Type.Array(
+          Type.Object({ author: Author, body: Type.String() }),
+        ),
+      }),
     ),
   ),
 });
@@ -568,6 +861,9 @@ type PrValue = Static<typeof outputSchema>;
 const prValue = (v: PrValue): JsonValue => v as JsonValue;
 
 export default function (pi: ExtensionAPI) {
+  const handlesByPr = new Map<string, PrHandles>();
+  pi.on("session_start", () => handlesByPr.clear());
+
   pi.on("input", (event) => {
     const active = pi.getActiveTools();
     if (
@@ -598,7 +894,7 @@ export default function (pi: ExtensionAPI) {
       );
     },
     description:
-      "Fetch a GitHub PR (URL or number) as markdown: metadata, description, changed files, failing checks, and unresolved review threads, without bot noise. Use instead of `gh pr view`. Pass `select` to fetch just one section, or `action: resolve` after a fix to resolve every open review thread and hide stale review content.",
+      "Fetch a GitHub PR (URL or number) as markdown: metadata, description, changed files, failing checks, and unresolved review threads, including bot reviewers. Use instead of `gh pr view`. Pass `select` to fetch just one section, or `action: resolve` with the handles of the items you handled to close them on GitHub.",
     parameters: params,
     outputSchema,
     async execute(_id, a, signal, _onUpdate, ctx) {
@@ -637,8 +933,17 @@ export default function (pi: ExtensionAPI) {
         }
       }
 
+      const prKey = `${glOwner}/${glRepo}#${num}`;
       if (a.action === "resolve") {
-        return resolveAndHide(ctx, glOwner, glRepo, num, a.hide ?? [], signal);
+        return resolveHandled(
+          ctx,
+          glOwner,
+          glRepo,
+          num,
+          handlesByPr.get(prKey),
+          a.ids ?? [],
+          signal,
+        );
       }
 
       const wantComments = !select || select === "comments";
@@ -787,46 +1092,45 @@ export default function (pi: ExtensionAPI) {
       if (gql?.code === 0 && gql.stdout) {
         try {
           const pr = parsePrData(gql.stdout);
+          const handles = handlesByPr.get(prKey) ?? newHandles();
+          handlesByPr.set(prKey, handles);
 
-          const comments = pr.comments.nodes.filter(
-            (c) =>
-              !c.isMinimized &&
-              (a.includeBots ||
-                !isBot(c.author?.login ?? "", c.author?.__typename)),
-          );
+          const comments = pr.comments.nodes
+            .filter((c) => !c.isMinimized && hasText(c.body))
+            .map((c) => ({
+              handle: markSeen(handles, "comment", c.id),
+              author: c.author?.login ?? "?",
+              body: cleanBody(c.body, 2 * 1024),
+            }));
           nComments = comments.length;
-          value.comments = comments.map((c) => ({
-            author: c.author?.login ?? "?",
-            body: cleanBody(c.body, 2 * 1024),
-          }));
+          value.comments = comments;
           if (comments.length) {
             out.push(`\n## Comments`);
-            for (const c of comments) {
-              out.push(
-                `**@${c.author?.login ?? "?"}**: ${cleanBody(c.body, 2 * 1024)}`,
-              );
-            }
+            for (const c of comments)
+              out.push(`\`${c.handle}\` **@${c.author}**: ${c.body}`);
           }
           const unfetchedC = pr.comments.totalCount - pr.comments.nodes.length;
           if (unfetchedC > 0)
             out.push(`\n_(+${unfetchedC} earlier comment(s) not fetched)_`);
 
-          const reviews = pr.reviews.nodes.filter(
-            (r) => !r.isMinimized && r.state !== "PENDING" && hasText(r.body),
-          );
+          const reviews = pr.reviews.nodes
+            .filter(
+              (r) => !r.isMinimized && r.state !== "PENDING" && hasText(r.body),
+            )
+            .map((r) => ({
+              handle: markSeen(handles, "review", r.id),
+              author: r.author?.login ?? "?",
+              state: r.state,
+              body: cleanBody(r.body, 2 * 1024),
+            }));
           nReviews = reviews.length;
-          value.reviews = reviews.map((r) => ({
-            author: r.author?.login ?? "?",
-            state: r.state,
-            body: cleanBody(r.body, 2 * 1024),
-          }));
+          value.reviews = reviews;
           if (reviews.length) {
             out.push(`\n## Review bodies`);
-            for (const r of reviews) {
+            for (const r of reviews)
               out.push(
-                `**@${r.author?.login ?? "?"}** (${r.state}): ${cleanBody(r.body, 2 * 1024)}`,
+                `\`${r.handle}\` **@${r.author}** (${r.state}): ${r.body}`,
               );
-            }
           }
           const unfetchedR = pr.reviews.totalCount - pr.reviews.nodes.length;
           if (unfetchedR > 0)
@@ -834,44 +1138,36 @@ export default function (pi: ExtensionAPI) {
 
           const threads = pr.reviewThreads.nodes
             .filter(
-              (t) => a.includeResolved || (!t.isResolved && !t.isOutdated),
+              (t) =>
+                !t.isResolved && !t.isOutdated && visibleComments(t).length,
             )
             .map((t) => ({
-              ...t,
-              visible: t.comments.nodes.filter((c) => !c.isMinimized),
-            }))
-            .filter((t) => t.visible.length);
+              thread: t,
+              handle: markSeen(handles, "thread", t.id, lastVisibleId(t)),
+              path: t.path,
+              line: t.line ?? null,
+              comments: visibleComments(t).map((c) => ({
+                author: c.author?.login ?? "?",
+                body: cleanBody(c.body, 2 * 1024),
+              })),
+            }));
           nThreads = threads.length;
-          value.threads = threads.map((t) => ({
-            path: t.path,
-            line: t.line ?? null,
-            comments: t.visible.map((c) => ({
-              author: c.author?.login ?? "?",
-              body: cleanBody(c.body, 2 * 1024),
-            })),
-          }));
+          value.threads = threads.map(({ thread: _, ...t }) => t);
           if (threads.length) {
             out.push(`\n## Review comments (unresolved)`);
             for (const t of threads) {
-              out.push(
-                `\n${`\`${t.path}\`${t.line ? `:${t.line}` : ""}`}${
-                  (t.isResolved ? " [resolved]" : "") +
-                  (t.isOutdated ? " [outdated]" : "")
-                }`,
-              );
-              for (const c of t.visible) {
-                out.push(
-                  `- **@${c.author?.login ?? "?"}**: ${cleanBody(c.body, 2 * 1024)}`,
-                );
-              }
-              const unfetched = t.comments.totalCount - t.comments.nodes.length;
+              out.push(`\n\`${t.handle}\` \`${threadLoc(t.thread)}\``);
+              for (const c of t.comments)
+                out.push(`- **@${c.author}**: ${c.body}`);
+              const unfetched =
+                t.thread.comments.totalCount - t.thread.comments.nodes.length;
               if (unfetched > 0)
                 out.push(`- _(+${unfetched} later comment(s) not fetched)_`);
             }
           }
-          if (reviews.length || threads.some((t) => !t.isResolved)) {
+          if (comments.length || reviews.length || threads.length) {
             out.push(
-              `\n**Next:** after you fix these review comments, call \`github_pr\` with \`pr: "${m.url}"\` and \`action: "resolve"\`.`,
+              `\n**Next:** handle every item, then call \`github_pr\` with \`pr: "${m.url}"\`, \`action: "resolve"\`, and \`ids\` set to the handles of the items you fixed, answered, or found to need no action.`,
             );
           }
           const unfetchedT =
@@ -884,17 +1180,13 @@ export default function (pi: ExtensionAPI) {
           out.push(`\n_(could not parse comments/review threads)_`);
         }
       } else if (gql) {
-        out.push(
-          `\n_(comments unavailable: ${firstLine(gql.stderr)})_`,
-        );
+        out.push(`\n_(comments unavailable: ${firstLine(gql.stderr)})_`);
       } else if (wantComments) {
         out.push(`\n_(comments unavailable: pass \`repo\` as owner/repo)_`);
       }
 
       if (!select && wantDiff && diff.code !== 0) {
-        out.push(
-          `\n_(diff unavailable: ${firstLine(diff.stderr)})_`,
-        );
+        out.push(`\n_(diff unavailable: ${firstLine(diff.stderr)})_`);
       } else if ((!select || select === "diff") && wantDiff && diff.stdout) {
         const cut = truncateHead(diff.stdout, {
           maxBytes: MAX_DIFF_BYTES,

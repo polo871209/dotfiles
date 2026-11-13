@@ -459,15 +459,21 @@ function writeEmptySession(cwd: string): string {
   return file;
 }
 
-function forkSession(ctx: ExtensionCommandContext, target: string): string {
+function cloneSession(ctx: ExtensionCommandContext, target: string): string {
   const source = ctx.sessionManager.getSessionFile();
   if (!source)
-    throw new Error("This session is not saved to disk, so it cannot move.");
-  const sessionFile = existsSync(source)
-    ? SessionManager.forkFrom(source, target).getSessionFile()
-    : writeEmptySession(target);
-  if (!sessionFile) throw new Error("pi created no session file");
-  return sessionFile;
+    throw new Error(
+      "This session is not saved to disk, so it cannot be cloned.",
+    );
+  const leaf = ctx.sessionManager.getLeafId();
+  if (!existsSync(source) || !leaf) return writeEmptySession(target);
+  const clone = SessionManager.open(
+    source,
+    SessionManager.create(target).getSessionDir(),
+    target,
+  ).createBranchedSession(leaf);
+  // pi writes a branched session only when its active path has an assistant message.
+  return clone && existsSync(clone) ? clone : writeEmptySession(target);
 }
 
 async function switchToSession(
@@ -494,13 +500,13 @@ async function finishWorktree(
 ): Promise<void> {
   await ctx.waitForIdle();
   const linked = await finishableWorktree(ctx.cwd);
-  const sessionFile = forkSession(ctx, linked.home);
+  const sessionFile = cloneSession(ctx, linked.home);
   const removed = await removeLinked(linked);
   if (linked.branch) await clearTabLabel(linked.branch).catch(() => {});
   await switchToSession(
     ctx,
     sessionFile,
-    `${removed} Session moved to ${linked.home}`,
+    `${removed} Session cloned to ${linked.home}`,
     continuation,
   );
 }
@@ -654,8 +660,8 @@ export default function (pi: ExtensionAPI) {
         await ctx.waitForIdle();
         await switchToSession(
           ctx,
-          forkSession(ctx, target.path),
-          `Session moved to ${target.path}`,
+          cloneSession(ctx, target.path),
+          `Session cloned to ${target.path}`,
           continuation,
         );
       } catch (e) {

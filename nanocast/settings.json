@@ -9,7 +9,7 @@
   },
   "appearance": {
     "theme": "system",
-    "animations": true,
+    "animations": false,
     "interfaceSize": "standard",
     "compactMode": false,
     "compactBarCommands": [
@@ -82,11 +82,6 @@
     "removedDefaultPatterns": [],
     "showInLauncher": true,
     "commands": {}
-  },
-  "fileTools": {
-    "enabled": true,
-    "commands": {},
-    "options": []
   },
   "notes": {
     "enabled": true,
@@ -189,6 +184,11 @@
     "commands": {
       "capture-screenshot": {
         "shortcut": "hyper+x",
+        "alias": null,
+        "showInLauncher": true
+      },
+      "draw-on-screen": {
+        "shortcut": "hyper+t",
         "alias": null,
         "showInLauncher": true
       }
