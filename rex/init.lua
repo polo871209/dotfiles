@@ -522,10 +522,34 @@ action {
     end,
 }
 
+action {
+    name = 'tab_new_next',
+    title = 'New Tab After Current',
+    run = function(ctx)
+        local here
+        for _, block in ipairs(must(rex.session.list_blocks {}).blocks) do
+            if block.block_id == ctx.block_id then here = block.window_id end
+        end
+        local windows = must(rex.session.view {}).windows
+        local next_window
+        for i, window in ipairs(windows) do
+            if window.window_id == here then next_window = windows[i + 1] end
+        end
+        local created = must(rex.session.new_window { focus = false, layout = shell_block { cwd = foreground_cwd(ctx) } })
+        if next_window then must(rex.session.move_window { window_id = created.window_id, before_window_id = next_window.window_id }) end
+        -- The app ignores a queued session.select for a window it has not received yet, so select from a separate rex process.
+        rex.exec.start(
+            { rex_bin_dir .. '/rex', '-C', ctx.client_id, 'do', 'session.select', 'session_id=' .. ctx.session_id, 'window_id=' .. created.window_id },
+            { detach = true }
+        )
+    end,
+}
+
 rex.bind('shift+cmd+k', 'client.palette.toggle')
 rex.bind('ctrl+alt+shift+cmd+s', 'client.sidebar.toggle')
 rex.bind('cmd+k', 'session_picker')
 
+rex.bind('cmd+t', 'tab_new_next')
 rex.bind('cmd+up', 'client.tab.previous')
 rex.bind('cmd+down', 'client.tab.next')
 

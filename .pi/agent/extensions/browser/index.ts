@@ -4,13 +4,12 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { customEntries } from "../shared/session.ts";
+import { registerToggle } from "../shared/toggle.ts";
 import { BrowserUse, type Llm } from "./bridge.ts";
 import { Helium, resolveProfile } from "./helium.ts";
 import type { DevtoolsReport } from "./devtools.ts";
 
 const TOOL_NAME = "browser";
-const TOGGLE_ENTRY = "browser-toggle";
 
 async function resolveLlm(ctx: ExtensionContext): Promise<Llm> {
   const model = ctx.modelRegistry.find("anthropic", "claude-haiku-5-5");
@@ -79,9 +78,8 @@ export default function (pi: ExtensionAPI) {
   let queue: Promise<unknown> = Promise.resolve();
 
   const showStatus = (ctx: ExtensionContext) => {
-    if (!pi.getActiveTools().includes(TOOL_NAME))
-      ctx.ui.setStatus(TOOL_NAME, undefined);
-    else ctx.ui.setStatus(TOOL_NAME, `browser:${helium?.label ?? "on"}`);
+    if (toggle.isEnabled())
+      ctx.ui.setStatus(TOOL_NAME, `browser:${helium?.label ?? "on"}`);
   };
 
   const closeHelium = async () => {
@@ -94,23 +92,25 @@ export default function (pi: ExtensionAPI) {
     await running?.close();
   };
 
-  const offerTool = (offered: boolean) => {
+  const offerTool = (offered: boolean, ctx: ExtensionContext) => {
     const active = pi.getActiveTools();
-    if (active.includes(TOOL_NAME) === offered) return;
-    pi.setActiveTools(
-      offered
-        ? [...active, TOOL_NAME]
-        : active.filter((name) => name !== TOOL_NAME),
-    );
+    if (active.includes(TOOL_NAME) !== offered)
+      pi.setActiveTools(
+        offered
+          ? [...active, TOOL_NAME]
+          : active.filter((name) => name !== TOOL_NAME),
+      );
+    showStatus(ctx);
   };
 
-  pi.on("session_start", (_event, ctx) => {
-    const last = customEntries<{ enabled: boolean }>(
-      ctx.sessionManager.getBranch(),
-      TOGGLE_ENTRY,
-    ).at(-1);
-    offerTool(last?.data?.enabled ?? false);
-    showStatus(ctx);
+  const toggle = registerToggle(pi, {
+    name: TOOL_NAME,
+    label: "Browser tool",
+    onStart: offerTool,
+    onChange: async (enabled, ctx) => {
+      if (!enabled) await closeHelium();
+      offerTool(enabled, ctx);
+    },
   });
 
   pi.on("session_shutdown", closeHelium);
@@ -119,18 +119,6 @@ export default function (pi: ExtensionAPI) {
     await queue;
     await closeHelium();
     showStatus(ctx);
-  });
-
-  pi.registerCommand("browser", {
-    description:
-      "Turn the background Helium browser tool on or off for this session",
-    handler: async (_args, ctx) => {
-      const enabled = !pi.getActiveTools().includes(TOOL_NAME);
-      offerTool(enabled);
-      pi.appendEntry(TOGGLE_ENTRY, { enabled });
-      if (!enabled) await closeHelium();
-      showStatus(ctx);
-    },
   });
 
   pi.registerTool<typeof params, { summary: string }>({

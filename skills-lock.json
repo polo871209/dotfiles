@@ -14,12 +14,6 @@
       "skillPath": "SKILL.md",
       "computedHash": "04cdabbcceaa7b5d4bd4b1ea02339013503d623b270b5b3b2e274837494d7134"
     },
-    "show-me": {
-      "source": "humanlayer/skills",
-      "sourceType": "github",
-      "skillPath": "plugins/show-me/skills/show-me/SKILL.md",
-      "computedHash": "0904362ca0f13fc69d88822bb1e7a72f27fd80b992b57ef89ef8a12c3fecce35"
-    },
     "writing-for-agents": {
       "source": "mattpocock/skills",
       "sourceType": "github",

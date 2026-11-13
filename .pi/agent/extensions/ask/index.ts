@@ -1,8 +1,10 @@
 // Native port of @juicesharp/rpiv-ask-user-question.
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
+import { Container, Text } from "@earendil-works/pi-tui";
 import {
   buildQuestionnaireResponse,
   buildToolResult,
+  formatAnswerScalar,
   MAX_HEADER_LENGTH,
   MAX_LABEL_LENGTH,
   MAX_OPTIONS,
@@ -56,6 +58,47 @@ function clampArguments(args: unknown): QuestionParams {
   } as QuestionParams;
 }
 
+const renderQuestions = (
+  params: Partial<QuestionParams>,
+  theme: Theme,
+  pad: number,
+) => {
+  const lines = (params.questions ?? []).flatMap((q) =>
+    q?.question
+      ? [
+          `${theme.fg("accent", theme.bold(`? ${q.header ?? ""}`))} ${theme.fg("text", q.question)}`,
+        ]
+      : [],
+  );
+  return new Text(
+    lines.join("\n") || theme.fg("accent", theme.bold("?")),
+    pad,
+    0,
+  );
+};
+
+// Same band as pi's user message, so the user's answers read as user turns when scrolling back.
+const renderAnswers = (
+  result: QuestionnaireResult,
+  params: Partial<QuestionParams>,
+  theme: Theme,
+  pad: number,
+) => {
+  const questions = params.questions ?? [];
+  const lines = [...result.answers]
+    .sort((a, b) => a.questionIndex - b.questionIndex)
+    .map((a) => {
+      const answer = theme.fg("userMessageText", formatAnswerScalar(a));
+      const header = questions[a.questionIndex]?.header;
+      return questions.length > 1 && header
+        ? `${theme.fg("userMessageText", theme.bold(`${header}:`))} ${answer}`
+        : answer;
+    });
+  return new Text(lines.join("\n"), pad, 1, (text) =>
+    theme.bg("userMessageBg", text),
+  );
+};
+
 function registerAskUserQuestionTool(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "ask_user_question",
@@ -67,6 +110,24 @@ function registerAskUserQuestionTool(pi: ExtensionAPI): void {
     outputSchema: QuestionnaireResultSchema,
     exposure: "model-only",
     annotations: { readOnlyHint: true, openWorldHint: false },
+    renderShell: "self",
+    renderCall: (args, theme, context) =>
+      renderQuestions(args, theme, context.outputPad),
+    renderResult(result, _options, theme, context) {
+      const details = result.details as QuestionnaireResult | undefined;
+      const message = result.content.find((c) => c.type === "text")?.text;
+      if (!details || details.error || context.isError)
+        return new Text(
+          theme.fg("error", message ?? "Question failed."),
+          context.outputPad,
+          0,
+        );
+      if (details.cancelled)
+        return new Text(theme.fg("dim", "No answer."), context.outputPad, 0);
+      return details.answers.length > 0
+        ? renderAnswers(details, context.args, theme, context.outputPad)
+        : new Container();
+    },
 
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       // RPC reports hasUI but its ui.custom() returns undefined at once.
@@ -113,7 +174,10 @@ function registerAskUserQuestionTool(pi: ExtensionAPI): void {
             }).component;
           },
           {
-            blocked: { kind: "question", message: params.questions[0].question },
+            blocked: {
+              kind: "question",
+              message: params.questions[0].question,
+            },
           },
         );
       } finally {

@@ -5,7 +5,7 @@
 .pi/agent/sessions/
 .pi/agent/models-store.json
 .pi/agent/trust.json
-.pi/agent/skill-packs/
+.pi/agent/toggles/
 
 # Override global ignore (`npm/`) so we track shared extension deps.
 # node_modules/ inside still ignored by the global `node_modules/` rule.

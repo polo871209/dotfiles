@@ -27,16 +27,16 @@ Before you change pi-native behavior, read the relevant docs in the installed `@
 
 - **`web-search.ts`** — searches or fetches web targets for external research, scoped by domain or recency, ranked and filtered for relevance, and returns GitHub links as local files or threads, videos as transcripts, and PDFs as text.
 - **`lsp/`** — symbol navigation, plus deterministic post-edit diagnostics and fixes.
-- **`github-pr.ts`** — fetches a PR's metadata, failing checks, review bodies and threads, or diff, and once the comments are fixed locally, resolves open threads and hides review content that no longer holds.
+- **`github-pr.ts`** — fetches a PR's metadata, failing checks, review bodies and threads, or diff, and once the comments are fixed locally, closes only the items the agent names and returns anything new, changed, or still open.
 - **`subagent/`** — delegates external research, read-only repo recon, or parallel review to an isolated agent. It runs in the foreground or background, returns compact structured results, shows each run's live status in pi without Rex status or notifications, and delivers background results as a message.
 - **`quiet-run.ts`** — the default way to run shell commands. Output goes to a log, and the agent gets the verdict and the requested slice.
-- **`ask/`** — structured choices when a request needs clarification.
-- **`browser/`** — on `/browser`, offers a background browser-use agent on your Helium profile for the rest of the session that finishes web tasks such as searches, forms, and data extraction, and shows `browser:` in the footer while it is on.
+- **`ask/`** — structured choices when a request needs clarification, with the answers shown in the transcript in the same style as user messages.
+- **`browser/`** — on `/browser`, offers a background browser-use agent on your Helium profile that finishes web tasks such as searches, forms, and data extraction, for one session or, with `/browser repo`, as the default for a repository and all its worktrees, and shows `browser:` in the footer while it is on.
 
 ### Cleaner context
 
-- **`skill-packs.ts`** — enables Lark/Feishu, Google Workspace, or Obsidian skills only on request, for one session or as the default for a folder and its subfolders.
-- **`poteto/`** — on `/poteto`, switches the current session into pstack's poteto mode with the latest pstack skills, and switches it back off on the next `/poteto`. `/poteto repo` flips the default for every new session in the current folder and its subfolders.
+- **`skill-packs.ts`** — on `/lark`, `/gws`, or `/obsidian`, enables Lark/Feishu, Google Workspace, or Obsidian skills for one session or, with `/<name> repo`, as the default for a repository and all its worktrees.
+- **`poteto/`** — on `/poteto`, switches the session into pstack's poteto mode with the latest pstack skills, for one session or, with `/poteto repo`, as the default for a repository and all its worktrees.
 - **`folder-context.ts`** — loads scoped agent instructions when files are touched, and refreshes them after edits.
 - **`btw.ts`** — answers a `/btw` side question with the session as context, outside the main agent's history.
 
@@ -64,3 +64,5 @@ Before you change pi-native behavior, read the relevant docs in the installed `@
 ## Layout
 
 Single-file extensions sit at the top level. Each directory is one extension, except `shared/`, which holds utilities used by several. `node_modules` links to `../npm/node_modules`.
+
+An on-off feature registers through `shared/toggle.ts`, which gives it `/<name>` for the session and `/<name> repo` for a repository default that covers every worktree.
