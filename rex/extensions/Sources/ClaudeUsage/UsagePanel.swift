@@ -27,13 +27,13 @@ public final class UsagePanels {
             guard let root = window.contentView?.superview ?? window.contentView else { continue }
             for footer in Self.views(in: root, classSuffix: "SidebarFooterView")
             where panels[ObjectIdentifier(footer)] == nil {
-                if let panel = UsagePanel(footer: footer, model: model) {
-                    panels[ObjectIdentifier(footer)] = panel
-                }
+                panels[ObjectIdentifier(footer)] = UsagePanel(footer: footer, model: model)
             }
         }
         let keyWindow = NSApp.keyWindow
-        guard retries > 0, !panels.values.contains(where: { $0.window === keyWindow }) else { return }
+        guard retries > 0, !panels.values.contains(where: { $0.window === keyWindow }) else {
+            return
+        }
         Task {
             try? await Task.sleep(for: .milliseconds(100))
             attach(retries: retries - 1)
@@ -46,12 +46,22 @@ public final class UsagePanels {
     }
 }
 
+private final class UsageHostingView: NSHostingView<UsageView> {
+    var emptyTop: CGFloat = 0
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let local = convert(point, from: superview)
+        let fromTop = isFlipped ? local.y : bounds.height - local.y
+        return fromTop < emptyTop ? nil : super.hitTest(point)
+    }
+}
+
 @MainActor
 private final class UsagePanel {
     private weak var footer: NSView?
     private weak var scrollView: NSScrollView?
     private let model: UsageModel
-    private let hosting: NSHostingView<UsageView>
+    private let hosting: UsageHostingView
     private var frameObserver: NSObjectProtocol?
     private var ownInset: (bottom: CGFloat, added: CGFloat)?
 
@@ -60,13 +70,14 @@ private final class UsagePanel {
         self.footer = footer
         self.model = model
         scrollView = container.subviews.lazy.compactMap { $0 as? NSScrollView }.first
-        hosting = NSHostingView(
-            rootView: UsageView(model: model, style: UsageStyle(footer: footer)))
+        hosting = UsageHostingView(
+            rootView: UsageView(model: model, style: UsageStyle(footer: footer), onFold: { _ in }))
         container.addSubview(hosting, positioned: .above, relativeTo: footer)
         footer.postsFrameChangedNotifications = true
         frameObserver = NotificationCenter.default.addObserver(
             forName: NSView.frameDidChangeNotification, object: footer, queue: .main
         ) { [weak self] _ in MainActor.assumeIsolated { self?.layout() } }
+        hosting.rootView = makeView(style: hosting.rootView.style)
         layout()
     }
 
@@ -77,12 +88,21 @@ private final class UsagePanel {
 
     var window: NSWindow? { footer?.window }
 
+    private func makeView(style: UsageStyle) -> UsageView {
+        UsageView(model: model, style: style) { [weak self] emptyTop in
+            guard let self else { return }
+            hosting.emptyTop = emptyTop
+            // SwiftUI reports this during its own update, and layout() sets the hosting frame.
+            Task { self.layout() }
+        }
+    }
+
     private func layout() {
         guard let footer, footer.superview === hosting.superview, let container = footer.superview
         else { return }
         let style = UsageStyle(footer: footer)
         if style != hosting.rootView.style {
-            hosting.rootView = UsageView(model: model, style: style)
+            hosting.rootView = makeView(style: style)
         }
         let flipped = container.isFlipped
         let height = hosting.fittingSize.height
@@ -93,8 +113,8 @@ private final class UsagePanel {
         hosting.frame = NSRect(
             x: footer.frame.minX, y: originY, width: footer.frame.width, height: height)
         hosting.isHidden = footer.isHidden
-        let panelTop = flipped ? originY : originY + height
-        reserveScrollSpace(max(0, flipped ? footerTop - panelTop : panelTop - footerTop))
+        let cardTop = flipped ? originY + hosting.emptyTop : originY + height - hosting.emptyTop
+        reserveScrollSpace(max(0, flipped ? footerTop - cardTop : cardTop - footerTop))
     }
 
     /// The footer is taller than its button row, so the panel sits on the buttons, not on the footer.
@@ -151,22 +171,61 @@ struct UsageStyle: Equatable {
 private struct UsageView: View {
     let model: UsageModel
     let style: UsageStyle
+    let onFold: (_ emptyTop: CGFloat) -> Void
+    @AppStorage("ClaudeUsageShowsWeekly") private var weeklyOverride: Bool?
+    @State private var weeklyHeight: CGFloat = 0
     @State private var hovering = false
 
+    private var weeklyIsHigh: Bool {
+        (model.usage?.weekly?.percent(now: model.now) ?? 0) >= 70
+    }
+
+    // Folding must not change the layout, because a layout change makes AppKit resize the panel on every frame.
     var body: some View {
-        VStack(spacing: 6) {
-            UsageHeader(plan: model.plan, style: style).padding(.bottom, 2)
-            UsageBar(label: "5h", window: model.usage?.session, now: model.now, style: style)
+        let showsWeekly = weeklyOverride ?? weeklyIsHigh
+        let emptyTop = showsWeekly ? 0 : weeklyHeight
+        VStack(spacing: 0) {
+            VStack(spacing: 8) {
+                UsageHeader(plan: model.plan, style: style)
+                UsageBar(label: "5h", window: model.usage?.session, now: model.now, style: style)
+            }
+            .offset(y: emptyTop)
+            .zIndex(1)
             UsageBar(label: "7d", window: model.usage?.weekly, now: model.now, style: style)
+                .padding(.top, 6)
+                .onGeometryChange(for: CGFloat.self) {
+                    $0.size.height
+                } action: {
+                    weeklyHeight = $0
+                }
+                .opacity(showsWeekly ? 1 : 0)
+                .scaleEffect(showsWeekly ? 1 : 0.92, anchor: .top)
+                .blur(radius: showsWeekly ? 0 : 3)
+                .animation(.easeOut(duration: 0.18), value: showsWeekly)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .frame(maxWidth: .infinity)
-        .contentShape(Rectangle())
+        .animation(.spring(duration: 0.4, bounce: 0.2), value: showsWeekly)
+        .contentShape(VisibleArea(emptyTop: emptyTop))
+        .onTapGesture {
+            weeklyOverride = showsWeekly == weeklyIsHigh ? !showsWeekly : nil
+        }
+        .onChange(of: weeklyIsHigh, initial: true) {
+            if weeklyOverride == weeklyIsHigh { weeklyOverride = nil }
+        }
         .onHover { hovering = $0 }
         .popover(isPresented: $hovering, arrowEdge: .trailing) {
             UsageDetail(model: model, style: style)
         }
+        .onChange(of: emptyTop, initial: true) { onFold(emptyTop) }
+    }
+}
+
+private struct VisibleArea: Shape {
+    let emptyTop: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        Path(rect.divided(atDistance: min(emptyTop, rect.height), from: .minYEdge).remainder)
     }
 }
 
@@ -231,10 +290,12 @@ private struct UsageBar: View {
                     }
                 }
             Text(percent.map { "\(Int($0.rounded()))%" } ?? "–")
+                .contentTransition(.numericText(value: percent ?? 0))
                 .foregroundStyle(style.foreground.opacity(0.7))
                 .frame(width: 30, alignment: .trailing)
         }
         .font(.system(size: 11, weight: .medium).monospacedDigit())
+        .animation(.snappy, value: percent)
     }
 }
 
@@ -262,10 +323,6 @@ private struct UsageDetail: View {
                         }
                     }
                 }
-            }
-            if let problem = model.problem {
-                Text(problem).foregroundStyle(style.critical).fixedSize(
-                    horizontal: false, vertical: true)
             }
             Text(refreshText(now: now)).foregroundStyle(.tertiary)
         }

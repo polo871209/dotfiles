@@ -9,7 +9,7 @@ local function tilde_path(dir)
 end
 
 local function add_agents(session)
-    for _, window in ipairs(assert(rex.call('session.view', { session_id = session.session_id })).windows) do
+    for _, window in ipairs(assert(rex.call('session.view', { session_id = session.session_id })).windows or {}) do
         for _, layer in ipairs(window.layers) do
             for _, block in ipairs(layer.blocks) do
                 if block.creator_name == terminal then

@@ -172,27 +172,56 @@ local function float_into_window(block_id, window_id, bounds)
     error('The window has no tiled pane to float beside', 0)
 end
 
+-- Rex restores a pane after a server restart as a plain shell, so .zshrc runs the command recorded here by block ID.
+-- pi's rex-resume.ts records its panes here too.
+local resume_dir = (os.getenv 'XDG_STATE_HOME' or home .. '/.local/state') .. '/rex/resume'
+local block_id_suffix = '[^:]+$'
+
+local function remove_closed_resume_records()
+    local live = {}
+    for block_id in exec_stdout({ rex_bin_dir .. '/rex', 'block', 'ls', '--all', '--quiet', '--short=false' }):gmatch '[^\n]+' do
+        live[block_id:match(block_id_suffix)] = true
+    end
+    for name in exec_stdout({ 'ls', resume_dir }):gmatch '[^\n]+' do
+        if not live[name] then os.remove(resume_dir .. '/' .. name) end
+    end
+end
+
+local function new_panel(spec)
+    local created = must(rex.session.new_layer {
+        window_id = spec.window_id,
+        bounds = spec.bounds,
+        focus = true,
+        layout = shell_block { label = spec.label, cwd = spec.cwd, command = spec.command },
+    })
+    exec_stdout { 'mkdir', '-p', resume_dir }
+    remove_closed_resume_records()
+    local record = must(io.open(resume_dir .. '/' .. created.block_ids[1]:match(block_id_suffix), 'w'))
+    record:write(table.concat({ 'exec', unpack(spec.command) }, '\0'))
+    record:close()
+end
+
 -- Returns the panel's block_id when it shows a panel that already runs.
-local function toggle_panel(ctx, label, bounds, layout)
+local function toggle_panel(ctx, spec)
     local here, panel, panel_layer, panel_window
     for _, entry in ipairs(view_blocks()) do
         if entry.block.block_id == ctx.block_id then here = entry.window_id end
-        if entry.block.label == label then
+        if entry.block.label == spec.label then
             panel, panel_layer, panel_window = entry.block, entry.layer, entry.window_id
         end
     end
     if not panel then
-        must(rex.session.new_layer { bounds = bounds, focus = true, layout = layout })
+        new_panel(spec)
         return
     end
     if panel.block_id == ctx.block_id then
         local layer_id = panel_layer.layer_id
-        if panel_layer.kind ~= 'floating' then layer_id = must(rex.session.float_block { block_id = panel.block_id, bounds = bounds }).layer_id end
+        if panel_layer.kind ~= 'floating' then layer_id = must(rex.session.float_block { block_id = panel.block_id, bounds = spec.bounds }).layer_id end
         must(rex.session.set_layer_state { layer_id = layer_id, state = 'minimized' })
         return
     end
     if panel_window ~= here then
-        float_into_window(panel.block_id, here, bounds)
+        float_into_window(panel.block_id, here, spec.bounds)
         must(rex.session.focus_block { block_id = panel.block_id })
     elseif panel_layer.kind == 'floating' then
         must(rex.session.set_layer_state { layer_id = panel_layer.layer_id, state = 'normal', focus = true })
@@ -203,18 +232,18 @@ local function toggle_panel(ctx, label, bounds, layout)
 end
 
 -- Returns the panel's block_id when it shows a panel that already runs.
-local function toggle_detached_panel(ctx, label, bounds, layout)
+local function toggle_detached_panel(ctx, spec)
     local here, panel
     for _, block in ipairs(must(rex.session.list_blocks {}).blocks) do
         if block.block_id == ctx.block_id then here = block.window_id end
-        if block.label == label then panel = block end
+        if block.label == spec.label then panel = block end
     end
     if not panel then
-        must(rex.session.new_layer { bounds = bounds, focus = true, layout = layout })
+        new_panel(spec)
     elseif panel.block_id == ctx.block_id then
         must(rex.session.detach_block { block_id = panel.block_id })
     else
-        if panel.placement ~= 'placed' or panel.window_id ~= here then float_into_window(panel.block_id, here, bounds) end
+        if panel.placement ~= 'placed' or panel.window_id ~= here then float_into_window(panel.block_id, here, spec.bounds) end
         must(rex.session.focus_block { block_id = panel.block_id })
         return panel.block_id
     end
@@ -336,12 +365,7 @@ action {
             end
         end
         if not lazygit then
-            must(rex.session.new_layer {
-                window_id = window_id,
-                bounds = bounds,
-                focus = true,
-                layout = shell_block { label = label, cwd = work_folder(foreground_cwd(ctx)), command = { 'lazygit' } },
-            })
+            new_panel { window_id = window_id, bounds = bounds, label = label, cwd = work_folder(foreground_cwd(ctx)), command = { 'lazygit' } }
         elseif lazygit.block_id == ctx.block_id then
             must(rex.session.set_block_label { block_id = lazygit.block_id, label = hidden_label })
             must(rex.session.detach_block { block_id = lazygit.block_id })
@@ -382,12 +406,11 @@ action {
 action {
     name = 'sofka',
     title = 'Toggle Sofka',
-    run = function(ctx) toggle_panel(ctx, 'Sofka', { 0.02, 0.02, 0.96, 0.96 }, shell_block { label = 'Sofka', command = { 'sofka' } }) end,
+    run = function(ctx) toggle_panel(ctx, { label = 'Sofka', bounds = { 0.02, 0.02, 0.96, 0.96 }, command = { 'sofka' } }) end,
 }
 
-local nvim_socket_prefix = home .. '/Library/Caches/rex-nvim-'
 -- Neovim reads an address with a colon as host:port, so the socket name drops the "block:" prefix.
-local block_id_suffix = '[^:]+$'
+local nvim_socket_prefix = home .. '/Library/Caches/rex-nvim-'
 
 action {
     name = 'nvim',
@@ -396,25 +419,21 @@ action {
         local cwd = foreground_cwd(ctx)
         local label = 'Neovim ' .. tilde_path(cwd)
         local open_last_edit = ('lua require("pi").open_last_edit(%q)'):format(ctx.block_id)
-        local shown = toggle_detached_panel(
-            ctx,
-            label,
-            { 0, 0, 1, 1 },
-            shell_block {
-                label = label,
-                cwd = cwd,
-                command = {
-                    'nvim',
-                    -- Rex leaves the unpainted cells of a floating layer transparent, so Neovim must paint its background.
-                    '--cmd',
-                    'let g:opaque_background = v:true',
-                    '--cmd',
-                    ('lua vim.fn.serverstart(%q .. vim.env.REX_BLOCK:match %q .. ".sock")'):format(nvim_socket_prefix, block_id_suffix),
-                    '-c',
-                    open_last_edit,
-                },
-            }
-        )
+        local shown = toggle_detached_panel(ctx, {
+            label = label,
+            bounds = { 0, 0, 1, 1 },
+            cwd = cwd,
+            command = {
+                'nvim',
+                -- Rex leaves the unpainted cells of a floating layer transparent, so Neovim must paint its background.
+                '--cmd',
+                'let g:opaque_background = v:true',
+                '--cmd',
+                ('lua vim.fn.serverstart(%q .. vim.env.REX_BLOCK:match %q .. ".sock")'):format(nvim_socket_prefix, block_id_suffix),
+                '-c',
+                open_last_edit,
+            },
+        })
         if shown then
             rex.exec {
                 shims .. 'nvim',

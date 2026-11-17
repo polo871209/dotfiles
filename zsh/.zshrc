@@ -331,18 +331,14 @@ fi
 
 eval "$(oh-my-posh init zsh --config "${XDG_CONFIG_HOME}/ohmyposh/config.yaml")"
 
-# Rex keeps block IDs across a server restart, so pi's rex-resume.ts extension records each pane's session by block ID.
-_pi_resume_file=${XDG_STATE_HOME:-$HOME/.local/state}/pi/rex-resume/${REX_BLOCK#block:}
-if [[ -n $REX_BLOCK ]] && (( SHLVL == 1 )) && [[ -r $_pi_resume_file ]]; then
-  _pi_resume_session=$(<$_pi_resume_file)
-  _pi_resume_precmd() {
-    precmd_functions=(${precmd_functions:#_pi_resume_precmd})
-    if [[ -f $_pi_resume_session ]]; then
-      pi --session "$_pi_resume_session"
-    else
-      pi
-    fi
+# Rex restores a pane after a server restart as a plain shell in the same block, so rex/init.lua and pi's rex-resume.ts record by block ID the command that brings it back.
+_rex_resume_file=${XDG_STATE_HOME:-$HOME/.local/state}/rex/resume/${REX_BLOCK#block:}
+if [[ -n $REX_BLOCK && -z $ZSH_EXECUTION_STRING && -r $_rex_resume_file ]] && (( SHLVL == 1 )); then
+  _rex_resume_command=(${(0)"$(<$_rex_resume_file)"})
+  _rex_resume_precmd() {
+    precmd_functions=(${precmd_functions:#_rex_resume_precmd})
+    $_rex_resume_command
   }
-  precmd_functions+=(_pi_resume_precmd)
+  precmd_functions+=(_rex_resume_precmd)
 fi
-unset _pi_resume_file
+unset _rex_resume_file

@@ -9,7 +9,6 @@ final class UsageModel {
     private(set) var usage: Usage?
     private(set) var plan: String?
     private(set) var fetchedAt: Date?
-    private(set) var problem: String?
     private(set) var now = Date()
     @ObservationIgnored private var loading = false
     @ObservationIgnored private var timers: [Timer] = []
@@ -37,18 +36,17 @@ final class UsageModel {
         guard !loading else { return }
         loading = true
         Task {
-            do {
-                let token = try await ClaudeLogin.accessToken()
-                async let plan = try? UsageAPI.plan(token: token)
-                usage = try await UsageAPI.fetch(token: token)
-                self.plan = await plan ?? self.plan
-                fetchedAt = Date()
-                problem = nil
-            } catch {
-                problem = error.localizedDescription
-            }
+            try? await load()
             now = Date()
             loading = false
         }
+    }
+
+    private func load() async throws {
+        let token = try await ClaudeLogin.accessToken()
+        async let plan = try? UsageAPI.plan(token: token)
+        usage = try await UsageAPI.fetch(token: token)
+        self.plan = await plan ?? self.plan
+        fetchedAt = Date()
     }
 }

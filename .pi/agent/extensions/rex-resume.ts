@@ -6,12 +6,7 @@ import * as path from "node:path";
 function resumeFileForBlock(blockId: string): string {
   const stateHome =
     process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state");
-  return path.join(
-    stateHome,
-    "pi",
-    "rex-resume",
-    blockId.replace(/^block:/, ""),
-  );
+  return path.join(stateHome, "rex", "resume", blockId.replace(/^block:/, ""));
 }
 
 export default function (pi: ExtensionAPI) {
@@ -33,7 +28,7 @@ export default function (pi: ExtensionAPI) {
       return;
     }
     fs.mkdirSync(path.dirname(resumeFile), { recursive: true });
-    fs.writeFileSync(resumeFile, sessionFile);
+    fs.writeFileSync(resumeFile, ["pi", "--session", sessionFile].join("\0"));
   });
 
   pi.on("session_shutdown", (event) => {
