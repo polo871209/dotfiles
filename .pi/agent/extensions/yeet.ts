@@ -1,40 +1,12 @@
 import type {
   ExtensionAPI,
   ExtensionContext,
-  Theme,
 } from "@earendil-works/pi-coding-agent";
-import { Box, Container, Text } from "@earendil-works/pi-tui";
-import { sideChannelWithLoader } from "./shared/llm";
+import { errorMessage } from "./shared/error";
+import { sideChannelComplete } from "./shared/llm";
+import { resultCard, stepsWidget } from "./shared/progress";
 
 const MAX_BODY_LINES = 2;
-
-function barWidget(lines: string[]) {
-  return (_tui: unknown, theme: Theme) => {
-    const container = new Container();
-    const build = () => {
-      container.clear();
-      lines.forEach((line, i) => {
-        container.addChild(
-          new Text(
-            theme.fg(
-              i === 0 ? "customMessageLabel" : "customMessageText",
-              `▎ ${line}`,
-            ),
-            1,
-            0,
-          ),
-        );
-      });
-    };
-    build();
-    const invalidate = container.invalidate.bind(container);
-    container.invalidate = () => {
-      build();
-      invalidate();
-    };
-    return container;
-  };
-}
 
 const YEET_MSG_TYPE = "yeet-marker";
 const YEET_WIDGET_KEY = "yeet-progress";
@@ -44,17 +16,14 @@ const CONVENTIONAL_SUBJECT =
 export default function (pi: ExtensionAPI) {
   pi.registerMessageRenderer<{ ok: boolean }>(
     YEET_MSG_TYPE,
-    (message, opts, theme) => {
-      const mark =
-        message.details?.ok === false
-          ? theme.fg("error", "✗ yeet")
-          : theme.fg("success", "✓ yeet");
-      const box = new Box(opts.outputPad, 1, (t) =>
-        theme.bg("customMessageBg", t),
-      );
-      box.addChild(new Text(`${mark} ${message.content as string}`, 0, 0));
-      return box;
-    },
+    (message, opts, theme) =>
+      resultCard(
+        "yeet",
+        message.details?.ok !== false,
+        message.content as string,
+        theme,
+        opts.outputPad,
+      ),
   );
 
   const report = (ok: boolean, content: string) =>
@@ -76,6 +45,7 @@ export default function (pi: ExtensionAPI) {
   const commitAndPush = async (
     args: string,
     ctx: ExtensionContext,
+    signal: AbortSignal,
   ): Promise<void> => {
     if (ctx.mode !== "tui") {
       ctx.ui.notify("/yeet requires interactive mode", "error");
@@ -89,22 +59,17 @@ export default function (pi: ExtensionAPI) {
     const showProgress = (active: number) => {
       ctx.ui.setWidget(
         YEET_WIDGET_KEY,
-        barWidget([
+        stepsWidget(
           "yeet",
-          ...[
+          [
             "stage changes",
             "run pre-commit",
             `write commit message (${yeetModel.id})`,
             "commit",
             "push",
-          ].map((step, index) =>
-            index < active
-              ? `✓ ${step}`
-              : index === active
-                ? `→ ${step}`
-                : `○ ${step}`,
-          ),
-        ]),
+          ],
+          active,
+        ),
         { placement: "aboveEditor" },
       );
     };
@@ -207,7 +172,8 @@ export default function (pi: ExtensionAPI) {
       .out;
 
     showProgress(2);
-    const message = await sideChannelWithLoader(ctx, `yeet → ${yeetModel.id}`, {
+    const response = await sideChannelComplete(ctx, {
+      signal,
       systemPrompt: `
 Write a tiny Conventional Commits message for the diff. The code is the source of truth and the reader has it, so the message names the change and never describes the code.
 
@@ -248,10 +214,16 @@ Return the raw commit message, starting with the subject line.`,
       ],
     });
 
-    if (!message) {
-      ctx.ui.notify("/yeet cancelled", "info");
+    if (!response.ok) {
+      if (response.reason !== "aborted") {
+        ctx.ui.notify(
+          `/yeet: commit message failed: ${response.error ?? response.reason}`,
+          "error",
+        );
+      }
       return;
     }
+    const message = response.text;
     const lines = message.trim().split("\n");
     const subjectIndex = lines.findIndex((l) =>
       CONVENTIONAL_SUBJECT.test(l.trim()),
@@ -291,17 +263,24 @@ Return the raw commit message, starting with the subject line.`,
     );
   };
 
-  let running = false;
+  let running: AbortController | undefined;
+  pi.on("session_shutdown", () => running?.abort());
+
   const runYeet = async (args: string, ctx: ExtensionContext) => {
     if (running) {
       ctx.ui.notify("/yeet is already running", "warning");
       return;
     }
-    running = true;
+    const controller = new AbortController();
+    running = controller;
     try {
-      await commitAndPush(args, ctx);
+      await commitAndPush(args, ctx, controller.signal);
+    } catch (e) {
+      if (!controller.signal.aborted) {
+        ctx.ui.notify(`/yeet: ${errorMessage(e)}`, "error");
+      }
     } finally {
-      running = false;
+      running = undefined;
       ctx.ui.setWidget(YEET_WIDGET_KEY, undefined);
     }
   };
@@ -309,11 +288,15 @@ Return the raw commit message, starting with the subject line.`,
   pi.registerCommand("yeet", {
     description:
       "Stage, commit, and push current repo changes; args are a hint for the commit message",
-    handler: runYeet,
+    handler: async (args, ctx) => {
+      void runYeet(args, ctx);
+    },
   });
 
   pi.registerShortcut("ctrl+alt+y", {
     description: "Stage, commit, and push current repo changes",
-    handler: (ctx) => runYeet("", ctx),
+    handler: (ctx) => {
+      void runYeet("", ctx);
+    },
   });
 }
