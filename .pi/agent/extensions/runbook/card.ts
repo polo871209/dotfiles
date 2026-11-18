@@ -159,9 +159,7 @@ export class StepsCard implements Component {
           t.fg("accent", t.bold("▍Run these yourself")),
           t.fg(
             "dim",
-            this.host.canSend
-              ? `${count} · ctrl+alt+c to use the keyboard`
-              : count,
+            this.host.canSend ? `${count} · /run to use the keyboard` : count,
           ),
           width,
         ),
@@ -191,7 +189,7 @@ export class StepsCard implements Component {
 
       const inner = Math.max(12, width - INDENT.length - 1);
       const bg = t.getBgAnsi("selectedBg");
-      for (const raw of highlightCode(step.code, step.lang ?? "bash"))
+      for (const raw of highlightCode(step.code, "bash"))
         for (const segment of wrapTextWithAnsi(raw, inner - 2)) {
           const body = ` ${segment}`;
           const padded = `${body}${" ".repeat(Math.max(0, inner - visibleWidth(body)))}`;
@@ -243,7 +241,7 @@ export class StepsCard implements Component {
   }
 
   private actions(step: Step): Action[] {
-    if (!this.host.canSend || !step.shell) return ["copy"];
+    if (!this.host.canSend) return ["copy"];
     const status = this.host.status(step.key);
     if (status?.state === "inline")
       return status.inPane ? ["stop", "copy"] : ["stop", "pop", "copy"];

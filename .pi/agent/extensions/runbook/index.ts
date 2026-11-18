@@ -2,7 +2,6 @@ import {
   copyToClipboard,
   type ExtensionAPI,
   type ExtensionContext,
-  type SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import {
   Container,
@@ -14,8 +13,6 @@ import {
 } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { errorMessage } from "../shared/error";
-import { LINK_OPEN, LINK_READY } from "../shared/link";
-import { extractText } from "../shared/message";
 import { customEntries, isCustom } from "../shared/session";
 import {
   type Action,
@@ -27,14 +24,7 @@ import {
   StepsCard,
 } from "./card";
 import { type Exited, inFolder, Pane, type SettledStatus } from "./pane";
-import {
-  fenceSteps,
-  type RunbookStep,
-  parseFences,
-  runbookSteps,
-  type Step,
-  textSteps,
-} from "./steps";
+import { type RunbookStep, runbookSteps, type Step } from "./steps";
 
 const TOOL = "show_runbook";
 
@@ -176,7 +166,6 @@ const history = (ctx: ExtensionContext): History => {
     }
     if (failure) failure.answered = true;
     const cards = message.content.flatMap((part): Card[] => {
-      if (part.type === "text") return [{ steps: textSteps(part.text) }];
       if (part.type !== "toolCall" || part.name !== TOOL) return [];
       const own = ownSteps(part.id, part.arguments);
       const base = waitingForFix(failure) ? cardWith(failure.key) : undefined;
@@ -207,64 +196,20 @@ const cardWithKey = (ctx: ExtensionContext, key: string): Card | undefined =>
     .turns.flatMap((turn) => turn.cards)
     .find((card) => card.steps.some((step) => step.key === key));
 
-type TextMessage = { role: "user" | "assistant"; text: string };
-
-const textMessages = (branch: readonly SessionEntry[]): TextMessage[] => {
-  const out: TextMessage[] = [];
-  for (const entry of branch) {
-    if (entry.type !== "message") continue;
-    const { role } = entry.message;
-    if (role !== "user" && role !== "assistant") continue;
-    const text = extractText(entry.message.content).trim();
-    if (text) out.push({ role, text });
-  }
-  return out;
-};
-
-const formatSession = (
-  ctx: ExtensionContext,
-): { text: string; turns: number } => {
-  const lines: string[] = [];
-  const name = ctx.sessionManager.getSessionName();
-  if (name) lines.push(`# ${name}`, "");
-  const messages = textMessages(ctx.sessionManager.getBranch());
-  for (const m of messages) lines.push(`## ${m.role}`, "", m.text, "");
-  return { text: lines.join("\n").trimEnd() + "\n", turns: messages.length };
-};
-
-const copyWithNotify = async (
-  ctx: ExtensionContext,
-  value: string,
-  label: string,
-): Promise<void> => {
-  try {
-    await copyToClipboard(value);
-    ctx.ui.notify(`Copied ${label} to clipboard`, "info");
-  } catch (e) {
-    ctx.ui.notify(errorMessage(e), "error");
-  }
-};
-
 export default function (pi: ExtensionAPI) {
   const session = process.env.REX_SESSION;
   const self = process.env.REX_BLOCK;
   const invalidators = new Map<string, () => void>();
-  const linked = new Map<string, Step>();
-  let screen: TUI | undefined;
-  const refresh = (key?: string) => {
+  const refresh = () => {
     for (const invalidate of invalidators.values()) invalidate();
-    const fenceChanged = key
-      ? linked.has(key)
-      : [...linked.keys()].some((k) => pane?.status(k)?.state === "inline");
-    if (!fenceChanged || !screen) return;
-    screen.invalidate();
-    screen.requestRender();
   };
+  let onSettled: ((key: string) => void) | undefined;
   const pane =
     session && self && process.env.PI_IS_SUBAGENT !== "1"
-      ? new Pane(session, self, refresh, (key, status) =>
-          pi.appendEntry<StepResult>(RESULT_ENTRY, { key, status }),
-        )
+      ? new Pane(session, self, refresh, (key, status) => {
+          pi.appendEntry<StepResult>(RESULT_ENTRY, { key, status });
+          onSettled?.(key);
+        })
       : undefined;
   let currentCtx: ExtensionContext | undefined;
   let selectedKey: string | undefined;
@@ -458,7 +403,7 @@ export default function (pi: ExtensionAPI) {
           pi.appendEntry<LogAttach>(ATTACH_ENTRY, { key: step.key, attach });
           if (attach) attached.add(step.key);
           else attached.delete(step.key);
-          refresh(step.key);
+          refresh();
           break;
         }
       }
@@ -569,15 +514,11 @@ export default function (pi: ExtensionAPI) {
   ): Promise<void> => {
     const { steps } = card;
     if (steps.length === 0) {
-      const text = textMessages(ctx.sessionManager.getBranch())
-        .filter((m) => m.role === "assistant")
-        .at(-1)?.text;
-      if (text) await copyWithNotify(ctx, text, "response");
-      else ctx.ui.notify("No assistant messages yet", "warning");
+      ctx.ui.notify("The last response has no runbook steps", "warning");
       return;
     }
     if (ctx.mode !== "tui") {
-      await copyWithNotify(ctx, steps[0].code, "code block");
+      ctx.ui.notify("/run needs the interactive UI", "warning");
       return;
     }
     let index = Math.max(
@@ -596,16 +537,39 @@ export default function (pi: ExtensionAPI) {
       tui.requestRender();
       reveal(tui, steps[index], direction);
     };
+    let screen: TUI | undefined;
     await ctx.ui.custom<void>((tui, theme, keybindings, done) => {
       screen = tui;
       select(tui, index, -1);
+      const close = () => {
+        onSettled = undefined;
+        done();
+      };
+      const passed = (step: Step): boolean => {
+        const status = pane?.status(step.key);
+        return (
+          status !== undefined && status.state !== "inline" && !failed(status)
+        );
+      };
+      const selectNextUnrun = () => {
+        const unrun = steps
+          .map((candidate, i) => ({ candidate, i }))
+          .filter(({ candidate }) => !pane?.status(candidate.key));
+        const target = unrun.find(({ i }) => i > index) ?? unrun.at(0);
+        if (target) select(tui, target.i, target.i > index ? 1 : -1);
+      };
+      onSettled = (key) => {
+        if (steps.every(passed)) close();
+        else if (steps[index].key === key && passed(steps[index]))
+          selectNextUnrun();
+      };
       const hints = (step: Step): string => {
         const status = pane?.status(step.key);
         if (status?.state === "inline")
           return status.inPane
             ? "ctrl+c stop · ↑↓ move · esc close"
             : "ctrl+c stop · o move to pane · ↑↓ move · esc close";
-        if (!pane || !step.shell) return "⏎ copy · ↑↓ move · esc close";
+        if (!pane) return "⏎ copy · ↑↓ move · esc close";
         const run = status ? "R run again" : "i run inline";
         const fix = failed(status)
           ? "d ask agent to fix · "
@@ -625,37 +589,13 @@ export default function (pi: ExtensionAPI) {
         handleInput(data: string): void {
           const step = steps[index];
           const status = pane?.status(step.key);
-          const next = () => {
-            if (selectedKey !== step.key) return;
-            const unrun = steps
-              .map((candidate, i) => ({ candidate, i }))
-              .filter(
-                ({ candidate }) =>
-                  candidate.shell && !pane?.status(candidate.key),
-              );
-            const target = unrun.find(({ i }) => i > index) ?? unrun.at(0);
-            if (target) {
-              select(tui, target.i, target.i > index ? 1 : -1);
-              return;
-            }
-            const allPassed = steps.every((candidate) => {
-              const result = pane?.status(candidate.key);
-              return (
-                !candidate.shell ||
-                (result !== undefined &&
-                  result.state !== "inline" &&
-                  !failed(result))
-              );
-            });
-            if (allPassed) done();
-          };
           if (matchesKey(data, "ctrl+c") && status?.state === "inline")
             void act(step, "stop");
           else if (
             keybindings.matches(data, "tui.select.cancel") ||
             data === "q"
           )
-            done();
+            close();
           else if (keybindings.matches(data, "tui.select.up") || data === "k")
             select(tui, Math.max(0, index - 1), -1);
           else if (keybindings.matches(data, "tui.select.down") || data === "j")
@@ -668,9 +608,11 @@ export default function (pi: ExtensionAPI) {
               note = { text: "✓ copied", color: "success" };
               tui.requestRender();
             });
-          else if (!pane || !step.shell) return;
+          else if (!pane) return;
           else if (data === "s")
-            void act(step, "send").then((ok) => ok && next());
+            void act(step, "send").then(
+              (ok) => ok && selectedKey === step.key && selectNextUnrun(),
+            );
           else if (data === "i" && status) {
             note = { text: "already ran · R runs it again", color: "warning" };
             tui.requestRender();
@@ -679,7 +621,7 @@ export default function (pi: ExtensionAPI) {
             data === "R" ||
             matchesKey(data, "shift+r")
           )
-            void runInline(step).then((result) => result?.code === 0 && next());
+            void runInline(step);
           else if (data === "o") void act(step, "pop");
           else if (
             data === "l" &&
@@ -688,133 +630,23 @@ export default function (pi: ExtensionAPI) {
           )
             void act(step, "log").then(() => tui.requestRender());
           else if (data === "d" && failed(status)) {
-            done();
+            close();
             askAgent(ctx, step);
           }
         },
         invalidate() {},
       };
     });
+    onSettled = undefined;
     selectedKey = selectedCard = undefined;
     screen?.invalidate();
     screen?.requestRender();
   };
 
-  for (const name of ["copy-blocks", "run"])
-    pi.registerCommand(name, {
-      description:
-        "Walk the code blocks and steps of the last response to run, send, or copy them",
-      handler: async (_args, ctx) => browse(ctx),
-    });
-  pi.registerShortcut("ctrl+alt+c", {
+  pi.registerCommand("run", {
     description:
-      "Walk the code blocks and steps of the last response to run, send, or copy them",
-    handler: (ctx) => browse(ctx),
-  });
-
-  pi.registerCommand("copy-all", {
-    description: "Copy entire session history (user + assistant) as markdown",
-    handler: async (_args, ctx) => {
-      const { text, turns } = formatSession(ctx);
-      if (turns === 0) {
-        ctx.ui.notify("Session is empty", "warning");
-        return;
-      }
-      await copyWithNotify(
-        ctx,
-        text,
-        `session (${turns} turns, ${text.length} chars)`,
-      );
-    },
-  });
-
-  let linksReady = false;
-  pi.events.on(LINK_READY, () => {
-    linksReady = true;
-  });
-  pi.events.on(LINK_OPEN, (url) => {
-    const match =
-      typeof url === "string" &&
-      /^pi-block:(copy|send|run|stop|pop|debug)\/(\w+)$/.exec(url);
-    const ctx = currentCtx;
-    if (!match || !ctx) return;
-    const step = linked.get(match[2]);
-    if (!step) {
-      ctx.ui.notify("That code block is no longer on screen", "warning");
-      return;
-    }
-    void act(step, match[1] as Action).then(
-      (ok) =>
-        ok && match[1] === "copy" && ctx.ui.notify("Copied code block", "info"),
-    );
-  });
-
-  const links = (step: Step): string[] => {
-    linked.set(step.key, step);
-    const link = (label: string, action: Action) =>
-      `[${label}](pi-block:${action}/${step.key})`;
-    if (!step.shell || !pane) return [link("⧉ copy", "copy")];
-    const status = pane.status(step.key);
-    const buttons =
-      status?.state === "inline"
-        ? [link("■ stop", "stop"), link("⇱ move to pane", "pop")]
-        : [
-            ...(failed(status) ? [link("✦ ask agent to fix", "debug")] : []),
-            link("▷ inline", "run"),
-            link("▶ send", "send"),
-            link("⧉ copy", "copy"),
-          ];
-    const chip = describeStatus(status);
-    if (status?.state !== "inline" && status?.state !== "exited")
-      return [[...buttons, ...(chip ? [`*${chip.text}*`] : [])].join(" · ")];
-    return [
-      [...buttons, `*${chip?.text}*`].join(" · "),
-      "",
-      "```",
-      ...(status.output.length > 0
-        ? status.output.map((line) => line.replace(ANSI, ""))
-        : ["…"]),
-      "```",
-    ];
-  };
-
-  pi.registerMarkdownTransformer((markdown, context) => {
-    if (
-      !linksReady ||
-      context.messageType !== "assistant" ||
-      context.isStreaming
-    )
-      return markdown;
-    const lines = markdown.split("\n");
-    const fences = parseFences(lines).filter(
-      (f) => f.closed && f.lang?.toLowerCase() !== "mermaid",
-    );
-    if (fences.length === 0) return markdown;
-    const out: string[] = [];
-    let cursor = 0;
-    for (const fence of fences) {
-      out.push(...lines.slice(cursor, fence.start));
-      const pad = (line: string) => `${fence.indent}${line}`;
-      fenceSteps(fence).forEach((step, i) => {
-        if (i > 0) out.push("");
-        if (step.key === selectedKey)
-          out.push(pad(`[▶ selected](${SELECTED_LINK}${step.key})`), "");
-        if (step.title)
-          out.push(
-            pad(step.title.replace(/^(\d+)([.)])|^([-+*>])/, "$1\\$2$3")),
-          );
-        out.push(
-          pad(`${fence.marker}${fence.lang ?? ""}`),
-          ...step.code.split("\n").map(pad),
-          pad(fence.marker),
-          ...links(step).map(pad),
-        );
-      });
-      cursor = fence.end + 1;
-      if (lines[cursor]?.trim()) out.push("");
-    }
-    out.push(...lines.slice(cursor));
-    return out.join("\n");
+      "Walk the runbook steps of the last response to run, send, or copy them",
+    handler: async (_args, ctx) => browse(ctx),
   });
 
   if (!pane) return;
@@ -831,11 +663,12 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerShortcut("ctrl+alt+s", {
-    description: "Send the next shell step of the last response to a Rex pane",
+    description:
+      "Send the next runbook step of the last response to a Rex pane",
     handler: async (ctx) => {
-      const steps = latestCard(ctx).steps.filter((s) => s.shell);
+      const { steps } = latestCard(ctx);
       if (steps.length === 0) {
-        ctx.ui.notify("The last response has no shell steps", "warning");
+        ctx.ui.notify("The last response has no runbook steps", "warning");
         return;
       }
       const sent = steps.map((s) => pane.status(s.key) !== undefined);
