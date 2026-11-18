@@ -23,7 +23,8 @@ import {
   SELECTED_LINK,
   StepsCard,
 } from "./card";
-import { type Exited, inFolder, Pane, type SettledStatus } from "./pane";
+import { Blocks, type Exited, inFolder, type SettledStatus } from "./blocks";
+import { terminalBytes } from "./keys";
 import { type RunbookStep, runbookSteps, type Step } from "./steps";
 
 const TOOL = "show_runbook";
@@ -114,7 +115,9 @@ const pendingReport = (
 const outcome = (status: SettledStatus): string => {
   const took = duration(status.took);
   if (status.state === "finished")
-    return `sent to a pane and finished after ${took}, exit code unknown`;
+    return status.stopped
+      ? `sent to a block and stopped by the user after ${took}`
+      : `sent to a block and finished after ${took}, exit code unknown`;
   if (status.code === undefined) return `ended after ${took} with no exit code`;
   if (status.code === INTERRUPTED) return `stopped by the user after ${took}`;
   return `exit ${status.code} in ${took}`;
@@ -204,9 +207,9 @@ export default function (pi: ExtensionAPI) {
     for (const invalidate of invalidators.values()) invalidate();
   };
   let onSettled: ((key: string) => void) | undefined;
-  const pane =
+  const blocks =
     session && self && process.env.PI_IS_SUBAGENT !== "1"
-      ? new Pane(session, self, refresh, (key, status) => {
+      ? new Blocks(session, self, refresh, (key, status) => {
           pi.appendEntry<StepResult>(RESULT_ENTRY, { key, status });
           onSettled?.(key);
         })
@@ -224,11 +227,11 @@ export default function (pi: ExtensionAPI) {
       RESULT_ENTRY,
     )) {
       const { key, status } = entry.data!;
-      pane?.restore(key, status);
+      blocks?.restore(key, status);
     }
     refresh();
   });
-  pi.on("session_shutdown", async () => pane?.dispose());
+  pi.on("session_shutdown", async () => blocks?.dispose());
 
   const merged = new Map<string, Step[]>();
   const resumed = new Set<string>();
@@ -338,9 +341,9 @@ export default function (pi: ExtensionAPI) {
 
   const runInline = async (step: Step): Promise<Exited | undefined> => {
     const ctx = currentCtx;
-    if (!ctx || !pane || pane.status(step.key)?.state === "inline") return;
+    if (!ctx || !blocks || blocks.status(step.key)?.state === "inline") return;
     try {
-      return await pane.run(
+      return await blocks.run(
         ctx.cwd,
         step.key,
         step.code,
@@ -352,7 +355,7 @@ export default function (pi: ExtensionAPI) {
   };
 
   const askAgent = (ctx: ExtensionContext, step: Step) => {
-    const status = pane?.status(step.key);
+    const status = blocks?.status(step.key);
     if (status?.state !== "exited") return;
     const message = [
       `The runbook step "${step.title ?? preview(step.code)}" failed with exit ${status.code}. Find the cause and fix it. If the command itself is wrong, show only the fixed step with ${TOOL}, and it takes the place of the failed step.`,
@@ -384,16 +387,21 @@ export default function (pi: ExtensionAPI) {
           break;
         case "send":
           await copyToClipboard(inFolder(ctx.cwd, step.code));
-          await pane?.send(ctx, step.key, step.code);
+          await blocks?.send(ctx, step.key, step.code);
           break;
         case "run":
           void runInline(step);
+          if (selectedKey === undefined)
+            void browse(ctx, cardWithKey(ctx, step.key), step.key);
           break;
         case "stop":
-          await pane?.interrupt(step.key);
+          await blocks?.interrupt(step.key);
           break;
-        case "pop":
-          await pane?.moveToPane(step.key);
+        case "float":
+          await blocks?.float(step.key);
+          break;
+        case "place":
+          await blocks?.place(step.key);
           break;
         case "debug":
           askAgent(ctx, step);
@@ -418,7 +426,7 @@ export default function (pi: ExtensionAPI) {
     name: TOOL,
     label: "Runbook",
     description:
-      "Hand shell commands to the user to run themselves, such as production writes or commands that need their credentials. The user sees each step with buttons to run it, send it to a terminal, or copy it, and can hand a failed step's output back to you. Call it as the last action of the turn, after the explanation. One step is one unit the user runs at once. To fix a step the user handed back, show only the fixed step, and it takes the failed step's place in the same runbook.",
+      "Hand shell commands to the user to run themselves, such as production writes or commands that need their credentials. The user sees each step with buttons to run it, send it to a Rex terminal block, or copy it, and can hand a failed step's output back to you. Call it as the last action of the turn, after the explanation. One step is one unit the user runs at once. To fix a step the user handed back, show only the fixed step, and it takes the failed step's place in the same runbook.",
     parameters: RunbookParams,
     exposure: "model-only",
     renderShell: "self",
@@ -460,8 +468,8 @@ export default function (pi: ExtensionAPI) {
         context.lastComponent instanceof StepsCard
           ? context.lastComponent
           : new StepsCard({
-              status: (key) => pane?.status(key),
-              canSend: pane !== undefined,
+              status: (key) => blocks?.status(key),
+              canSend: blocks !== undefined,
               logAttached: (key) => attached.has(key),
               selected: () =>
                 selectedCard === context.toolCallId ? selectedKey : undefined,
@@ -521,11 +529,16 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.notify("/run needs the interactive UI", "warning");
       return;
     }
+    const running = steps.findIndex(
+      (s) => blocks?.status(s.key)?.state === "inline",
+    );
     let index = Math.max(
       0,
-      steps.findIndex((s) =>
-        startKey ? s.key === startKey : !pane?.status(s.key),
-      ),
+      startKey
+        ? steps.findIndex((s) => s.key === startKey)
+        : running !== -1
+          ? running
+          : steps.findIndex((s) => !blocks?.status(s.key)),
     );
     let note: { text: string; color: "success" | "warning" } | undefined;
     const select = (tui: TUI, next: number, direction: 1 | -1) => {
@@ -546,7 +559,7 @@ export default function (pi: ExtensionAPI) {
         done();
       };
       const passed = (step: Step): boolean => {
-        const status = pane?.status(step.key);
+        const status = blocks?.status(step.key);
         return (
           status !== undefined && status.state !== "inline" && !failed(status)
         );
@@ -554,7 +567,7 @@ export default function (pi: ExtensionAPI) {
       const selectNextUnrun = () => {
         const unrun = steps
           .map((candidate, i) => ({ candidate, i }))
-          .filter(({ candidate }) => !pane?.status(candidate.key));
+          .filter(({ candidate }) => !blocks?.status(candidate.key));
         const target = unrun.find(({ i }) => i > index) ?? unrun.at(0);
         if (target) select(tui, target.i, target.i > index ? 1 : -1);
       };
@@ -564,19 +577,23 @@ export default function (pi: ExtensionAPI) {
           selectNextUnrun();
       };
       const hints = (step: Step): string => {
-        const status = pane?.status(step.key);
+        const status = blocks?.status(step.key);
         if (status?.state === "inline")
-          return status.inPane
-            ? "ctrl+c stop · ↑↓ move · esc close"
-            : "ctrl+c stop · o move to pane · ↑↓ move · esc close";
-        if (!pane) return "⏎ copy · ↑↓ move · esc close";
+          return {
+            detached:
+              "type to answer in a floating block · ctrl+c stop · ctrl+o place block · esc close",
+            floating:
+              "type in the floating block · ctrl+c stop · ctrl+o place block · esc close",
+            placed: "type in the placed block · ctrl+c stop · esc close",
+          }[status.placement];
+        if (!blocks) return "⏎ copy · ↑↓ move · esc close";
         const run = status ? "R run again" : "i run inline";
         const fix = failed(status)
           ? "d ask agent to fix · "
           : status?.state === "exited"
             ? `l ${attached.has(step.key) ? "detach" : "attach"} log · `
             : "";
-        return `${fix}${run} · s send to pane · ⏎ copy · ↑↓ move · esc close`;
+        return `${fix}${run} · s send to block · ⏎ copy · ↑↓ move · esc close`;
       };
       return {
         render(width: number): string[] {
@@ -588,10 +605,20 @@ export default function (pi: ExtensionAPI) {
         },
         handleInput(data: string): void {
           const step = steps[index];
-          const status = pane?.status(step.key);
-          if (matchesKey(data, "ctrl+c") && status?.state === "inline")
-            void act(step, "stop");
-          else if (
+          const status = blocks?.status(step.key);
+          if (status?.state === "inline") {
+            if (matchesKey(data, "ctrl+c")) void act(step, "stop");
+            else if (matchesKey(data, "ctrl+o")) void act(step, "place");
+            else if (matchesKey(data, "escape")) close();
+            else {
+              const bytes = terminalBytes(data);
+              if (!bytes) return;
+              blocks
+                ?.write(step.key, bytes)
+                .catch((e) => ctx.ui.notify(errorMessage(e), "error"));
+              if (status.placement === "detached") void act(step, "float");
+            }
+          } else if (
             keybindings.matches(data, "tui.select.cancel") ||
             data === "q"
           )
@@ -608,7 +635,7 @@ export default function (pi: ExtensionAPI) {
               note = { text: "✓ copied", color: "success" };
               tui.requestRender();
             });
-          else if (!pane) return;
+          else if (!blocks) return;
           else if (data === "s")
             void act(step, "send").then(
               (ok) => ok && selectedKey === step.key && selectNextUnrun(),
@@ -622,7 +649,6 @@ export default function (pi: ExtensionAPI) {
             matchesKey(data, "shift+r")
           )
             void runInline(step);
-          else if (data === "o") void act(step, "pop");
           else if (
             data === "l" &&
             status?.state === "exited" &&
@@ -649,13 +675,13 @@ export default function (pi: ExtensionAPI) {
     handler: async (_args, ctx) => browse(ctx),
   });
 
-  if (!pane) return;
+  if (!blocks) return;
 
   pi.registerCommand("send-target", {
-    description: "Choose the Rex pane that receives sent steps",
+    description: "Choose the Rex block that receives sent steps",
     handler: async (_args, ctx) => {
       try {
-        await pane.pick(ctx);
+        await blocks.pick(ctx);
       } catch (e) {
         ctx.ui.notify(errorMessage(e), "error");
       }
@@ -664,14 +690,14 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerShortcut("ctrl+alt+s", {
     description:
-      "Send the next runbook step of the last response to a Rex pane",
+      "Send the next runbook step of the last response to a Rex block",
     handler: async (ctx) => {
       const { steps } = latestCard(ctx);
       if (steps.length === 0) {
         ctx.ui.notify("The last response has no runbook steps", "warning");
         return;
       }
-      const sent = steps.map((s) => pane.status(s.key) !== undefined);
+      const sent = steps.map((s) => blocks.status(s.key) !== undefined);
       const next = steps[sent.lastIndexOf(true) + 1];
       if (!next) {
         ctx.ui.notify(`All ${steps.length} steps were sent`, "info");

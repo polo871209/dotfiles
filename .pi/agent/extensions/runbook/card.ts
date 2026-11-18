@@ -12,10 +12,19 @@ import {
   visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import type { StepStatus } from "./pane";
+import { icon } from "../shared/icons";
+import type { Placement, StepStatus } from "./blocks";
 import type { Step } from "./steps";
 
-export type Action = "copy" | "send" | "run" | "stop" | "pop" | "debug" | "log";
+export type Action =
+  | "copy"
+  | "send"
+  | "run"
+  | "stop"
+  | "float"
+  | "place"
+  | "debug"
+  | "log";
 
 type CardHost = {
   status: (key: string) => StepStatus | undefined;
@@ -40,7 +49,8 @@ const KEYS: Record<Action, string> = {
   send: "s",
   copy: "⏎",
   stop: "ctrl+c",
-  pop: "o",
+  float: "type",
+  place: "ctrl+o",
   debug: "d",
   log: "l",
 };
@@ -50,7 +60,8 @@ const FILLS: Record<Action, ThemeColor> = {
   send: "accent",
   copy: "muted",
   stop: "warning",
-  pop: "toolTitle",
+  float: "accent",
+  place: "toolTitle",
   debug: "error",
   log: "mdLinkUrl",
 };
@@ -86,19 +97,23 @@ export const describeStatus = (
     case undefined:
       return undefined;
     case "sent":
-      return { color: "warning", text: "● pasted · press Enter in the pane" };
+      return { color: "warning", text: "● pasted · press Enter in the block" };
     case "running":
       return { color: "accent", text: spinning(status.since, status.program) };
     case "finished":
-      return { color: "muted", text: `■ finished · ${duration(status.took)}` };
+      return status.stopped
+        ? { color: "warning", text: `■ stopped · ${duration(status.took)}` }
+        : { color: "muted", text: `■ finished · ${duration(status.took)}` };
     case "closed":
-      return { color: "dim", text: "pane closed" };
+      return { color: "dim", text: "block closed" };
     case "inline":
       return {
         color: "accent",
         text: spinning(
           status.since,
-          status.inPane ? "running in pane" : "running",
+          status.placement === "detached"
+            ? "running"
+            : `running in ${status.placement} block`,
         ),
       };
     case "exited": {
@@ -109,7 +124,10 @@ export const describeStatus = (
         return { color: "warning", text: `■ stopped · ${took}` };
       if (status.code === undefined)
         return { color: "muted", text: `■ ended · ${took}` };
-      return { color: "error", text: `✗ exit ${status.code} · ${took}` };
+      return {
+        color: "error",
+        text: `${icon.close} exit ${status.code} · ${took}`,
+      };
     }
   }
 };
@@ -244,7 +262,13 @@ export class StepsCard implements Component {
     if (!this.host.canSend) return ["copy"];
     const status = this.host.status(step.key);
     if (status?.state === "inline")
-      return status.inPane ? ["stop", "copy"] : ["stop", "pop", "copy"];
+      return (
+        {
+          detached: ["stop", "float", "place", "copy"],
+          floating: ["stop", "place", "copy"],
+          placed: ["stop", "copy"],
+        } satisfies Record<Placement, Action[]>
+      )[status.placement];
     if (failed(status)) return ["debug", "run", "send", "copy"];
     if (status?.state === "exited") return ["log", "run", "send", "copy"];
     return ["run", "send", "copy"];
@@ -254,23 +278,27 @@ export class StepsCard implements Component {
     const status = this.host.status(step.key);
     switch (action) {
       case "copy":
-        return this.copied.has(step.key) ? "✓ Copied" : "⧉ Copy";
+        return this.copied.has(step.key)
+          ? `${icon.check} Copied`
+          : `${icon.contentCopy} Copy`;
       case "run":
-        return status ? "↻ Run again" : "▷ Run inline";
+        return status ? `${icon.replay} Run again` : `${icon.play} Run inline`;
       case "send":
         return status && status.state !== "exited"
-          ? "↻ Send again"
-          : "▶ Send to pane";
+          ? `${icon.send} Send again`
+          : `${icon.send} Send to block`;
       case "stop":
-        return "■ Stop";
-      case "pop":
-        return "⇱ Move to pane";
+        return `${icon.stop} Stop`;
+      case "float":
+        return `${icon.keyboard} Type`;
+      case "place":
+        return `${icon.dockRight} Place block`;
       case "debug":
-        return "✦ Ask agent to fix";
+        return `${icon.autoFix} Ask agent to fix`;
       case "log":
         return this.host.logAttached(step.key)
-          ? "✓ Log attached"
-          : "⊕ Attach log";
+          ? `${icon.paperclipCheck} Log attached`
+          : `${icon.paperclip} Attach log`;
     }
   }
 

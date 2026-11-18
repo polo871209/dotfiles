@@ -5,6 +5,7 @@ import {
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { errorMessage } from "./shared/error";
+import { icon } from "./shared/icons";
 import { LINK_OPEN, LINK_READY } from "./shared/link";
 import { extractText } from "./shared/message";
 
@@ -188,7 +189,7 @@ export default function (pi: ExtensionAPI) {
       blocks.set(key, fence.code);
       out.push(
         ...lines.slice(cursor, fence.end + 1),
-        `${fence.indent}[⧉ copy](pi-copy:${key})`,
+        `${fence.indent}[${icon.contentCopy} copy](pi-copy:${key})`,
       );
       cursor = fence.end + 1;
       if (lines[cursor]?.trim()) out.push("");

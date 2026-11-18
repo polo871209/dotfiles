@@ -1,5 +1,6 @@
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { createWriteStream, type WriteStream } from "node:fs";
 import { readFile, rm } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -23,17 +24,19 @@ const shellWord = (text: string): string =>
 export const inFolder = (cwd: string, code: string): string =>
   `cd ${shellWord(cwd)} && ${code}`;
 
+export type Placement = "detached" | "floating" | "placed";
+
 export type StepStatus =
   | { state: "sent"; block: string; since: number }
   | { state: "running"; block: string; since: number; program: string }
-  | { state: "finished"; block: string; took: number }
+  | { state: "finished"; block: string; took: number; stopped?: boolean }
   | { state: "closed"; block: string }
   | {
       state: "inline";
       block?: string;
       since: number;
       output: string[];
-      inPane: boolean;
+      placement: Placement;
     }
   | {
       state: "exited";
@@ -75,13 +78,18 @@ type WatchEvent =
   | { kind: "process"; block_id: string; program?: string }
   | { kind: "pwd" | "closed"; block_id: string };
 
-export class Pane {
+export class Blocks {
   private target: string | undefined;
   private watcher: ChildProcess | undefined;
   private ticker: ReturnType<typeof setInterval> | undefined;
   private readonly statuses = new Map<string, StepStatus>();
   private readonly active = new Map<string, string>();
   private readonly runs = new Map<string, ChildProcess>();
+  private readonly shellReturns = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
+  private readonly inputs = new Map<string, WriteStream>();
   private disposed = false;
 
   constructor(
@@ -134,7 +142,7 @@ export class Pane {
         .filter(Boolean)
         .join(" · "),
     );
-    const NEW = "New pane beside pi";
+    const NEW = "New block beside pi";
     const choice = await ctx.ui.select(title, [...labels, NEW]);
     if (!choice) return undefined;
     this.target =
@@ -156,7 +164,7 @@ export class Pane {
     if (result.status === "pick" || result.status === "busy") {
       const title =
         result.status === "busy"
-          ? `The target pane runs ${result.program ?? "no program"}. Send commands to`
+          ? `The target block runs ${result.program ?? "no program"}. Send commands to`
           : undefined;
       if (!(await this.pick(ctx, title))) return;
       result = await request(this.target);
@@ -164,7 +172,7 @@ export class Pane {
     }
     if (result.status === "busy") {
       ctx.ui.notify(
-        `The target pane runs ${result.program ?? "no program"}, so nothing was sent. Pick another pane with /send-target.`,
+        `The target block runs ${result.program ?? "no program"}, so nothing was sent. Pick another block with /send-target.`,
         "warning",
       );
       return;
@@ -172,7 +180,7 @@ export class Pane {
     this.target = result.block_id;
     if (result.status === "no_bracketed_paste") {
       ctx.ui.notify(
-        `${result.program} in the target pane has bracketed paste off, so a multi-line send would run each line.`,
+        `${result.program} in the target block has bracketed paste off, so a multi-line send would run each line.`,
         "warning",
       );
       return;
@@ -193,18 +201,25 @@ export class Pane {
     columns: number,
   ): Promise<Exited> {
     const exitFile = path.join(os.tmpdir(), `pi-runbook-${randomUUID()}`);
+    const inputFifo = `${exitFile}.in`;
+    execFileSync("mkfifo", [inputFifo]);
+    const input = createWriteStream(inputFifo, { flags: "r+" });
+    input.on("error", () => {});
+    this.inputs.set(key, input);
     const child = spawn(
       "rex",
       rexDoArgs(
         SCRIPT,
         {
           op: "run",
+          self: this.self,
           label: "runbook",
           cwd,
           columns,
           rows: 24,
           lines: OUTPUT_LINES,
           transcript: TRANSCRIPT_LINES,
+          input: inputFifo,
           command: [
             "/bin/sh",
             "-c",
@@ -223,12 +238,13 @@ export class Pane {
       state: "inline",
       since,
       output: [],
-      inPane: false,
+      placement: "detached",
     };
     let transcript = "";
     let stderr = "";
     const update = (next: Partial<typeof status>) => {
-      status = { ...status, ...next };
+      const current = this.statuses.get(key);
+      status = { ...(current?.state === "inline" ? current : status), ...next };
       this.statuses.set(key, status);
       this.onChange(key);
     };
@@ -256,8 +272,11 @@ export class Pane {
     return new Promise((resolve) => {
       child.on("close", async () => {
         this.runs.delete(key);
+        this.inputs.delete(key);
+        input.destroy();
         const written = await readFile(exitFile, "utf8").catch(() => "");
         await rm(exitFile, { force: true });
+        await rm(inputFifo, { force: true });
         const exitCode = written.trim() === "" ? undefined : Number(written);
         const failedToStart =
           status.block === undefined && stderr.split("\n").find(Boolean);
@@ -278,21 +297,37 @@ export class Pane {
     });
   }
 
-  private inlineBlock(key: string): string | undefined {
-    const status = this.statuses.get(key);
-    return status?.state === "inline" ? status.block : undefined;
+  write(key: string, data: string): Promise<void> {
+    const input = this.inputs.get(key);
+    if (!input) return Promise.resolve();
+    return new Promise((resolve, reject) =>
+      input.write(data, (e) => (e ? reject(e) : resolve())),
+    );
   }
 
-  async interrupt(key: string): Promise<void> {
-    const block = this.inlineBlock(key);
-    if (block) await this.lua({ op: "write", block_id: block, data: "\x03" });
+  interrupt(key: string): Promise<void> {
+    return this.write(key, "\x03");
   }
 
-  async moveToPane(key: string): Promise<void> {
+  float(key: string): Promise<void> {
+    return this.movePlacement(key, "floating");
+  }
+
+  place(key: string): Promise<void> {
+    return this.movePlacement(key, "placed");
+  }
+
+  private async movePlacement(key: string, to: Placement): Promise<void> {
     const status = this.statuses.get(key);
-    if (status?.state !== "inline" || !status.block || status.inPane) return;
-    await this.lua({ op: "pop", block_id: status.block });
-    this.statuses.set(key, { ...status, inPane: true });
+    if (status?.state !== "inline" || !status.block) return;
+    if (status.placement === to || status.placement === "placed") return;
+    await this.lua({
+      op: to === "floating" ? "float" : "place",
+      block_id: status.block,
+    });
+    const current = this.statuses.get(key);
+    if (current?.state !== "inline") return;
+    this.statuses.set(key, { ...current, placement: to });
     this.onChange(key);
   }
 
@@ -324,25 +359,58 @@ export class Pane {
       return;
     }
     const block = event.block_id;
-    let next: StepStatus | undefined;
+    const shellInFront =
+      event.kind === "process" && SHELLS.has(event.program ?? "");
+    if (!shellInFront) {
+      clearTimeout(this.shellReturns.get(block));
+      this.shellReturns.delete(block);
+    }
     if (event.kind === "closed") {
-      next = { state: "closed", block };
       this.active.delete(block);
       if (this.target === block) this.target = undefined;
+      this.transition(key, { state: "closed", block });
     } else if (event.kind === "pwd" && current.state === "sent") {
-      next = { state: "finished", block, took: Date.now() - current.since };
-    } else if (event.kind === "process" && event.program) {
-      if (!SHELLS.has(event.program) && current.state !== "finished")
-        next = {
-          state: "running",
-          block,
-          since: current.state === "running" ? current.since : Date.now(),
-          program: event.program,
-        };
-      else if (SHELLS.has(event.program) && current.state === "running")
-        next = { state: "finished", block, took: Date.now() - current.since };
+      const took = Date.now() - current.since;
+      this.transition(key, { state: "finished", block, took });
+    } else if (event.kind !== "process" || !event.program) {
+      return;
+    } else if (!shellInFront && current.state !== "finished") {
+      this.transition(key, {
+        state: "running",
+        block,
+        since: current.state === "running" ? current.since : Date.now(),
+        program: event.program,
+      });
+    } else if (
+      shellInFront &&
+      current.state === "running" &&
+      !this.shellReturns.has(block)
+    ) {
+      // A shell loop brings the shell to the front between its commands, so only a shell that stays in front ends the step.
+      const took = Date.now() - current.since;
+      const timer = setTimeout(async () => {
+        const stopped = await this.interrupted(block);
+        if (this.shellReturns.get(block) !== timer) return;
+        this.shellReturns.delete(block);
+        if (this.statuses.get(key)?.state === "running")
+          this.transition(key, { state: "finished", block, took, stopped });
+      }, 1500);
+      timer.unref?.();
+      this.shellReturns.set(block, timer);
     }
-    if (!next) return;
+  }
+
+  // A command typed into a shell reports no exit status, but the terminal echoes ^C when the user interrupts it.
+  private async interrupted(block: string): Promise<boolean> {
+    const { lines } = await this.lua<{ lines: string[] }>({
+      op: "last_lines",
+      block_id: block,
+      count: 3,
+    }).catch(() => ({ lines: [] }));
+    return lines.some((line) => line.includes("^C"));
+  }
+
+  private transition(key: string, next: StepStatus): void {
     this.statuses.set(key, next);
     if (next.state === "finished") this.onSettle(key, next);
     this.syncTicker();
@@ -366,7 +434,11 @@ export class Pane {
     this.disposed = true;
     for (const [key, child] of this.runs) {
       const status = this.statuses.get(key);
-      if (status?.state === "inline" && status.block && !status.inPane)
+      if (
+        status?.state === "inline" &&
+        status.block &&
+        status.placement !== "placed"
+      )
         spawn(
           "rex",
           [
@@ -385,6 +457,10 @@ export class Pane {
       child.kill();
     }
     this.runs.clear();
+    for (const input of this.inputs.values()) input.destroy();
+    this.inputs.clear();
+    for (const timer of this.shellReturns.values()) clearTimeout(timer);
+    this.shellReturns.clear();
     this.watcher?.kill();
     this.watcher = undefined;
     if (this.ticker) clearInterval(this.ticker);
