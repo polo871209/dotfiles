@@ -158,6 +158,7 @@ clone() {
 }
 
 # wt [branch | done]: in a repo made by clone, from any folder inside it. wt branch goes to the branch's folder and creates it if missing, wt picks a folder, and wt done removes this clean folder and goes back to the default branch.
+# .pi/agent/extensions/worktree.ts does the same in pi. Change both together.
 wt() {
   local root=$PWD
   while [[ $root != / && ! -d $root/.bare ]]; do root=${root:h}; done
@@ -231,6 +232,9 @@ wt() {
       for file in $home/(.env|.env.*|mise.toml|mise.*.toml|.mise.toml|.mise.*.toml)(N); do
         git -C $home check-ignore -q ${file:t} && cp $file $root/$1/
       done
+      if [[ -f $root/.pi/mcp.json && ! -e $root/$1/.pi/mcp.json ]]; then
+        mkdir -p $root/$1/.pi && ln -s $root/.pi/mcp.json $root/$1/.pi/mcp.json
+      fi
       cd $root/$1
       ;;
   esac

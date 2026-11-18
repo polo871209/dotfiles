@@ -44,7 +44,7 @@ Before you change pi-native behavior, read the relevant docs in the installed `@
 
 - **`go.ts`** — resumes an interrupted or stalled agent turn.
 - **`yeet.ts`** — validates, writes Conventional Commits, and pushes current changes.
-- **`worktree.ts`** — only in a repo set up by the `clone` shell function, on `/wt` or a worktree request, continues the session on a copy in a branch's folder, starts a background agent in a new worktree, lists worktrees, and deletes a branch with its folder, discarding uncommitted changes. When pi exits, the shell that started it moves to the session's last folder.
+- **`worktree.ts`** — only in a repo set up by the `clone` shell function, on `/wt` or any new branch, continues the session on a copy in a branch's folder, starts a background agent in a new worktree, gives new worktrees the repository's MCP servers, lists worktrees, and deletes a branch with its folder, discarding uncommitted changes. When pi exits, the shell that started it moves to the session's last folder.
 - **`fork-window.ts`** — on `/fork` or `/clone` in Rex, continues the conversation in a new Rex window while this pane keeps the original.
 - **`runbook/`** — shows commands the user must run as steps they can run in pi and answer prompts for, paste into a Rex terminal block, or copy. It hands failed output back to the agent for a fix in place, and reports on the next turn which steps ran and how they ended.
 - **`copy.ts`** — copies a code block from the last response or the whole session transcript, from a command, a shortcut, or a link under each code block.

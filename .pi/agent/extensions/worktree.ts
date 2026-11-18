@@ -1,9 +1,11 @@
 import {
   copyFileSync,
   existsSync,
+  mkdirSync,
   readdirSync,
   realpathSync,
   rmdirSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join, relative } from "node:path";
@@ -17,9 +19,11 @@ import { Type } from "typebox";
 import { run } from "./shared/exec";
 import { errorMessage } from "./shared/error";
 
+// The `clone` and `wt` functions in zsh/.zshrc do the same in the shell. Change both together.
 const BARE_DIR = ".bare";
 const TOOL_NAME = "worktree";
 const LOCAL_CONFIG = /^(\.env(\.[^/]+)?|\.?mise(\.[^/]+)?\.toml)$/;
+const MCP_CONFIG = join(".pi", "mcp.json");
 
 interface Worktree {
   path: string;
@@ -36,6 +40,7 @@ interface CreatedWorktree extends Worktree {
   branch: string;
   created: boolean;
   copied: string[];
+  mcpLinked: boolean;
 }
 
 interface PendingMove {
@@ -154,6 +159,15 @@ async function copyLocalConfig(
   return files;
 }
 
+function linkRepoMcp(root: string, worktree: string): boolean {
+  const shared = join(root, MCP_CONFIG);
+  const link = join(worktree, MCP_CONFIG);
+  if (!existsSync(shared) || existsSync(link)) return false;
+  mkdirSync(dirname(link), { recursive: true });
+  symlinkSync(shared, link);
+  return true;
+}
+
 async function ensureWorktree(
   repo: Repo,
   branch: string,
@@ -164,7 +178,13 @@ async function ensureWorktree(
   await git(root, ["check-ref-format", "--branch", branch], signal);
   const existing = repo.worktrees.find((w) => w.branch === branch);
   if (existing)
-    return { path: existing.path, branch, created: false, copied: [] };
+    return {
+      path: existing.path,
+      branch,
+      created: false,
+      copied: [],
+      mcpLinked: false,
+    };
 
   const path = join(root, branch);
   const hasLocal =
@@ -200,7 +220,13 @@ async function ensureWorktree(
   await git(root, args, signal);
   const home = homeOf(repo);
   const copied = home ? await copyLocalConfig(home.path, path, signal) : [];
-  return { path, branch, created: true, copied };
+  return {
+    path,
+    branch,
+    created: true,
+    copied,
+    mcpLinked: linkRepoMcp(root, path),
+  };
 }
 
 async function currentWorktree(
@@ -550,7 +576,10 @@ function createdText(wt: CreatedWorktree): string {
   const copied = wt.copied.length
     ? ` Copied ${wt.copied.join(", ")} from the default-branch worktree.`
     : "";
-  return `Created worktree ${wt.path} on branch ${wt.branch}.${copied}`;
+  const mcp = wt.mcpLinked
+    ? ` Linked ${MCP_CONFIG} to the repository's MCP servers.`
+    : "";
+  return `Created worktree ${wt.path} on branch ${wt.branch}.${copied}${mcp}`;
 }
 
 export default function (pi: ExtensionAPI) {
@@ -681,7 +710,7 @@ export default function (pi: ExtensionAPI) {
       openWorldHint: false,
     },
     description:
-      "One folder per branch in this repo. Use only when the user, AGENTS.md, or a plan asks, instead of `git worktree`. `list`: folders and status. `enter`: move this session to the folder of `branch`, created if missing. `spawn`: a new agent works on `task` in that folder, in a background tab. `done`: delete this folder and its local branch. `remove`: delete another branch and its folder. Both discard uncommitted changes and unpushed commits.",
+      "One folder per branch in this repo. Use for every new branch, instead of `git worktree` or switching branches in this folder. `list`: folders and status. `enter`: move this session to the folder of `branch`, created if missing. `spawn`: a new agent works on `task` in that folder, in a background tab. `done`: delete this folder and its local branch. `remove`: delete another branch and its folder. Both discard uncommitted changes and unpushed commits.",
     parameters: Type.Object({
       action: Type.Enum(["list", "enter", "spawn", "done", "remove"]),
       branch: Type.Optional(Type.String({ description: "e.g. feat/login" })),
