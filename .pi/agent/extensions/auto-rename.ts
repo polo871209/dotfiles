@@ -1,10 +1,10 @@
+import { contentText } from "@earendil-works/pi-ai";
 import { basename, isAbsolute, relative } from "node:path";
 import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { isForkName } from "./shared/fork-name";
-import { extractText } from "./shared/message";
 import { surviveReload } from "./shared/reload";
 import { customEntries } from "./shared/session";
 import {
@@ -109,7 +109,7 @@ function sessionDigest(
     if (entry.type !== "message") continue;
     const { message } = entry;
     if (message.role === "user") {
-      const text = extractText(message.content).trim();
+      const text = contentText(message.content).trim();
       if (text) requests.push(text);
     } else if (message.role === "assistant") {
       for (const call of message.content) {
@@ -231,7 +231,7 @@ export default function (pi: ExtensionAPI) {
   // Pi emits message_end before it stores the message, so the prompt is passed along.
   pi.on("message_end", (event, ctx) => {
     if (event.message.role !== "user") return;
-    renameInBackground(ctx, extractText(event.message.content));
+    renameInBackground(ctx, contentText(event.message.content));
   });
   pi.on("session_start", (_e, ctx) => {
     renameInBackground(ctx);
@@ -254,7 +254,7 @@ export default function (pi: ExtensionAPI) {
       if (arg === "-" || arg.toLowerCase() === "clear") {
         pi.setSessionName("");
         pi.appendEntry<AutoRenameEntry>(ENTRY_TYPE, { turns: 0 });
-        ctx.ui.notify("Session name cleared", "info");
+        ctx.ui.notify("Session name cleared");
         return;
       }
 
@@ -296,7 +296,7 @@ export default function (pi: ExtensionAPI) {
         }
         pi.setSessionName(name);
         pi.appendEntry<AutoRenameEntry>(ENTRY_TYPE, { turns: userTurns, name });
-        ctx.ui.notify(`Session named: ${name}`, "info");
+        ctx.ui.notify(`Session named: ${name}`);
       } finally {
         if (sessionFile) inFlight.delete(sessionFile);
       }

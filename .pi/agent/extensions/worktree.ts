@@ -565,7 +565,7 @@ async function switchToSession(
 ): Promise<boolean> {
   const { cancelled } = await ctx.switchSession(sessionFile, {
     withSession: async (next) => {
-      next.ui.notify(notice, "info");
+      next.ui.notify(notice);
       if (continuation)
         await next.sendMessage(
           { customType: "worktree", content: continuation, display: true },
@@ -744,7 +744,7 @@ export default function (pi: ExtensionAPI) {
             doneBranch,
             await currentWorktree(ctx.cwd),
           );
-          ctx.ui.notify(`${removed}${await closeTab(doneBranch)}`, "info");
+          ctx.ui.notify(`${removed}${await closeTab(doneBranch)}`);
           return;
         }
         if (commandArgs)
@@ -754,7 +754,7 @@ export default function (pi: ExtensionAPI) {
           : await pickWorktree(ctx);
         if (!target) return;
         if (target.path === (await currentWorktree(ctx.cwd))) {
-          ctx.ui.notify(`Session is already in ${target.path}`, "info");
+          ctx.ui.notify(`Session is already in ${target.path}`);
           return;
         }
         await waitForAgent(ctx, showRunning);

@@ -66,10 +66,6 @@ const FILLS: Record<Action, ThemeColor> = {
   log: "mdLinkUrl",
 };
 
-// Theme.bg only takes the fixed ThemeBg slots, so a fill reuses a foreground color as background.
-const asBackground = (fgAnsi: string): string => fgAnsi.replace("[38;", "[48;");
-const asForeground = (bgAnsi: string): string => bgAnsi.replace("[48;", "[38;");
-
 export const failed = (status: StepStatus | undefined): boolean =>
   status?.state === "exited" &&
   status.code !== undefined &&
@@ -306,9 +302,11 @@ export class StepsCard implements Component {
     if (!this.ready) return t.fg("dim", text);
     const pressed =
       this.pressed?.step.key === step.key && this.pressed.action === action;
-    const fill = asBackground(t.getFgAnsi(pressed ? "text" : FILLS[action]));
-    const ink = asForeground(t.getBgAnsi("selectedBg"));
-    return `${fill}${ink}${t.bold(text)}\x1b[39;49m`;
+    return t.style(text, {
+      fg: t.colors.selectedBg,
+      bg: t.colors[pressed ? "text" : FILLS[action]],
+      bold: true,
+    });
   }
 
   private statusChip(t: Theme, status: StepStatus | undefined): string {

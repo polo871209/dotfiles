@@ -72,7 +72,7 @@ export function registerToggle(pi: ExtensionAPI, config: ToggleConfig): Toggle {
   ): Promise<void> => {
     let note: string | void = undefined;
     if (value && prepare) {
-      ctx.ui.notify(`${label}: preparing…`, "info");
+      ctx.ui.notify(`${label}: preparing…`);
       try {
         note = await prepare("command");
       } catch (e) {
@@ -84,7 +84,6 @@ export function registerToggle(pi: ExtensionAPI, config: ToggleConfig): Toggle {
     pi.appendEntry<ToggleEntry>(ENTRY_TYPE, { name, enabled });
     ctx.ui.notify(
       `${label} ${enabled ? "on" : "off"}${note ? ` (${note})` : ""}`,
-      "info",
     );
     showStatus(ctx);
     await onChange(enabled, ctx);
@@ -124,14 +123,14 @@ export function registerToggle(pi: ExtensionAPI, config: ToggleConfig): Toggle {
         const folder = await folderWithDefault(ctx.cwd);
         if (folder) {
           rmSync(folderDefaultFile(folder));
-          ctx.ui.notify(`${label}: off by default in ${folder}`, "info");
+          ctx.ui.notify(`${label}: off by default in ${folder}`);
           if (enabled) await setEnabled(false, ctx);
           return;
         }
         const scope = (await repoRoot(ctx.cwd)) ?? resolve(ctx.cwd);
         mkdirSync(folderDefaultsDir, { recursive: true });
         writeFileSync(folderDefaultFile(scope), "");
-        ctx.ui.notify(`${label}: on by default in ${scope}`, "info");
+        ctx.ui.notify(`${label}: on by default in ${scope}`);
         if (!enabled) await setEnabled(true, ctx);
       },
     },

@@ -36,12 +36,9 @@ export default function (pi: ExtensionAPI) {
           lines.push(
             `  ${displayPath(f.file, ctx.cwd)}  [${f.clients.join(", ") || "no LSP"}]`,
           );
-        ctx.ui.notify(lines.join("\n") || "nvim running, nothing open", "info");
+        ctx.ui.notify(lines.join("\n") || "nvim running, nothing open");
       } catch (e) {
-        ctx.ui.notify(
-          `lsp-status failed: ${errorMessage(e)}`,
-          "error",
-        );
+        ctx.ui.notify(`lsp-status failed: ${errorMessage(e)}`, "error");
       }
     },
   });
@@ -54,7 +51,6 @@ export default function (pi: ExtensionAPI) {
         (await restartDaemons())
           ? "nvim daemons killed"
           : "no nvim daemon running",
-        "info",
       );
     },
   });

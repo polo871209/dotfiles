@@ -2,6 +2,7 @@ import type { Theme } from "@earendil-works/pi-coding-agent";
 import {
   type Component,
   CURSOR_MARKER,
+  renderFakeCursor,
   truncateToWidth,
   visibleWidth,
   wrapTextWithAnsi,
@@ -28,7 +29,7 @@ function wrapInlineInput(
   }).segment(buffer.slice(offset));
   const rawAt = firstGrapheme ? firstGrapheme.segment : "";
   return wrapTextWithAnsi(
-    `${buffer.slice(0, offset)}${CURSOR_MARKER}\x1b[7m${rawAt === "" || rawAt === " " ? "\u00a0" : rawAt}\x1b[27m${buffer.slice(offset + rawAt.length)}`,
+    `${buffer.slice(0, offset)}${CURSOR_MARKER}${renderFakeCursor(rawAt === "" || rawAt === " " ? "\u00a0" : rawAt)}${buffer.slice(offset + rawAt.length)}`,
     contentWidth,
   );
 }

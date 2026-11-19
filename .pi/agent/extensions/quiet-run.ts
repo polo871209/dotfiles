@@ -1,8 +1,11 @@
-import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { stripVTControlCharacters } from "node:util";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import {
+  createLocalBashOperations,
+  type ExtensionAPI,
+} from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { formatDuration } from "./shared/format";
@@ -45,18 +48,16 @@ function collapseRuns(lines: string[]): string[] {
   return out;
 }
 
-const liveGroups = new Set<number>();
+const shell = createLocalBashOperations();
+
+const verdictOf = (error: unknown, timeoutSeconds?: number) => {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message === "aborted") return "aborted";
+  if (message.startsWith("timeout:")) return `timeout after ${timeoutSeconds}s`;
+  return `failed to start (${message})`;
+};
 
 export default function (pi: ExtensionAPI) {
-  pi.on("session_shutdown", () => {
-    for (const pid of liveGroups) {
-      try {
-        process.kill(-pid, "SIGTERM");
-      } catch {}
-    }
-    liveGroups.clear();
-  });
-
   pi.registerTool({
     name: "quiet_run",
     label: "Quiet Run",
@@ -95,7 +96,7 @@ export default function (pi: ExtensionAPI) {
     }),
     outputSchema: Type.Object({
       verdict: Type.String({
-        description: "exit=N, timeout, aborted, or killed",
+        description: "exit=N, timeout, aborted, or failed to start",
       }),
       exit_code: Type.Union([Type.Number(), Type.Null()]),
       duration_ms: Type.Number(),
@@ -140,13 +141,6 @@ export default function (pi: ExtensionAPI) {
       const logFd = fs.openSync(logPath, "w");
 
       const startedAt = Date.now();
-      const child = spawn("/bin/sh", ["-c", `exec 2>&1\n${command}`], {
-        cwd,
-        stdio: ["ignore", "pipe", "ignore"],
-        // Own process group, because signalling only the shell leaves workers alive holding the pipe open.
-        detached: true,
-      });
-
       const keep = params.tail ?? FAILURE_TAIL;
       // pi previews the first 10 lines of a partial result: 1 header + 9.
       const LIVE_LINES = 9;
@@ -156,7 +150,6 @@ export default function (pi: ExtensionAPI) {
       let lineCount = 0;
       let pending = "";
       let lastPush = 0;
-      let lastData = Date.now();
 
       const addLines = (raws: string[]) => {
         const clean = raws.map(cleanLine);
@@ -175,10 +168,9 @@ export default function (pi: ExtensionAPI) {
         } catch {}
       };
 
-      child.stdout!.setEncoding("utf8");
-      child.stdout!.on("data", (chunk: string) => {
-        lastData = Date.now();
-        const parts = (pending + chunk).split("\n");
+      const decoder = new StringDecoder("utf8");
+      const onData = (data: Buffer) => {
+        const parts = (pending + decoder.write(data)).split("\n");
         pending = parts.pop()!;
         const cr = pending.lastIndexOf("\r", pending.length - 2);
         if (cr > 0) pending = pending.slice(cr + 1);
@@ -197,68 +189,24 @@ export default function (pi: ExtensionAPI) {
             details: {},
           });
         } catch {}
-      });
-
-      let sigkillTimer: ReturnType<typeof setTimeout> | undefined;
-      const killTree = (sig: NodeJS.Signals) => {
-        try {
-          if (child.pid) process.kill(-child.pid, sig);
-        } catch {}
       };
-      const terminate = () => {
-        killTree("SIGTERM");
-        sigkillTimer ??= setTimeout(() => killTree("SIGKILL"), 3_000);
-      };
-      let timedOut = false;
-      const timer = params.timeoutSeconds
-        ? setTimeout(() => {
-            timedOut = true;
-            terminate();
-          }, params.timeoutSeconds * 1000)
-        : undefined;
-      signal?.addEventListener("abort", terminate, { once: true });
-      if (child.pid) liveGroups.add(child.pid);
 
-      const { code, killSignal, spawnError } = await new Promise<{
-        code: number | null;
-        killSignal: NodeJS.Signals | null;
-        spawnError?: Error;
-      }>((resolve) => {
-        child.on("error", (err) =>
-          resolve({ code: null, killSignal: null, spawnError: err }),
-        );
-        child.on("close", (c, s) => resolve({ code: c, killSignal: s }));
-        // A background job (`cmd &`) inherits the pipe and holds it open after the shell exits.
-        child.on("exit", (c, s) => {
-          const deadline = Date.now() + 2_000;
-          const settle = () => {
-            if (Date.now() - lastData < 100 && Date.now() < deadline) {
-              setTimeout(settle, 100);
-              return;
-            }
-            child.stdout!.destroy();
-            resolve({ code: c, killSignal: s });
-          };
-          setTimeout(settle, 100);
-        });
-      });
-      clearTimeout(timer);
-      clearTimeout(sigkillTimer);
-      if (timedOut || signal?.aborted) killTree("SIGKILL");
-      signal?.removeEventListener("abort", terminate);
-      if (child.pid) liveGroups.delete(child.pid);
+      let code: number | null = null;
+      let verdict: string;
+      try {
+        ({ exitCode: code } = await shell.exec(command, cwd, {
+          onData,
+          signal,
+          timeout: params.timeoutSeconds,
+        }));
+        verdict = `exit=${code}`;
+      } catch (error) {
+        verdict = verdictOf(error, params.timeoutSeconds);
+      }
+      pending += decoder.end();
       if (pending) addLines([pending]);
       fs.closeSync(logFd);
 
-      const verdict = spawnError
-        ? `failed to start (${spawnError.message})`
-        : timedOut
-          ? `timeout after ${params.timeoutSeconds}s`
-          : signal?.aborted
-            ? "aborted"
-            : killSignal
-              ? `killed (${killSignal})`
-              : `exit=${code}`;
       const failed = verdict !== "exit=0";
       const n = params.tail ?? (failed ? FAILURE_TAIL : SUCCESS_TAIL);
       const shown = n > 0 ? (matcher ? hits : ring).slice(-n) : [];
@@ -293,7 +241,7 @@ export default function (pi: ExtensionAPI) {
         details: {},
         structuredContent: {
           verdict,
-          exit_code: spawnError || timedOut || killSignal ? null : code,
+          exit_code: code,
           duration_ms: Date.now() - startedAt,
           lines: lineCount,
           output: body.join("\n"),

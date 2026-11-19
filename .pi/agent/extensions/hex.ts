@@ -1,3 +1,4 @@
+import { contentText } from "@earendil-works/pi-ai";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -5,7 +6,6 @@ import type {
 import { errorMessage } from "./shared/error";
 import { sideChannelComplete } from "./shared/llm";
 import { resultCard, stepsWidget } from "./shared/progress";
-import { extractText } from "./shared/message";
 
 const HEX = "/Applications/Hex.app/Contents/MacOS/hex";
 
@@ -42,7 +42,7 @@ const recentTurns = (ctx: ExtensionContext) =>
       if (entry.type !== "message") return [];
       const { message } = entry;
       if (message.role !== "user" && message.role !== "assistant") return [];
-      const text = extractText(message.content).trim();
+      const text = contentText(message.content).trim();
       return text ? [`${message.role}: ${text.slice(0, 2000)}`] : [];
     })
     .slice(-4)
@@ -173,9 +173,7 @@ export default function (pi: ExtensionAPI) {
     const controller = new AbortController();
     running = controller;
     const step = (active: number) =>
-      ctx.ui.setWidget("hex", stepsWidget("hex", STEPS, active), {
-        placement: "aboveEditor",
-      });
+      ctx.ui.setWidget("hex", stepsWidget("hex", STEPS, active));
     try {
       const result = await learn(hint, ctx, controller.signal, step);
       if (result && !controller.signal.aborted) {

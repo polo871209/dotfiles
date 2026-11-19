@@ -97,9 +97,9 @@ export function registerSkillToggle(
       update: {
         description: "Sync the clone",
         run: async (ctx) => {
-          ctx.ui.notify(`${label}: syncing…`, "info");
+          ctx.ui.notify(`${label}: syncing…`);
           try {
-            ctx.ui.notify(`${label}: ${await syncClone()}`, "info");
+            ctx.ui.notify(`${label}: ${await syncClone()}`);
           } catch (e) {
             ctx.ui.notify(
               `${label} update failed: ${errorMessage(e)}`,

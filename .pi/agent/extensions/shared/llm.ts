@@ -1,4 +1,9 @@
-import type { Api, Message, Model } from "@earendil-works/pi-ai";
+import {
+  type Api,
+  contentText,
+  type Message,
+  type Model,
+} from "@earendil-works/pi-ai";
 import {
   BorderedLoader,
   type ExtensionContext,
@@ -68,11 +73,7 @@ export async function sideChannelComplete(
     }
     return {
       ok: true,
-      text: response.content
-        .filter((c): c is { type: "text"; text: string } => c.type === "text")
-        .map((c) => c.text)
-        .join(opts.join ?? "\n")
-        .trim(),
+      text: contentText(response.content, opts.join).trim(),
     };
   } catch (e) {
     return {

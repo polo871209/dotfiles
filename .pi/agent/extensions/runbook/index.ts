@@ -6,6 +6,7 @@ import {
 import {
   Container,
   matchesKey,
+  stripTerminalSequences,
   Text,
   type TUI,
   TuiAltScreen,
@@ -41,8 +42,6 @@ const RunbookParams = Type.Object({
     { minItems: 1 },
   ),
 });
-
-const ANSI = /\x1b\[[0-9;]*m/g;
 
 const preview = (text: string, limit = 60): string => {
   const line = text
@@ -268,7 +267,7 @@ export default function (pi: ExtensionAPI) {
       if (item.withLog && item.status.state === "exited")
         lines.push(
           "```",
-          item.status.transcript.replace(ANSI, "") || "(no output)",
+          stripTerminalSequences(item.status.transcript) || "(no output)",
           "```",
         );
     }
@@ -367,7 +366,7 @@ export default function (pi: ExtensionAPI) {
       "Output:",
       "",
       "```",
-      status.transcript.replace(ANSI, "") || "(no output)",
+      stripTerminalSequences(status.transcript) || "(no output)",
       "```",
     ].join("\n");
     pi.appendEntry(FAILED_ENTRY, { key: step.key });
@@ -700,7 +699,7 @@ export default function (pi: ExtensionAPI) {
       const sent = steps.map((s) => blocks.status(s.key) !== undefined);
       const next = steps[sent.lastIndexOf(true) + 1];
       if (!next) {
-        ctx.ui.notify(`All ${steps.length} steps were sent`, "info");
+        ctx.ui.notify(`All ${steps.length} steps were sent`);
         return;
       }
       await act(next, "send");

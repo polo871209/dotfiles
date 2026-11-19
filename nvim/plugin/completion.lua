@@ -7,10 +7,12 @@ vim.pack.add {
     { src = 'https://github.com/saghen/blink.cmp', version = vim.version.range '1.x' },
 }
 
+local lazy_group = vim.api.nvim_create_augroup('blink-lazy', { clear = true })
 vim.api.nvim_create_autocmd('InsertEnter', {
-    group = vim.api.nvim_create_augroup('blink-lazy', { clear = true }),
-    once = true,
+    group = lazy_group,
     callback = function()
+        if vim.b.completion == false then return end
+        vim.api.nvim_del_augroup_by_id(lazy_group)
         require('blink.cmp').setup {
             keymap = {
                 preset = 'super-tab',
@@ -22,9 +24,6 @@ vim.api.nvim_create_autocmd('InsertEnter', {
                 },
                 list = {
                     max_items = 20,
-                },
-                trigger = {
-                    show_on_insert_on_trigger_character = true,
                 },
             },
 

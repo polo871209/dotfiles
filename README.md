@@ -73,14 +73,3 @@ No secret is in this repository or in the shell environment. Each tool reads its
 
 - mise runs `gh auth token` for the GitHub API.
 - pi runs the `security` command in [models.json](.pi/agent/models.json) for the TypeSafe key.
-
-## Project environment variables
-
-Put a project's environment variables in `.mise.toml`. [git/ignore](git/ignore) keeps that file out of every repository.
-
-```toml
-[env]
-LOG_LEVEL = "debug"
-```
-
-Run `mise trust` once in the project. Only tools that mise starts through its shims see these variables, for example `node`, `pnpm`, and `go`. The shell does not see them. For Python, use `uv run`, because the `python` shim ignores the project's `.venv`.

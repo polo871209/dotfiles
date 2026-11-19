@@ -1,7 +1,7 @@
 {
   "plugins": {
     "SchemaStore.nvim": {
-      "rev": "246ca2fa1323ee1312b84352ab09b8c2fa292888",
+      "rev": "a0479e8a6d5d3471899d2be630fd207f4804dc7d",
       "src": "https://github.com/b0o/SchemaStore.nvim"
     },
     "blink.cmp": {
@@ -30,11 +30,11 @@
       "src": "https://github.com/3rd/image.nvim"
     },
     "mini.nvim": {
-      "rev": "a03ad899bda446b5a81cfa99d8aeeb92241522f3",
+      "rev": "22619434ccca787cdb34406c97f0e395d4debadc",
       "src": "https://github.com/echasnovski/mini.nvim"
     },
     "neo-tree.nvim": {
-      "rev": "bb9779f532ef9ec62486a840fb5db44591aeff0f",
+      "rev": "760d9701953ad2b0277fe9776ba99bb011ecac2b",
       "src": "git@github.com:nvim-neo-tree/neo-tree.nvim"
     },
     "nui.nvim": {
@@ -42,7 +42,7 @@
       "src": "git@github.com:MunifTanjim/nui.nvim"
     },
     "nvim-lint": {
-      "rev": "f6230a5c06ba59e6059c14637f1dbe29a7978b9b",
+      "rev": "6bf29b9dbdad60b38b489b23309c22ba6d4c915a",
       "src": "https://github.com/mfussenegger/nvim-lint"
     },
     "plenary.nvim": {
@@ -54,7 +54,7 @@
       "src": "https://github.com/stevearc/quicker.nvim"
     },
     "render-markdown.nvim": {
-      "rev": "8e8795368391036643b622875a6da6a51bcd33f4",
+      "rev": "a67f826164c38c836fc6060f32b275c4c43317a7",
       "src": "git@github.com:MeanderingProgrammer/render-markdown.nvim"
     },
     "todo-comments.nvim": {
@@ -62,7 +62,7 @@
       "src": "https://github.com/folke/todo-comments.nvim"
     },
     "tree-sitter-manager.nvim": {
-      "rev": "06c90a3af8eb471f4a4ff979d681312284a8583a",
+      "rev": "05c2328f1ffd84f1944f9ff9aeb0d5032c6e5c1e",
       "src": "https://github.com/romus204/tree-sitter-manager.nvim"
     },
     "treesj": {

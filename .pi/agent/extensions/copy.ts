@@ -1,3 +1,4 @@
+import { contentText } from "@earendil-works/pi-ai";
 import { createHash } from "node:crypto";
 import {
   copyToClipboard,
@@ -7,7 +8,6 @@ import {
 import { errorMessage } from "./shared/error";
 import { icon } from "./shared/icons";
 import { LINK_OPEN, LINK_READY } from "./shared/link";
-import { extractText } from "./shared/message";
 
 type Fence = {
   indent: string;
@@ -80,7 +80,7 @@ const textMessages = (ctx: ExtensionContext): TextMessage[] =>
     if (entry.type !== "message") return [];
     const { role } = entry.message;
     if (role !== "user" && role !== "assistant") return [];
-    const text = extractText(entry.message.content).trim();
+    const text = contentText(entry.message.content).trim();
     return text ? [{ role, text }] : [];
   });
 
@@ -91,7 +91,7 @@ const copyWithNotify = async (
 ): Promise<void> => {
   try {
     await copyToClipboard(value);
-    ctx.ui.notify(`Copied ${label} to clipboard`, "info");
+    ctx.ui.notify(`Copied ${label} to clipboard`);
   } catch (e) {
     ctx.ui.notify(errorMessage(e), "error");
   }
@@ -170,31 +170,29 @@ export default function (pi: ExtensionAPI) {
     else void copyWithNotify(currentCtx, code, "code block");
   });
 
-  pi.registerMarkdownTransformer((markdown, context) => {
-    if (
-      !linksReady ||
-      context.messageType !== "assistant" ||
-      context.isStreaming
-    )
-      return markdown;
-    const lines = markdown.split("\n");
-    const fences = parseFences(lines).filter(
-      (f) => f.closed && f.lang?.toLowerCase() !== "mermaid",
-    );
-    if (fences.length === 0) return markdown;
-    const out: string[] = [];
-    let cursor = 0;
-    for (const fence of fences) {
-      const key = hashKey(fence.code);
-      blocks.set(key, fence.code);
-      out.push(
-        ...lines.slice(cursor, fence.end + 1),
-        `${fence.indent}[${icon.contentCopy} copy](pi-copy:${key})`,
+  pi.registerMarkdownTransformer(
+    (markdown, context) => {
+      if (!linksReady || context.isStreaming) return markdown;
+      const lines = markdown.split("\n");
+      const fences = parseFences(lines).filter(
+        (f) => f.closed && f.lang?.toLowerCase() !== "mermaid",
       );
-      cursor = fence.end + 1;
-      if (lines[cursor]?.trim()) out.push("");
-    }
-    out.push(...lines.slice(cursor));
-    return out.join("\n");
-  });
+      if (fences.length === 0) return markdown;
+      const out: string[] = [];
+      let cursor = 0;
+      for (const fence of fences) {
+        const key = hashKey(fence.code);
+        blocks.set(key, fence.code);
+        out.push(
+          ...lines.slice(cursor, fence.end + 1),
+          `${fence.indent}[${icon.contentCopy} copy](pi-copy:${key})`,
+        );
+        cursor = fence.end + 1;
+        if (lines[cursor]?.trim()) out.push("");
+      }
+      out.push(...lines.slice(cursor));
+      return out.join("\n");
+    },
+    { messageTypes: ["assistant"] },
+  );
 }

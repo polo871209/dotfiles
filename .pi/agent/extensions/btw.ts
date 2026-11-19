@@ -1,4 +1,4 @@
-import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import {
   convertToLlm,
   getMarkdownTheme,
@@ -27,19 +27,6 @@ const answerText = (message: AssistantMessage) =>
     .join("")
     .trim();
 
-// Providers reject a tool call without its result, which the transcript has while a tool runs.
-const withoutOpenToolCalls = (messages: Message[]) => {
-  const answered = new Set(
-    messages.flatMap((m) => (m.role === "toolResult" ? [m.toolCallId] : [])),
-  );
-  const open = messages.findIndex(
-    (m) =>
-      m.role === "assistant" &&
-      m.content.some((c) => c.type === "toolCall" && !answered.has(c.id)),
-  );
-  return open < 0 ? messages : messages.slice(0, open);
-};
-
 async function ask(
   ctx: ExtensionContext,
   question: string,
@@ -47,8 +34,8 @@ async function ask(
   onText: (text: string) => void,
 ): Promise<string> {
   if (!ctx.model) throw new Error("no model selected");
-  const transcript = withoutOpenToolCalls(
-    convertToLlm(ctx.sessionManager.buildSessionProjection().messages),
+  const transcript = convertToLlm(
+    ctx.sessionManager.buildSessionProjection().messages,
   );
   const stream = ctx.modelRegistry.streamSimple(
     ctx.model,
@@ -66,6 +53,7 @@ async function ask(
     },
     {
       sessionId: ctx.sessionManager.getSessionId(),
+      disableContinuation: true,
       reasoning: ctx.thinkingLevel === "off" ? undefined : ctx.thinkingLevel,
       signal,
     },
@@ -99,17 +87,15 @@ export default function (pi: ExtensionAPI) {
     running = controller;
     const show = (answer: string) => {
       if (controller.signal.aborted) return;
-      ctx.ui.setWidget(
-        "btw",
-        (_tui, theme) => card({ question, answer }, theme),
-        { placement: "aboveEditor" },
+      ctx.ui.setWidget("btw", (_tui, theme) =>
+        card({ question, answer }, theme),
       );
     };
     show("…");
     try {
       const answer = await ask(ctx, question, controller.signal, show);
       pi.appendEntry<Btw>("btw", { question, answer });
-      if (ctx.mode !== "tui") ctx.ui.notify(answer, "info");
+      if (ctx.mode !== "tui") ctx.ui.notify(answer);
     } catch (error) {
       if (!controller.signal.aborted) {
         ctx.ui.notify(`btw: ${errorMessage(error)}`, "error");

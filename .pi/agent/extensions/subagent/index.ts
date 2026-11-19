@@ -1,6 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import { extractText } from "../shared/message";
 import { formatDuration } from "../shared/format";
 import { surviveReload } from "../shared/reload";
 import { WORKING_FRAME_MS, workingFrames } from "../shared/working-indicator";
@@ -24,7 +23,7 @@ import {
   truncateToWidth,
 } from "@earendil-works/pi-tui";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { JsonValue } from "@earendil-works/pi-ai";
+import { contentText, type JsonValue } from "@earendil-works/pi-ai";
 import { Type, type Static } from "typebox";
 import { customEntries, isCustom } from "../shared/session";
 import { rexDoArgs } from "../shared/rex";
@@ -482,7 +481,9 @@ const statusIcon = (theme: Theme, p: Progress): string => {
   return theme.fg("success", "✓");
 };
 
-const pendingProgress = (args: Partial<Static<typeof SubagentParams>>): Progress => ({
+const pendingProgress = (
+  args: Partial<Static<typeof SubagentParams>>,
+): Progress => ({
   agent: args.agent ?? "",
   task: args.task ?? "",
   model: "",
@@ -869,7 +870,8 @@ function registerChildReporter(pi: ExtensionAPI): void {
             : [],
         )
         .at(-1);
-      const output = extractText(lastReply?.content).trim() || undefined;
+      const output =
+        (lastReply && contentText(lastReply.content).trim()) || undefined;
       const result: Omit<WatchOutcome, "state"> & { state: "done" | "error" } =
         event.aborted || lastReply?.stopReason === "aborted"
           ? { state: "error", msg: "aborted in the pane", output }
@@ -956,7 +958,7 @@ export default function (pi: ExtensionAPI) {
         (record) => record.detach !== undefined,
       );
       if (detachable.length === 0) {
-        ctx.ui.notify("No foreground subagent is running", "info");
+        ctx.ui.notify("No foreground subagent is running");
         return;
       }
       for (const record of detachable) record.detach?.();
@@ -1053,8 +1055,7 @@ export default function (pi: ExtensionAPI) {
       if (record?.progress.background) record.redrawRow = context.invalidate;
       const p = record?.progress.background
         ? record.progress
-        : (result.details ??
-          pendingProgress(context.args));
+        : (result.details ?? pendingProgress(context.args));
       return padded(context.outputPad, (width) =>
         renderProgressComponent(
           p,
@@ -1214,7 +1215,6 @@ export default function (pi: ExtensionAPI) {
       { action, id, path: fieldPath, message, timeoutSeconds },
       signal,
     ) {
-
       const fail = (text: string) => ({
         content: [{ type: "text" as const, text }],
         details: undefined,

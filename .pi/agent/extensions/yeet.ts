@@ -70,7 +70,6 @@ export default function (pi: ExtensionAPI) {
           ],
           active,
         ),
-        { placement: "aboveEditor" },
       );
     };
     const EXCLUDE = [":(exclude,top)git/"];

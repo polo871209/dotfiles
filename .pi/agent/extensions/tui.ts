@@ -3,11 +3,11 @@ import {
   type ExtensionAPI,
   type ExtensionContext,
   type KeybindingsManager,
-  SettingsManager,
   type Theme as PiTheme,
 } from "@earendil-works/pi-coding-agent";
 import {
   Marked,
+  type Color,
   type Component,
   type EditorTheme,
   type OverlayHandle,
@@ -15,10 +15,17 @@ import {
   type TUI,
   type TuiMouseEvent,
   type TuiMouseEventResult,
+  rgbColor,
+  styleText,
   truncateToWidth,
   visibleWidth,
 } from "@earendil-works/pi-tui";
-import { diagramKind, type MermaidArt, render, type Span } from "grok-mermaid";
+import {
+  diagramKind,
+  type MermaidArt,
+  render,
+  type Span,
+} from "lovely-mermaid";
 import { LINK_OPEN, LINK_READY } from "./shared/link";
 import { WORKING_FRAME_MS, workingFrames } from "./shared/working-indicator";
 
@@ -72,6 +79,7 @@ interface SelectListLike {
 
 interface EditorWithOverlay {
   autocompleteState?: unknown;
+  capturesViewportInput: boolean;
   autocompleteList?: SelectListLike;
   autocompleteMaxVisible?: number;
   focused?: boolean;
@@ -87,7 +95,7 @@ interface EditorWithOverlay {
 const isAutocompleteOpen = (
   editor: EditorWithOverlay,
 ): editor is EditorWithOverlay & { autocompleteList: SelectListLike } =>
-  Boolean(editor.autocompleteState && editor.autocompleteList);
+  editor.capturesViewportInput && Boolean(editor.autocompleteList);
 
 const normalizeToSingleLine = (text: string) =>
   text.replace(/[\r\n]+/g, " ").trim();
@@ -208,21 +216,23 @@ const syncOverlay = (editor: EditorWithOverlay, editorHeight: number) => {
 
 type Paint = (text: string) => string;
 
-const rgbFg =
-  (rgb: string): Paint =>
+const paintWith =
+  (color: Color, theme: PiTheme): Paint =>
   (text) =>
-    `\x1b[38;2;${rgb}m${text}\x1b[39m`;
+    styleText(text, { fg: color }, theme.getColorMode());
 
 const STATUS_BADGES = [
-  { key: "lark", paint: rgbFg("51;112;255"), tintsEditor: false },
-  { key: "gws", paint: rgbFg("66;133;244"), tintsEditor: false },
-  { key: "obsidian", paint: rgbFg("124;58;237"), tintsEditor: false },
-  { key: "browser", paint: rgbFg("45;212;191"), tintsEditor: false },
-  { key: "poteto", paint: rgbFg("177;212;228"), tintsEditor: true },
+  { key: "lark", color: rgbColor(51, 112, 255), tintsEditor: false },
+  { key: "gws", color: rgbColor(66, 133, 244), tintsEditor: false },
+  { key: "obsidian", color: rgbColor(124, 58, 237), tintsEditor: false },
+  { key: "browser", color: rgbColor(45, 212, 191), tintsEditor: false },
+  { key: "poteto", color: rgbColor(177, 212, 228), tintsEditor: true },
 ];
 
-const editorTint = (statuses: ReadonlyMap<string, string>) =>
-  STATUS_BADGES.find((b) => b.tintsEditor && statuses.get(b.key))?.paint;
+const editorTint = (statuses: ReadonlyMap<string, string>, theme: PiTheme) => {
+  const badge = STATUS_BADGES.find((b) => b.tintsEditor && statuses.get(b.key));
+  return badge && paintWith(badge.color, theme);
+};
 
 class ThemedEditor extends CustomEditor {
   constructor(
@@ -251,7 +261,7 @@ class ThemedEditor extends CustomEditor {
     const state = self.autocompleteState;
     let lines: string[];
     if (state && self.autocompleteList) {
-      self.autocompleteState = undefined;
+      self.autocompleteState = null;
       try {
         lines = super.render(width);
       } finally {
@@ -328,7 +338,7 @@ const installEditor = (pi: ExtensionAPI, statuses: StatusSource) => {
         editorTheme,
         keybindings,
         () => ctx.ui.theme,
-        () => editorTint(statuses.read()),
+        () => editorTint(statuses.read(), ctx.ui.theme),
       );
       mounted = { tui, editor };
       return editor;
@@ -454,9 +464,11 @@ const installFooter = (pi: ExtensionAPI, statuses: StatusSource) => {
                   : "",
               ),
               model,
-              ...STATUS_BADGES.flatMap(({ key, paint }) => {
+              ...STATUS_BADGES.flatMap(({ key, color }) => {
                 const text = active.get(key);
-                return text ? [{ plain: text, colored: paint(text) }] : [];
+                return text
+                  ? [{ plain: text, colored: paintWith(color, theme)(text) }]
+                  : [];
               }),
             ];
           }
@@ -547,7 +559,7 @@ const codeSpan = (line: string) => {
 };
 
 const styleSpan = (span: Span, theme: PiTheme) => {
-  switch (span.cls) {
+  switch (span.role) {
     case "border":
       return theme.fg("borderMuted", span.text);
     case "text":
@@ -572,43 +584,47 @@ const installWideMermaid = (pi: ExtensionAPI) => {
   pi.on("session_start", async (_event, ctx) => {
     if (ctx.mode !== "tui") return;
     theme = ctx.ui.theme;
-    mode = SettingsManager.create(ctx.cwd).getMermaidRenderingMode();
+    mode = pi.getSettings().markdown?.mermaid ?? "streaming";
   });
 
-  pi.registerMarkdownTransformer((markdown, context) => {
-    if (
-      !theme ||
-      mode === "off" ||
-      context.messageType === "assistant-thinking" ||
-      (context.isStreaming && mode !== "streaming")
-    )
-      return markdown;
-    const activeTheme = theme;
-    return parser
-      .lexer(markdown)
-      .map((token) => {
-        if (
-          token.type !== "code" ||
-          token.lang?.trim().split(/\s+/, 1)[0]?.toLowerCase() !== "mermaid"
-        )
-          return token.raw;
-        const art = render(token.text);
-        if (
-          !art ||
-          art.width <= context.availableWidth ||
-          (!context.isStreaming && art.warnings.length > 0)
-        )
-          return token.raw;
-        const fitted = fitMermaid(token.text, context.availableWidth);
-        if (!fitted) return token.raw;
-        return `${fitted.styled
-          .map((row) =>
-            codeSpan(row.map((span) => styleSpan(span, activeTheme)).join("")),
+  pi.registerMarkdownTransformer(
+    (markdown, context) => {
+      if (
+        !theme ||
+        mode === "off" ||
+        (context.isStreaming && mode !== "streaming")
+      )
+        return markdown;
+      const activeTheme = theme;
+      return parser
+        .lexer(markdown)
+        .map((token) => {
+          if (
+            token.type !== "code" ||
+            token.lang?.trim().split(/\s+/, 1)[0]?.toLowerCase() !== "mermaid"
           )
-          .join("  \n")}\n`;
-      })
-      .join("");
-  });
+            return token.raw;
+          const art = render(token.text);
+          if (
+            !art ||
+            art.width <= context.availableWidth ||
+            (!context.isStreaming && art.warnings.length > 0)
+          )
+            return token.raw;
+          const fitted = fitMermaid(token.text, context.availableWidth);
+          if (!fitted) return token.raw;
+          return `${fitted.styled
+            .map((row) =>
+              codeSpan(
+                row.map((span) => styleSpan(span, activeTheme)).join(""),
+              ),
+            )
+            .join("  \n")}\n`;
+        })
+        .join("");
+    },
+    { messageTypes: ["user", "assistant", "summary"] },
+  );
 };
 
 export default function (pi: ExtensionAPI) {
