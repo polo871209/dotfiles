@@ -235,6 +235,12 @@ wt() {
       if [[ -f $root/.pi/mcp.json && ! -e $root/$1/.pi/mcp.json ]]; then
         mkdir -p $root/$1/.pi && ln -s $root/.pi/mcp.json $root/$1/.pi/mcp.json
       fi
+      # mise passes trust from a main checkout to its worktrees, but a bare repo has no main checkout.
+      local shown=${home:A}
+      [[ $shown == $HOME/* ]] && shown="~${shown#$HOME}"
+      if [[ -n $home ]] && mise -C $home trust --show 2>/dev/null | grep -qxF "$shown: trusted"; then
+        mise trust $root/$1
+      fi
       cd $root/$1
       ;;
   esac

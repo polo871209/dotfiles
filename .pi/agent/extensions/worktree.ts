@@ -8,8 +8,9 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, relative } from "node:path";
-import { fuzzyFilter } from "@earendil-works/pi-tui";
+import { fuzzyFilter, Loader } from "@earendil-works/pi-tui";
 import {
   SessionManager,
   type ExtensionAPI,
@@ -24,6 +25,8 @@ const BARE_DIR = ".bare";
 const TOOL_NAME = "worktree";
 const LOCAL_CONFIG = /^(\.env(\.[^/]+)?|\.?mise(\.[^/]+)?\.toml)$/;
 const MCP_CONFIG = join(".pi", "mcp.json");
+
+type ShowRunning = (step: string | undefined) => void;
 
 interface Worktree {
   path: string;
@@ -41,6 +44,7 @@ interface CreatedWorktree extends Worktree {
   created: boolean;
   copied: string[];
   mcpLinked: boolean;
+  miseTrusted: boolean;
 }
 
 interface PendingMove {
@@ -168,6 +172,28 @@ function linkRepoMcp(root: string, worktree: string): boolean {
   return true;
 }
 
+async function isMiseTrusted(
+  dir: string,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  const real = realpathSync(dir);
+  const shown = real.startsWith(`${homedir()}/`)
+    ? `~${real.slice(homedir().length)}`
+    : real;
+  const r = await run("mise", ["trust", "--show"], signal, dir);
+  return r.stdout.split("\n").includes(`${shown}: trusted`);
+}
+
+// mise passes trust from a main checkout to its worktrees, but a bare repo has no main checkout.
+async function inheritMiseTrust(
+  home: string,
+  worktree: string,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  if (!(await isMiseTrusted(home, signal))) return false;
+  return (await run("mise", ["trust", worktree], signal)).code === 0;
+}
+
 async function ensureWorktree(
   repo: Repo,
   branch: string,
@@ -184,6 +210,7 @@ async function ensureWorktree(
       created: false,
       copied: [],
       mcpLinked: false,
+      miseTrusted: false,
     };
 
   const path = join(root, branch);
@@ -226,6 +253,7 @@ async function ensureWorktree(
     created: true,
     copied,
     mcpLinked: linkRepoMcp(root, path),
+    miseTrusted: home ? await inheritMiseTrust(home.path, path, signal) : false,
   };
 }
 
@@ -502,13 +530,40 @@ function cloneSession(ctx: ExtensionCommandContext, target: string): string {
   return clone && existsSync(clone) ? clone : writeEmptySession(target);
 }
 
+function runningWidget(ctx: ExtensionCommandContext): ShowRunning {
+  return (step) =>
+    ctx.ui.setWidget(
+      "wt",
+      step === undefined
+        ? undefined
+        : (tui, theme) => {
+            const loader = new Loader(
+              tui,
+              (s) => theme.fg("accent", s),
+              (s) => theme.fg("muted", s),
+              `/wt: ${step}`,
+            );
+            return Object.assign(loader, { dispose: () => loader.stop() });
+          },
+    );
+}
+
+async function waitForAgent(
+  ctx: ExtensionCommandContext,
+  showRunning: ShowRunning,
+): Promise<void> {
+  if (ctx.isIdle()) return;
+  showRunning("waiting for the agent to finish its turn");
+  await ctx.waitForIdle();
+}
+
 async function switchToSession(
   ctx: ExtensionCommandContext,
   sessionFile: string,
   notice: string,
   continuation?: string,
-): Promise<void> {
-  await ctx.switchSession(sessionFile, {
+): Promise<boolean> {
+  const { cancelled } = await ctx.switchSession(sessionFile, {
     withSession: async (next) => {
       next.ui.notify(notice, "info");
       if (continuation)
@@ -518,18 +573,26 @@ async function switchToSession(
         );
     },
   });
+  return !cancelled;
 }
 
 async function finishWorktree(
   ctx: ExtensionCommandContext,
+  showRunning: ShowRunning,
   continuation?: string,
-): Promise<void> {
-  await ctx.waitForIdle();
+): Promise<boolean> {
+  await waitForAgent(ctx, showRunning);
+  showRunning("checking this worktree");
   const linked = await finishableWorktree(ctx.cwd);
+  showRunning(`copying the session to ${linked.home}`);
   const sessionFile = cloneSession(ctx, linked.home);
+  showRunning(
+    `removing ${linked.path}${linked.branch ? ` and branch ${linked.branch}` : ""}`,
+  );
   const removed = await removeLinked(linked);
   if (linked.branch) await clearTabLabel(linked.branch).catch(() => {});
-  await switchToSession(
+  showRunning(`moving the session to ${linked.home}`);
+  return switchToSession(
     ctx,
     sessionFile,
     `${removed} Session cloned to ${linked.home}`,
@@ -579,7 +642,10 @@ function createdText(wt: CreatedWorktree): string {
   const mcp = wt.mcpLinked
     ? ` Linked ${MCP_CONFIG} to the repository's MCP servers.`
     : "";
-  return `Created worktree ${wt.path} on branch ${wt.branch}.${copied}${mcp}`;
+  const mise = wt.miseTrusted
+    ? " Trusted its mise configuration, as in the default-branch worktree."
+    : "";
+  return `Created worktree ${wt.path} on branch ${wt.branch}.${copied}${mcp}${mise}`;
 }
 
 export default function (pi: ExtensionAPI) {
@@ -663,13 +729,16 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify("Usage: /wt <branch> or /wt done", "error");
         return;
       }
+      const showRunning = runningWidget(ctx);
+      let moved = false;
       try {
         if (commandArgs === "done") {
-          await finishWorktree(ctx, continuation);
+          moved = await finishWorktree(ctx, showRunning, continuation);
           return;
         }
         const doneBranch = commandArgs.match(/^done\s+(\S+)$/)?.[1];
         if (doneBranch) {
+          showRunning(`removing branch ${doneBranch} and its folder`);
           const removed = await removeBranch(
             await openRepo(ctx.cwd),
             doneBranch,
@@ -678,6 +747,8 @@ export default function (pi: ExtensionAPI) {
           ctx.ui.notify(`${removed}${await closeTab(doneBranch)}`, "info");
           return;
         }
+        if (commandArgs)
+          showRunning(`preparing the worktree of ${commandArgs}`);
         const target = commandArgs
           ? await ensureWorktree(await openRepo(ctx.cwd), commandArgs)
           : await pickWorktree(ctx);
@@ -686,8 +757,9 @@ export default function (pi: ExtensionAPI) {
           ctx.ui.notify(`Session is already in ${target.path}`, "info");
           return;
         }
-        await ctx.waitForIdle();
-        await switchToSession(
+        await waitForAgent(ctx, showRunning);
+        showRunning(`moving the session to ${target.path}`);
+        moved = await switchToSession(
           ctx,
           cloneSession(ctx, target.path),
           `Session cloned to ${target.path}`,
@@ -695,6 +767,9 @@ export default function (pi: ExtensionAPI) {
         );
       } catch (e) {
         ctx.ui.notify(errorMessage(e), "error");
+      } finally {
+        // After a session switch, pi has cleared the widget, and this ctx is stale and throws.
+        if (!moved) showRunning(undefined);
       }
     },
   });
@@ -710,7 +785,7 @@ export default function (pi: ExtensionAPI) {
       openWorldHint: false,
     },
     description:
-      "One folder per branch in this repo. Use for every new branch, instead of `git worktree` or switching branches in this folder. `list`: folders and status. `enter`: move this session to the folder of `branch`, created if missing. `spawn`: a new agent works on `task` in that folder, in a background tab. `done`: delete this folder and its local branch. `remove`: delete another branch and its folder. Both discard uncommitted changes and unpushed commits.",
+      "One folder per branch in this repo. Call `enter` before the first edit when the task belongs to an existing branch, or when the user asks for a new branch. Call `spawn` only when the user asks for a background agent. Use it instead of `git worktree` or switching branches in this folder. `list`: folders and status. `enter`: move this session to the folder of `branch`, created if missing. `spawn`: a new agent works on `task` in that folder, in a background tab. `done`: delete this folder and its local branch. `remove`: delete another branch and its folder. Both discard uncommitted changes and unpushed commits.",
     parameters: Type.Object({
       action: Type.Enum(["list", "enter", "spawn", "done", "remove"]),
       branch: Type.Optional(Type.String({ description: "e.g. feat/login" })),

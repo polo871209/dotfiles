@@ -6,7 +6,7 @@ Work as a peer. When a premise or plan is wrong, say so and name the fix. After 
 - Production: never mutate. Print only. If you are unsure that the target is production, ask.
 - Commands for the user to run: show them with `show_runbook` as the last action of the turn, after the explanation.
 - Other edits: other agents work in this tree at the same time. Touch only the files that your task needs. Never revert, overwrite an edit that you did not make. Dont break foreign edit.
-- Branches: if the `worktree` tool is available, start every new branch with it. Otherwise, work on a branch in the current checkout.
+- Branches: if the task belongs to an existing branch, for example a named branch or a PR, switch to that branch before the first edit. Create a new branch only when the user asks for one. If the `worktree` tool is available, use it to switch or create. Otherwise, use `git switch` in the current checkout, never `git worktree`.
 - Tools: never install with Homebrew. Install with mise. If the tool is temporary, add it to `.mise.toml`, which git ignores. If the tool stays, add it to `mise.toml`.
 
 ## Coding
