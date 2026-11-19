@@ -13,7 +13,7 @@ struct PendingView: View {
             divider
             ScrollViewReader { proxy in
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 1) {
+                    LazyVStack(alignment: .leading, spacing: 1) {
                         rows(selectedID: selectedID)
                     }
                     .padding(6)
@@ -37,9 +37,7 @@ struct PendingView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 7)
         }
-        .background(theme.background, in: .rect(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(theme.muted.opacity(0.35)))
-        .shadow(color: .black.opacity(0.35), radius: 24, y: 8)
+        .overlayCard(theme)
         .onAppear { searchFocused = true }
     }
 

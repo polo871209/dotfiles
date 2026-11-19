@@ -16,7 +16,6 @@ mcp-auth.json
 
 # Env
 .env
-.envrc
 
 # Logs
 *.log

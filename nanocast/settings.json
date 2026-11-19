@@ -179,31 +179,17 @@
       }
     }
   },
-  "screenshot": {
-    "saveFolder": "~/Downloads",
+  "screen": {
+    "screenshotFolder": "~/Downloads",
+    "recordingFolder": "~/Downloads",
+    "recordingFormat": "mov",
+    "recordingSystemAudio": false,
+    "recordingMicrophone": true,
+    "recordingShowsClicks": true,
+    "recordingCamera": false,
     "commands": {
       "capture-screenshot": {
         "shortcut": "hyper+x",
-        "alias": null,
-        "showInLauncher": true
-      },
-      "draw-on-screen": {
-        "shortcut": "hyper+t",
-        "alias": null,
-        "showInLauncher": true
-      }
-    }
-  },
-  "screenRecording": {
-    "saveFolder": "~/Downloads",
-    "format": "mov",
-    "systemAudio": false,
-    "microphone": true,
-    "showsClicks": true,
-    "camera": false,
-    "commands": {
-      "record-screen": {
-        "shortcut": "hyper+z",
         "alias": null,
         "showInLauncher": true
       }

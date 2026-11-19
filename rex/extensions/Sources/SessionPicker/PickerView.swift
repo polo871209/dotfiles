@@ -27,11 +27,11 @@ struct PickerView: View {
             theme.muted.opacity(0.25).frame(height: 1)
             ScrollViewReader { proxy in
                 ScrollView {
-                    VStack(spacing: 1) {
+                    LazyVStack(spacing: 1) {
                         ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                             RowView(
                                 row: row, theme: theme, selected: index == model.selection,
-                                filtering: model.isFiltering,
+                                current: model.isCurrent(row), filtering: model.isFiltering,
                                 expanded: row.sessionID.map(model.expanded.contains) == true,
                                 agentStates: row.sessionID.flatMap { agentStates[$0] } ?? []
                             )
@@ -55,7 +55,7 @@ struct PickerView: View {
                 if let error = model.error {
                     Text(error).foregroundStyle(theme.red).lineLimit(1).truncationMode(.middle)
                 } else if model.loaded {
-                    Text("\(rows.count) of \(model.listed.count)")
+                    Text("\(rows.count) of \(model.listedCount)")
                 }
                 Spacer()
                 Text("→ ← agents")
@@ -69,9 +69,7 @@ struct PickerView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 7)
         }
-        .background(theme.background, in: .rect(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(theme.muted.opacity(0.35)))
-        .shadow(color: .black.opacity(0.35), radius: 24, y: 8)
+        .overlayCard(theme)
         .onAppear { searchFocused = true }
     }
 }
@@ -80,6 +78,7 @@ private struct RowView: View {
     let row: Row
     let theme: Theme
     let selected: Bool
+    let current: Bool
     let filtering: Bool
     let expanded: Bool
     let agentStates: [String]
@@ -116,7 +115,7 @@ private struct RowView: View {
                 }
             }
             Spacer(minLength: 8)
-            if row.isCurrent {
+            if current {
                 Text("current").font(.system(size: 11)).foregroundStyle(theme.muted)
             } else if filtering, let context = row.context {
                 Text(context).font(.system(size: 11)).foregroundStyle(theme.muted)

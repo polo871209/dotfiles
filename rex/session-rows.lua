@@ -1,6 +1,5 @@
 local terminal = 'com.superlogical.terminal'
 local home = os.getenv 'HOME'
-local current = rex.args.current
 local rows = {}
 
 local function tilde_path(dir)
@@ -39,7 +38,7 @@ end
 local open = {}
 for _, session in ipairs(assert(rex.call('session.attach_all', { event_scope = 'session' })).sessions) do
     open[session.label] = true
-    rows[#rows + 1] = { kind = 'session', session_id = session.session_id, label = session.label, current = session.session_id == current }
+    rows[#rows + 1] = { kind = 'session', session_id = session.session_id, label = session.label }
     add_agents(session)
 end
 

@@ -2,6 +2,8 @@
 minimum_release_age = "0"
 # Avoid compiling Python from source; use precompiled builds
 python.compile = false
+# gh keeps its token in the keychain, where mise's default hosts.yml lookup cannot find it.
+github.credential_command = "gh auth token"
 
 [tools]
 # Languages / runtimes
@@ -9,8 +11,9 @@ bun = "latest"
 cue = "latest"
 go = "latest"
 node = "latest"
-python = "latest"
+python = ["latest", "3.14"]
 ruff = "latest"
+rust = "latest"
 tree-sitter = "latest"
 uv = "latest"
 zig = "latest"
@@ -19,20 +22,20 @@ zig = "latest"
 neovim = "latest"
 
 # Shell / CLI tools
+"conda:tree" = "latest"
 "github:noahdunnagan/fsearch" = "latest"
 "npm:opengarden" = { version = "latest", allow_low_downloads = true }
 "pipx:pgcli" = "latest"
 atuin = "latest"
 bat = "latest"
 carapace = "latest"
-direnv = "latest"
 eza = "0.23.5"
 fastfetch = "latest"
 fd = "latest"
 fzf = "latest"
 jq = "latest"
 just = "latest"
-oh-my-posh = "latest"
+mas = "latest"
 ripgrep = "latest"
 yq = "latest"
 zoxide = "latest"
@@ -40,18 +43,17 @@ zoxide = "latest"
 # Git / GitHub
 "github:googleworkspace/cli" = { version = "latest", exe = "gws" }
 gh = "latest"
-glab = "latest"
 lazygit = "latest"
 
 # Kubernetes / cloud / containers
 "aqua:docker/cli" = "latest"
 "github:polo871209/sofka" = "latest"
 apko = "latest"
-cloudflared = "latest"
 cloud-sql-proxy = "2"
+cloudflared = "latest"
 helm = "latest"
-kubectx = "latest"
 kubectl = "latest"
+kubectx = "latest"
 kubens = "latest"
 wrangler = "latest"
 
@@ -72,8 +74,6 @@ wrangler = "latest"
 # Formatters / linters / debuggers
 "aqua:bazelbuild/buildtools/buildifier" = "latest"
 "aqua:bufbuild/buf" = "latest"
-"go:github.com/go-delve/delve/cmd/dlv" = "latest"
-"go:golang.org/x/tools/cmd/goimports" = "latest"
 "aqua:golangci/golangci-lint" = "latest"
 "aqua:hadolint/hadolint" = "latest"
 "aqua:JohnnyMorganz/StyLua" = "latest"
@@ -81,17 +81,21 @@ wrangler = "latest"
 "aqua:realm/SwiftLint" = "latest"
 "aqua:terraform-linters/tflint" = "latest"
 "github:DonIsaac/zlint" = "latest"
-"npm:eslint_d" = "latest"
+"go:github.com/go-delve/delve/cmd/dlv" = "latest"
+"go:golang.org/x/tools/cmd/goimports" = "latest"
 "npm:@biomejs/biome" = "latest"
+"npm:oxlint" = "latest"
 "npm:prettier" = "latest"
+"pipx:sqlfluff" = "latest"
 clang-format = "latest"
 prek = "latest"
 semgrep = "latest"
-"pipx:sqlfluff" = "latest"
 
 # Other
+"github:yt-dlp/yt-dlp" = "latest"
 "npm:@earendil-works/pi-coding-agent" = "latest"
 "pipx:browser-use" = "latest"
 ffmpeg = "latest"
-"github:yt-dlp/yt-dlp" = "latest"
-redis = "8.8.0"
+imagemagick = "latest"
+sqlite = "latest"
+xcodegen = "latest"

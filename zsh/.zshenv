@@ -1,30 +1,17 @@
-# Editors & Pagers
 export EDITOR=nvim
 export KUBE_EDITOR=nvim
 export PAGER="bat --paging=always"
 export MANPAGER="bat -plman"
 export LESS=-iRFX
 
-# Go
 export GOPATH="$HOME/.local/share/go"
 
-# Google Cloud
 export CLOUDSDK_CONFIG="$HOME/.gcloud"
-export CLOUDSDK_PYTHON="$HOME/.local/share/mise/shims/python3"
+export CLOUDSDK_PYTHON="$HOME/.local/share/mise/installs/python/3.14/bin/python3"
 export CLOUDSDK_PYTHON_SITEPACKAGES=1
 export GOOGLE_APPLICATION_CREDENTIALS="$CLOUDSDK_CONFIG/application_default_credentials.json"
 
-# Docker
 export DOCKER_DEFAULT_PLATFORM=linux/amd64
 
-# GitHub
-export GITHUB_TOKEN="$(gh auth token 2>/dev/null)"
-
-# Secrets live in the login keychain, never in this repo. Add one with:
-#   security add-generic-password -a "$USER" -s <service> -U -w
-# An empty value is fine: web-search's rerank treats it as "not configured".
-export TYPESAFE_API_KEY="$(security find-generic-password -s typesafe-api-key -w 2>/dev/null)"
-
-# Misc
 export OBSIDIAN_VAULT="$HOME/vault/obsidian"
 export HOMEBREW_NO_ENV_HINTS=1

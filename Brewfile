@@ -1,22 +1,13 @@
 tap "anomalyco/tap"
 tap "crmne/tap", trusted: true
 tap "polo871209/nanocast", "https://github.com/polo871209/nanocast", trusted: true
-brew "cocoapods"
 brew "git"
-brew "imagemagick"
-brew "libpq"
-brew "mas"
 brew "mise"
 brew "mole"
-brew "sqlite", link: true
 brew "stow"
 brew "tcping"
-brew "tree"
 brew "watch"
 brew "xcode-build-server"
-brew "xcodegen"
-brew "zsh-autosuggestions"
-brew "zsh-syntax-highlighting"
 cask "betterdisplay"
 cask "dbeaver-community"
 cask "font-fira-code-nerd-font"

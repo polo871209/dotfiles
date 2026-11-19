@@ -9,7 +9,7 @@ end
 
 local SKIP_FILES = vim.tbl_map(vim.glob.to_lpeg, ignore.files)
 
-local LOCAL_FILES = vim.tbl_map(vim.glob.to_lpeg, { '.env', '.env.*', '.envrc', '.mise.toml', '.mise.local.toml', 'mise.local.toml' })
+local LOCAL_FILES = vim.tbl_map(vim.glob.to_lpeg, { '.env', '.env.*', '.mise.toml', '.mise.local.toml', 'mise.local.toml' })
 
 local function rg_globs()
     local globs = {}

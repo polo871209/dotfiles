@@ -14,6 +14,7 @@ public final class PickerHost {
     static let socketPath = NSHomeDirectory() + "/Library/Caches/rex-session-picker.sock"
 
     private var listener: Listener?
+    private var model: PickerModel?
     private let overlays = OverlayHost()
 
     public func start() {
@@ -29,10 +30,11 @@ public final class PickerHost {
     }
 
     private func toggle(_ request: PickerRequest) {
-        let model = PickerModel(
-            rex: Rex(
-                client: request.client, current: request.session, rowsScript: request.rowsScript,
-                path: request.path))
+        let rex = Rex(
+            client: request.client, current: request.session, rowsScript: request.rowsScript,
+            path: request.path)
+        let model = self.model ?? PickerModel(rex: rex)
+        self.model = model
         let opened = overlays.toggle(
             maxSize: NSSize(width: 680, height: 480),
             content: { theme, close in
@@ -40,7 +42,7 @@ public final class PickerHost {
                 return PickerView(model: model, theme: theme)
             },
             handleKey: { press in Self.handle(press, model: model) })
-        if opened { model.reload() }
+        if opened { model.open(with: rex) }
     }
 
     private static func handle(_ press: KeyPress, model: PickerModel) -> KeyResult {

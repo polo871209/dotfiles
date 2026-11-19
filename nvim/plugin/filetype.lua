@@ -15,7 +15,6 @@ vim.filetype.add {
 
 vim.filetype.add {
     filename = {
-        ['.envrc'] = 'sh',
         ['BUILD'] = 'bzl',
         ['BUILD.bazel'] = 'bzl',
         ['WORKSPACE'] = 'bzl',

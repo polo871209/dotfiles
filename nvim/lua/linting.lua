@@ -2,8 +2,7 @@ local M = {}
 
 local SLOW_LINTERS = { semgrep = true }
 
-local ESLINT_CONFIGS =
-    { 'eslint.config.js', 'eslint.config.mjs', 'eslint.config.cjs', 'eslint.config.ts', '.eslintrc.json', '.eslintrc.js', '.eslintrc.cjs', '.eslintrc' }
+local OXLINT_CONFIGS = { '.oxlintrc.json', '.oxlintrc.jsonc', 'oxlint.config.ts', 'oxlint.config.mts' }
 local SQLFLUFF_CONFIGS = { '.sqlfluff', 'pep8.ini', 'pyproject.toml', 'setup.cfg', 'tox.ini' }
 
 ---@param bufnr integer
@@ -13,9 +12,9 @@ local function buf_dir(bufnr) return vim.fs.dirname(vim.api.nvim_buf_get_name(bu
 -- These linters read their configuration from the working directory, and nvim-lint defaults that to nvim's cwd.
 ---@type table<string, fun(bufnr: integer): string?>
 local cwd_by_linter = {
-    eslint_d = function(bufnr) return vim.fs.root(bufnr, ESLINT_CONFIGS) end,
     golangcilint = function(bufnr) return vim.fs.root(bufnr, 'go.mod') or buf_dir(bufnr) end,
     hadolint = function(bufnr) return vim.fs.root(bufnr, { '.hadolint.yaml', '.hadolint.yml' }) or buf_dir(bufnr) end,
+    oxlint = function(bufnr) return vim.fs.root(bufnr, OXLINT_CONFIGS) end,
     semgrep = function(bufnr) return vim.fs.root(bufnr, '.git') or buf_dir(bufnr) end,
     sqlfluff = function(bufnr) return vim.fs.root(bufnr, SQLFLUFF_CONFIGS) end,
     tflint = function(bufnr) return vim.fs.root(bufnr, '.tflint.hcl') or buf_dir(bufnr) end,

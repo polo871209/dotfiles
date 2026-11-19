@@ -9,6 +9,8 @@
 --ignore=^\.mise\.toml
 --ignore=^Brewfile
 --ignore=^justfile
+--ignore=^zprompt
+--ignore=^atuin
 --ignore=^dot_zshenv
 --ignore=^prek\.toml
 --ignore=^skills-lock\.json

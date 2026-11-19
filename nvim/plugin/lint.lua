@@ -111,10 +111,10 @@ lint.linters_by_ft = {
     sql = { 'sqlfluff' },
     swift = { 'swiftlint' },
     terraform = { 'tflint' },
-    typescript = { 'eslint_d', 'semgrep' },
-    typescriptreact = { 'eslint_d', 'semgrep' },
-    javascript = { 'eslint_d' },
-    javascriptreact = { 'eslint_d' },
+    typescript = { 'oxlint', 'semgrep' },
+    typescriptreact = { 'oxlint', 'semgrep' },
+    javascript = { 'oxlint' },
+    javascriptreact = { 'oxlint' },
     zig = { 'zlint' },
 }
 

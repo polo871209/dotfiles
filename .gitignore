@@ -15,6 +15,10 @@
 pgcli/history
 pgcli/log
 
+# rex terminfo writes these per machine
+rex/ssh_config
+rex/terminfo-hosts
+
 # Hex regenerates these on update
 hex/AGENTS.md
 hex/hex.d.ts

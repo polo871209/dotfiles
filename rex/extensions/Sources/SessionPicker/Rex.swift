@@ -13,8 +13,7 @@ struct Rex: Sendable {
     let path: String
 
     func rows() throws -> [Row] {
-        try JSONDecoder().decode(RowList.self, from: run(["do", rowsScript, "current=\(current)"]))
-            .rows
+        try JSONDecoder().decode(RowList.self, from: run(["do", rowsScript])).rows
     }
 
     func open(_ row: Row) throws {

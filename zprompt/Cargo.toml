@@ -1,0 +1,17 @@
+[package]
+name = "zprompt"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.100"
+publish = false
+
+[dependencies]
+gix = { version = "0.90.0", default-features = false, features = ["status", "sha1", "max-performance"] }
+saphyr = "0.3.4"
+unicode-width = "0.2.3"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

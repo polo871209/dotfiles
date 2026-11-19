@@ -11,10 +11,9 @@ struct Row: Decodable, Identifiable, Sendable {
     var detail: String?
     var state: String?
     var context: String?
-    var current: Bool?
 
     private enum CodingKeys: String, CodingKey {
-        case kind, label, dir, detail, state, context, current
+        case kind, label, dir, detail, state, context
         case sessionID = "session_id"
         case blockID = "block_id"
     }
@@ -23,7 +22,6 @@ struct Row: Decodable, Identifiable, Sendable {
         [kind.rawValue, sessionID ?? "", blockID ?? "", dir ?? ""].joined(separator: "|")
     }
     var searchText: String { [label, detail, context].compactMap(\.self).joined(separator: " ") }
-    var isCurrent: Bool { current == true }
 }
 
 struct RowList: Decodable {

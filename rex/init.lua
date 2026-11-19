@@ -2,7 +2,9 @@ local terminal = 'com.superlogical.terminal'
 local home = os.getenv 'HOME'
 -- The Rex server's PATH has no mise shims.
 local shims = home .. '/.local/share/mise/shims/'
-local zoxide = shims .. 'zoxide'
+-- A mise shim call costs about 30 ms, so zoxide uses mise's global install link: https://mise.jdx.dev/ide-integration.html#global-version-link
+local zoxide_dir = home .. '/.local/share/mise/installs/zoxide/global'
+local zoxide = zoxide_dir .. '/zoxide'
 local config_dir = (os.getenv 'XDG_CONFIG_HOME' or home .. '/.config') .. '/rex'
 local rex_bin_dir = home .. '/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS'
 
@@ -315,7 +317,7 @@ action {
             session = ctx.session_id,
             rows_script = config_dir .. '/session-rows.lua',
             -- Rex starts from launchd with a bare PATH, so give the picker one that finds rex and zoxide.
-            path = rex_bin_dir .. ':' .. shims .. ':/usr/bin:/bin',
+            path = rex_bin_dir .. ':' .. zoxide_dir .. ':' .. shims .. ':/usr/bin:/bin',
         }
         local sent = must(rex.exec({ 'nc', '-U', home .. '/Library/Caches/rex-session-picker.sock' }, { stdin = request .. '\n', timeout = 2 }))
         if not sent.ok then error('Rex does not load the session picker. Run `just rex`, then reopen Rex.', 0) end

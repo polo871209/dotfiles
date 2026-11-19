@@ -1,0 +1,8 @@
+{
+  "$schema": "https://pi.dev/schemas/models.schema.json",
+  "providers": {
+    "typesafe": {
+      "apiKey": "!security find-generic-password -s typesafe-api-key -w"
+    }
+  }
+}

@@ -1,56 +1,54 @@
-# History Configuration
 HISTFILE="${ZDOTDIR:-$HOME}/.zsh_history"
 HISTSIZE=50000
 SAVEHIST=50000
-setopt EXTENDED_HISTORY          # Write the history file in the ':start:elapsed;command' format
-setopt HIST_EXPIRE_DUPS_FIRST    # Expire a duplicate event first when trimming history
-setopt HIST_FIND_NO_DUPS         # Do not display duplicates of a line previously found
-setopt HIST_IGNORE_ALL_DUPS      # Delete an old recorded event if a new event is a duplicate
-setopt HIST_IGNORE_SPACE         # Do not record an event starting with a space
-setopt HIST_SAVE_NO_DUPS         # Do not write a duplicate event to the history file
-setopt SHARE_HISTORY             # Share history between all sessions
+setopt EXTENDED_HISTORY
+setopt HIST_EXPIRE_DUPS_FIRST
+setopt HIST_FIND_NO_DUPS
+setopt HIST_IGNORE_ALL_DUPS
+setopt HIST_IGNORE_SPACE
+setopt HIST_SAVE_NO_DUPS
+setopt SHARE_HISTORY
 
-# Autocompletion Configuration
 autoload -Uz compinit
-# Regenerate dump only once per day; use cached version otherwise (~15ms saved/run)
-if [[ -n "${ZDOTDIR:-$HOME}/.zcompdump"(#qN.mh+24) ]]; then
-  compinit -u
-else
-  compinit -u -C
-fi
+() {
+  if (( $# )); then compinit -u; else compinit -u -C; fi
+} ${ZDOTDIR:-$HOME}/.zcompdump(N.mh+24)
 
 zstyle ':completion:*' menu select
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'
 zstyle ':completion:*' format $'\e[2;37mCompleting %d\e[m'
 
+# The first line of each cache holds the resolved binary path, because mise keeps the release archive's mtime on each binary, so an upgrade can leave the binary older than its cache.
 _eval_cache() {
-  local cmd="$1" cache="${XDG_CACHE_HOME:-$HOME/.cache}/zsh/$2.zsh"
-  local bin_path="${commands[$cmd]}"
-  local extra_dep="$3"
-
-  [[ -z "$bin_path" ]] && return
-
-  if [[ ! -f "$cache" || "$bin_path" -nt "$cache" || ( -n "$extra_dep" && "$extra_dep" -nt "$cache" ) ]]; then
-    mkdir -p "${cache:h}"
-    "${@:4}" > "$cache"
+  local config
+  [[ $1 == --config ]] && config=$2 && shift 2
+  whence -p $1 >/dev/null || return
+  local bin==$1 cache=${XDG_CACHE_HOME:-$HOME/.cache}/zsh/$1.zsh stamp
+  local header="# ${bin:A} $*"
+  [[ -e $config ]] && header+=" < ${config:A}"
+  [[ -r $cache ]] && read -r stamp < $cache
+  if [[ $stamp != "$header" || $bin -nt $cache || $config -nt $cache ]]; then
+    mkdir -p ${cache:h}
+    if ! { print -r -- $header && "$@" } > $cache.$$ || ! mv -f $cache.$$ $cache; then
+      rm -f $cache.$$
+      return 1
+    fi
+    zcompile -R $cache
   fi
-
-  if [[ ! -f "$cache.zwc" || "$cache" -nt "$cache.zwc" ]]; then
-    zcompile -R "$cache" 2>/dev/null || true
-  fi
-
-  source "$cache"
+  source $cache
 }
 
-_eval_cache carapace carapace "" carapace _carapace
+_eval_cache carapace _carapace
 
-source /opt/homebrew/share/zsh-autosuggestions/zsh-autosuggestions.zsh
-source /opt/homebrew/share/zsh-syntax-highlighting/zsh-syntax-highlighting.zsh
+# Binds the widgets once, at the first prompt, instead of at every prompt (5 ms each).
+ZSH_AUTOSUGGEST_MANUAL_REBIND=1
+# Fetches each suggestion in the background, because atuin's strategy starts a 10 ms `atuin search` per keystroke.
+ZSH_AUTOSUGGEST_USE_ASYNC=1
+source $ZDOTDIR/zsh-autosuggestions.zsh
+source $ZDOTDIR/zsh-syntax-highlighting.zsh
 
-# vi mode
 bindkey -v
 
-# cursor style when in vi mode
 function zle-keymap-select {
   if [[ ${KEYMAP} == vicmd ]] ; then
     echo -ne "\e[1 q"
@@ -60,19 +58,16 @@ function zle-keymap-select {
 }
 zle -N zle-keymap-select
 
-# reset cursor style on each prompt
 function zle-line-init {
   echo -ne "\e[5 q"
 }
 zle -N zle-line-init
 
-# v to edit the command line in editor
 autoload -Uz edit-command-line
 zle -N edit-command-line
 zstyle ':zle:edit-command-line' editor nvim -c 'set filetype=bash' -c 'let b:shell_cmdline = 1'
 bindkey -M vicmd 'v' edit-command-line
 
-# Aliases
 function cafe {
   if (( $# > 1 )) || [[ $# == 1 && $1 != <1-> ]]; then
     print -u2 "usage: cafe [minutes]"
@@ -106,7 +101,6 @@ alias prune="docker system prune --all -f && docker volume prune --all -f"
 alias ls="eza --group-directories-first -a --icons=auto"
 alias n="nvim"
 alias o="open ."
-# The worktree pi extension writes the session's folder to PI_CWD_FILE, so the shell ends in the folder pi ended in.
 pi() {
   local cwd_file=$(mktemp -t pi-cwd)
   PI_CWD_FILE=$cwd_file PI_CWD_SHELL=$$ command pi "$@"
@@ -129,7 +123,6 @@ db() {
   pgcli "postgres://postgres:pg@$(docker port pg18 5432/tcp)/default"
 }
 
-# clone <url> [dir]: repository in dir/.bare, one folder per branch, file contents fetched on first use.
 clone() {
   if (( $# < 1 || $# > 2 )); then
     print -u2 "usage: clone <url> [dir]"
@@ -157,8 +150,6 @@ clone() {
   cd "$dir/$branch"
 }
 
-# wt [branch | done]: in a repo made by clone, from any folder inside it. wt branch goes to the branch's folder and creates it if missing, wt picks a folder, and wt done removes this clean folder and goes back to the default branch.
-# .pi/agent/extensions/worktree.ts does the same in pi. Change both together.
 wt() {
   local root=$PWD
   while [[ $root != / && ! -d $root/.bare ]]; do root=${root:h}; done
@@ -280,12 +271,10 @@ function lg {
   lazygit -p ${root:h}/$default "$@"
 }
 
-## Bat
 export BAT_PAGER="less -iRFK"
 alias bat="bat --color=always"
 alias -g -- --help='--help 2>&1 | bat --language=help --style=plain'
 
-# FZF
 export FZF_DEFAULT_COMMAND="fd --hidden --strip-cwd-prefix --exclude .git --exclude .venv"
 export FZF_DEFAULT_OPTS="--select-1"
 nf() {
@@ -295,7 +284,6 @@ nf() {
     [[ -d "$file" ]] && cd "$file" && nvim || nvim "$file"
 }
 
-# ff [dir]: live fsearch over the whole disk, or only inside dir. A picked file opens in nvim, and a picked folder becomes the cwd.
 ff() {
     local scope=${1:+in:${1:A}}
     local pick
@@ -308,19 +296,30 @@ ff() {
 
 if [[ $TERM_PROGRAM == rex ]]; then
   alias s="$XDG_CONFIG_HOME/rex/session-picker"
-  # The Rex app starts its first session in $HOME.
-  () {
-    local dir=$PWD
-    [[ $dir == $HOME ]] && dir=$HOME/dotfiles
-    [[ -n $(rex --timeout 1s do session_default dir="$dir" 2>/dev/null) ]] && cd "$dir"
-  }
+  # session_default names Rex's only session after its folder. The Rex app starts that session in $HOME, so only a pane in $HOME waits for the answer to cd.
+  if [[ $PWD == $HOME ]]; then
+    [[ -n $(rex --timeout 1s do session_default dir="$HOME/dotfiles" 2>/dev/null) ]] && cd ~/dotfiles
+  else
+    rex --timeout 1s do session_default dir="$PWD" >/dev/null 2>&1 &!
+  fi
 fi
 
-# Tool Integrations
-_eval_cache uv       uv       ""  uv generate-shell-completion zsh
-_eval_cache direnv   direnv   ""  direnv hook zsh
-_eval_cache zoxide   zoxide   ""  zoxide init zsh
-_eval_cache atuin    atuin    ""  atuin init zsh
+_eval_cache zoxide init zsh
+# atuin init runs `atuin uuid` (6 ms) unless ATUIN_SESSION is set for this SHLVL, so make the same UUIDv7 here.
+if [[ -z $ATUIN_SESSION || $ATUIN_SHLVL != $SHLVL ]]; then
+  () {
+    setopt local_options no_multibyte
+    zmodload zsh/datetime zsh/system
+    local random hex= byte
+    sysread -s 10 random < /dev/urandom
+    for byte in ${(s::)random}; do hex+=${(l:2::0:)$(( [##16] #byte ))}; done
+    local -i ms=$(( EPOCHREALTIME * 1000 )) variant=$(( 8 + 0x${hex[4]} % 4 ))
+    export ATUIN_SESSION=${(L):-${(l:12::0:)$(( [##16] ms ))}7${hex[1,3]}$(( [##16] variant ))${hex[5,19]}}
+    export ATUIN_SHLVL=$SHLVL
+  }
+fi
+_eval_cache --config ~/.atuin/config.toml atuin init zsh
+_eval_cache zprompt init
 unfunction _eval_cache
 
 # Rex lists zoxide folders in its palette only when it loads its config, so reload it when zoxide learns a folder.
@@ -328,18 +327,16 @@ if [[ $TERM_PROGRAM == rex ]] && (( $+functions[__zoxide_hook] )); then
   functions[_zoxide_add_pwd]=$functions[__zoxide_hook]
   # zoxide's doctor warns on every z unless chpwd_functions holds __zoxide_hook, so wrap it under the same name.
   __zoxide_hook() {
-    if zoxide query --list | grep -qxF -- "$PWD"; then
-      _zoxide_add_pwd
-      return
-    fi
-    _zoxide_add_pwd
-    if zoxide query --list | grep -qxF -- "$PWD"; then
-      rex config reload >/dev/null 2>&1 &!
-    fi
+    {
+      if zoxide query --list | grep -qxF -- "$PWD"; then
+        _zoxide_add_pwd
+      else
+        _zoxide_add_pwd
+        zoxide query --list | grep -qxF -- "$PWD" && rex config reload >/dev/null 2>&1
+      fi
+    } &!
   }
 fi
-
-eval "$(oh-my-posh init zsh --config "${XDG_CONFIG_HOME}/ohmyposh/config.yaml")"
 
 # Rex restores a pane after a server restart as a plain shell in the same block, so rex/init.lua and pi's rex-resume.ts record by block ID the command that brings it back.
 _rex_resume_file=${XDG_STATE_HOME:-$HOME/.local/state}/rex/resume/${REX_BLOCK#block:}
