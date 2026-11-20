@@ -23,12 +23,12 @@ _zp_precmd() {
   setopt prompt_percent
   _zp_args=($last_status $ran $duration $COLUMNS)
   _zp_cancel_fresh
-  _zp_show "$($_zp_bin prompt cached $_zp_args)"
+  _zp_show "$($_zp_bin prompt zsh cached $_zp_args)"
   _zp_tooltip=
   _zp_tooltip_word=
   RPROMPT=$_zp_right
   if [[ -o zle ]]; then
-    exec {_zp_fresh_fd}< <($_zp_bin prompt fresh $_zp_args)
+    exec {_zp_fresh_fd}< <($_zp_bin prompt zsh fresh $_zp_args)
     _zp_fresh_pid=$sysparams[procsubstpid]
     zle -F -w $_zp_fresh_fd _zp_show_fresh
   fi

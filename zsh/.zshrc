@@ -151,89 +151,18 @@ clone() {
 }
 
 wt() {
-  local root=$PWD
-  while [[ $root != / && ! -d $root/.bare ]]; do root=${root:h}; done
-  if [[ ! -d $root/.bare ]]; then
-    print -u2 "wt: no .bare folder above $PWD. Clone the repo with clone <url>."
-    return 1
-  fi
-  root=${root:A}
-  local default=${$(git -C $root symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null)#origin/}
-  if [[ -z $default ]]; then
-    print -u2 "wt: origin/HEAD is not set. Run git remote set-head origin --auto in $root."
-    return 1
-  fi
-  local -A folder_of
-  local line folder
-  for line in ${(f)"$(git -C $root worktree list --porcelain)"}; do
-    case $line in
-      worktree\ *) folder=${line#worktree } ;;
-      branch\ *) folder_of[${line#branch refs/heads/}]=$folder ;;
-    esac
-  done
-
+  local dir
   case $1 in
     "")
-      local pick=$(print -l ${(k)folder_of} | fzf --prompt "${root:t} worktree> ")
-      [[ -n $pick ]] && cd $folder_of[$pick]
+      local list
+      list=$(git wt) || return
+      dir=$(print -r -- $list | fzf --delimiter '\t' --with-nth 1 --prompt 'worktree> ') && cd ${dir#*$'\t'}
       ;;
     done)
-      local branch=$2
-      if [[ -n $branch ]]; then
-        folder=$folder_of[$branch]
-        if [[ -z $folder ]] && ! git -C $root show-ref --verify --quiet refs/heads/$branch; then
-          print -u2 "wt: no folder or local branch is named $branch."
-          return 1
-        fi
-      else
-        folder=$(git rev-parse --show-toplevel 2>/dev/null)
-        if [[ -z $folder || $folder == $root ]]; then
-          print -u2 "wt: $PWD is not in a branch folder."
-          return 1
-        fi
-        branch=$(git -C $folder branch --show-current)
-      fi
-      if [[ $branch == $default ]]; then
-        print -u2 "wt: $branch is the default branch, and it stays."
-        return 1
-      fi
-      if [[ -n $folder ]]; then
-        if [[ $PWD/ == $folder/* ]]; then wt $default || return; fi
-        git -C $root worktree remove --force $folder || return
-        local dir=${folder:h}
-        while [[ $dir == $root/* ]] && rmdir $dir 2>/dev/null; do dir=${dir:h}; done
-        print "Removed $folder."
-      fi
-      [[ -z $branch ]] || git -C $root branch -D $branch
+      dir=$(git wt "$@") || return
+      [[ -d $PWD ]] || cd $dir
       ;;
-    *)
-      if [[ -n $folder_of[$1] ]]; then
-        cd $folder_of[$1]
-        return
-      fi
-      git check-ref-format --branch $1 >/dev/null || return
-      if git -C $root show-ref --verify --quiet refs/heads/$1; then
-        git -C $root worktree add $root/$1 $1
-      elif git -C $root show-ref --verify --quiet refs/remotes/origin/$1; then
-        git -C $root worktree add --track -b $1 $root/$1 origin/$1
-      else
-        git -C $root worktree add -b $1 $root/$1 $default
-      fi || return
-      local home=$folder_of[$default] file
-      for file in $home/(.env|.env.*|mise.toml|mise.*.toml|.mise.toml|.mise.*.toml)(N); do
-        git -C $home check-ignore -q ${file:t} && cp $file $root/$1/
-      done
-      if [[ -f $root/.pi/mcp.json && ! -e $root/$1/.pi/mcp.json ]]; then
-        mkdir -p $root/$1/.pi && ln -s $root/.pi/mcp.json $root/$1/.pi/mcp.json
-      fi
-      # mise passes trust from a main checkout to its worktrees, but a bare repo has no main checkout.
-      local shown=${home:A}
-      [[ $shown == $HOME/* ]] && shown="~${shown#$HOME}"
-      if [[ -n $home ]] && mise -C $home trust --show 2>/dev/null | grep -qxF "$shown: trusted"; then
-        mise trust $root/$1
-      fi
-      cd $root/$1
-      ;;
+    *) dir=$(git wt "$@") && cd $dir ;;
   esac
 }
 
@@ -319,7 +248,7 @@ if [[ -z $ATUIN_SESSION || $ATUIN_SHLVL != $SHLVL ]]; then
   }
 fi
 _eval_cache --config ~/.atuin/config.toml atuin init zsh
-_eval_cache zprompt init
+_eval_cache zprompt init zsh
 unfunction _eval_cache
 
 # Rex lists zoxide folders in its palette only when it loads its config, so reload it when zoxide learns a folder.

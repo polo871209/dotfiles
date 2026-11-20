@@ -15,6 +15,7 @@ vim.lsp.enable {
     'jsonnet_ls',
     'lua_ls',
     'pyrefly',
+    'rust_analyzer',
     'sourcekit',
     'starpls',
     'taplo',

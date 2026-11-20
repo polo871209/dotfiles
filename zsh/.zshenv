@@ -15,3 +15,6 @@ export DOCKER_DEFAULT_PLATFORM=linux/amd64
 
 export OBSIDIAN_VAULT="$HOME/vault/obsidian"
 export HOMEBREW_NO_ENV_HINTS=1
+
+typeset -U path
+path=($ZDOTDIR/scripts $path)

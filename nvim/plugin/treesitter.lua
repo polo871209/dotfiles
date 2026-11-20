@@ -34,6 +34,7 @@ require('tree-sitter-manager').setup {
         'python',
         'query',
         'regex',
+        'rust',
         'scss',
         'sql',
         'starlark',

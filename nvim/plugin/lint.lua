@@ -108,6 +108,7 @@ lint.linters_by_ft = {
     dockerfile = { 'hadolint' },
     go = { 'golangcilint', 'semgrep' },
     python = { 'ruff', 'semgrep' },
+    rust = { 'semgrep' },
     sql = { 'sqlfluff' },
     swift = { 'swiftlint' },
     terraform = { 'tflint' },

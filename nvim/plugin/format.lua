@@ -55,6 +55,7 @@ require('conform').setup {
         markdown = { 'prettier' },
         proto = { 'buf' },
         python = { 'ruff_fix', 'ruff_format', 'ruff_organize_imports' },
+        rust = { 'rustfmt' },
         sql = { 'sqlfluff' },
         swift = { 'swiftlint', lsp_format = 'last' },
         tf = { 'terraform_fmt' },

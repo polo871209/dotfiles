@@ -1,0 +1,187 @@
+#!/usr/bin/env bash
+# One folder per branch in a repo that the `clone` function in zsh/.zshrc set up.
+# stdout carries the result a caller reads. stderr carries what happened, one sentence per line.
+# Runs on bash 3.2, the macOS /bin/bash: no associative arrays, mapfile, or negative indexes.
+set -o pipefail
+
+die() {
+  printf 'git-wt: %s\n' "$*" >&2
+  exit 1
+}
+
+note() {
+  printf '%s\n' "$*" >&2
+}
+
+root=$(pwd -P)
+until [[ -d $root/.bare ]]; do
+  [[ $root == / ]] && die "$PWD is not in a repo with one folder per branch. Clone the repo with clone <url>."
+  root=${root%/*}
+  root=${root:-/}
+done
+
+folders=()
+branches=()
+branch_folders=()
+folder=
+while IFS= read -r line; do
+  case $line in
+    "worktree "*) folder=${line#worktree } ;;
+    bare) folder= ;;
+    "HEAD "*) [[ -n $folder ]] && folders+=("$folder") ;;
+    "branch "*)
+      branches+=("${line#branch refs/heads/}")
+      branch_folders+=("$folder")
+      ;;
+  esac
+done < <(git -C "$root" worktree list --porcelain)
+
+default=
+load_default() {
+  default=$(git -C "$root" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null) ||
+    die "origin/HEAD is not set. Run git remote set-head origin --auto in $root."
+  default=${default#origin/}
+}
+
+found=
+folder_of() {
+  local i
+  for i in "${!branches[@]}"; do
+    if [[ ${branches[i]} == "$1" ]]; then
+      found=${branch_folders[i]}
+      return 0
+    fi
+  done
+  return 1
+}
+
+branch_in() {
+  local i
+  found=
+  for i in "${!branch_folders[@]}"; do
+    [[ ${branch_folders[i]} == "$1" ]] && found=${branches[i]}
+  done
+}
+
+has_branch() {
+  git -C "$root" show-ref --verify --quiet "refs/heads/$1"
+}
+
+copy_local_config() {
+  local from=$1 to=$2 path name list names=() ignored=()
+  shopt -s nullglob
+  for path in "$from"/{.env,.env.*,mise.toml,mise.*.toml,.mise.toml,.mise.*.toml}; do
+    [[ -f $path ]] && names+=("${path##*/}")
+  done
+  shopt -u nullglob
+  ((${#names[@]})) || return 0
+  while IFS= read -r name; do
+    ignored+=("$name")
+  done < <(git -C "$from" check-ignore -- "${names[@]}")
+  ((${#ignored[@]})) || return 0
+  for name in "${ignored[@]}"; do
+    cp "$from/$name" "$to/" || return
+  done
+  printf -v list ', %s' "${ignored[@]}"
+  note "Copied ${list:2} from the default-branch worktree."
+}
+
+link_mcp() {
+  local shared=$root/.pi/mcp.json link=$1/.pi/mcp.json
+  [[ -f $shared && ! -e $link && ! -L $link ]] || return 0
+  mkdir -p "$1/.pi" && ln -s "$shared" "$link" &&
+    note "Linked .pi/mcp.json to the repository's MCP servers."
+}
+
+# mise passes trust from a main checkout to its worktrees, but a bare repo has no main checkout.
+inherit_mise_trust() {
+  local from=$1 to=$2 shown
+  command -v mise >/dev/null || return 0
+  shown=$(cd "$from" && pwd -P) || return 0
+  [[ $shown == "$HOME"/* ]] && shown="~${shown#"$HOME"}"
+  mise -C "$from" trust --show 2>/dev/null | grep -qxF "$shown: trusted" || return 0
+  mise trust "$to" >/dev/null 2>&1 &&
+    note "Trusted its mise configuration, as in the default-branch worktree."
+}
+
+opened=
+open_folder() {
+  local branch=$1 base=$2 dir=$root/$1 remote ref
+  if folder_of "$branch"; then
+    opened=$found
+    return
+  fi
+  git -C "$root" check-ref-format --branch "$branch" >/dev/null || exit 1
+  [[ -n $default ]] || load_default
+  if has_branch "$branch"; then
+    git -C "$root" worktree add -q "$dir" "$branch"
+  else
+    while IFS= read -r ref; do
+      [[ -z $remote || $ref == "origin/$branch" ]] && remote=$ref
+    done < <(git -C "$root" for-each-ref --format='%(refname:short)' "refs/remotes/*/$branch")
+    if [[ -n $remote ]]; then
+      git -C "$root" worktree add -q --track -b "$branch" "$dir" "$remote"
+    else
+      git -C "$root" worktree add -q -b "$branch" "$dir" "${base:-$default}"
+    fi
+  fi || exit 1
+  note "Created worktree $dir on branch $branch."
+  if folder_of "$default"; then
+    copy_local_config "$found" "$dir"
+    inherit_mise_trust "$found" "$dir"
+  fi
+  link_mcp "$dir"
+  opened=$dir
+}
+
+finish() {
+  local target=$1 folder branch real f dir sha
+  if [[ -z $target ]]; then
+    folder=$(git rev-parse --show-toplevel 2>/dev/null) || die "$PWD is not in a branch folder."
+    branch_in "$folder"
+    branch=$found
+  elif folder_of "$target"; then
+    folder=$found
+    branch=$target
+  elif has_branch "$target"; then
+    branch=$target
+  else
+    real=$(cd "$target" 2>/dev/null && pwd -P) || die "No folder or local branch is named $target."
+    for f in "${folders[@]}"; do
+      [[ $f == "$real" ]] && folder=$f
+    done
+    [[ -n $folder ]] || die "No folder or local branch is named $target."
+    branch_in "$folder"
+    branch=$found
+  fi
+  load_default
+  [[ $branch == "$default" ]] && die "$branch is the default branch, and it stays."
+  open_folder "$default" ""
+  if [[ -n $folder ]]; then
+    git -C "$root" worktree remove --force "$folder" || exit 1
+    dir=${folder%/*}
+    while [[ $dir == "$root"/* ]] && rmdir "$dir" 2>/dev/null; do dir=${dir%/*}; done
+    note "Removed $folder."
+  fi
+  if [[ -n $branch ]]; then
+    sha=$(git -C "$root" rev-parse --short "refs/heads/$branch") || exit 1
+    git -C "$root" branch -q -D "$branch" || exit 1
+    note "Deleted branch $branch at $sha. Restore it with \`git branch $branch $sha\`."
+  fi
+}
+
+case $1 in
+  "")
+    for i in "${!branches[@]}"; do
+      printf '%s\t%s\n' "${branches[i]}" "${branch_folders[i]}"
+    done
+    ;;
+  done)
+    finish "$2"
+    printf '%s\n' "$opened"
+    ;;
+  *)
+    open_folder "$1" "$2"
+    printf '%s\n' "$opened"
+    ;;
+esac

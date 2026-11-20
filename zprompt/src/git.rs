@@ -1,4 +1,4 @@
-use crate::cache::{self, Freshness};
+use crate::{cache_file, cache_read, cache_write};
 use gix::bstr::ByteSlice;
 use gix::remote::Direction;
 use gix::status::Submodule;
@@ -23,7 +23,7 @@ pub struct Status {
     pub changes: Changes,
 }
 
-pub fn status(cwd: &Path, freshness: Freshness) -> Option<Status> {
+pub fn status(cwd: &Path, fresh: bool) -> Option<Status> {
     let repo = gix::discover_with_environment_overrides(cwd).ok()?;
     let head = repo.head().ok()?;
     let local = head.id().map(|id| id.detach());
@@ -37,16 +37,29 @@ pub fn status(cwd: &Path, freshness: Freshness) -> Option<Status> {
         Head::Branch(name) => format!("branch {name}"),
         Head::Detached(commit) => format!("detached {commit}"),
     };
-    let file = cache::file("git", repo.workdir().unwrap_or(repo.git_dir()));
-    let changes = match freshness {
-        Freshness::Cached => cached_changes(&cache::read(&file), &head_key).unwrap_or_default(),
-        Freshness::Fresh => {
-            let (ahead, behind) = branch.zip(local).and_then(|(name, local)| upstream_counts(&repo, &name, local)).unwrap_or_default();
-            let changes = Changes { dirty: has_changes(&repo), ahead, behind };
-            cache::write(&file, &format!("{head_key}\n{} {} {}", u8::from(changes.dirty), changes.ahead, changes.behind));
-            changes
-        }
+    let file = cache_file("git", repo.workdir().unwrap_or(repo.git_dir()));
+    if !fresh {
+        let changes = cached_changes(&cache_read(&file), &head_key).unwrap_or_default();
+        return Some(Status { head, changes });
+    }
+    let (ahead, behind) = branch
+        .zip(local)
+        .and_then(|(name, local)| upstream_counts(&repo, &name, local))
+        .unwrap_or_default();
+    let changes = Changes {
+        dirty: has_changes(&repo),
+        ahead,
+        behind,
     };
+    cache_write(
+        &file,
+        &format!(
+            "{head_key}\n{} {} {}",
+            u8::from(changes.dirty),
+            changes.ahead,
+            changes.behind
+        ),
+    );
     Some(Status { head, changes })
 }
 
@@ -56,24 +69,47 @@ fn cached_changes(text: &str, head_key: &str) -> Option<Changes> {
         return None;
     }
     let mut values = values.split(' ').map(str::parse::<usize>);
-    Some(Changes { dirty: values.next()?.ok()? != 0, ahead: values.next()?.ok()?, behind: values.next()?.ok()? })
+    Some(Changes {
+        dirty: values.next()?.ok()? != 0,
+        ahead: values.next()?.ok()?,
+        behind: values.next()?.ok()?,
+    })
 }
 
-fn upstream_counts(repo: &gix::Repository, branch: &gix::refs::FullName, local: gix::ObjectId) -> Option<(usize, usize)> {
-    let upstream = repo.branch_remote_tracking_ref_name(branch.as_ref(), Direction::Fetch)?.ok()?;
-    let upstream = repo.find_reference(upstream.as_ref()).ok()?.into_fully_peeled_id().ok()?.detach();
-    Some((only_in(repo, local, upstream), only_in(repo, upstream, local)))
+fn upstream_counts(
+    repo: &gix::Repository,
+    branch: &gix::refs::FullName,
+    local: gix::ObjectId,
+) -> Option<(usize, usize)> {
+    let upstream = repo
+        .branch_remote_tracking_ref_name(branch.as_ref(), Direction::Fetch)?
+        .ok()?;
+    let upstream = repo
+        .find_reference(upstream.as_ref())
+        .ok()?
+        .into_fully_peeled_id()
+        .ok()?
+        .detach();
+    Some((
+        only_in(repo, local, upstream),
+        only_in(repo, upstream, local),
+    ))
 }
 
 fn only_in(repo: &gix::Repository, tip: gix::ObjectId, other: gix::ObjectId) -> usize {
     if tip == other {
         return 0;
     }
-    repo.rev_walk([tip]).with_hidden([other]).all().map_or(0, |walk| walk.filter_map(Result::ok).count())
+    repo.rev_walk([tip])
+        .with_hidden([other])
+        .all()
+        .map_or(0, |walk| walk.filter_map(Result::ok).count())
 }
 
 fn has_changes(repo: &gix::Repository) -> bool {
-    let Ok(status) = repo.status(gix::progress::Discard) else { return false };
+    let Ok(status) = repo.status(gix::progress::Discard) else {
+        return false;
+    };
     status
         .index_worktree_rewrites(None)
         .index_worktree_submodules(Submodule::AsConfigured { check_dirty: true })
@@ -93,7 +129,8 @@ mod tests {
 
     impl Repo {
         fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!("zprompt-git-{name}-{}", std::process::id()));
+            let dir =
+                std::env::temp_dir().join(format!("zprompt-git-{name}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
             std::fs::create_dir_all(&dir).unwrap();
             let repo = Self(dir, std::cell::Cell::new(0));
@@ -103,7 +140,14 @@ mod tests {
 
         fn git(&self, args: &[&str]) {
             let status = Command::new("git")
-                .args(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"])
+                .args([
+                    "-c",
+                    "user.name=t",
+                    "-c",
+                    "user.email=t@t",
+                    "-c",
+                    "commit.gpgsign=false",
+                ])
                 .args(args)
                 .current_dir(&self.0)
                 .status()
@@ -113,11 +157,17 @@ mod tests {
 
         fn commit(&self) {
             self.1.set(self.1.get() + 1);
-            self.git(&["commit", "-q", "--allow-empty", "-m", &self.1.get().to_string()]);
+            self.git(&[
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                &self.1.get().to_string(),
+            ]);
         }
 
         fn status(&self) -> Option<Status> {
-            status(&self.0, Freshness::Fresh)
+            status(&self.0, true)
         }
     }
 
@@ -128,7 +178,14 @@ mod tests {
     }
 
     fn branch(name: &str, dirty: bool, ahead: usize, behind: usize) -> Option<Status> {
-        Some(Status { head: Head::Branch(name.into()), changes: Changes { dirty, ahead, behind } })
+        Some(Status {
+            head: Head::Branch(name.into()),
+            changes: Changes {
+                dirty,
+                ahead,
+                behind,
+            },
+        })
     }
 
     #[test]
@@ -168,7 +225,13 @@ mod tests {
         let repo = Repo::new("detached");
         repo.commit();
         repo.git(&["checkout", "-q", "--detach"]);
-        let Some(Status { head: Head::Detached(commit), .. }) = repo.status() else { panic!() };
+        let Some(Status {
+            head: Head::Detached(commit),
+            ..
+        }) = repo.status()
+        else {
+            panic!()
+        };
         assert_eq!(commit.len(), 7);
     }
 
@@ -181,7 +244,11 @@ mod tests {
         repo.git(&["update-ref", "refs/remotes/origin/main", "base"]);
         repo.git(&["config", "branch.main.remote", "origin"]);
         repo.git(&["config", "branch.main.merge", "refs/heads/main"]);
-        repo.git(&["config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"]);
+        repo.git(&[
+            "config",
+            "remote.origin.fetch",
+            "+refs/heads/*:refs/remotes/origin/*",
+        ]);
         assert_eq!(repo.status(), branch("main", false, 1, 0));
         repo.git(&["reset", "-q", "--hard", "base"]);
         repo.git(&["update-ref", "refs/remotes/origin/main", "HEAD@{1}"]);
@@ -196,16 +263,16 @@ mod tests {
         repo.commit();
         std::fs::write(repo.0.join("file"), "a").unwrap();
         assert_eq!(repo.status(), branch("main", true, 0, 0));
-        assert_eq!(status(&repo.0, Freshness::Cached), branch("main", true, 0, 0));
+        assert_eq!(status(&repo.0, false), branch("main", true, 0, 0));
         repo.git(&["switch", "-q", "-c", "other"]);
-        assert_eq!(status(&repo.0, Freshness::Cached), branch("other", false, 0, 0));
+        assert_eq!(status(&repo.0, false), branch("other", false, 0, 0));
     }
 
     #[test]
     fn returns_nothing_outside_a_repository() {
         let dir = std::env::temp_dir().join(format!("zprompt-git-none-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        assert_eq!(status(&dir, Freshness::Fresh), None);
+        assert_eq!(status(&dir, true), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

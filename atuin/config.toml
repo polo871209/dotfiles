@@ -1,6 +1,4 @@
 search_mode = "daemon-fuzzy"
-# The zsh-autosuggestions hint is a prefix search, so the up arrow uses one too and selects the hint first.
-search_mode_shell_up_key_binding = "prefix"
 enter_accept = true
 
 history_filter = [

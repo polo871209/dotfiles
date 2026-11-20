@@ -1,15 +1,5 @@
-import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  realpathSync,
-  rmdirSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { existsSync, realpathSync, writeFileSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
 import { fuzzyFilter, Loader } from "@earendil-works/pi-tui";
 import {
   SessionManager,
@@ -20,11 +10,8 @@ import { Type } from "typebox";
 import { run } from "./shared/exec";
 import { errorMessage } from "./shared/error";
 
-// The `clone` and `wt` functions in zsh/.zshrc do the same in the shell. Change both together.
 const BARE_DIR = ".bare";
 const TOOL_NAME = "worktree";
-const LOCAL_CONFIG = /^(\.env(\.[^/]+)?|\.?mise(\.[^/]+)?\.toml)$/;
-const MCP_CONFIG = join(".pi", "mcp.json");
 
 type ShowRunning = (step: string | undefined) => void;
 
@@ -39,12 +26,10 @@ interface Repo {
   worktrees: Worktree[];
 }
 
-interface CreatedWorktree extends Worktree {
+interface EnsuredWorktree {
+  path: string;
   branch: string;
-  created: boolean;
-  copied: string[];
-  mcpLinked: boolean;
-  miseTrusted: boolean;
+  report: string;
 }
 
 interface PendingMove {
@@ -53,7 +38,6 @@ interface PendingMove {
 }
 
 interface LinkedWorktree {
-  root: string;
   home: string;
   path: string;
   branch?: string;
@@ -145,117 +129,36 @@ async function openRepo(cwd: string, signal?: AbortSignal): Promise<Repo> {
   };
 }
 
-const homeOf = (repo: Repo) =>
-  repo.worktrees.find((w) => w.branch === repo.defaultBranch);
-
-async function copyLocalConfig(
-  from: string,
-  to: string,
+async function gitWt(
+  cwd: string,
+  args: string[],
   signal?: AbortSignal,
-): Promise<string[]> {
-  const ignored = await git(
-    from,
-    ["ls-files", "--others", "--ignored", "--exclude-standard", "--directory"],
-    signal,
-  );
-  const files = ignored.split("\n").filter((f) => LOCAL_CONFIG.test(f));
-  for (const file of files) copyFileSync(join(from, file), join(to, file));
-  return files;
-}
-
-function linkRepoMcp(root: string, worktree: string): boolean {
-  const shared = join(root, MCP_CONFIG);
-  const link = join(worktree, MCP_CONFIG);
-  if (!existsSync(shared) || existsSync(link)) return false;
-  mkdirSync(dirname(link), { recursive: true });
-  symlinkSync(shared, link);
-  return true;
-}
-
-async function isMiseTrusted(
-  dir: string,
-  signal?: AbortSignal,
-): Promise<boolean> {
-  const real = realpathSync(dir);
-  const shown = real.startsWith(`${homedir()}/`)
-    ? `~${real.slice(homedir().length)}`
-    : real;
-  const r = await run("mise", ["trust", "--show"], signal, dir);
-  return r.stdout.split("\n").includes(`${shown}: trusted`);
-}
-
-// mise passes trust from a main checkout to its worktrees, but a bare repo has no main checkout.
-async function inheritMiseTrust(
-  home: string,
-  worktree: string,
-  signal?: AbortSignal,
-): Promise<boolean> {
-  if (!(await isMiseTrusted(home, signal))) return false;
-  return (await run("mise", ["trust", worktree], signal)).code === 0;
+): Promise<{ out: string; report: string }> {
+  const r = await run("git", ["wt", ...args], signal, cwd, 60_000);
+  const report = r.stderr.trim().replace(/\n/g, " ");
+  if (r.code !== 0)
+    throw new Error(report || `git wt ${args.join(" ")} failed`);
+  return { out: r.stdout.trim(), report };
 }
 
 async function ensureWorktree(
-  repo: Repo,
+  cwd: string,
   branch: string,
   base?: string,
   signal?: AbortSignal,
-): Promise<CreatedWorktree> {
-  const { root } = repo;
-  await git(root, ["check-ref-format", "--branch", branch], signal);
-  const existing = repo.worktrees.find((w) => w.branch === branch);
-  if (existing)
-    return {
-      path: existing.path,
-      branch,
-      created: false,
-      copied: [],
-      mcpLinked: false,
-      miseTrusted: false,
-    };
-
-  const path = join(root, branch);
-  const hasLocal =
-    (
-      await run(
-        "git",
-        ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`],
-        signal,
-        root,
-      )
-    ).code === 0;
-  const remotes = hasLocal
-    ? []
-    : (
-        await git(
-          root,
-          [
-            "for-each-ref",
-            "--format=%(refname:short)",
-            `refs/remotes/*/${branch}`,
-          ],
-          signal,
-        )
-      )
-        .split("\n")
-        .filter(Boolean);
-  const remote = remotes.find((r) => r === `origin/${branch}`) ?? remotes[0];
-  const args = hasLocal
-    ? ["worktree", "add", path, branch]
-    : remote
-      ? ["worktree", "add", "--track", "-b", branch, path, remote]
-      : ["worktree", "add", "-b", branch, path, base ?? repo.defaultBranch];
-  await git(root, args, signal);
-  const home = homeOf(repo);
-  const copied = home ? await copyLocalConfig(home.path, path, signal) : [];
-  return {
-    path,
-    branch,
-    created: true,
-    copied,
-    mcpLinked: linkRepoMcp(root, path),
-    miseTrusted: home ? await inheritMiseTrust(home.path, path, signal) : false,
-  };
+): Promise<EnsuredWorktree> {
+  if (branch === "done")
+    throw new Error("A branch named done conflicts with `git wt done`.");
+  const { out, report } = await gitWt(
+    cwd,
+    [branch, ...(base ? [base] : [])],
+    signal,
+  );
+  return { path: out, branch, report };
 }
+
+const reportOf = (wt: EnsuredWorktree) =>
+  wt.report || `Found worktree ${wt.path} on branch ${wt.branch}.`;
 
 async function currentWorktree(
   cwd: string,
@@ -278,81 +181,34 @@ async function finishableWorktree(
     throw new Error(
       `This session is in the worktree of the default branch ${repo.defaultBranch}, which stays.`,
     );
-  const home = await ensureWorktree(
-    repo,
-    repo.defaultBranch,
-    undefined,
-    signal,
-  );
-  return { root: repo.root, home: home.path, path, branch };
+  const home = await ensureWorktree(cwd, repo.defaultBranch, undefined, signal);
+  return { home: home.path, path, branch };
 }
 
-async function removeFolder(
-  root: string,
-  path: string,
-  signal?: AbortSignal,
-): Promise<void> {
-  await git(root, ["worktree", "remove", "--force", path], signal);
-  for (
-    let dir = dirname(path);
-    dir.startsWith(`${root}/`) && !readdirSync(dir).length;
-    dir = dirname(dir)
-  )
-    rmdirSync(dir);
-}
-
-async function deleteBranch(
-  root: string,
-  branch: string,
+async function removeWorktree(
+  cwd: string,
+  target: string,
   signal?: AbortSignal,
 ): Promise<string> {
-  const sha = await git(
-    root,
-    ["rev-parse", "--short", `refs/heads/${branch}`],
-    signal,
-  );
-  await git(root, ["branch", "-D", branch], signal);
-  return `Deleted branch ${branch} at ${sha}. Restore it with \`git branch ${branch} ${sha}\`.`;
+  return (await gitWt(cwd, ["done", target], signal)).report;
 }
 
-async function removeLinked(
-  { root, path, branch }: LinkedWorktree,
+async function removeOtherWorktree(
+  cwd: string,
+  target: string,
   signal?: AbortSignal,
 ): Promise<string> {
-  await removeFolder(root, path, signal);
-  const removed = `Removed ${path}.`;
-  return branch
-    ? `${removed} ${await deleteBranch(root, branch, signal)}`
-    : removed;
-}
-
-async function removeBranch(
-  repo: Repo,
-  branch: string,
-  here: string | undefined,
-  signal?: AbortSignal,
-): Promise<string> {
-  if (branch === repo.defaultBranch)
-    throw new Error(`Branch ${branch} is the default branch, and it stays.`);
-  const worktree = repo.worktrees.find((w) => w.branch === branch);
-  if (worktree?.path === here)
+  const repo = await openRepo(cwd, signal);
+  const here = await currentWorktree(cwd, signal);
+  const asPath = resolve(cwd, target);
+  const folder =
+    repo.worktrees.find((w) => w.branch === target)?.path ??
+    (existsSync(asPath) ? realpathSync(asPath) : undefined);
+  if (here && folder === here)
     throw new Error(
-      "This session is in that branch's folder. Use `done` without a branch.",
+      "This session is in that folder. Use `done` without a branch.",
     );
-  if (worktree) await removeFolder(repo.root, worktree.path, signal);
-  else if (
-    (
-      await run(
-        "git",
-        ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`],
-        signal,
-        repo.root,
-      )
-    ).code !== 0
-  )
-    throw new Error(`No folder or local branch is named ${branch}.`);
-  const deleted = await deleteBranch(repo.root, branch, signal);
-  return worktree ? `Removed ${worktree.path}. ${deleted}` : deleted;
+  return removeWorktree(cwd, target, signal);
 }
 
 async function closeTab(branch: string, signal?: AbortSignal): Promise<string> {
@@ -589,7 +445,7 @@ async function finishWorktree(
   showRunning(
     `removing ${linked.path}${linked.branch ? ` and branch ${linked.branch}` : ""}`,
   );
-  const removed = await removeLinked(linked);
+  const removed = await removeWorktree(linked.home, linked.path);
   if (linked.branch) await clearTabLabel(linked.branch).catch(() => {});
   showRunning(`moving the session to ${linked.home}`);
   return switchToSession(
@@ -634,20 +490,6 @@ const reply = (
   terminate,
 });
 
-function createdText(wt: CreatedWorktree): string {
-  if (!wt.created) return `Found worktree ${wt.path} on branch ${wt.branch}.`;
-  const copied = wt.copied.length
-    ? ` Copied ${wt.copied.join(", ")} from the default-branch worktree.`
-    : "";
-  const mcp = wt.mcpLinked
-    ? ` Linked ${MCP_CONFIG} to the repository's MCP servers.`
-    : "";
-  const mise = wt.miseTrusted
-    ? " Trusted its mise configuration, as in the default-branch worktree."
-    : "";
-  return `Created worktree ${wt.path} on branch ${wt.branch}.${copied}${mcp}${mise}`;
-}
-
 export default function (pi: ExtensionAPI) {
   const { PI_CWD_FILE, PI_CWD_SHELL } = process.env;
   const shellCwdFile =
@@ -690,29 +532,50 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerCommand("wt", {
     description:
-      "Move this session to a branch's worktree, or /wt done [branch] to delete a branch and its folder",
+      "Move this session to a branch's worktree, created from [base] if missing, or /wt done [branch] to delete a branch and its folder",
     getArgumentCompletions: async (prefix) => {
       const r = await run(
         "git",
-        ["for-each-ref", "--format=%(refname:short)", "refs/heads"],
+        [
+          "for-each-ref",
+          "--format=%(refname)",
+          "refs/heads",
+          "refs/remotes/origin",
+        ],
         undefined,
         process.cwd(),
         5_000,
       );
       if (r.code !== 0) return null;
-      const done = {
-        value: "done",
-        label: "done",
-        description:
-          "Delete this folder and its branch, discarding changes, and move back to the default branch",
-      };
+      const refs = r.stdout.split("\n");
+      const local = refs.flatMap((ref) =>
+        ref.startsWith("refs/heads/") ? [ref.slice(11)] : [],
+      );
+      const doneArg = prefix.match(/^done\s+(.*)$/)?.[1];
+      if (doneArg !== undefined)
+        return fuzzyFilter(
+          local.map((b) => ({ value: `done ${b}`, label: b })),
+          doneArg,
+          (item) => item.label,
+        );
+      const remote = refs.flatMap((ref) => {
+        const b = ref.startsWith("refs/remotes/origin/") ? ref.slice(20) : "";
+        return b && b !== "HEAD" && !local.includes(b) ? [b] : [];
+      });
       return fuzzyFilter(
         [
-          done,
-          ...r.stdout
-            .split("\n")
-            .filter(Boolean)
-            .map((b) => ({ value: b, label: b })),
+          {
+            value: "done",
+            label: "done",
+            description:
+              "Delete this folder and its branch, discarding changes, and move back to the default branch",
+          },
+          ...local.map((b) => ({ value: b, label: b })),
+          ...remote.map((b) => ({
+            value: b,
+            label: b,
+            description: "remote branch, new folder",
+          })),
         ],
         prefix,
         (item) => item.value,
@@ -726,32 +589,34 @@ export default function (pi: ExtensionAPI) {
           : undefined;
       pendingMove = undefined;
       if (!commandArgs && !ctx.hasUI) {
-        ctx.ui.notify("Usage: /wt <branch> or /wt done", "error");
+        ctx.ui.notify(
+          "Usage: /wt <branch> [base] or /wt done [branch]",
+          "error",
+        );
         return;
       }
       const showRunning = runningWidget(ctx);
       let moved = false;
       try {
-        if (commandArgs === "done") {
+        const [first, second] = commandArgs.split(/\s+/);
+        if (first === "done" && !second) {
           moved = await finishWorktree(ctx, showRunning, continuation);
           return;
         }
-        const doneBranch = commandArgs.match(/^done\s+(\S+)$/)?.[1];
-        if (doneBranch) {
-          showRunning(`removing branch ${doneBranch} and its folder`);
-          const removed = await removeBranch(
-            await openRepo(ctx.cwd),
-            doneBranch,
-            await currentWorktree(ctx.cwd),
-          );
-          ctx.ui.notify(`${removed}${await closeTab(doneBranch)}`);
+        if (first === "done") {
+          showRunning(`removing branch ${second} and its folder`);
+          const removed = await removeOtherWorktree(ctx.cwd, second);
+          ctx.ui.notify(`${removed}${await closeTab(second)}`);
           return;
         }
-        if (commandArgs)
-          showRunning(`preparing the worktree of ${commandArgs}`);
-        const target = commandArgs
-          ? await ensureWorktree(await openRepo(ctx.cwd), commandArgs)
-          : await pickWorktree(ctx);
+        let report = "";
+        let target: Worktree | undefined;
+        if (first) {
+          showRunning(`preparing the worktree of ${first}`);
+          const wt = await ensureWorktree(ctx.cwd, first, second);
+          report = wt.report && `${wt.report} `;
+          target = wt;
+        } else target = await pickWorktree(ctx);
         if (!target) return;
         if (target.path === (await currentWorktree(ctx.cwd))) {
           ctx.ui.notify(`Session is already in ${target.path}`);
@@ -762,7 +627,7 @@ export default function (pi: ExtensionAPI) {
         moved = await switchToSession(
           ctx,
           cloneSession(ctx, target.path),
-          `Session cloned to ${target.path}`,
+          `${report}Session cloned to ${target.path}`,
           continuation,
         );
       } catch (e) {
@@ -851,12 +716,7 @@ export default function (pi: ExtensionAPI) {
       if (!branch) throw new Error(`Pass \`branch\` to ${action}.`);
 
       if (action === "remove") {
-        const removed = await removeBranch(
-          await openRepo(ctx.cwd, signal),
-          branch,
-          await currentWorktree(ctx.cwd, signal),
-          signal,
-        );
+        const removed = await removeOtherWorktree(ctx.cwd, branch, signal);
         return reply(`${removed}${await closeTab(branch, signal)}`, {
           branch,
         });
@@ -876,7 +736,7 @@ export default function (pi: ExtensionAPI) {
           throw new Error(
             `Branch ${branch} is the default branch. Spawn on another branch.`,
           );
-        const wt = await ensureWorktree(repo, branch, base, signal);
+        const wt = await ensureWorktree(ctx.cwd, branch, base, signal);
         const tab = await openTab(
           session,
           branch,
@@ -885,17 +745,12 @@ export default function (pi: ExtensionAPI) {
           signal,
         );
         return reply(
-          `${createdText(wt)} An agent started on the task in background Rex tab ${branch}, block ${tab.block_id}.`,
+          `${reportOf(wt)} An agent started on the task in background Rex tab ${branch}, block ${tab.block_id}.`,
           { path: wt.path, branch, ...tab },
         );
       }
 
-      const wt = await ensureWorktree(
-        await openRepo(ctx.cwd, signal),
-        branch,
-        base,
-        signal,
-      );
+      const wt = await ensureWorktree(ctx.cwd, branch, base, signal);
       if (wt.path === (await currentWorktree(ctx.cwd, signal)))
         return reply(`Session is already in ${wt.path}.`, {
           path: wt.path,
@@ -906,7 +761,7 @@ export default function (pi: ExtensionAPI) {
         continuation: `This session moved to the worktree at \`${wt.path}\` on branch \`${branch}\`. Continue the task there.`,
       };
       return reply(
-        `${createdText(wt)} When this turn ends, the session moves there.`,
+        `${reportOf(wt)} When this turn ends, the session moves there.`,
         { path: wt.path, branch },
         true,
       );

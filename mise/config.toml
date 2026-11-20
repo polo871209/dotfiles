@@ -13,7 +13,7 @@ go = "latest"
 node = "latest"
 python = ["latest", "3.14"]
 ruff = "latest"
-rust = "latest"
+rust = { version = "latest", components = ["rust-analyzer", "rust-src"] }
 tree-sitter = "latest"
 uv = "latest"
 zig = "latest"

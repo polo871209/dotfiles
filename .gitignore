@@ -19,6 +19,8 @@ pgcli/log
 rex/ssh_config
 rex/terminfo-hosts
 
+zprompt/target/
+
 # Hex regenerates these on update
 hex/AGENTS.md
 hex/hex.d.ts
