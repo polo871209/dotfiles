@@ -1,82 +1,68 @@
 ---
 name: code-review
-description: Standards review of the diff since a fixed point. Spec axis added only when a spec exists.
+description: Review the diff since a fixed point for bugs, standards, spec, and stale docs. Fixes stale docs in place.
 disable-model-invocation: true
 ---
 
-Two-axis review of the diff between `HEAD` and a fixed point (default branch unless the user says otherwise):
+Review the diff between `HEAD` and a fixed point on separate axes. Each pass runs as a `reviewer` subagent (hidden: call `subagent` with `agent: "reviewer"`) with fresh context. The reviewer carries the rubric, the finding format, and the smell baseline in its own prompt. Pass only the brief for its axis.
 
-- **Standards** (always): does the code conform to this repo's documented coding standards?
-- **Spec** (only when a spec exists): does the code faithfully implement the originating issue / PRD / spec?
+- **Bugs** (always, two passes): is the code correct?
+- **Standards** (always): does the code follow the repo's documented standards?
+- **Docs** (always): did the diff make a doc or comment false? This skill fixes those in place.
+- **Spec** (only when the user passes a spec): does the code implement it?
 
-Each axis runs as a **`reviewer` sub-agent** (read-only, hidden: invoke via the `subagent` tool with `agent: "reviewer"`) so they don't pollute each other's context (in parallel when both run), then this skill verifies and aggregates the findings. The reviewer carries the Fowler smell baseline in its own system prompt. Don't paste it.
+## 1. Pin the fixed point
 
-## Process
+The fixed point is what the user names: a SHA, branch, tag, or `HEAD~5`. If the user names none, use the **base ref** from `../rebase/SKILL.md`, after `git fetch origin`.
 
-### 1. Pin the fixed point, then rebase onto it
+The diff command is `git diff <fixed-point>...HEAD`. Three dots compare against the merge-base, so only this branch's changes show. The commit list is `git log <fixed-point>..HEAD --oneline`.
 
-Whatever the user said is the fixed point: a commit SHA, branch name, tag, `HEAD~5`, etc. If they didn't specify one, use the branch's **base ref** as defined in `../rebase/SKILL.md`. The base ref is what this branch is actually proposed against, so the diff covers only this branch's own changes.
+Completion: `git rev-parse <fixed-point>` succeeds and the diff is non-empty. Otherwise stop and report.
 
-Then rebase the branch onto the fixed point by following `../rebase/SKILL.md`. Skip when the fixed point isn't a branch tip. If the rebase stopped or aborted, report to the user and stop. Don't review a stale base.
+## 2. Gather intent
 
-Capture the diff command once: `git diff <fixed-point>...HEAD` (three-dot, so the comparison is against the merge-base). Also note the list of commits via `git log <fixed-point>..HEAD --oneline`.
+Intent is what the author meant the change to do. Collect:
 
-Before going further, confirm the fixed point resolves (`git rev-parse <fixed-point>`) and the diff is non-empty. A bad ref or empty diff must fail here, not inside two parallel sub-agents.
+- The PR title and body with `gh pr view --json title,body`, if a PR exists.
+- The full commit messages with `git log <fixed-point>..HEAD --format=%B`.
+- The spec, only if the user passed one: a path, an issue number fetched with `gh issue view`, or a URL.
 
-### 2. Identify the spec source (optional)
+## 3. Find standards sources
 
-Look for one, in this order:
+List every file that documents how to write code in this repo. `CODING_STANDARDS.md`, `CONTRIBUTING.md`, and every `AGENTS.md` on the path of a changed file must be on the list when they exist.
 
-1. A path the user passed as an argument.
-2. Issue/PR references in the commit messages (`#123`, `Closes #45`, etc.). Fetch via `github_pr` or `gh issue view`.
-3. A PRD/spec file under `docs/`, `specs/`, or `.scratch/` matching the branch name or feature.
+## 4. Spawn the passes
 
-If nothing turns up, skip the Spec axis silently (do NOT ask the user for one) and note "no spec, Standards only" in the final report.
+Send every `subagent` call in one message, in the foreground. Every task gets the diff command, the commit list, the intent, one brief, and a 400-word cap:
 
-### 3. Identify the standards sources
+- **Bugs, diff pass**: "Read only the diff. Flag bugs you can prove from the diff alone: wrong logic, broken types or imports, unhandled errors, security holes."
+- **Bugs, context pass**: "Read the changed code with its context. Follow callers with `lsp` references and check history with `git log -S` for reverted fixes. Flag bugs in the changed code, including callers it breaks."
+- **Standards**: the files from step 3. "Flag every place the diff breaks a documented rule. Add baseline smells."
+- **Docs**: "Find every doc and comment the diff made false or incomplete: comments in and near changed hunks, and repo text (README, `docs/`, `AGENTS.md`, skills, doc comments, help text) that names a symbol, flag, path, configuration key, or behavior the diff changed, renamed, added, or removed. Quote the stale text. The trigger is the hunk that makes it false."
+- **Spec**, if the user passed one: the spec path or contents. "Flag requirements that are missing or partial, behavior the spec did not ask for, and requirements implemented wrong."
 
-Search the repo for every file that documents how to write code. When `CODING_STANDARDS.md`, `CONTRIBUTING.md`, or `AGENTS.md` exists, it must be on the list.
+## 5. Verify every finding
 
-### 4. Spawn both sub-agents in parallel
+Subagent findings are often false. Treat each one as a claim and check it against the repository:
 
-Standards always runs. Spec runs only when step 2 found a spec, then send both `subagent` calls in a single message, in the foreground.
+- The cited range exists and overlaps the diff. For Docs, the quoted text exists at the cited path.
+- The code does what the finding says. Read around the hunk, because the guard a finding calls missing often lives outside it.
+- For Bugs, the trigger is reachable from a real caller or input.
+- A quoted rule or spec line exists and says what the finding claims.
+- For a missing requirement, search the whole branch before you accept that it is absent.
 
-**Standards sub-agent prompt** includes:
+Merge findings that name the same defect. Drop every unverified finding without a trace: no mention, no count. Keep only the verified part of a partly true finding, rewritten to match the code.
 
-- The full diff command and commit list.
-- The list of standards-source files you found in step 3.
-- The brief: "Report (per file/hunk where relevant) (a) every place the diff violates a documented standard: cite the standard (file + the rule). (b) any baseline smell you spot: name it and quote the hunk. Mark each finding as a hard violation or a judgement call. Under 400 words."
+Completion: every finding is verified or dropped.
 
-**Spec sub-agent prompt** includes:
+## 6. Fix stale docs
 
-- The diff command and commit list.
-- The path or fetched contents of the spec.
-- The brief: "Report: (a) requirements the spec asked for that are missing or partial. (b) behaviour in the diff that the spec did not ask for (scope creep). (c) requirements that look implemented but where the implementation looks wrong. Quote the spec line for each finding. Under 400 words."
+Fix every verified Docs finding without asking. Rewrite only the false words so the text matches the code, in the style and length around it. If the stale text is a comment outside the `Comments` keep list of the system prompt, delete it.
 
-### 5. Verify every finding
+Completion: every verified Docs finding is fixed, and this step's edits touch only doc and comment lines.
 
-Sub-agent findings are often false. Treat each one as a claim and check it yourself against the repository:
+## 7. Report
 
-- The quoted hunk exists in the diff at the cited file.
-- The cited standard exists in the cited file and says what the finding claims. For a Spec finding, the quoted spec line exists and asks for what the finding claims.
-- The code does what the finding describes. Read the code around the hunk, because the guard or behaviour the finding calls missing often lives outside it.
-- For a "missing" or "partial" requirement, search the whole branch for the implementation before you accept that it is absent.
+Name the fixed point. List the verified findings under `## Bugs`, `## Standards`, and `## Spec` when it ran, highest priority first within each axis. Keep the axes separate, because code can follow every rule and still implement the wrong thing. Under `## Docs fixed`, list each edited `path:line` with one line on what changed.
 
-A finding is verified only when every check passes. Drop every other finding without a trace: no mention, no count, no "dismissed" section. If a finding is partly true, keep only the verified part, rewritten to match what the code does.
-
-The step is done when every finding of every report is verified or dropped.
-
-### 6. Aggregate
-
-Note the fixed point used, then present the verified findings of each report that ran under `## Standards` and `## Spec` headings. Do **not** merge or rerank findings because the two axes are deliberately separate (see _Why two axes_).
-
-End with a one-line summary: total verified findings per axis, and the worst issue _within each axis_ (if any). Don't pick a single winner across axes because that's the reranking the separation exists to prevent.
-
-## Why two axes (when both run)
-
-A change can pass one axis and fail the other:
-
-- Code that follows every standard but implements the wrong thing → **Standards pass, Spec fail.**
-- Code that does exactly what the issue asked but breaks the project's conventions → **Spec pass, Standards fail.**
-
-Reporting them separately stops one axis from masking the other.
+End with one line: `Patch is correct` when no Bugs finding is P0 or P1, else `Patch is incorrect`, then the finding count and the worst finding of each axis.
