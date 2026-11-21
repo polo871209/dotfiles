@@ -78,6 +78,7 @@
     "scopes": [
       "~"
     ],
+    "includesHiddenFiles": false,
     "ignorePatterns": [],
     "removedDefaultPatterns": [],
     "showInLauncher": true,
@@ -184,7 +185,7 @@
     "recordingFolder": "~/Downloads",
     "recordingFormat": "mov",
     "recordingSystemAudio": false,
-    "recordingMicrophone": true,
+    "recordingMicrophone": false,
     "recordingShowsClicks": true,
     "recordingCamera": false,
     "commands": {
