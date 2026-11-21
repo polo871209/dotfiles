@@ -11,11 +11,14 @@ let package = Package(
     ],
     targets: [
         .target(name: "Boot"),
-        .target(name: "RexExtensions", dependencies: ["SessionPicker", "ClaudeUsage", "PendingPRs"]),
+        .target(
+            name: "RexExtensions",
+            dependencies: ["SessionPicker", "ClaudeUsage", "PendingPRs", "Toast"]),
         .target(name: "RexKit"),
         .target(name: "SessionPicker", dependencies: ["RexKit"]),
         .target(name: "ClaudeUsage", dependencies: ["RexKit"]),
         .target(name: "PendingPRs", dependencies: ["RexKit"]),
+        .target(name: "Toast", dependencies: ["RexKit"]),
         .executableTarget(name: "insert-dylib"),
         .testTarget(name: "RexKitTests", dependencies: ["RexKit"]),
         .testTarget(name: "SessionPickerTests", dependencies: ["SessionPicker"]),

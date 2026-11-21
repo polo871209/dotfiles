@@ -80,7 +80,7 @@ local function live_sessions()
     return live
 end
 
-local function select_session(session_id, from)
+local function select_session(session_id, from, window_id)
     local live = live_sessions()
     local visits = { session_id }
     if from ~= session_id and live[from] then visits[2] = from end
@@ -92,8 +92,18 @@ local function select_session(session_id, from)
     local file = must(io.open(history_file, 'w'))
     file:write(table.concat(visits, '\n'), '\n')
     file:close()
-    rex.client.queue('session.select', { session_id = session_id })
+    rex.client.queue('session.select', { session_id = session_id, window_id = window_id })
     return { session_id = session_id }
+end
+
+local function window_of(session_id, block_id)
+    for _, window in ipairs(must(rex.call('session.view', { session_id = session_id })).windows or {}) do
+        for _, layer in ipairs(window.layers) do
+            for _, block in ipairs(layer.blocks) do
+                if block.block_id == block_id then return window.window_id end
+            end
+        end
+    end
 end
 
 local function exists(path)
@@ -277,8 +287,9 @@ action {
     title = 'Switch Session',
     args = { session_id = 'string', block_id = 'string?', from = 'string?' },
     run = function(ctx, args)
-        if args.block_id then must(rex.call('session.focus_block', { session_id = args.session_id, block_id = args.block_id })) end
-        return select_session(args.session_id, args.from or ctx.session_id)
+        if not args.block_id then return select_session(args.session_id, args.from or ctx.session_id) end
+        must(rex.call('session.focus_block', { session_id = args.session_id, block_id = args.block_id }))
+        return select_session(args.session_id, args.from or ctx.session_id, window_of(args.session_id, args.block_id))
     end,
 }
 
@@ -491,12 +502,9 @@ action {
         local launcher = pane.ancestors[1]
         local dir = launcher and launcher.cwd or pane.foreground.cwd
         must(rex.exec({ 'pbcopy' }, { stdin = dir }))
-        -- Rex has no Lua call for an in-app notice, so send the pane an OSC 9 desktop notification.
-        local tty = rex.exec { 'ps', '-o', 'tty=', '-p', tostring(pane.foreground.pid) }
-        local tty_file = tty and tty.ok and io.open('/dev/' .. tty.stdout:gsub('%s', ''), 'w')
-        if not tty_file then return end
-        tty_file:write(('\27]9;Copied %s\7'):format(tilde_path(dir)))
-        tty_file:close()
+        local request = rex.json.encode { text = 'Copied ' .. tilde_path(dir) }
+        local sent = must(rex.exec({ 'nc', '-U', home .. '/Library/Caches/rex-toast.sock' }, { stdin = request .. '\n', timeout = 2 }))
+        if not sent.ok then error('Copied, but Rex does not load the toast extension. Run `just rex`, then reopen Rex.', 0) end
     end,
 }
 

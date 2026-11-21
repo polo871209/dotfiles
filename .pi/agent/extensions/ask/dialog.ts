@@ -257,7 +257,7 @@ class DialogView {
     this.liveProps = props;
   }
 
-  render(width: number): string[] {
+  render(width: number): readonly string[] {
     const state = this.liveProps.state;
     const strategy =
       this.config.isMulti &&
@@ -501,7 +501,7 @@ interface QuestionnaireBuildConfig {
 interface QuestionnaireBuilt {
   adapter: QuestionnairePropsAdapter;
   inlineInput: Input;
-  render: (width: number) => string[];
+  render: (width: number) => readonly string[];
   invalidate: () => void;
 }
 

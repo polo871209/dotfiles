@@ -80,8 +80,7 @@ export default function (pi: ExtensionAPI) {
         timeout,
       });
       return {
-        // pi.exec reports a signal-killed child (timeout) as code 0.
-        ok: r.code === 0 && !r.killed,
+        ok: r.code === 0,
         out: r.stdout.trim(),
         err: r.stderr.trim(),
         stdout: r.stdout,

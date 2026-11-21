@@ -29,6 +29,8 @@ Before you change pi-native behavior, read the relevant docs in the installed `@
 - **`lsp/`** — symbol navigation, plus deterministic post-edit diagnostics and fixes.
 - **`github-pr.ts`** — fetches a PR's metadata, failing checks, review bodies and threads, or diff, and once the comments are fixed locally, closes only the items the agent names and returns anything new, changed, or still open.
 - **`subagent/`** — delegates external research, read-only repo recon, or parallel review to an isolated agent. It runs in the foreground or background, returns compact structured results, shows each run's live status in pi without Rex status or notifications, and delivers background results as a message.
+- **`chart/`** — draws line, area, scatter, or bar charts inline in the transcript from series data or a CSV, TSV, or JSON file, in theme colors. In fullscreen mode, the pointer shows values at a point, and dragging zooms or pans the x axis.
+- **`promql/`** — charts one or more named PromQL range queries over a time window in one chart, and fetches finer data for a zoomed or panned window.
 - **`quiet-run.ts`** — the default way to run shell commands. Output goes to a log, and the agent gets the verdict and the requested slice.
 - **`ask/`** — structured choices when a request needs clarification, with the answers shown in the transcript in the same style as user messages.
 - **`browser/`** — on `/browser`, offers a background browser-use agent on your Helium profile that finishes web tasks such as searches, forms, and data extraction, for one session or, with `/browser repo`, as the default for a repository and all its worktrees, and shows `browser:` in the footer while it is on.
@@ -65,6 +67,6 @@ Before you change pi-native behavior, read the relevant docs in the installed `@
 
 ## Layout
 
-Single-file extensions sit at the top level. Each directory is one extension, except `shared/`, which holds utilities used by several. `node_modules` links to `../npm/node_modules`.
+Single-file extensions sit at the top level. Each directory is one extension, except `shared/`, which holds utilities used by several. `shared/chart/` renders charts for any tool that registers a data source through `registerChartTool`. `node_modules` links to `../npm/node_modules`.
 
 An on-off feature registers through `shared/toggle.ts`, which gives it `/<name>` for the session and `/<name> repo` for a repository default that covers every worktree.
