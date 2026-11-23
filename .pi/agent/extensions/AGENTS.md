@@ -26,7 +26,7 @@ Before you change pi-native behavior, read the relevant docs in the installed `@
 ### Tools for the model
 
 - **`web-search.ts`** — searches or fetches web targets for external research, scoped by domain or recency, ranked and filtered for relevance, and returns GitHub links as local files or threads, videos as transcripts, and PDFs as text.
-- **`lsp/`** — symbol navigation, plus deterministic post-edit diagnostics and fixes.
+- **`lsp/`** — symbol navigation, plus deterministic post-edit diagnostics and fixes. The agent's repair of those diagnostics stays in its context but out of the transcript, so the final answer stays last on screen.
 - **`github-pr.ts`** — fetches a PR's metadata, failing checks, review bodies and threads, or diff, and once the comments are fixed locally, closes only the items the agent names and returns anything new, changed, or still open.
 - **`subagent/`** — delegates external research, read-only repo recon, or parallel review to an isolated agent. It runs in the foreground or background, returns compact structured results, shows each run's live status in pi without Rex status or notifications, and delivers background results as a message.
 - **`chart/`** — draws line, area, scatter, or bar charts inline in the transcript from series data or a CSV, TSV, or JSON file, in theme colors. In fullscreen mode, the pointer shows values at a point, and dragging zooms or pans the x axis.

@@ -1,6 +1,6 @@
 #!/bin/sh
 set -eu
-app="/Applications/Rex Beta.app"
+app="/Applications/Rex.app"
 support="$HOME/Library/Application Support/rex-extensions"
 dylib="$support/RexExtensions.dylib"
 
@@ -12,24 +12,24 @@ codesign -dv "$app" 2>&1 | grep -q 'TeamIdentifier=AG92C3PT77' || { echo "$app i
 codesign --verify --strict "$app"
 rm -rf "$support/official"
 mkdir -p "$support/official"
-ditto "$app" "$support/official/Rex Beta.app"
+ditto "$app" "$support/official/Rex.app"
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
-ditto "$app" "$stage/Rex Beta.app"
-"$support/insert-dylib" "$stage/Rex Beta.app/Contents/MacOS/Rex" "$dylib"
+ditto "$app" "$stage/Rex.app"
+"$support/insert-dylib" "$stage/Rex.app/Contents/MacOS/Rex" "$dylib"
 # A Team-signed Autoupdate rejects the ad hoc Rex, so Sparkle updates fail: https://github.com/sparkle-project/Sparkle/blob/2.x/Autoupdate/SUCodeSigningVerifier.m (validateConnection)
-sparkle="$stage/Rex Beta.app/Contents/Frameworks/Sparkle.framework"
+sparkle="$stage/Rex.app/Contents/Frameworks/Sparkle.framework"
 codesign -f -s - --preserve-metadata=identifier,entitlements,flags "$sparkle/Versions/B/Autoupdate"
 codesign -f -s - --preserve-metadata=identifier,entitlements,flags "$sparkle"
 codesign -d --entitlements - --xml "$app" > "$stage/entitlements.plist"
 /usr/libexec/PlistBuddy -c "Add :com.apple.security.cs.disable-library-validation bool true" "$stage/entitlements.plist"
-codesign -f -s - --options runtime --entitlements "$stage/entitlements.plist" "$stage/Rex Beta.app"
-codesign --verify --strict "$stage/Rex Beta.app"
+codesign -f -s - --options runtime --entitlements "$stage/entitlements.plist" "$stage/Rex.app"
+codesign --verify --strict "$stage/Rex.app"
 # The running Rex still maps the replaced bundle, so move it aside instead of deleting it.
 rm -rf "$support/replaced"
 mkdir -p "$support/replaced"
 mv "$app" "$support/replaced/"
-mv "$stage/Rex Beta.app" "$app"
+mv "$stage/Rex.app" "$app"
 echo "Patched $(defaults read "$app/Contents/Info.plist" CFBundleVersion). Quit Rex (⌘Q) and open it again."
 # `just rex` runs in a terminal and reopens Rex itself, so only the launch agent notifies.
 if pgrep -xq Rex && [ ! -t 1 ]; then

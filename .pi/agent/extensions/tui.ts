@@ -1,11 +1,13 @@
 import {
   CustomEditor,
+  UserMessageComponent,
   type ExtensionAPI,
   type ExtensionContext,
   type KeybindingsManager,
   type Theme as PiTheme,
 } from "@earendil-works/pi-coding-agent";
 import {
+  Container,
   Marked,
   type Color,
   type Component,
@@ -27,6 +29,7 @@ import {
   type Span,
 } from "lovely-mermaid";
 import { LINK_OPEN, LINK_READY } from "./shared/link";
+import { HIDE_REST_OF_RUN } from "./shared/transcript";
 import { WORKING_FRAME_MS, workingFrames } from "./shared/working-indicator";
 
 const SGR_RESET = "\x1b[0m";
@@ -328,9 +331,9 @@ const collapseBlankDockRows = (tui: TUI, editor: Component) => {
 };
 
 const installEditor = (pi: ExtensionAPI, statuses: StatusSource) => {
+  let mounted: { tui: TUI; editor: ThemedEditor } | undefined;
   pi.on("session_start", async (_event, ctx) => {
     if (ctx.mode !== "tui") return;
-    let mounted: { tui: TUI; editor: ThemedEditor } | undefined;
     ctx.ui.setEditorComponent((tui, editorTheme, keybindings) => {
       installLinkRouter(tui, pi);
       const editor = new ThemedEditor(
@@ -346,6 +349,38 @@ const installEditor = (pi: ExtensionAPI, statuses: StatusSource) => {
     if (mounted && process.env.PI_IS_SUBAGENT === "1")
       collapseBlankDockRows(mounted.tui, mounted.editor);
   });
+  return () => mounted?.tui;
+};
+
+// Pi has no API to hide transcript messages, so this finds the chat container that holds the user messages.
+const findTranscript = (tui: TUI) =>
+  tui.children
+    .flatMap((child) => (child instanceof Container ? child.children : []))
+    .find(
+      (child): child is Container =>
+        child instanceof Container &&
+        child.children.some((entry) => entry instanceof UserMessageComponent),
+    );
+
+const installRunHiding = (pi: ExtensionAPI, getTui: () => TUI | undefined) => {
+  let restore: (() => void) | undefined;
+  const show = () => {
+    restore?.();
+    restore = undefined;
+  };
+  pi.events.on(HIDE_REST_OF_RUN, () => {
+    const tui = getTui();
+    const transcript = tui && findTranscript(tui);
+    if (restore || !transcript) return;
+    const addChild = transcript.addChild;
+    transcript.addChild = () => {};
+    restore = () => {
+      transcript.addChild = addChild;
+    };
+  });
+  pi.on("input", async () => show());
+  pi.on("agent_settled", async () => show());
+  pi.on("session_shutdown", async () => show());
 };
 
 const installWorking = (pi: ExtensionAPI) => {
@@ -630,7 +665,7 @@ const installWideMermaid = (pi: ExtensionAPI) => {
 export default function (pi: ExtensionAPI) {
   installWideMermaid(pi);
   const statuses: StatusSource = { read: () => new Map() };
-  installEditor(pi, statuses);
+  installRunHiding(pi, installEditor(pi, statuses));
   installFooter(pi, statuses);
   installWorking(pi);
   installCollapsedTools(pi);

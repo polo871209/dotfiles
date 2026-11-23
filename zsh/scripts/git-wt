@@ -20,6 +20,12 @@ until [[ -d $root/.bare ]]; do
   root=${root:-/}
 done
 
+lazygit_link=$root/.bare/lazygit.yml
+if [[ ! -e $lazygit_link && ! -L $lazygit_link ]]; then
+  ln -s "${XDG_CONFIG_HOME:-$HOME/.config}/lazygit/worktree.yml" "$lazygit_link" &&
+    note "Linked lazygit's commands for one folder per branch."
+fi
+
 folders=()
 branches=()
 branch_folders=()

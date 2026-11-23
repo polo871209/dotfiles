@@ -1,0 +1,69 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/jesseduffield/lazygit/refs/heads/master/schema/config.json
+# git-wt links this file as .bare/lazygit.yml, so lazygit loads it only in repos with one folder per branch.
+customCommands:
+  - key: n
+    context: localBranches
+    description: New branch from the selected one, in its own folder
+    prompts:
+      - type: input
+        title: "New branch from {{.SelectedLocalBranch.Name}}:"
+        key: Branch
+    output: log
+    command: git wt {{.Form.Branch | quote}} {{.SelectedLocalBranch.Name | quote}}
+  - key: w
+    context: localBranches
+    description: Open the branch in its own folder
+    output: log
+    command: git wt {{.SelectedLocalBranch.Name | quote}}
+  - key: D
+    context: localBranches
+    description: Delete the branch and its folder, discarding uncommitted changes
+    prompts:
+      - type: confirm
+        title: Delete branch and folder
+        body: "Force-delete branch {{.SelectedLocalBranch.Name}} and remove its folder? Uncommitted changes in the folder are lost."
+    output: log
+    command: |
+      {{if .SelectedLocalBranch.Head}}echo "lazygit runs in the folder of {{.SelectedLocalBranch.Name}}. Switch to another worktree first." >&2; exit 1{{end}}
+      git wt done {{.SelectedLocalBranch.Name | quote}}
+  - key: w
+    context: remoteBranches
+    description: Open the branch in its own folder, tracking the remote branch
+    output: log
+    command: git wt {{.SelectedRemoteBranch.Name | quote}}
+  - key: n
+    context: worktrees
+    description: Open a local, remote, or new branch in its own folder
+    prompts:
+      - type: input
+        title: "Branch:"
+        key: Branch
+        suggestions:
+          preset: branches
+    output: log
+    command: git wt {{.Form.Branch | quote}}
+  - key: d
+    context: worktrees
+    description: Remove the folder and its empty parent folders, keep the branch
+    prompts:
+      - type: confirm
+        title: Remove folder
+        body: "Remove {{.SelectedWorktree.Path}}? Branch {{.SelectedWorktree.Branch}} is kept."
+    command: |
+      {{if or .SelectedWorktree.IsMain .SelectedWorktree.IsCurrent}}echo "lazygit runs in this worktree, or it is the main one." >&2; exit 1{{end}}
+      path={{.SelectedWorktree.Path | quote}}
+      root=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
+      git worktree remove "$path" || exit 1
+      dir=$(dirname "$path")
+      while [ "${dir#"$root"/}" != "$dir" ] && rmdir "$dir" 2>/dev/null; do dir=$(dirname "$dir"); done
+  - key: D
+    context: worktrees
+    description: Delete the folder and its branch, discarding uncommitted changes
+    prompts:
+      - type: confirm
+        title: Delete folder and branch
+        body: "Remove {{.SelectedWorktree.Path}} and force-delete branch {{.SelectedWorktree.Branch}}? Uncommitted changes in the folder are lost."
+    output: log
+    command: |
+      {{if or .SelectedWorktree.IsMain .SelectedWorktree.IsCurrent}}echo "lazygit runs in this worktree, or it is the main one." >&2; exit 1{{end}}
+      git wt done {{.SelectedWorktree.Path | quote}}

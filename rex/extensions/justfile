@@ -1,4 +1,4 @@
-app := "/Applications/Rex Beta.app"
+app := "/Applications/Rex.app"
 support := env("HOME") / "Library/Application Support/rex-extensions"
 label := "local.rex-extensions"
 agent := env("HOME") / "Library/LaunchAgents" / label + ".plist"
@@ -45,11 +45,11 @@ unpatch:
     set -eu
     launchctl bootout "gui/$(id -u)/{{ label }}" 2>/dev/null || true
     rm -f "{{ agent }}"
-    test -d "{{ support }}/official/Rex Beta.app" || { echo "no official backup in {{ support }}/official" >&2; exit 1; }
+    test -d "{{ support }}/official/Rex.app" || { echo "no official backup in {{ support }}/official" >&2; exit 1; }
     rm -rf "{{ support }}/replaced"
     mkdir -p "{{ support }}/replaced"
     mv "{{ app }}" "{{ support }}/replaced/"
-    ditto "{{ support }}/official/Rex Beta.app" "{{ app }}"
+    ditto "{{ support }}/official/Rex.app" "{{ app }}"
     echo "Official Rex restored. Quit Rex (⌘Q) and open it again."
 
 # Run the Swift tests

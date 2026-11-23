@@ -20,6 +20,7 @@ vim.lsp.enable {
     'starpls',
     'taplo',
     'terraformls',
+    'tsgo',
     'vtsls',
     'yamlls',
     'zls',

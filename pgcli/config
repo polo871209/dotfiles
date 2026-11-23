@@ -1,2 +1,3 @@
 [main]
 keyword_casing = upper
+multi_line = True

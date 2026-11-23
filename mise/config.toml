@@ -25,7 +25,7 @@ neovim = "latest"
 "conda:tree" = "latest"
 "github:noahdunnagan/fsearch" = "latest"
 "npm:opengarden" = { version = "latest", allow_low_downloads = true }
-"pipx:pgcli" = "latest"
+"pipx:pgcli" = { version = "latest", uvx_args = "--with psycopg[binary]" }
 atuin = "latest"
 bat = "latest"
 carapace = "latest"

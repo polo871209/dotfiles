@@ -13,6 +13,7 @@ import {
   runDriver,
 } from "./driver";
 import { changeNote } from "./diff";
+import { HIDE_REST_OF_RUN } from "../../shared/transcript";
 const isRebasing = (cwd: string): boolean => {
   let dir = cwd;
   for (let i = 0; i < 8; i++) {
@@ -190,6 +191,7 @@ export function registerFeedback(pi: ExtensionAPI): void {
       };
     }
     repairFollowups++;
+    pi.events.emit(HIDE_REST_OF_RUN, undefined);
     return {
       entries: [
         ...event.entries,

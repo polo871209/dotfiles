@@ -141,7 +141,7 @@ clone() {
       git -C "$dir" fetch --filter=blob:none origin &&
       git -C "$dir" remote set-head origin --auto >/dev/null &&
       branch=${$(git -C "$dir" symbolic-ref --short refs/remotes/origin/HEAD)#origin/} &&
-      git -C "$dir" worktree add -q --track -b "$branch" "$branch" "origin/$branch" &&
+      git -C "$dir" wt "$branch" >/dev/null &&
       git -C "$dir" symbolic-ref HEAD "refs/heads/$branch"
   }; then
     rm -rf "$dir"

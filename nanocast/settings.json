@@ -98,7 +98,8 @@
     "menuSearchDisabledApps": [],
     "windowSwitcherShortcut": "cmd+tab",
     "windowSwitcherExcludedApps": [
-      "rocks.spotifast.Spotifast"
+      "rocks.spotifast.Spotifast",
+      "net.whatsapp.WhatsApp"
     ],
     "commands": {
       "search-menu-items": {
@@ -185,9 +186,9 @@
     "recordingFolder": "~/Downloads",
     "recordingFormat": "mov",
     "recordingSystemAudio": false,
-    "recordingMicrophone": false,
+    "recordingMicrophone": true,
     "recordingShowsClicks": true,
-    "recordingCamera": false,
+    "recordingCamera": true,
     "commands": {
       "capture-screenshot": {
         "shortcut": "hyper+x",

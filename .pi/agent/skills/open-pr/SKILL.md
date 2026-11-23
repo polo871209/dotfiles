@@ -6,6 +6,8 @@ disable-model-invocation: true
 
 Open a PR for the current branch with `gh`. If a PR already exists for the branch, update its title and body instead of creating a second one.
 
+Use only `git` and `gh`: commit, push, and open the PR. CI runs the tests, builds, and dependency installs, so leave them to CI.
+
 ## Title
 
 Use Conventional Commits `type(scope): subject`, with no trailing period.
@@ -27,7 +29,6 @@ Use these sections, or map them onto the template:
 - `## Why`: 2 or 3 sentences. Say what the system did before, what this PR changes, and the one mechanism behind it. If the PR is a follow-up, link the earlier PR.
 - `## Scope`: one bullet per area, 5 at most. Start each bullet with a plain label, such as `Callers:` or `Rules:`, followed by 1 or 2 sentences. Group exceptions by reason, for example "Calls that name an acting user", in about 4 bullets. If a call behaves differently, for example it loses a token, give it one sentence with the reason it still works.
 - `## Risks`: only what can break in production, 3 bullets at most, each with the action to take or avoid, for example "Do not redeploy X". Drop the section when nothing applies.
-- `## Verification`: each check you ran and its outcome, plus one line on what the tests prove. Leave out test internals and flaky-test notes.
 
 If the change spans many files or components, add a Mermaid diagram of how the changed components connect. GitHub renders a fenced `mermaid` block as a graph.
 
