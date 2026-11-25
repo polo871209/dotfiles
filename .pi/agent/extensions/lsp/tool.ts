@@ -1,5 +1,3 @@
-import * as fs from "node:fs";
-import { type Static, Type } from "typebox";
 import {
   defineTool,
   withFileMutationQueue,
@@ -7,13 +5,14 @@ import {
   type AgentToolUpdateCallback,
   type ExtensionToolContext,
 } from "@earendil-works/pi-coding-agent";
+import * as fs from "node:fs";
+import { Type, type Static } from "typebox";
 import { run } from "../shared/exec";
 import { restartDaemons } from "./nvim";
 import {
   capText,
   displayPath,
   formatDiagLine,
-  formatLocations,
   normalizeAtPath,
   sortDiagnostics,
   toAbs,
@@ -21,7 +20,6 @@ import {
   withDriver,
   type Diag,
   type DriverErr,
-  type LspLocation,
   type StatusResult,
 } from "./utils";
 
@@ -106,12 +104,6 @@ async function listWorkspaceFiles(
   return { files, totalCandidates: candidates.length };
 }
 
-type AnchorAction =
-  "hover" | "definition" | "references" | "implementation" | "type_definition";
-
-interface DriverLocResult extends DriverErr {
-  locations?: LspLocation[];
-}
 interface DriverHoverResult extends DriverErr {
   text?: string;
 }
@@ -138,60 +130,26 @@ interface RenameResult extends DriverErr {
   edit_count?: number;
 }
 
-async function runAnchor(
-  action: AnchorAction,
+async function runHover(
   params: LspParams,
   ctx: ExtensionToolContext,
   signal: AbortSignal | undefined,
   onUpdate: AgentToolUpdateCallback | undefined,
 ): Promise<AgentToolResult<unknown>> {
-  if (!params.file) return toolError(`LSP error: action "${action}" requires file`);
-  if (!params.line) return toolError(`LSP error: action "${action}" requires line`);
+  if (!params.file) return toolError('LSP error: action "hover" requires file');
+  if (!params.line) return toolError('LSP error: action "hover" requires line');
   const file = toAbs(normalizeAtPath(params.file), ctx.cwd);
-
-  if (action === "hover") {
-    return withDriver<DriverHoverResult>(
-      ctx,
-      "hover",
-      [file, params.line, params.symbol ?? ""],
-      signal,
-      onUpdate,
-      (res) => {
-        const t = capText(res.text?.trim() || "No hover information");
-        return {
-          text: t.text,
-          details: { line: params.line, truncated: t.truncated },
-        };
-      },
-    );
-  }
-
-  return withDriver<DriverLocResult>(
+  return withDriver<DriverHoverResult>(
     ctx,
-    action,
+    "hover",
     [file, params.line, params.symbol ?? ""],
     signal,
     onUpdate,
-    (res, cwd) => {
-      const locs = res.locations ?? [];
-      const t = capText(
-        formatLocations(
-          locs,
-          cwd,
-          (
-            {
-              hover: "hover",
-              definition: "definition(s)",
-              references: "reference(s)",
-              implementation: "implementation(s)",
-              type_definition: "type definition(s)",
-            } satisfies Record<AnchorAction, string>
-          )[action],
-        ),
-      );
+    (res) => {
+      const t = capText(res.text?.trim() || "No hover information");
       return {
         text: t.text,
-        details: { count: locs.length, truncated: t.truncated },
+        details: { line: params.line, truncated: t.truncated },
       };
     },
   );
@@ -237,8 +195,10 @@ async function runRename(
   signal: AbortSignal | undefined,
   onUpdate: AgentToolUpdateCallback | undefined,
 ): Promise<AgentToolResult<unknown>> {
-  if (!params.file) return toolError('LSP error: action "rename" requires file');
-  if (!params.line) return toolError('LSP error: action "rename" requires line');
+  if (!params.file)
+    return toolError('LSP error: action "rename" requires file');
+  if (!params.line)
+    return toolError('LSP error: action "rename" requires line');
   if (!params.new_name)
     return toolError('LSP error: action "rename" requires new_name');
   const file = toAbs(normalizeAtPath(params.file), ctx.cwd);
@@ -352,10 +312,6 @@ async function runDiagnostics(
 const parameters = Type.Object({
   action: Type.Enum([
     "hover",
-    "definition",
-    "references",
-    "implementation",
-    "type_definition",
     "document_symbols",
     "diagnostics",
     "rename",
@@ -376,8 +332,7 @@ const parameters = Type.Object({
   line: Type.Optional(
     Type.Number({
       minimum: 1,
-      description:
-        "1-based line number. Required for hover, definition, references, implementation, type_definition, and rename.",
+      description: "1-based line number. Required for hover and rename.",
     }),
   ),
   symbol: Type.Optional(
@@ -386,9 +341,7 @@ const parameters = Type.Object({
         "Text on the line that selects the column. Default: the first token on the line.",
     }),
   ),
-  new_name: Type.Optional(
-    Type.String({ description: "Required for rename." }),
-  ),
+  new_name: Type.Optional(Type.String({ description: "Required for rename." })),
 });
 
 type LspParams = Static<typeof parameters>;
@@ -403,14 +356,14 @@ export const lspTool = defineTool({
     openWorldHint: false,
   },
   description:
-    "Language-server lookups and rename. document_symbols outlines a file for less than reading it. rename saves the edits in every affected file, so run references first. Diagnostics run automatically after each edit, so call diagnostics only on request. restart restarts the daemon that all pi sessions share, for stale results or timeouts. A line number must be current, so re-read a file after you edit it.",
+    "Language-server hover, file outline, diagnostics, and rename. document_symbols outlines a file for less than reading it. rename saves the edits in every affected file. Diagnostics run automatically after each edit, so call diagnostics only on request. restart restarts the daemon that all pi sessions share, for stale results or timeouts. A line number must be current, so re-read a file after you edit it.",
   parameters,
   outputSchema: Type.Object({
     success: Type.Boolean(),
     text: Type.String({ description: "The result as the model sees it" }),
     count: Type.Optional(
       Type.Number({
-        description: "Locations, symbols, rename edits, or diagnostics",
+        description: "Symbols, rename edits, or diagnostics",
       }),
     ),
     errors: Type.Optional(Type.Number()),
@@ -456,7 +409,7 @@ async function dispatch(
       return runDocumentSymbols(p, ctx, signal, onUpdate);
     case "diagnostics":
       return runDiagnostics(p, ctx, signal, onUpdate);
-    default:
-      return runAnchor(p.action, p, ctx, signal, onUpdate);
+    case "hover":
+      return runHover(p, ctx, signal, onUpdate);
   }
 }

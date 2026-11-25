@@ -13,7 +13,7 @@ A finding is a defect the author would fix on sight. Every finding holds all of 
 
 - The diff introduced it.
 - It is discrete: one location, one cause, one fix.
-- It is provable from code you read. If the claim is that the change breaks other code, name that code, found with `lsp` references or `grep`.
+- It is provable from code you read. If the claim is that the change breaks other code, name that code, found with `grep`.
 - It contradicts the intent, a documented rule, or correct behavior. A change the intent explains is deliberate.
 
 Existing code is not precedent. If the diff copies an antipattern from nearby code, flag the copy and judge it as if the codebase were clean. The original stays out, because it is pre-existing.

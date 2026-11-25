@@ -20,8 +20,6 @@ import { run } from "./shared/exec";
 const MAX_DIFF_BYTES = 48 * 1024;
 const MAX_REPORT_BYTES = 64 * 1024;
 const MAX_LISTED_FILES = 200;
-// truncateHead applies a 2000-line cap by default. These two budgets are
-// byte-only, so disable the line limit rather than add a second one.
 const NO_LINE_CAP = Number.MAX_SAFE_INTEGER;
 
 function stripHtmlComments(s: string): string {

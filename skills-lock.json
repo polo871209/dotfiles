@@ -6,19 +6,22 @@
       "ref": "main",
       "sourceType": "github",
       "skillPath": "pstack/skills/how/SKILL.md",
-      "computedHash": "b0dcd53c5491a24d3bf16dd251f65334e7fc21137e0cd60907c2728b44d5541b"
+      "computedHash": "68d69cebe27179ed5fe090d44aa4841ea808ac0b68c41be2a09d36de6169fc4e",
+      "commit": "b1fbf4b60ac6813b4583ccc356850dafcf492665"
     },
     "humanizer": {
       "source": "blader/humanizer",
       "sourceType": "github",
       "skillPath": "SKILL.md",
-      "computedHash": "04cdabbcceaa7b5d4bd4b1ea02339013503d623b270b5b3b2e274837494d7134"
+      "computedHash": "6da5d71e32eb66770b4c1ebe38b7e5c271bfca6290c9248aeb8449a84dbfe914",
+      "commit": "a32f24407364c74c812b43c15926d638bee1e072"
     },
     "writing-for-agents": {
       "source": "mattpocock/skills",
       "sourceType": "github",
       "skillPath": "skills/productivity/writing-for-agents/SKILL.md",
-      "computedHash": "e79a2476b2417b228922453478d9505a6b9af19f3a412e560728ce62ed3555ca"
+      "computedHash": "e79a2476b2417b228922453478d9505a6b9af19f3a412e560728ce62ed3555ca",
+      "commit": "6f7f7831a625f040a8e06a0e7954826b87ce775a"
     }
   }
 }

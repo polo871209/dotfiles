@@ -1,3 +1,4 @@
+import { attach, type NeovimClient } from "neovim";
 import { spawn } from "node:child_process";
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
@@ -5,15 +6,11 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { attach, type NeovimClient } from "neovim";
 import { surviveReload } from "../shared/reload";
 
 const DRIVER_PATH = path.join(import.meta.dirname, "driver.lua");
 const LOG_FILE = path.join(os.tmpdir(), "pi-lsp.log");
 
-// Derive from $HOME only. Any env input (TMPDIR, XDG_RUNTIME_DIR) can differ
-// between processes and split the daemon pool. Keep it short: unix socket
-// paths cap around 104 bytes.
 const RUNTIME_DIR = path.join(os.homedir(), ".cache", "pi-lsp");
 
 const log = (msg: string) => {
@@ -287,8 +284,7 @@ export const restartDaemons = async (): Promise<boolean> => {
     dropLane(lane);
     adhoc?.end();
     if (pid) {
-      for (let i = 0; i < 20 && alive(pid); i++)
-        await sleep(100);
+      for (let i = 0; i < 20 && alive(pid); i++) await sleep(100);
       if (alive(pid)) {
         try {
           process.kill(pid, "SIGKILL");
@@ -398,7 +394,7 @@ const loadedHere = new Set<string>();
 const digest = (src: string) =>
   crypto.createHash("sha1").update(src).digest("hex").slice(0, 16);
 
-export const loadLuaOnce = async (
+const loadLuaOnce = async (
   cwd: string,
   key: string,
   src: string,

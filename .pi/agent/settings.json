@@ -3,11 +3,7 @@
   "defaultProvider": "anthropic",
   "defaultModel": "claude-opus-5-5",
   "defaultThinkingLevel": "high",
-  "defaultTools": [
-    "+codemode",
-    "+grep",
-    "+find"
-  ],
+  "defaultTools": ["+codemode"],
   "theme": "catppuccin-mocha",
   "fullscreenScrollbar": "hidden",
   "outputPad": 0,
@@ -17,17 +13,14 @@
   },
   "quietStartup": true,
   "collapseChangelog": true,
-  "lastChangelogVersion": "1.6.0",
+  "lastChangelogVersion": "1.6.1",
   "warnings": {
     "anthropicExtraUsage": false
   },
   "compaction": {
     "modelOverrides": {
       "anthropic/claude-opus-5-5": {
-        "reserveTokens": 700000
-      },
-      "anthropic/claude-sonnet-5-5": {
-        "reserveTokens": 700000
+        "reserveTokens": 650000
       }
     }
   },
@@ -36,12 +29,6 @@
   },
   "defaultProjectTrust": "always",
   "enableInstallTelemetry": false,
-  "selfUpdateCommand": [
-    "mise",
-    "upgrade",
-    "npm:{packageName}"
-  ],
-  "skills": [
-    "~/dotfiles/.agents/skills"
-  ]
+  "selfUpdateCommand": ["mise", "upgrade", "npm:{packageName}"],
+  "skills": ["~/dotfiles/.agents/skills"]
 }

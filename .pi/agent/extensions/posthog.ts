@@ -1,13 +1,14 @@
-import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { userInfo } from "node:os";
-import { basename, dirname, join } from "node:path";
-import type { Usage } from "@earendil-works/pi-ai";
+import type { ImageContent, TextContent, Usage } from "@earendil-works/pi-ai";
 import {
   getAgentDir,
   type ExtensionAPI,
   type ExtensionContext,
+  type ToolInfo,
 } from "@earendil-works/pi-coding-agent";
+import { randomUUID } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { userInfo } from "node:os";
+import { basename, dirname, join } from "node:path";
 import { errorMessage } from "./shared/error";
 
 interface CapturedEvent {
@@ -55,6 +56,104 @@ function usageProperties(usage: Usage): Record<string, unknown> {
   };
 }
 
+function extensionName({ path }: ToolInfo["sourceInfo"]): string {
+  const file = basename(path);
+  return /^index\.[cm]?[jt]s$/.test(file)
+    ? basename(dirname(path))
+    : file.replace(/\.[cm]?[jt]s$/, "");
+}
+
+function definitionChars(tool: ToolInfo): number {
+  return (
+    tool.description.length +
+    JSON.stringify(tool.parameters).length +
+    (tool.promptGuidelines?.join("\n").length ?? 0)
+  );
+}
+
+function isFixedChoice(schema: unknown): boolean {
+  if (typeof schema !== "object" || schema === null) return false;
+  const field = schema as Record<string, unknown>;
+  if (field.type === "boolean" || "enum" in field || "const" in field)
+    return true;
+  return (
+    Array.isArray(field.anyOf) &&
+    field.anyOf.every(
+      (member: unknown) =>
+        isFixedChoice(member) ||
+        (member as { type?: unknown } | null)?.type === "null",
+    )
+  );
+}
+
+function argProperties(
+  args: unknown,
+  tool: ToolInfo | undefined,
+): Record<string, unknown> {
+  if (typeof args !== "object" || args === null) return {};
+  const fields =
+    (tool?.parameters as { properties?: Record<string, unknown> } | undefined)
+      ?.properties ?? {};
+  return Object.fromEntries(
+    Object.entries(args)
+      .filter(([, value]) => value !== undefined && value !== null)
+      .map(([key, value]) => [
+        `arg_${key}`,
+        isFixedChoice(fields[key]) ? value : true,
+      ]),
+  );
+}
+
+function commandPrograms(command: string): string[] {
+  const bare = command
+    .split("<<")[0]
+    .replace(/'[^']*'|"(?:\\.|[^"\\])*"/g, "\0");
+  const programs = bare.split(/[;&|\n()`]+/).flatMap((segment) => {
+    const program = segment
+      .trim()
+      .split(/\s+/)
+      .find((word) => !/^\w+=/.test(word));
+    return program && /^[a-z_./][\w./+-]*$/i.test(program)
+      ? [basename(program)]
+      : [];
+  });
+  return [...new Set(programs)];
+}
+
+function usageDetails(
+  toolName: string,
+  args: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  const command = args?.command;
+  if (toolName === "bash" && typeof command === "string")
+    return { programs: commandPrograms(command) };
+  const path = args?.path;
+  if (
+    toolName === "read" &&
+    typeof path === "string" &&
+    basename(path) === "SKILL.md"
+  )
+    return { skill: basename(dirname(path)) };
+  return {};
+}
+
+function resultSize(
+  result:
+    | {
+        content?: (TextContent | ImageContent)[];
+      }
+    | undefined,
+): Record<string, number> {
+  const content = result?.content ?? [];
+  return {
+    result_chars: content.reduce(
+      (chars, block) => chars + (block.type === "text" ? block.text.length : 0),
+      0,
+    ),
+    result_images: content.filter((block) => block.type === "image").length,
+  };
+}
+
 export default function (pi: ExtensionAPI) {
   const token = readToken();
   if (!token) return;
@@ -65,6 +164,12 @@ export default function (pi: ExtensionAPI) {
   let repo: string | undefined;
   let branch: string | undefined;
   let reportedFailure = false;
+  let tools = new Map<string, ToolInfo>();
+  let offeredKey: string | undefined;
+  const startedCalls = new Map<
+    string,
+    { toolName: string; args: Record<string, unknown> | undefined }
+  >();
 
   const flush = async (ctx: ExtensionContext) => {
     if (!queue.length) return;
@@ -129,8 +234,34 @@ export default function (pi: ExtensionAPI) {
     });
   };
 
+  const captureOffered = (ctx: ExtensionContext) => {
+    const allTools = pi
+      .getAllTools()
+      .filter((tool) => tool.exposure !== "hidden");
+    tools = new Map(allTools.map((tool) => [tool.name, tool]));
+    const active = new Set(pi.getActiveTools());
+    const key = JSON.stringify(
+      allTools.map((tool) => [tool.name, active.has(tool.name)]),
+    );
+    if (key === offeredKey) return;
+    offeredKey = key;
+    for (const tool of allTools)
+      capture(ctx, "pi tool offered", Date.now(), {
+        tool: tool.name,
+        active: active.has(tool.name),
+        exposure: tool.exposure,
+        extension: extensionName(tool.sourceInfo),
+        definition_chars: definitionChars(tool),
+      });
+  };
+
+  pi.on("session_start", () => {
+    offeredKey = undefined;
+  });
+
   pi.on("before_agent_start", async (_event, ctx) => {
     traceId = randomUUID();
+    captureOffered(ctx);
     const git = await pi.exec(
       "git",
       [
@@ -167,12 +298,31 @@ export default function (pi: ExtensionAPI) {
     });
   });
 
+  pi.on("tool_execution_start", (event) => {
+    startedCalls.set(event.toolCallId, {
+      toolName: event.toolName,
+      args: event.args as Record<string, unknown> | undefined,
+    });
+  });
+
   pi.on("tool_execution_end", (event, ctx) => {
+    const args = startedCalls.get(event.toolCallId)?.args;
+    startedCalls.delete(event.toolCallId);
     capture(ctx, "pi tool call", Date.now(), {
       tool: event.toolName,
       duration_ms: event.durationMs,
+      ran: event.durationMs !== undefined,
       is_error: event.isError,
-      nested: event.parentToolCallId !== undefined,
+      parent_tool:
+        event.parentToolCallId === undefined
+          ? undefined
+          : startedCalls.get(event.parentToolCallId)?.toolName,
+      $ai_model: ctx.model?.id,
+      $ai_provider: ctx.model?.provider,
+      thinking_level: pi.getThinkingLevel(),
+      ...resultSize(event.result as Parameters<typeof resultSize>[0]),
+      ...argProperties(args, tools.get(event.toolName)),
+      ...usageDetails(event.toolName, args),
     });
   });
 

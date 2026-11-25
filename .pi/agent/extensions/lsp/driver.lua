@@ -90,21 +90,6 @@ local function range_start(range)
     return (s.line or 0) + 1, (s.character or 0) + 1
 end
 
-local function read_line(file, line_1idx)
-    local f = io.open(file, 'r')
-    if not f then return '' end
-    local i = 0
-    for l in f:lines() do
-        i = i + 1
-        if i == line_1idx then
-            f:close()
-            return l:gsub('^%s+', '')
-        end
-    end
-    f:close()
-    return ''
-end
-
 function M.hover(file, line, symbol)
     local b, missing = open_buf(file)
     if not b then return { ok = false, error = missing } end
@@ -132,67 +117,6 @@ function M.hover(file, line, symbol)
     end
     return { ok = true, text = '' }
 end
-
-local function normalize_locations(res)
-    local out = {}
-    for _, r in pairs(res or {}) do
-        local result = r.result
-        if result then
-            if not vim.islist(result) then result = { result } end
-            for _, loc in ipairs(result) do
-                local uri = loc.uri or loc.targetUri
-                local range = loc.range or loc.targetSelectionRange or loc.targetRange
-                if uri and range then
-                    local file = vim.uri_to_fname(uri)
-                    local line, col = range_start(range)
-                    table.insert(out, { file = file, line = line, col = col, context = read_line(file, line) })
-                end
-            end
-        end
-    end
-    return out
-end
-
-function M.definition(file, line, symbol)
-    local b, missing = open_buf(file)
-    if not b then return { ok = false, error = missing } end
-    local params, err = make_position_params(b, line, symbol)
-    if not params then return { ok = false, error = err } end
-    local ok, res = pcall(vim.lsp.buf_request_sync, b, 'textDocument/definition', params, REQ_TIMEOUT_MS)
-    if not ok then return { ok = false, error = 'request failed' } end
-    return { ok = true, locations = normalize_locations(res) }
-end
-
-function M.references(file, line, symbol)
-    local b, missing = open_buf(file)
-    if not b then return { ok = false, error = missing } end
-    local params, err = make_position_params(b, line, symbol)
-    if not params then return { ok = false, error = err } end
-    params.context = { includeDeclaration = true }
-    local ok, res = pcall(vim.lsp.buf_request_sync, b, 'textDocument/references', params, REQ_TIMEOUT_MS)
-    if not ok then return { ok = false, error = 'request failed' } end
-    local locations = normalize_locations(res)
-    if #locations <= 1 then
-        wait_progress_done(2000)
-        local ok2, res2 = pcall(vim.lsp.buf_request_sync, b, 'textDocument/references', params, REQ_TIMEOUT_MS)
-        if ok2 then locations = normalize_locations(res2) end
-    end
-    return { ok = true, locations = locations }
-end
-
-local function loc_request(file, line, symbol, method)
-    local b, missing = open_buf(file)
-    if not b then return { ok = false, error = missing } end
-    local params, err = make_position_params(b, line, symbol)
-    if not params then return { ok = false, error = err } end
-    local ok, res = pcall(vim.lsp.buf_request_sync, b, method, params, REQ_TIMEOUT_MS)
-    if not ok then return { ok = false, error = 'request failed' } end
-    return { ok = true, locations = normalize_locations(res) }
-end
-
-function M.implementation(file, line, symbol) return loc_request(file, line, symbol, 'textDocument/implementation') end
-
-function M.type_definition(file, line, symbol) return loc_request(file, line, symbol, 'textDocument/typeDefinition') end
 
 local function collect_edit_uris(edit)
     local uris = {}

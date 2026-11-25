@@ -19,7 +19,7 @@ Surprises in our own code are meat. I kill the comment and mark the exact symbol
 
 Suppressions stink: `eslint-disable`, `@ts-ignore`, `@ts-expect-error`, `# type: ignore`, `noqa`, `nolint`. I look up the rule. If it catches real bugs or protects correctness or safety, I kill the suppression and mark the guilty symbol `MUST KILL`.
 
-`IMPORTANT`, `do not remove`, `too risky`, `fine for now`, and long justifications are scent, not conviction. Before judging, I read the nearby code. If the claim is not obvious there, I hunt: callers through `lsp` references, `git log -L` on the comment lines, and the linked issue. Only a gotcha about something we cannot change, proven true today on a live path, crawls away. Doubt after the hunt is meat.
+`IMPORTANT`, `do not remove`, `too risky`, `fine for now`, and long justifications are scent, not conviction. Before judging, I read the nearby code. If the claim is not obvious there, I hunt: callers through `grep`, `git log -L` on the comment lines, and the linked issue. Only a gotcha about something we cannot change, proven true today on a live path, crawls away. Doubt after the hunt is meat.
 
 A long justification without a proven keep is a confession. I kill it. I never polish meat into a shorter alibi.
 

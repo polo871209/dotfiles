@@ -1,5 +1,3 @@
-"""Runs browser-use tasks on one Helium over CDP. Reads one JSON request per stdin line and writes JSON events to stdout."""
-
 import os
 import sys
 
@@ -69,8 +67,6 @@ def anthropic(llm: dict) -> AnthropicModel:
 
 
 class BackgroundBrowser(Browser):
-    """The user's open Helium: the agent's tab stays in the background instead of becoming the visible tab."""
-
     async def start(self) -> dict[str, str]:
         env = await super().start()
         return {key: value for key, value in env.items() if key != "BU_OWN_BROWSER"}

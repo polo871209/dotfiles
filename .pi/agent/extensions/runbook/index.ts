@@ -14,6 +14,7 @@ import {
 } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { errorMessage } from "../shared/error";
+import { preview } from "../shared/format";
 import { customEntries, isCustom } from "../shared/session";
 import {
   type Action,
@@ -42,15 +43,6 @@ const RunbookParams = Type.Object({
     { minItems: 1 },
   ),
 });
-
-const preview = (text: string, limit = 60): string => {
-  const line = text
-    .split("\n")
-    .map((l) => l.trim())
-    .find(Boolean);
-  const compact = (line ?? "(empty)").replace(/\s+/g, " ");
-  return compact.length <= limit ? compact : `${compact.slice(0, limit - 1)}…`;
-};
 
 const FAILED_ENTRY = "runbook-failed";
 const RESULT_ENTRY = "runbook-result";
@@ -216,11 +208,14 @@ export default function (pi: ExtensionAPI) {
   let currentCtx: ExtensionContext | undefined;
   let selectedKey: string | undefined;
   let selectedCard: string | undefined;
+  const merged = new Map<string, Step[]>();
+  const resumed = new Set<string>();
+  const attached = new Set<string>();
 
   pi.on("session_start", async (_event, ctx) => {
     currentCtx = ctx;
-    merged.clear();
-    syncAttached(ctx);
+    for (const item of pendingReport(ctx).items)
+      if (item.withLog && !failed(item.status)) attached.add(item.key);
     for (const entry of customEntries<StepResult>(
       ctx.sessionManager.getBranch(),
       RESULT_ENTRY,
@@ -231,16 +226,6 @@ export default function (pi: ExtensionAPI) {
     refresh();
   });
   pi.on("session_shutdown", async () => blocks?.dispose());
-
-  const merged = new Map<string, Step[]>();
-  const resumed = new Set<string>();
-  const attached = new Set<string>();
-
-  const syncAttached = (ctx: ExtensionContext) => {
-    attached.clear();
-    for (const item of pendingReport(ctx).items)
-      if (item.withLog && !failed(item.status)) attached.add(item.key);
-  };
 
   const stepLabel = (ctx: ExtensionContext, key: string): string => {
     const steps = cardWithKey(ctx, key)?.steps ?? [];
@@ -385,7 +370,6 @@ export default function (pi: ExtensionAPI) {
           await copyToClipboard(inFolder(ctx.cwd, step.code));
           break;
         case "send":
-          await copyToClipboard(inFolder(ctx.cwd, step.code));
           await blocks?.send(ctx, step.key, step.code);
           break;
         case "run":
@@ -696,10 +680,9 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.notify("The last response has no runbook steps", "warning");
         return;
       }
-      const sent = steps.map((s) => blocks.status(s.key) !== undefined);
-      const next = steps[sent.lastIndexOf(true) + 1];
+      const next = steps.find((s) => blocks.status(s.key) === undefined);
       if (!next) {
-        ctx.ui.notify(`All ${steps.length} steps were sent`);
+        ctx.ui.notify(`All ${steps.length} steps already ran or were sent`);
         return;
       }
       await act(next, "send");

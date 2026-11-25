@@ -1,3 +1,4 @@
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createWriteStream, type WriteStream } from "node:fs";
@@ -5,7 +6,6 @@ import { readFile, rm } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { createInterface } from "node:readline";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { run } from "../shared/exec";
 import { rexDoArgs } from "../shared/rex";
 
@@ -22,7 +22,7 @@ const shellWord = (text: string): string =>
   /^[\w@%+=:,./-]+$/.test(text) ? text : `'${text.replaceAll("'", `'\\''`)}'`;
 
 export const inFolder = (cwd: string, code: string): string =>
-  `cd ${shellWord(cwd)} && ${code}`;
+  `cd ${shellWord(cwd)} && ${code.includes("\n") ? `{\n${code}\n}` : code}`;
 
 export type Placement = "detached" | "floating" | "placed";
 

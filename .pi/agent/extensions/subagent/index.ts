@@ -1,11 +1,5 @@
-import { execFileSync, spawn } from "node:child_process";
-import { createInterface } from "node:readline";
-import { formatDuration } from "../shared/format";
-import { surviveReload } from "../shared/reload";
-import { WORKING_FRAME_MS, workingFrames } from "../shared/working-indicator";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { contentText, type JsonValue } from "@earendil-works/pi-ai";
 import {
   getAgentDir,
   getMarkdownTheme,
@@ -22,11 +16,17 @@ import {
   Text,
   truncateToWidth,
 } from "@earendil-works/pi-tui";
-import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { contentText, type JsonValue } from "@earendil-works/pi-ai";
+import { execFileSync, spawn } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { createInterface } from "node:readline";
 import { Type, type Static } from "typebox";
-import { customEntries, isCustom } from "../shared/session";
+import { formatDuration } from "../shared/format";
+import { surviveReload } from "../shared/reload";
 import { rexDoArgs } from "../shared/rex";
+import { customEntries, isCustom } from "../shared/session";
+import { WORKING_FRAME_MS, workingFrames } from "../shared/working-indicator";
 
 interface AgentConfig {
   name: string;
@@ -586,10 +586,6 @@ const initialProgress = (
   output: "",
 });
 
-// One flat object, not a union: providers render a top-level union as `anyOf`,
-// so a near-miss argument returns a per-branch error dump the model burns turns
-// retrying. Flat schema plus runtime field checks give one actionable error
-// line.
 const MANAGE_ACTIONS = ["wait", "result", "steer", "stop"] as const;
 
 const ManageParams = Type.Object({
@@ -888,7 +884,6 @@ function registerChildReporter(pi: ExtensionAPI): void {
   });
 }
 
-// Rex marks a pane with any status record as unread, so the child keeps a root record only while `blocked`, which rex.lua watches for.
 function hideRunStateFromRex(): void {
   const write = process.stdout.write.bind(process.stdout);
   process.stdout.write = ((chunk: unknown, ...rest: unknown[]) =>

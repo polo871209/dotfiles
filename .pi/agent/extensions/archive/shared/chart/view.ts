@@ -103,7 +103,6 @@ type Window = [number, number];
 
 type Plot = { lines: string[]; axis: string };
 
-/** Rows, columns, and scales of one render width. Pixel and braille plots draw from the same frame. */
 type XYFrame = {
   rows: number;
   rowsPerTick: number;
@@ -112,7 +111,6 @@ type XYFrame = {
   y: Ticks;
   x: Ticks;
   domain: Window;
-  /** Indices of the first and last points inside the domain. first > last when none are. */
   first: number;
   last: number;
 };
@@ -438,7 +436,6 @@ export class ChartView implements Component {
     return d0 + (col / frame.plotCols) * (d1 - d0);
   }
 
-  /** Number of points with x below `x`, or at or below it when `inclusive`. */
   private countBelow(x: number, inclusive: boolean): number {
     const spec = this.data;
     const count = countOf(spec);
@@ -475,7 +472,6 @@ export class ChartView implements Component {
       : after;
   }
 
-  /** The series drawn closest to the pointer row at a hovered index. */
   private nearestSeries(frame: XYFrame, index: number): number | undefined {
     if (!this.pointer) return undefined;
     let best: number | undefined;
@@ -575,7 +571,6 @@ export class ChartView implements Component {
     };
   }
 
-  /** Indices to draw: the visible points plus one neighbor on each side, so lines run to the edges. */
   private drawRange(frame: XYFrame): [number, number] {
     return [
       Math.max(0, frame.first - 1),
@@ -647,7 +642,6 @@ export class ChartView implements Component {
     return true;
   }
 
-  /** Grid and series, drawn once per frame. Pointer feedback goes on a copy. */
   private xyCanvas(frame: XYFrame): Canvas {
     const spec = this.data;
     const cell = pixelCell();
@@ -827,7 +821,6 @@ export class ChartView implements Component {
     });
   }
 
-  /** Horizontal bars, one text row per category, labels and values as text in the gutter. */
   private barPlot(width: number): Plot {
     const { theme } = this;
     const spec = this.data;
@@ -955,7 +948,6 @@ export class ChartView implements Component {
     return line;
   }
 
-  /** The axis row while the pointer is on the plot: the selected range during a zoom drag, otherwise a caret at the hovered point and the gesture hints. */
   private pointerAxis(frame: XYFrame, width: number): string | undefined {
     const { theme } = this;
     const zoom = this.drag?.mode === "zoom" ? this.drag : undefined;

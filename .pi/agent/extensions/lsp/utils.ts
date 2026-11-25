@@ -1,4 +1,3 @@
-import * as path from "node:path";
 import {
   DEFAULT_MAX_BYTES,
   DEFAULT_MAX_LINES,
@@ -6,8 +5,9 @@ import {
   type AgentToolResult,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import { callDriver } from "./nvim";
+import * as path from "node:path";
 import { errorMessage } from "../shared/error";
+import { callDriver } from "./nvim";
 
 export const capText = (full: string): { text: string; truncated: boolean } => {
   const t = truncateHead(full, {
@@ -20,13 +20,6 @@ export const capText = (full: string): { text: string; truncated: boolean } => {
   }
   return { text, truncated: t.truncated };
 };
-
-export interface LspLocation {
-  file: string;
-  line: number;
-  col: number;
-  context: string;
-}
 
 export interface DriverErr {
   ok: boolean;
@@ -127,19 +120,4 @@ export const formatDiagLine = (d: Diag, cwd: string): string => {
       } satisfies Record<Severity, string>
     )[d.severity]
   }  ${src ? `${src}: ` : ""}${d.message.replace(/\s+/g, " ").trim()}`;
-};
-
-export const formatLocations = (
-  locations: LspLocation[],
-  cwd: string,
-  label: string,
-): string => {
-  if (locations.length === 0) return `No ${label} found`;
-  const lines: string[] = [`Found ${locations.length} ${label}:`];
-  for (const loc of locations) {
-    lines.push(
-      `  ${displayPath(loc.file, cwd)}:${loc.line}:${loc.col}  ${loc.context}`,
-    );
-  }
-  return lines.join("\n");
 };

@@ -77,7 +77,6 @@ const renderQuestions = (
   );
 };
 
-// Same band as pi's user message, so the user's answers read as user turns when scrolling back.
 const renderAnswers = (
   result: QuestionnaireResult,
   params: Partial<QuestionParams>,

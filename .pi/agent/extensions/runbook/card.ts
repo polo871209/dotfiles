@@ -6,9 +6,9 @@ import {
 import {
   type Component,
   hyperlink,
+  truncateToWidth,
   type TuiMouseEvent,
   type TuiMouseEventResult,
-  truncateToWidth,
   visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";

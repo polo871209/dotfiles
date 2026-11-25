@@ -47,7 +47,6 @@ function unitOf(query: string): string | undefined {
   return undefined;
 }
 
-/** One name per series: the query name, plus the labels that differ when the query returns several series. */
 function seriesNames(metrics: Record<string, string>[], name: string): string[] {
   if (metrics.length === 1) return [name];
   const keys = [...new Set(metrics.flatMap((m) => Object.keys(m)))];

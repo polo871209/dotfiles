@@ -6,6 +6,7 @@ import {
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { errorMessage } from "./shared/error";
+import { preview } from "./shared/format";
 import { icon } from "./shared/icons";
 import { LINK_OPEN, LINK_READY } from "./shared/link";
 
@@ -65,15 +66,6 @@ const parseFences = (lines: string[]): Fence[] => {
 
 const hashKey = (code: string): string =>
   createHash("sha1").update(code).digest("hex").slice(0, 10);
-
-const preview = (text: string, limit = 60): string => {
-  const line = text
-    .split("\n")
-    .map((l) => l.trim())
-    .find(Boolean);
-  const compact = (line ?? "(empty)").replace(/\s+/g, " ");
-  return compact.length <= limit ? compact : `${compact.slice(0, limit - 1)}…`;
-};
 
 const textMessages = (ctx: ExtensionContext): TextMessage[] =>
   ctx.sessionManager.getBranch().flatMap((entry): TextMessage[] => {
@@ -147,7 +139,7 @@ export default function (pi: ExtensionAPI) {
       await copyWithNotify(
         ctx,
         `${text}\n`,
-        `session (${messages.length} turns, ${text.length + 1} chars)`,
+        `session (${messages.length} messages)`,
       );
     },
   });

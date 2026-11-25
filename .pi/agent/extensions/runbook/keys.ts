@@ -24,7 +24,6 @@ const LEGACY: Record<string, string> = {
 const PASTE = /^\x1b\[200~([\s\S]*)\x1b\[201~$/;
 const KITTY = /^\x1b\[[\d;:]*u$|^\x1b\[[\d;]*:[\d;:]*[A-Z~]$/;
 
-/** Translates pi key input, legacy or Kitty-encoded, into the bytes a program in a terminal reads. */
 export const terminalBytes = (data: string): string | undefined => {
   if (isKeyRelease(data)) return undefined;
   const paste = PASTE.exec(data);
