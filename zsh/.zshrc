@@ -267,14 +267,3 @@ if [[ $TERM_PROGRAM == rex ]] && (( $+functions[__zoxide_hook] )); then
   }
 fi
 
-# Rex restores a pane after a server restart as a plain shell in the same block, so rex/init.lua and pi's rex-resume.ts record by block ID the command that brings it back.
-_rex_resume_file=${XDG_STATE_HOME:-$HOME/.local/state}/rex/resume/${REX_BLOCK#block:}
-if [[ -n $REX_BLOCK && -z $ZSH_EXECUTION_STRING && -r $_rex_resume_file ]] && (( SHLVL == 1 )); then
-  _rex_resume_command=(${(0)"$(<$_rex_resume_file)"})
-  _rex_resume_precmd() {
-    precmd_functions=(${precmd_functions:#_rex_resume_precmd})
-    $_rex_resume_command
-  }
-  precmd_functions+=(_rex_resume_precmd)
-fi
-unset _rex_resume_file

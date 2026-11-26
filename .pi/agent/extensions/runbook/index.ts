@@ -8,11 +8,12 @@ import {
   matchesKey,
   stripTerminalSequences,
   Text,
+  truncateToWidth,
   type TUI,
   TuiAltScreen,
-  truncateToWidth,
 } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
+import { type Static, Type } from "typebox";
+import { Value } from "typebox/value";
 import { errorMessage } from "../shared/error";
 import { preview } from "../shared/format";
 import { customEntries, isCustom } from "../shared/session";
@@ -27,22 +28,27 @@ import {
   StepsCard,
 } from "./card";
 import { terminalBytes } from "./keys";
-import { type RunbookStep, runbookSteps, type Step } from "./steps";
+import { runbookSteps, type Step } from "./steps";
 
 const TOOL = "show_runbook";
 
-const RunbookParams = Type.Object({
-  steps: Type.Array(
-    Type.Object({
-      title: Type.String({ description: "What the step does, in a few words" }),
-      command: Type.String({
-        description:
-          "The shell commands of this step, pasted at once into an interactive zsh in this session's folder.",
-      }),
-    }),
-    { minItems: 1 },
-  ),
+const RunbookStep = Type.Object({
+  title: Type.String({ description: "What the step does, in a few words" }),
+  command: Type.String({
+    description:
+      "The shell commands of this step, pasted at once into an interactive zsh in this session's folder.",
+  }),
 });
+
+const RunbookParams = Type.Object({
+  steps: Type.Array(RunbookStep, { minItems: 1 }),
+});
+
+const StreamedParams = Type.Object({
+  steps: Type.Optional(Type.Array(Type.Partial(RunbookStep))),
+});
+
+const ReportedIds = Type.Object({ reported: Type.Array(Type.String()) });
 
 const FAILED_ENTRY = "runbook-failed";
 const RESULT_ENTRY = "runbook-result";
@@ -65,15 +71,19 @@ type ReportDetails = {
   items: (ReportItem & { label: string })[];
 };
 
-const pendingReport = (ctx: ExtensionContext): { items: ReportItem[]; reported: string[] } => {
+const pendingReport = (ctx: ExtensionContext) => {
   const results = new Map<string, { id: string; status: SettledStatus }>();
   const attaches = new Map<string, { id: string; attach: boolean }>();
   const handedBack = new Set<string>();
   const reported = new Set<string>();
 
   for (const entry of ctx.sessionManager.getBranch()) {
-    if (entry.type === "custom_message" && entry.customType === REPORT_MESSAGE)
-      for (const id of (entry.details as ReportDetails).reported) reported.add(id);
+    if (
+      entry.type === "custom_message" &&
+      entry.customType === REPORT_MESSAGE &&
+      Value.Check(ReportedIds, entry.details)
+    )
+      for (const id of entry.details.reported) reported.add(id);
 
     if (isCustom<StepResult>(entry, RESULT_ENTRY)) {
       const { key, status } = entry.data!;
@@ -145,8 +155,8 @@ const splice = (base: Step[], key: string, own: Step[]): Step[] => {
   return i === -1 ? own : [...base.slice(0, i), ...own, ...base.slice(i + 1)];
 };
 
-const ownSteps = (toolCallId: string, args: unknown): Step[] =>
-  runbookSteps(toolCallId, (args as { steps?: RunbookStep[] }).steps ?? []);
+const ownSteps = (toolCallId: string, args: Static<typeof StreamedParams>): Step[] =>
+  runbookSteps(toolCallId, args.steps ?? []);
 
 const waitingForFix = (failure: Failure | undefined): failure is Failure =>
   failure !== undefined && failure.prompts === 1 && !failure.fixId;
@@ -183,7 +193,11 @@ const history = (ctx: ExtensionContext): History => {
 
     const cards = message.content.flatMap((part): Card[] => {
       if (part.type !== "toolCall" || part.name !== TOOL) return [];
-      const own = ownSteps(part.id, part.arguments);
+
+      const own = Value.Check(StreamedParams, part.arguments)
+        ? ownSteps(part.id, part.arguments)
+        : [];
+
       const base = waitingForFix(failure) ? cardWith(failure.key) : undefined;
 
       if (!base || !failure) return [{ id: part.id, steps: own }];
@@ -219,7 +233,6 @@ const cardWithKey = (ctx: ExtensionContext, key: string): Card | undefined =>
     .find((card) => card.steps.some((step) => step.key === key));
 
 export default function (pi: ExtensionAPI) {
-  const session = process.env.REX_SESSION;
   const self = process.env.REX_BLOCK;
   const invalidators = new Map<string, () => void>();
 
@@ -230,8 +243,8 @@ export default function (pi: ExtensionAPI) {
   let onSettled: ((key: string) => void) | undefined;
 
   const blocks =
-    session && self && process.env.PI_IS_SUBAGENT !== "1"
-      ? new Blocks(session, self, refresh, (key, status) => {
+    self && process.env.PI_IS_SUBAGENT !== "1"
+      ? new Blocks(self, refresh, (key, status) => {
           pi.appendEntry<StepResult>(RESULT_ENTRY, { key, status });
           onSettled?.(key);
         })

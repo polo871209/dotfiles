@@ -238,6 +238,11 @@ local function place()
     return {}
 end
 
-local op = ({ targets = targets, send = send, watch = watch, run = run, float = float, place = place, last_lines = last_lines })[args.op]
+local function close()
+    check(rex.call('block.close', { session_id = rex.session_id, block_id = args.block_id }))
+    return {}
+end
+
+local op = ({ targets = targets, send = send, watch = watch, run = run, float = float, place = place, last_lines = last_lines, close = close })[args.op]
     or error('unknown op: ' .. tostring(args.op), 0)
 return op()

@@ -6,7 +6,8 @@ import {
   type ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
 import { fuzzyFilter, Loader } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
+import { Type, type Static } from "typebox";
+import { Value } from "typebox/value";
 import { errorMessage } from "./shared/error";
 import { run } from "./shared/exec";
 
@@ -61,11 +62,24 @@ type ToolData = {
   block_id?: string;
 };
 
-interface RexWindow {
-  window_id: string;
-  label: string;
-  layers: { blocks: { block_id: string }[] }[];
-}
+const RexWindowList = Type.Object({
+  windows: Type.Array(
+    Type.Object({
+      window_id: Type.String(),
+      label: Type.String(),
+      layers: Type.Array(
+        Type.Object({ blocks: Type.Array(Type.Object({ block_id: Type.String() })) }),
+      ),
+    }),
+  ),
+});
+
+type RexWindow = Static<typeof RexWindowList>["windows"][number];
+
+const CreatedWindow = Type.Object({
+  window_id: Type.String(),
+  block_ids: Type.Array(Type.String(), { minItems: 1 }),
+});
 
 interface Tab {
   window_id: string;
@@ -232,7 +246,12 @@ async function rex(args: string[], signal?: AbortSignal): Promise<string> {
 async function rexWindows(session: string, signal?: AbortSignal): Promise<RexWindow[]> {
   const out = await rex(["window", "ls", "--json", "-s", session], signal);
 
-  return (JSON.parse(out) as { windows: RexWindow[] }).windows;
+  const list = JSON.parse(out);
+
+  if (!Value.Check(RexWindowList, list))
+    throw new Error(`rex window ls: unexpected output: ${out}`);
+
+  return list.windows;
 }
 
 const tabOf = (windows: RexWindow[], branch: string) => windows.find((w) => w.label === branch);
@@ -263,9 +282,12 @@ async function openTab(
     signal,
   );
 
-  const created = JSON.parse(out) as { window_id: string; block_ids: string[] };
+  const created = JSON.parse(out);
 
-  return { window_id: created.window_id, block_id: created.block_ids[0]! };
+  if (!Value.Check(CreatedWindow, created))
+    throw new Error(`rex window new: unexpected output: ${out}`);
+
+  return { window_id: created.window_id, block_id: created.block_ids[0] };
 }
 
 async function clearTabLabel(branch: string): Promise<void> {
@@ -471,6 +493,24 @@ export default function (pi: ExtensionAPI) {
     PI_CWD_FILE && Number(PI_CWD_SHELL) === process.ppid ? PI_CWD_FILE : undefined;
 
   let pendingMove: PendingMove | undefined;
+
+  const queueMove = (move: PendingMove) => {
+    if (pendingMove)
+      throw new Error(
+        `This turn already runs /wt ${pendingMove.commandArgs} when it ends. End the turn, then call worktree again from the new folder.`,
+      );
+    pendingMove = move;
+  };
+
+  pi.on("tool_call", () => {
+    if (!pendingMove) return;
+
+    return {
+      block: true,
+      reason: `The session moves with /wt ${pendingMove.commandArgs} when this turn ends, and the task continues there. End the turn now.`,
+      terminate: true,
+    };
+  });
 
   const offerTool = (offered: boolean) => {
     const active = pi.getActiveTools();
@@ -688,10 +728,10 @@ export default function (pi: ExtensionAPI) {
 
       if (action === "done") {
         const wt = await finishableWorktree(ctx.cwd, signal);
-        pendingMove = {
+        queueMove({
           commandArgs: "done",
           continuation: `This session deleted the folder ${wt.path}${wt.branch ? ` and branch \`${wt.branch}\`` : ""}, and moved to the default-branch worktree at \`${wt.home}\`. Continue the task there.`,
-        };
+        });
 
         return reply(
           `When this turn ends, ${wt.path}${wt.branch ? ` and branch ${wt.branch} are` : " is"} deleted, and the session moves to ${wt.home}.`,
@@ -747,10 +787,10 @@ export default function (pi: ExtensionAPI) {
           path: wt.path,
           branch,
         });
-      pendingMove = {
+      queueMove({
         commandArgs: branch,
         continuation: `This session moved to the worktree at \`${wt.path}\` on branch \`${branch}\`. Continue the task there.`,
-      };
+      });
 
       return reply(
         `${reportOf(wt)} When this turn ends, the session moves there.`,

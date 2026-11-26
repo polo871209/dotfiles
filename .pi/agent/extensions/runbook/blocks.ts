@@ -6,6 +6,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { createInterface } from "node:readline";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { type StaticDecode, type TSchema, Type } from "typebox";
+import { Value } from "typebox/value";
 import { run } from "../shared/exec";
 import { rexDoArgs } from "../shared/rex";
 
@@ -15,6 +17,7 @@ const OUTPUT_LINES = 12;
 const TRANSCRIPT_LINES = 80;
 
 const NON_SGR_ESCAPE =
+  // oxlint-disable-next-line no-control-regex
   /\x1b\[[0-9;?]*[A-Za-ln-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][0-9A-Za-z]|\x1b[=>78]/g;
 
 // Rex starts every terminal through /usr/bin/login, which always exits 0, so the wrapper writes the real status to a file.
@@ -52,30 +55,70 @@ export type Exited = Extract<StepStatus, { state: "exited" }>;
 
 export type SettledStatus = Extract<StepStatus, { state: "exited" } | { state: "finished" }>;
 
-type Target = {
-  block_id: string;
-  label?: string;
-  sibling: boolean;
-  program?: string;
-  cwd?: string;
-};
+// rex.json.encode writes an empty Lua table as {}, so an empty list arrives as an object.
+const LuaList = <T extends TSchema>(item: T) =>
+  Type.Codec(Type.Union([Type.Array(item), Type.Object({}, { additionalProperties: false })]))
+    .Decode((list) => (Array.isArray(list) ? list : []))
+    .Encode((list) => list);
 
-type SendResult =
-  | { status: "pick" }
+const TargetsReply = Type.Object({
+  targets: LuaList(
+    Type.Object({
+      block_id: Type.String(),
+      label: Type.Optional(Type.String()),
+      sibling: Type.Boolean(),
+      program: Type.Optional(Type.String()),
+      cwd: Type.Optional(Type.String()),
+    }),
+  ),
+});
+
+const SendReply = Type.Union([
+  Type.Object({ status: Type.Literal("pick") }),
+  Type.Object({
+    status: Type.Union([
+      Type.Literal("sent"),
+      Type.Literal("busy"),
+      Type.Literal("no_bracketed_paste"),
+    ]),
+    block_id: Type.String(),
+    program: Type.Optional(Type.String()),
+  }),
+]);
+
+const LinesReply = Type.Object({ lines: LuaList(Type.String()) });
+
+const RunEvent = Type.Union([
+  Type.Object({ kind: Type.Literal("started"), block_id: Type.String() }),
+  Type.Object({ kind: Type.Literal("screen"), lines: LuaList(Type.String()) }),
+  Type.Object({ kind: Type.Literal("exited"), text: Type.String() }),
+]);
+
+const WatchEvent = Type.Union([
+  Type.Object({
+    kind: Type.Literal("process"),
+    block_id: Type.String(),
+    program: Type.Optional(Type.String()),
+  }),
+  Type.Object({
+    kind: Type.Union([Type.Literal("pwd"), Type.Literal("closed")]),
+    block_id: Type.String(),
+  }),
+]);
+
+type WatchEvent = StaticDecode<typeof WatchEvent>;
+
+type LuaRequest =
+  | { op: "targets" }
   | {
-      status: "sent" | "busy" | "no_bracketed_paste";
-      block_id: string;
-      program?: string;
-    };
-
-type RunEvent =
-  | { kind: "started"; block_id: string }
-  | { kind: "screen"; lines: string[] | Record<string, never> }
-  | { kind: "exited"; text: string };
-
-type WatchEvent =
-  | { kind: "process"; block_id: string; program?: string }
-  | { kind: "pwd" | "closed"; block_id: string };
+      op: "send";
+      target: string | undefined;
+      text: string;
+      cwd: string;
+      text_in_folder: string;
+    }
+  | { op: "float" | "place"; block_id: string }
+  | { op: "last_lines"; block_id: string; count: number };
 
 export class Blocks {
   private target: string | undefined;
@@ -89,7 +132,6 @@ export class Blocks {
   private disposed = false;
 
   constructor(
-    private readonly session: string,
     private readonly self: string,
     private readonly onChange: (key?: string) => void,
     private readonly onSettle: (key: string, status: SettledStatus) => void,
@@ -103,10 +145,10 @@ export class Blocks {
     return this.statuses.get(key);
   }
 
-  private async lua<T>(args: Record<string, unknown>): Promise<T> {
+  private async lua(request: LuaRequest): Promise<string> {
     const r = await run(
       "rex",
-      rexDoArgs(SCRIPT, { self: this.self, ...args }, { session: this.session, json: true }),
+      rexDoArgs(SCRIPT, { self: this.self, ...request }, { session: this.self, json: true }),
       undefined,
       undefined,
       15_000,
@@ -114,13 +156,15 @@ export class Blocks {
 
     if (r.code !== 0) throw new Error(`rex: ${(r.stderr || r.stdout).trim().split("\n")[0]}`);
 
-    return JSON.parse(r.stdout) as T;
+    return r.stdout;
+  }
+
+  private async query<T extends TSchema>(reply: T, request: LuaRequest): Promise<StaticDecode<T>> {
+    return Value.Decode(reply, JSON.parse(await this.lua(request)));
   }
 
   async pick(ctx: ExtensionContext, title = "Send commands to"): Promise<string | undefined> {
-    const { targets } = await this.lua<{ targets: Target[] }>({
-      op: "targets",
-    });
+    const { targets } = await this.query(TargetsReply, { op: "targets" });
 
     const home = process.env.HOME ?? "";
 
@@ -148,7 +192,7 @@ export class Blocks {
     this.ensureWatcher();
 
     const request = (target: string | undefined) =>
-      this.lua<SendResult>({
+      this.query(SendReply, {
         op: "send",
         target,
         text: code,
@@ -230,7 +274,7 @@ export class Blocks {
             exitFile,
           ],
         },
-        { session: this.session },
+        { session: this.self },
       ),
       { stdio: ["ignore", "pipe", "pipe"] },
     );
@@ -260,21 +304,17 @@ export class Blocks {
     this.syncTicker();
     child.stderr.setEncoding("utf8").on("data", (d: string) => (stderr += d));
     createInterface({ input: child.stdout }).on("line", (line) => {
-      let event: RunEvent;
+      let event: StaticDecode<typeof RunEvent>;
 
       try {
-        event = JSON.parse(line) as RunEvent;
+        event = Value.Decode(RunEvent, JSON.parse(line));
       } catch {
         return;
       }
 
       if (event.kind === "started") update({ block: event.block_id });
       else if (event.kind === "screen")
-        update({
-          output: Array.isArray(event.lines)
-            ? event.lines.map((l) => l.replace(NON_SGR_ESCAPE, ""))
-            : [],
-        });
+        update({ output: event.lines.map((l) => l.replace(NON_SGR_ESCAPE, "")) });
       else transcript = event.text;
     });
 
@@ -347,7 +387,7 @@ export class Blocks {
   private ensureWatcher(): void {
     if (this.watcher) return;
 
-    const child = spawn("rex", rexDoArgs(SCRIPT, { op: "watch" }, { session: this.session }), {
+    const child = spawn("rex", rexDoArgs(SCRIPT, { op: "watch" }, { session: this.self }), {
       stdio: ["ignore", "pipe", "ignore"],
     });
 
@@ -358,7 +398,7 @@ export class Blocks {
     child.on("error", () => {});
     createInterface({ input: child.stdout }).on("line", (line) => {
       try {
-        this.apply(JSON.parse(line) as WatchEvent);
+        this.apply(Value.Decode(WatchEvent, JSON.parse(line)));
       } catch {}
     });
   }
@@ -419,7 +459,7 @@ export class Blocks {
 
   // A command typed into a shell reports no exit status, but the terminal echoes ^C when the user interrupts it.
   private async interrupted(block: string): Promise<boolean> {
-    const { lines } = await this.lua<{ lines: string[] }>({
+    const { lines } = await this.query(LinesReply, {
       op: "last_lines",
       block_id: block,
       count: 3,
@@ -459,15 +499,7 @@ export class Blocks {
       if (status?.state === "inline" && status.block && status.placement !== "placed")
         spawn(
           "rex",
-          [
-            "api",
-            "call",
-            "block.close",
-            JSON.stringify({
-              session_id: this.session,
-              block_id: status.block,
-            }),
-          ],
+          rexDoArgs(SCRIPT, { op: "close", block_id: status.block }, { session: this.self }),
           { stdio: "ignore", detached: true },
         )
           .on("error", () => {})

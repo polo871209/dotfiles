@@ -1,19 +1,30 @@
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
+import { createHash } from "node:crypto";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-function resumeFileForBlock(blockId: string): string {
-  const stateHome = process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state");
-
-  return path.join(stateHome, "rex", "resume", blockId.replace(/^block:/, ""));
+// https://www.superlogical.com/rex/docs/build/program-resume
+declare global {
+  var rexResumeToken: string | undefined;
 }
 
-export default function (pi: ExtensionAPI) {
-  const blockId = process.env.REX_BLOCK;
+// Pi reloads extensions on every session switch, so the token must outlive this module.
+globalThis.rexResumeToken ??= process.env.OSC7577_TOKEN;
 
-  if (!blockId || process.env.PI_IS_SUBAGENT === "1") return;
-  const resumeFile = resumeFileForBlock(blockId);
+// The tools that pi runs must not report as pi.
+delete process.env.OSC7577_TOKEN;
+
+function report(token: string, fields: string) {
+  const body = `pid=${process.pid}:time=${Math.floor(Date.now() / 1000)}:${fields}`;
+  const mac = createHash("sha256").update(`${body}:${token}`).digest("hex");
+
+  process.stdout.write(`\x1b]7577;${body}:mac=${mac}\x1b\\`);
+}
+
+const base64 = (text: string) => Buffer.from(text).toString("base64");
+
+export default function (pi: ExtensionAPI) {
+  const token = globalThis.rexResumeToken;
+
+  if (!token) return;
   let killedBySignal = false;
 
   const markKilled = () => {
@@ -28,21 +39,20 @@ export default function (pi: ExtensionAPI) {
     const sessionFile = ctx.sessionManager.getSessionFile();
 
     if (!sessionFile) {
-      fs.rmSync(resumeFile, { force: true });
+      report(token, "clear=1");
 
       return;
     }
 
-    fs.mkdirSync(path.dirname(resumeFile), { recursive: true });
-    fs.writeFileSync(resumeFile, ["pi", "--session", sessionFile].join("\0"));
+    const argv = ["pi", "--session", sessionFile].map(base64).join(",");
+
+    report(token, `argv=${argv}:cwd=${base64(ctx.cwd)}`);
   });
 
-  pi.on("session_shutdown", (event) => {
+  pi.on("session_shutdown", (event, ctx) => {
     process.off("SIGTERM", markKilled);
     process.off("SIGHUP", markKilled);
 
-    if (event.reason === "quit" && !killedBySignal) {
-      fs.rmSync(resumeFile, { force: true });
-    }
+    if (ctx.hasUI && event.reason === "quit" && !killedBySignal) report(token, "clear=1");
   });
 }

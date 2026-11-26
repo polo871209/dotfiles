@@ -2,62 +2,111 @@ import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import { basename, dirname, join } from "node:path";
-import type { ImageContent, TextContent, Usage } from "@earendil-works/pi-ai";
+import type { Usage } from "@earendil-works/pi-ai";
 import {
   getAgentDir,
   type ExtensionAPI,
   type ExtensionContext,
   type ToolInfo,
 } from "@earendil-works/pi-coding-agent";
-import { errorMessage } from "./shared/error";
+import { Type, type Static } from "typebox";
+import { Value } from "typebox/value";
+
+type PropertyValue = string | number | boolean | string[] | undefined;
 
 interface CapturedEvent {
   event: string;
   uuid: string;
   timestamp: string;
-  properties: Record<string, unknown>;
+  properties: Record<string, PropertyValue>;
 }
 
-function readToken(): string | undefined {
+const PosthogConfig = Type.Object({ token: Type.String({ pattern: "^phc_" }) });
+
+const ToolArgs = Type.Record(Type.String(), Type.Unknown());
+
+type ToolArgs = Static<typeof ToolArgs>;
+
+const ScalarArg = Type.Union([Type.String(), Type.Number(), Type.Boolean()]);
+const BashArgs = Type.Object({ command: Type.String() });
+const ReadArgs = Type.Object({ path: Type.String() });
+
+const ParameterFields = Type.Object({ properties: Type.Record(Type.String(), Type.Unknown()) });
+
+const RequiredChoice = Type.Union([
+  Type.Object({ type: Type.Literal("boolean") }),
+  Type.Object({ enum: Type.Array(Type.Unknown()) }),
+  Type.Object({ const: Type.Unknown() }),
+]);
+
+const FixedChoice = Type.Union([
+  RequiredChoice,
+  Type.Object({
+    anyOf: Type.Array(Type.Union([RequiredChoice, Type.Object({ type: Type.Literal("null") })])),
+  }),
+]);
+
+const ToolResult = Type.Object({
+  content: Type.Array(
+    Type.Union([
+      Type.Object({ type: Type.Literal("text"), text: Type.String() }),
+      Type.Object({ type: Type.Literal("image") }),
+    ]),
+  ),
+});
+
+function readToken() {
   const path = join(getAgentDir(), "posthog.json");
 
   if (!existsSync(path)) return undefined;
 
-  const { token } = JSON.parse(readFileSync(path, "utf8")) as {
-    token?: unknown;
-  };
+  const config = JSON.parse(readFileSync(path, "utf8"));
 
-  if (typeof token !== "string" || !token.startsWith("phc_"))
+  if (!Value.Check(PosthogConfig, config))
     throw new Error(`${path}: "token" must be a phc_ project token`);
 
-  return token;
+  return config.token;
 }
 
-function usageProperties(usage: Usage): Record<string, unknown> {
+type UsageProperties = {
+  $ai_cache_reporting_exclusive: true;
+  $ai_input_tokens: number;
+  $ai_output_tokens: number;
+  $ai_cache_read_input_tokens: number;
+  $ai_cache_creation_input_tokens: number;
+  $ai_cache_creation_1h_input_tokens?: number;
+  $ai_cache_creation_5m_input_tokens?: number;
+  reasoning_tokens?: number;
+  $ai_input_cost_usd?: number;
+  $ai_output_cost_usd?: number;
+  $ai_total_cost_usd?: number;
+};
+
+function usageProperties(usage: Usage) {
   const { cost } = usage;
 
-  return {
+  const properties: UsageProperties = {
     // PostHog assumes cache-inclusive input for non-Anthropic providers, but pi-ai reports input without cache tokens for all of them.
     $ai_cache_reporting_exclusive: true,
     $ai_input_tokens: usage.input,
     $ai_output_tokens: usage.output,
     $ai_cache_read_input_tokens: usage.cacheRead,
     $ai_cache_creation_input_tokens: usage.cacheWrite,
-    ...(usage.cacheWrite1h === undefined
-      ? {}
-      : {
-          $ai_cache_creation_1h_input_tokens: usage.cacheWrite1h,
-          $ai_cache_creation_5m_input_tokens: usage.cacheWrite - usage.cacheWrite1h,
-        }),
     reasoning_tokens: usage.reasoning,
-    ...(cost.total > 0
-      ? {
-          $ai_input_cost_usd: cost.input + cost.cacheRead + cost.cacheWrite,
-          $ai_output_cost_usd: cost.output,
-          $ai_total_cost_usd: cost.total,
-        }
-      : {}),
   };
+
+  if (usage.cacheWrite1h !== undefined) {
+    properties.$ai_cache_creation_1h_input_tokens = usage.cacheWrite1h;
+    properties.$ai_cache_creation_5m_input_tokens = usage.cacheWrite - usage.cacheWrite1h;
+  }
+
+  if (cost.total > 0) {
+    properties.$ai_input_cost_usd = cost.input + cost.cacheRead + cost.cacheWrite;
+    properties.$ai_output_cost_usd = cost.output;
+    properties.$ai_total_cost_usd = cost.total;
+  }
+
+  return properties;
 }
 
 function extensionName({ path }: ToolInfo["sourceInfo"]): string {
@@ -76,31 +125,17 @@ function definitionChars(tool: ToolInfo): number {
   );
 }
 
-function isFixedChoice(schema: unknown): boolean {
-  if (typeof schema !== "object" || schema === null) return false;
-  const field = schema as Record<string, unknown>;
-
-  if (field.type === "boolean" || "enum" in field || "const" in field) return true;
-
-  return (
-    Array.isArray(field.anyOf) &&
-    field.anyOf.every(
-      (member: unknown) =>
-        isFixedChoice(member) || (member as { type?: unknown } | null)?.type === "null",
-    )
-  );
-}
-
-function argProperties(args: unknown, tool: ToolInfo | undefined): Record<string, unknown> {
-  if (typeof args !== "object" || args === null) return {};
-
-  const fields =
-    (tool?.parameters as { properties?: Record<string, unknown> } | undefined)?.properties ?? {};
+function argProperties(args: ToolArgs, tool: ToolInfo | undefined) {
+  const parameters = tool?.parameters;
+  const fields = Value.Check(ParameterFields, parameters) ? parameters.properties : {};
 
   return Object.fromEntries(
     Object.entries(args)
       .filter(([, value]) => value !== undefined && value !== null)
-      .map(([key, value]) => [`arg_${key}`, isFixedChoice(fields[key]) ? value : true]),
+      .map(([key, value]) => [
+        `arg_${key}`,
+        Value.Check(FixedChoice, fields[key]) && Value.Check(ScalarArg, value) ? value : true,
+      ]),
   );
 }
 
@@ -119,31 +154,17 @@ function commandPrograms(command: string): string[] {
   return [...new Set(programs)];
 }
 
-function usageDetails(
-  toolName: string,
-  args: Record<string, unknown> | undefined,
-): Record<string, unknown> {
-  const command = args?.command;
+function usageDetails(toolName: string, args: ToolArgs) {
+  if (toolName === "bash" && Value.Check(BashArgs, args))
+    return { programs: commandPrograms(args.command) };
 
-  if (toolName === "bash" && typeof command === "string")
-    return { programs: commandPrograms(command) };
-  const path = args?.path;
-
-  if (toolName === "read" && typeof path === "string" && basename(path) === "SKILL.md")
-    return { skill: basename(dirname(path)) };
+  if (toolName === "read" && Value.Check(ReadArgs, args) && basename(args.path) === "SKILL.md")
+    return { skill: basename(dirname(args.path)) };
 
   return {};
 }
 
-function resultSize(
-  result:
-    | {
-        content?: (TextContent | ImageContent)[];
-      }
-    | undefined,
-): Record<string, number> {
-  const content = result?.content ?? [];
-
+function resultSize(content: Static<typeof ToolResult>["content"]) {
   return {
     result_chars: content.reduce(
       (chars, block) => chars + (block.type === "text" ? block.text.length : 0),
@@ -167,44 +188,41 @@ export default function (pi: ExtensionAPI) {
   let tools = new Map<string, ToolInfo>();
   let offeredKey: string | undefined;
 
-  const startedCalls = new Map<
-    string,
-    { toolName: string; args: Record<string, unknown> | undefined }
-  >();
+  const startedCalls = new Map<string, { toolName: string; args: ToolArgs }>();
 
-  const flush = async (ctx: ExtensionContext) => {
+  const flush = async (ctx: ExtensionContext, timeoutMs: number) => {
     if (!queue.length) return;
     const batch = queue;
     queue = [];
-
-    const requeue = () => {
-      queue = [...batch, ...queue].slice(-500);
-    };
 
     const res = await fetch("https://us.i.posthog.com/batch/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ api_key: token, batch }),
-      signal: AbortSignal.timeout(3000),
-    }).catch((e: unknown) => new Error(errorMessage(e)));
+      signal: AbortSignal.timeout(timeoutMs),
+    }).catch(() => undefined);
 
-    if (!(res instanceof Error) && res.ok) return;
+    if (res?.ok) return;
 
-    if (res instanceof Error || res.status === 429 || res.status >= 500) requeue();
+    if (!res || res.status === 429 || res.status >= 500) {
+      queue = [...batch, ...queue].slice(-500);
 
-    const failure =
-      res instanceof Error ? res.message : `HTTP ${res.status} ${await res.text().catch(() => "")}`;
+      return;
+    }
 
     if (reportedFailure || !ctx.hasUI) return;
     reportedFailure = true;
-    ctx.ui.notify(`posthog: upload failed: ${failure}`, "warning");
+    ctx.ui.notify(
+      `posthog: upload rejected: HTTP ${res.status} ${await res.text().catch(() => "")}`,
+      "warning",
+    );
   };
 
   const capture = (
     ctx: ExtensionContext,
     event: string,
     timestamp: number,
-    properties: Record<string, unknown>,
+    properties: Record<string, PropertyValue>,
   ) => {
     queue.push({
       event,
@@ -222,7 +240,7 @@ export default function (pi: ExtensionAPI) {
       },
     });
 
-    if (queue.length >= 50) void flush(ctx);
+    if (queue.length >= 50) void flush(ctx, 15_000);
   };
 
   const captureSummary = (ctx: ExtensionContext, spanName: string, usage: Usage | undefined) => {
@@ -293,12 +311,12 @@ export default function (pi: ExtensionAPI) {
   pi.on("tool_execution_start", (event) => {
     startedCalls.set(event.toolCallId, {
       toolName: event.toolName,
-      args: event.args as Record<string, unknown> | undefined,
+      args: Value.Check(ToolArgs, event.args) ? event.args : {},
     });
   });
 
   pi.on("tool_execution_end", (event, ctx) => {
-    const args = startedCalls.get(event.toolCallId)?.args;
+    const args = startedCalls.get(event.toolCallId)?.args ?? {};
     startedCalls.delete(event.toolCallId);
     capture(ctx, "pi tool call", Date.now(), {
       tool: event.toolName,
@@ -312,7 +330,7 @@ export default function (pi: ExtensionAPI) {
       $ai_model: ctx.model?.id,
       $ai_provider: ctx.model?.provider,
       thinking_level: pi.getThinkingLevel(),
-      ...resultSize(event.result as Parameters<typeof resultSize>[0]),
+      ...resultSize(Value.Check(ToolResult, event.result) ? event.result.content : []),
       ...argProperties(args, tools.get(event.toolName)),
       ...usageDetails(event.toolName, args),
     });
@@ -328,9 +346,8 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("agent_settled", (_event, ctx) => {
     traceId = undefined;
-
-    return flush(ctx);
+    void flush(ctx, 15_000);
   });
 
-  pi.on("session_shutdown", (_event, ctx) => flush(ctx));
+  pi.on("session_shutdown", (_event, ctx) => flush(ctx, 3000));
 }

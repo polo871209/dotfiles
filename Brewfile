@@ -21,6 +21,7 @@ cask "microsoft-teams"
 cask "polo871209/nanocast/nanocast"
 cask "obsidian"
 cask "orbstack"
+cask "pdfcraft"
 cask "crmne/tap/spotifast"
 cask "zen"
 mas "LINE", id: 539883307

@@ -184,33 +184,63 @@ local function float_into_window(block_id, window_id, bounds)
     error('The window has no tiled pane to float beside', 0)
 end
 
--- Rex restores a pane after a server restart as a plain shell, so .zshrc runs the command recorded here by block ID.
--- pi's rex-resume.ts records its panes here too.
-local resume_dir = (os.getenv 'XDG_STATE_HOME' or home .. '/.local/state') .. '/rex/resume'
 local block_id_suffix = '[^:]+$'
 
-local function remove_closed_resume_records()
-    local live = {}
-    for block_id in exec_stdout({ rex_bin_dir .. '/rex', 'block', 'ls', '--all', '--quiet', '--short=false' }):gmatch '[^\n]+' do
-        live[block_id:match(block_id_suffix)] = true
-    end
-    for name in exec_stdout({ 'ls', resume_dir }):gmatch '[^\n]+' do
-        if not live[name] then os.remove(resume_dir .. '/' .. name) end
+local function hide_panel(block, layer, window_id)
+    if block.label == 'Lazygit' then
+        -- A detached block has no window_id, so its label records the window that hid it.
+        must(rex.session.set_block_label { block_id = block.block_id, label = 'Lazygit ' .. window_id })
+        must(rex.session.detach_block { block_id = block.block_id })
+    elseif block.label:match '^Neovim ' then
+        must(rex.session.detach_block { block_id = block.block_id })
+    elseif block.label == 'Sofka' or block.label == 'Run' then
+        must(rex.session.set_layer_state { layer_id = layer.layer_id, state = 'minimized' })
     end
 end
 
+local function hide_other_panels(window_id, shown_block_id)
+    for _, entry in ipairs(view_blocks()) do
+        local layer, block = entry.layer, entry.block
+        if entry.window_id == window_id and layer.kind == 'floating' and layer.state ~= 'minimized' and block.block_id ~= shown_block_id then
+            hide_panel(block, layer, window_id)
+        end
+    end
+end
+
+-- https://www.superlogical.com/rex/docs/customize/resume-rules
+rex.set('resume.trust.pi', { command = { 'pi', '--session', rex.match.under '~/.pi/agent/sessions' } })
+rex.set('resume.trust.lazygit', { command = { 'lazygit' } })
+rex.set('resume.trust.sofka', { command = { 'sofka' } })
+rex.set('resume.trust.nvim', {
+    command = { 'nvim' },
+    flags = { ['--cmd'] = { 'keep', values = 1 }, ['-c'] = { 'keep', values = 1 } },
+})
+
+-- lazygit, sofka, and nvim do not report OSC 7577, so the panel reports for them with its own pid and then execs them.
+-- https://www.superlogical.com/rex/docs/build/program-resume#a-wrapper-to-make-any-program-resume
+local report_resume_then_exec = [[
+if [ -n "$OSC7577_TOKEN" ]; then
+  b64() { printf %s "$1" | base64 | tr -d '\n'; }
+  argv=$(for a in "$@"; do b64 "$a"; echo; done | paste -sd, -)
+  body="pid=$$:time=$(date +%s):argv=$argv:cwd=$(b64 "$(pwd)")"
+  mac=$(printf '%s:%s' "$body" "$OSC7577_TOKEN" | shasum -a 256 | cut -c1-64)
+  printf '\033]7577;%s:mac=%s\033\\' "$body" "$mac" > /dev/tty
+  unset OSC7577_TOKEN
+fi
+exec "$@"
+]]
+
 local function new_panel(spec)
-    local created = must(rex.session.new_layer {
+    must(rex.session.new_layer {
         window_id = spec.window_id,
         bounds = spec.bounds,
         focus = true,
-        layout = shell_block { label = spec.label, cwd = spec.cwd, command = spec.command },
+        layout = shell_block {
+            label = spec.label,
+            cwd = spec.cwd,
+            command = { '/bin/sh', '-c', report_resume_then_exec, 'sh', unpack(spec.command) },
+        },
     })
-    exec_stdout { 'mkdir', '-p', resume_dir }
-    remove_closed_resume_records()
-    local record = must(io.open(resume_dir .. '/' .. created.block_ids[1]:match(block_id_suffix), 'w'))
-    record:write(table.concat({ 'exec', unpack(spec.command) }, '\0'))
-    record:close()
 end
 
 -- Returns the panel's block_id when it shows a panel that already runs.
@@ -223,6 +253,7 @@ local function toggle_panel(ctx, spec)
         end
     end
     if not panel then
+        hide_other_panels(here)
         new_panel(spec)
         return
     end
@@ -232,6 +263,7 @@ local function toggle_panel(ctx, spec)
         must(rex.session.set_layer_state { layer_id = layer_id, state = 'minimized' })
         return
     end
+    hide_other_panels(here, panel.block_id)
     if panel_window ~= here then
         float_into_window(panel.block_id, here, spec.bounds)
         must(rex.session.focus_block { block_id = panel.block_id })
@@ -251,10 +283,12 @@ local function toggle_detached_panel(ctx, spec)
         if block.label == spec.label then panel = block end
     end
     if not panel then
+        hide_other_panels(here)
         new_panel(spec)
     elseif panel.block_id == ctx.block_id then
         must(rex.session.detach_block { block_id = panel.block_id })
     else
+        hide_other_panels(here, panel.block_id)
         if panel.placement ~= 'placed' or panel.window_id ~= here then float_into_window(panel.block_id, here, spec.bounds) end
         must(rex.session.focus_block { block_id = panel.block_id })
         return panel.block_id
@@ -366,7 +400,6 @@ action {
             if block.block_id == ctx.block_id then window_id = block.window_id end
         end
         if not window_id then error('Open Lazygit runs from a pane', 0) end
-        -- A detached block has no window_id, so its label records the window that hid it.
         local hidden_label = label .. ' ' .. window_id
         local lazygit
         for _, block in ipairs(blocks) do
@@ -378,11 +411,13 @@ action {
             end
         end
         if not lazygit then
-            new_panel { window_id = window_id, bounds = bounds, label = label, cwd = work_folder(foreground_cwd(ctx)), command = { 'lazygit' } }
+            local cwd = work_folder(foreground_cwd(ctx))
+            hide_other_panels(window_id)
+            new_panel { window_id = window_id, bounds = bounds, label = label, cwd = cwd, command = { 'lazygit' } }
         elseif lazygit.block_id == ctx.block_id then
-            must(rex.session.set_block_label { block_id = lazygit.block_id, label = hidden_label })
-            must(rex.session.detach_block { block_id = lazygit.block_id })
+            hide_panel(lazygit, nil, window_id)
         else
+            hide_other_panels(window_id, lazygit.block_id)
             if lazygit.placement ~= 'placed' then float_into_window(lazygit.block_id, window_id, bounds) end
             if lazygit.label ~= label then must(rex.session.set_block_label { block_id = lazygit.block_id, label = label }) end
             must(rex.session.focus_block { block_id = lazygit.block_id })
@@ -395,24 +430,29 @@ action {
     title = 'Toggle Floating Shell',
     run = function(ctx)
         local label = 'Run'
+        local here, run
         for _, entry in ipairs(view_blocks()) do
-            local block, layer = entry.block, entry.layer
-            if block.label == label then
-                if block.block_id == ctx.block_id then
-                    must(rex.session.set_layer_state { layer_id = layer.layer_id, state = 'minimized' })
-                elseif layer.kind == 'floating' then
-                    must(rex.session.set_layer_state { layer_id = layer.layer_id, state = 'normal', focus = true })
-                else
-                    must(rex.session.focus_block { block_id = block.block_id })
-                end
-                return
+            if entry.block.block_id == ctx.block_id then here = entry.window_id end
+            if not run and entry.block.label == label then run = entry end
+        end
+        if not run then
+            local cwd = foreground_cwd(ctx)
+            hide_other_panels(here)
+            must(rex.session.new_layer {
+                bounds = { 0.05, 0.05, 0.9, 0.9 },
+                focus = true,
+                layout = shell_block { label = label, cwd = cwd },
+            })
+        elseif run.block.block_id == ctx.block_id then
+            must(rex.session.set_layer_state { layer_id = run.layer.layer_id, state = 'minimized' })
+        else
+            hide_other_panels(run.window_id, run.block.block_id)
+            if run.layer.kind == 'floating' then
+                must(rex.session.set_layer_state { layer_id = run.layer.layer_id, state = 'normal', focus = true })
+            else
+                must(rex.session.focus_block { block_id = run.block.block_id })
             end
         end
-        must(rex.session.new_layer {
-            bounds = { 0.05, 0.05, 0.9, 0.9 },
-            focus = true,
-            layout = shell_block { label = label, cwd = foreground_cwd(ctx) },
-        })
     end,
 }
 
