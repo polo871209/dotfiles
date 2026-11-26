@@ -1,3 +1,7 @@
+import { execFile } from "node:child_process";
+import { existsSync, renameSync, rmSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
   DefaultPackageManager,
   getAgentDir,
@@ -5,10 +9,6 @@ import {
   SettingsManager,
   type ExtensionAPI,
 } from "@earendil-works/pi-coding-agent";
-import { execFile } from "node:child_process";
-import { existsSync, renameSync, rmSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import { errorMessage } from "./error";
 import { registerToggle, type Toggle } from "./toggle";
 
@@ -43,10 +43,7 @@ interface SkillToggle extends Toggle {
   cloneDir: string;
 }
 
-export function registerSkillToggle(
-  pi: ExtensionAPI,
-  config: SkillToggleConfig,
-): SkillToggle {
+export function registerSkillToggle(pi: ExtensionAPI, config: SkillToggleConfig): SkillToggle {
   const { name, label, repoUrl, cacheDirName, sparsePaths } = config;
   const cloneDir = join(homedir(), ".cache", cacheDirName);
   const skillDirs = config.skillPaths.map((p) => join(cloneDir, p));
@@ -64,25 +61,27 @@ export function registerSkillToggle(
       repoUrl,
       partial,
     ]);
-    if (sparsePaths)
-      await git(["sparse-checkout", "set", ...sparsePaths], partial);
+
+    if (sparsePaths) await git(["sparse-checkout", "set", ...sparsePaths], partial);
     renameSync(partial, cloneDir);
   };
 
   const syncClone = async (): Promise<string> => {
     if (!isCloned()) {
       await clone();
+
       return "cloned";
     }
+
     const before = await git(["rev-parse", "HEAD"], cloneDir);
+
     try {
       await git(["pull", "--ff-only"], cloneDir);
     } catch (err) {
       return `pull failed, using cached copy: ${errorMessage(err).split("\n")[0]}`;
     }
-    return (await git(["rev-parse", "HEAD"], cloneDir)) === before
-      ? "up to date"
-      : "updated";
+
+    return (await git(["rev-parse", "HEAD"], cloneDir)) === before ? "up to date" : "updated";
   };
 
   const toggle = registerToggle(pi, {
@@ -90,6 +89,7 @@ export function registerSkillToggle(
     label,
     prepare: async (trigger) => {
       if (trigger === "command") return syncClone();
+
       if (!isCloned()) await clone();
     },
     onChange: (_enabled, ctx) => ctx.reload(),
@@ -98,15 +98,15 @@ export function registerSkillToggle(
         description: "Sync the clone",
         run: async (ctx) => {
           ctx.ui.notify(`${label}: syncing…`);
+
           try {
             ctx.ui.notify(`${label}: ${await syncClone()}`);
           } catch (e) {
-            ctx.ui.notify(
-              `${label} update failed: ${errorMessage(e)}`,
-              "error",
-            );
+            ctx.ui.notify(`${label} update failed: ${errorMessage(e)}`, "error");
+
             return;
           }
+
           if (toggle.isEnabled()) await ctx.reload();
         },
       },
@@ -116,31 +116,31 @@ export function registerSkillToggle(
   pi.on("resources_discover", async ({ cwd }) => {
     if (!toggle.isEnabled() || !isCloned()) return {};
     const agentDir = getAgentDir();
+
     const resolved = await new DefaultPackageManager({
       cwd,
       agentDir,
       settingsManager: SettingsManager.create(cwd, agentDir),
     }).resolve(async () => "skip");
+
     const taken = new Set(
       loadSkills({
         cwd,
         agentDir,
-        skillPaths: resolved.skills
-          .filter((skill) => skill.enabled)
-          .map((skill) => skill.path),
+        skillPaths: resolved.skills.filter((skill) => skill.enabled).map((skill) => skill.path),
         includeDefaults: false,
       }).skills.map((skill) => skill.name),
     );
+
     const { skills } = loadSkills({
       cwd,
       agentDir,
       skillPaths: skillDirs,
       includeDefaults: false,
     });
+
     return {
-      skillPaths: skills
-        .filter((skill) => !taken.has(skill.name))
-        .map((skill) => skill.baseDir),
+      skillPaths: skills.filter((skill) => !taken.has(skill.name)).map((skill) => skill.baseDir),
     };
   });
 

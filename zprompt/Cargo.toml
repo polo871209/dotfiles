@@ -6,7 +6,11 @@ rust-version = "1.100"
 publish = false
 
 [dependencies]
-gix = { version = "0.90.0", default-features = false, features = ["status", "sha1", "max-performance"] }
+gix = { version = "0.90.0", default-features = false, features = [
+  "status",
+  "sha1",
+  "max-performance",
+] }
 saphyr = "0.3.4"
 unicode-width = "0.2.3"
 

@@ -61,15 +61,13 @@ const at = (url?: string, line?: number) =>
 export class DevtoolsRecorder {
   readonly console: ConsoleEntry[] = [];
   private readonly requests: RequestEntry[] = [];
-  private readonly open = new Map<
-    string,
-    { entry: RequestEntry; start: number }
-  >();
+  private readonly open = new Map<string, { entry: RequestEntry; start: number }>();
   private lastActivity = Date.now();
 
   handle(method: string, params: Record<string, any>, sessionId: string) {
     this.lastActivity = Date.now();
     const key = `${sessionId}:${params.requestId}`;
+
     switch (method) {
       case "Runtime.consoleAPICalled": {
         const frame: CallFrame | undefined = params.stackTrace?.callFrames?.[0];
@@ -81,6 +79,7 @@ export class DevtoolsRecorder {
         });
         break;
       }
+
       case "Runtime.exceptionThrown": {
         const details = params.exceptionDetails;
         this.console.push({
@@ -91,6 +90,7 @@ export class DevtoolsRecorder {
         });
         break;
       }
+
       case "Log.entryAdded": {
         const entry = params.entry;
         this.console.push({
@@ -101,51 +101,55 @@ export class DevtoolsRecorder {
         });
         break;
       }
+
       case "Network.requestWillBeSent": {
         const previous = this.open.get(key);
+
         if (previous && params.redirectResponse) {
           previous.entry.status = params.redirectResponse.status;
-          previous.entry.ms = Math.round(
-            (params.timestamp - previous.start) * 1000,
-          );
+          previous.entry.ms = Math.round((params.timestamp - previous.start) * 1000);
         }
+
         const entry: RequestEntry = {
           method: params.request.method,
           url: params.request.url,
           type: params.type,
         };
+
         this.requests.push(entry);
         this.open.set(key, { entry, start: params.timestamp });
         break;
       }
+
       case "Network.responseReceived": {
         const request = this.open.get(key);
+
         if (!request) break;
         request.entry.status = params.response.status;
         request.entry.type ??= params.type;
         break;
       }
+
       case "Network.loadingFinished": {
         const request = this.open.get(key);
+
         if (!request) break;
         request.entry.bytes = params.encodedDataLength;
-        request.entry.ms = Math.round(
-          (params.timestamp - request.start) * 1000,
-        );
+        request.entry.ms = Math.round((params.timestamp - request.start) * 1000);
         this.open.delete(key);
         break;
       }
+
       case "Network.loadingFailed": {
         const request = this.open.get(key);
+
         if (!request) break;
         request.entry.failure = params.blockedReason
           ? `blocked: ${params.blockedReason}`
           : params.canceled
             ? "canceled"
             : params.errorText;
-        request.entry.ms = Math.round(
-          (params.timestamp - request.start) * 1000,
-        );
+        request.entry.ms = Math.round((params.timestamp - request.start) * 1000);
         this.open.delete(key);
         break;
       }
@@ -155,6 +159,7 @@ export class DevtoolsRecorder {
   /** Resolves once no event arrived for `quietMs`, or after `capMs`. */
   async quiet(quietMs = 500, capMs = 5_000) {
     const deadline = Date.now() + capMs;
+
     while (Date.now() < deadline && Date.now() - this.lastActivity < quietMs)
       await new Promise((resolve) => setTimeout(resolve, 100));
   }
@@ -165,27 +170,24 @@ export class DevtoolsRecorder {
     const log_path = join(dir, `devtools-${Date.now()}.json`);
     await writeFile(
       log_path,
-      JSON.stringify(
-        { console: this.console, requests: this.requests },
-        null,
-        2,
-      ),
+      JSON.stringify({ console: this.console, requests: this.requests }, null, 2),
     );
+
     const count = (keys: string[]) => {
       const counts: Record<string, number> = {};
+
       for (const key of keys) counts[key] = (counts[key] ?? 0) + 1;
+
       return counts;
     };
+
     return {
       console: this.console
         .filter((entry) => entry.level === "error" || entry.level === "warning")
         .slice(0, MAX_LISTED),
       console_by_level: count(this.console.map((entry) => entry.level)),
       problem_requests: this.requests
-        .filter(
-          (request) =>
-            request.failure !== undefined || (request.status ?? 0) >= 400,
-        )
+        .filter((request) => request.failure !== undefined || (request.status ?? 0) >= 400)
         .slice(0, MAX_LISTED)
         .map((request) => ({ ...request, url: clip(request.url, 300) })),
       requests: this.requests.length,

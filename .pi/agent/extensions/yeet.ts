@@ -1,7 +1,4 @@
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { errorMessage } from "./shared/error";
 import { sideChannelComplete } from "./shared/llm";
 import { resultCard, stepsWidget } from "./shared/progress";
@@ -10,20 +7,19 @@ const MAX_BODY_LINES = 2;
 
 const YEET_MSG_TYPE = "yeet-marker";
 const YEET_WIDGET_KEY = "yeet-progress";
+
 const CONVENTIONAL_SUBJECT =
   /^(?:feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(?:\([\w.-]+\))?!?:\s/i;
 
 export default function (pi: ExtensionAPI) {
-  pi.registerMessageRenderer<{ ok: boolean }>(
-    YEET_MSG_TYPE,
-    (message, opts, theme) =>
-      resultCard(
-        "yeet",
-        message.details?.ok !== false,
-        message.content as string,
-        theme,
-        opts.outputPad,
-      ),
+  pi.registerMessageRenderer<{ ok: boolean }>(YEET_MSG_TYPE, (message, opts, theme) =>
+    resultCard(
+      "yeet",
+      message.details?.ok !== false,
+      message.content as string,
+      theme,
+      opts.outputPad,
+    ),
   );
 
   const report = (ok: boolean, content: string) =>
@@ -36,6 +32,7 @@ export default function (pi: ExtensionAPI) {
       },
       { triggerTurn: false },
     );
+
   const failureOutput = (r: { stdout: string; stderr: string }) =>
     [r.stdout, r.stderr]
       .map((s) => s.trim())
@@ -49,13 +46,18 @@ export default function (pi: ExtensionAPI) {
   ): Promise<void> => {
     if (ctx.mode !== "tui") {
       ctx.ui.notify("/yeet requires interactive mode", "error");
+
       return;
     }
+
     const yeetModel = ctx.modelRegistry.find("anthropic", "claude-sonnet-5-5");
+
     if (!yeetModel || !ctx.modelRegistry.hasConfiguredAuth(yeetModel)) {
       ctx.ui.notify("/yeet: no configured commit-message model", "error");
+
       return;
     }
+
     const showProgress = (active: number) => {
       ctx.ui.setWidget(
         YEET_WIDGET_KEY,
@@ -72,6 +74,7 @@ export default function (pi: ExtensionAPI) {
         ),
       );
     };
+
     const EXCLUDE = [":(exclude,top)git/"];
 
     const gitWith = async (timeout: number | undefined, gargs: string[]) => {
@@ -79,6 +82,7 @@ export default function (pi: ExtensionAPI) {
         cwd: ctx.cwd,
         timeout,
       });
+
       return {
         ok: r.code === 0,
         out: r.stdout.trim(),
@@ -87,31 +91,35 @@ export default function (pi: ExtensionAPI) {
         stderr: r.stderr || (r.killed ? `timed out after ${timeout}ms` : ""),
       };
     };
+
     const git = (...gargs: string[]) => gitWith(undefined, gargs);
-    const gitPush = (...gargs: string[]) =>
-      gitWith(120_000, ["push", ...gargs]);
+    const gitPush = (...gargs: string[]) => gitWith(120_000, ["push", ...gargs]);
 
     const pushAndReport = async (sha: string, subject: string) => {
       showProgress(4);
       let push = await gitPush();
+
       if (!push.ok && /no upstream branch|--set-upstream/i.test(push.stderr)) {
         push = await gitPush("-u", "origin", "HEAD");
       }
-      const pushNote = push.ok
-        ? "pushed"
-        : `push failed: ${failureOutput(push)}`;
+
+      const pushNote = push.ok ? "pushed" : `push failed: ${failureOutput(push)}`;
+
       if (!push.ok) ctx.ui.notify("/yeet: push failed (see history)", "error");
       report(push.ok, `${sha} ${subject} (${pushNote})`);
     };
 
     if (!(await git("rev-parse", "--git-dir")).ok) {
       ctx.ui.notify("/yeet: not a git repository", "error");
+
       return;
     }
-    const wtStatus = (await git("status", "--porcelain", "--", ".", ...EXCLUDE))
-      .out;
+
+    const wtStatus = (await git("status", "--porcelain", "--", ".", ...EXCLUDE)).out;
+
     if (!wtStatus) {
       const ahead = await git("rev-list", "--count", "@{upstream}..HEAD");
+
       if (ahead.ok && Number(ahead.out) > 0) {
         const subject = (await git("log", "-1", "--format=%s")).out;
         const n = Number(ahead.out);
@@ -119,57 +127,61 @@ export default function (pi: ExtensionAPI) {
           (await git("rev-parse", "--short", "HEAD")).out,
           n > 1 ? `${subject} and ${n - 1} earlier commit(s)` : subject,
         );
+
         return;
       }
+
       ctx.ui.notify("/yeet: nothing to commit", "warning");
+
       return;
     }
 
     showProgress(0);
     const add = await git("add", "-A", "--", ".", ...EXCLUDE);
+
     if (!add.ok) {
       ctx.ui.notify(`/yeet: git add failed: ${add.err}`, "error");
+
       return;
     }
 
     showProgress(1);
-    const runHook = () =>
-      gitWith(600_000, ["hook", "run", "--ignore-missing", "pre-commit"]);
+    const runHook = () => gitWith(600_000, ["hook", "run", "--ignore-missing", "pre-commit"]);
     let hook = await runHook();
+
     if (!(await git("diff", "--quiet", "--", ".", ...EXCLUDE)).ok) {
       const restage = await git("add", "-A", "--", ".", ...EXCLUDE);
+
       if (!restage.ok) {
         ctx.ui.notify(`/yeet: git add failed: ${restage.err}`, "error");
+
         return;
       }
+
       hook = await runHook();
     }
+
     if (!hook.ok) {
       ctx.ui.notify("/yeet: pre-commit failed (see history)", "error");
       report(false, `pre-commit failed:\n${failureOutput(hook)}`);
+
       return;
     }
+
     const base = (await git("rev-parse", "--verify", "HEAD")).ok
       ? "HEAD"
       : "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
-    const stat = await git(
-      "diff",
-      "--cached",
-      "--stat",
-      base,
-      "--",
-      ".",
-      ...EXCLUDE,
-    );
+
+    const stat = await git("diff", "--cached", "--stat", base, "--", ".", ...EXCLUDE);
     const full = await git("diff", "--cached", base, "--", ".", ...EXCLUDE);
     const diff = full.ok ? full.out : wtStatus;
 
     const log = await git("log", "-10", "--no-merges", "--format=%s");
 
-    const branch = (await git("symbolic-ref", "--quiet", "--short", "HEAD"))
-      .out;
+    const branch = (await git("symbolic-ref", "--quiet", "--short", "HEAD")).out;
 
     showProgress(2);
+
     const response = await sideChannelComplete(ctx, {
       signal,
       systemPrompt: `
@@ -201,9 +213,7 @@ Return the raw commit message, starting with the subject line.`,
             {
               type: "text",
               text: `${args.trim() ? `\nUser hint: ${args.trim()}\n` : ""}${branch ? `Current branch: ${branch}\n\n` : ""}${
-                log.ok && log.out
-                  ? `Recent commit subjects (style reference):\n${log.out}\n\n`
-                  : ""
+                log.ok && log.out ? `Recent commit subjects (style reference):\n${log.out}\n\n` : ""
               }Diffstat:\n${stat.ok ? stat.out : wtStatus}\n\nDiff:\n${diff.length > 6000 ? diff.slice(0, 6000) + "\n…(truncated)" : diff}`,
             },
           ],
@@ -219,13 +229,14 @@ Return the raw commit message, starting with the subject line.`,
           "error",
         );
       }
+
       return;
     }
+
     const message = response.text;
     const lines = message.trim().split("\n");
-    const subjectIndex = lines.findIndex((l) =>
-      CONVENTIONAL_SUBJECT.test(l.trim()),
-    );
+    const subjectIndex = lines.findIndex((l) => CONVENTIONAL_SUBJECT.test(l.trim()));
+
     const [subject = "", ...bodyLines] = (
       subjectIndex > 0 ? lines.slice(subjectIndex).join("\n") : message
     )
@@ -233,32 +244,30 @@ Return the raw commit message, starting with the subject line.`,
       .replace(/^["'`]+|["'`]+$/g, "")
       .trim()
       .split("\n");
-    const body = bodyLines
-      .filter((line) => line.trim())
-      .slice(0, MAX_BODY_LINES);
-    const cleanMessage = body.length
-      ? [subject, "", ...body].join("\n")
-      : subject;
+
+    const body = bodyLines.filter((line) => line.trim()).slice(0, MAX_BODY_LINES);
+    const cleanMessage = body.length ? [subject, "", ...body].join("\n") : subject;
+
     if (!CONVENTIONAL_SUBJECT.test(subject) || subject.length > 72) {
       ctx.ui.notify(
         `/yeet: the model returned no valid commit subject: ${subject.slice(0, 80) || "(empty)"}`,
         "error",
       );
+
       return;
     }
 
     showProgress(3);
     const commit = await git("commit", "--no-verify", "-m", cleanMessage);
+
     if (!commit.ok) {
       ctx.ui.notify("/yeet: commit failed (see history)", "error");
       report(false, `commit failed:\n${failureOutput(commit)}`);
+
       return;
     }
 
-    await pushAndReport(
-      (await git("rev-parse", "--short", "HEAD")).out,
-      subject,
-    );
+    await pushAndReport((await git("rev-parse", "--short", "HEAD")).out, subject);
   };
 
   let running: AbortController | undefined;
@@ -267,10 +276,13 @@ Return the raw commit message, starting with the subject line.`,
   const runYeet = async (args: string, ctx: ExtensionContext) => {
     if (running) {
       ctx.ui.notify("/yeet is already running", "warning");
+
       return;
     }
+
     const controller = new AbortController();
     running = controller;
+
     try {
       await commitAndPush(args, ctx, controller.signal);
     } catch (e) {

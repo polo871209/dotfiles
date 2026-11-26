@@ -1,13 +1,13 @@
+import * as fs from "node:fs";
+import * as net from "node:net";
+import * as os from "node:os";
+import * as path from "node:path";
 import type {
   ExtensionAPI,
   ExtensionContext,
   MessageRenderer,
 } from "@earendil-works/pi-coding-agent";
 import { Box, Text } from "@earendil-works/pi-tui";
-import * as fs from "node:fs";
-import * as net from "node:net";
-import * as os from "node:os";
-import * as path from "node:path";
 import { errorMessage } from "./shared/error";
 
 // The temp directory keeps the path under the 104-byte macOS socket limit, and
@@ -17,9 +17,11 @@ function socketPathForBlock(blockId: string): string {
 }
 
 let sessionCwd = process.cwd();
+
 function displayPath(filePath: string): string {
   if (!path.isAbsolute(filePath)) return filePath;
   const rel = path.relative(sessionCwd, filePath);
+
   return rel && !rel.startsWith("..") ? rel : filePath;
 }
 
@@ -46,6 +48,7 @@ function formatFileSnapshot(f: FilePayload): string {
   const srcLines = f.content.split(/\r?\n/);
   const from = Math.max(Math.floor(f.sline), 1);
   const to = from + srcLines.length - 1;
+
   return (
     `${displayPath(f.path)} lines ${from}-${to} of ${f.total && Math.floor(f.total) >= to ? Math.floor(f.total) : to}. The "<n>${GUTTER_SEP}" gutter is line numbers, not file content.\n` +
     `\`\`\`${f.ft ?? ""}\n${srcLines
@@ -63,6 +66,7 @@ const EDITOR_TAB_WIDTH = 4;
 
 function tabFidelityNote(content: string): string {
   if (!content.includes("\t")) return "";
+
   return (
     `\nThis file indents with tabs, shown above as ${EDITOR_TAB_WIDTH} spaces each. ` +
     `Turn leading ${EDITOR_TAB_WIDTH}-space groups back into tabs in oldText, or read the file if its indentation looks mixed.`
@@ -72,17 +76,23 @@ function tabFidelityNote(content: string): string {
 function lastEditedFile(ctx: ExtensionContext): string | undefined {
   const failedCalls = new Set<string>();
   const branch = ctx.sessionManager.getBranch();
+
   for (let i = branch.length - 1; i >= 0; i--) {
     const entry = branch[i];
+
     if (entry.type !== "message") continue;
     const message = entry.message;
+
     if (message.role === "toolResult" && message.isError) {
       failedCalls.add(message.toolCallId);
       continue;
     }
+
     if (message.role !== "assistant") continue;
+
     for (let j = message.content.length - 1; j >= 0; j--) {
       const block = message.content[j];
+
       if (
         block.type !== "toolCall" ||
         (block.name !== "edit" && block.name !== "write") ||
@@ -90,8 +100,8 @@ function lastEditedFile(ctx: ExtensionContext): string | undefined {
       )
         continue;
       const filePath = block.arguments.path;
-      if (typeof filePath === "string" && filePath !== "")
-        return path.resolve(ctx.cwd, filePath);
+
+      if (typeof filePath === "string" && filePath !== "") return path.resolve(ctx.cwd, filePath);
     }
   }
 }
@@ -109,20 +119,21 @@ export default function (pi: ExtensionAPI) {
     box.addChild(
       new Text(
         `${theme.fg("dim", details ? snapshotLabel(details) : "file snapshot")}${
-          expanded && typeof message.content === "string"
-            ? `\n${message.content}`
-            : ""
+          expanded && typeof message.content === "string" ? `\n${message.content}` : ""
         }`,
         0,
         0,
       ),
     );
+
     return box;
   };
+
   pi.registerMessageRenderer(SNAPSHOT_MESSAGE_TYPE, renderSnapshot);
   pi.registerMessageRenderer(LEGACY_SNAPSHOT_MESSAGE_TYPE, renderSnapshot);
 
   const blockId = process.env.REX_BLOCK;
+
   if (!blockId) return;
   const sockPath = socketPathForBlock(blockId);
 
@@ -136,7 +147,9 @@ export default function (pi: ExtensionAPI) {
 
   const handleLine = (line: string): Ack => {
     const trimmed = line.trim();
+
     if (!trimmed) return { ok: false, error: "empty line" };
+
     let payload: {
       text?: string;
       paste?: string;
@@ -144,25 +157,22 @@ export default function (pi: ExtensionAPI) {
       mode?: "steer" | "followUp" | "nextTurn";
       query?: "last_edit";
     };
+
     try {
       payload = JSON.parse(trimmed);
     } catch {
-      currentCtx?.ui.notify(
-        "rex-bridge: dropped malformed JSON line",
-        "warning",
-      );
+      currentCtx?.ui.notify("rex-bridge: dropped malformed JSON line", "warning");
+
       return { ok: false, error: "malformed JSON" };
     }
-    if (
-      typeof payload !== "object" ||
-      payload === null ||
-      Array.isArray(payload)
-    )
+
+    if (typeof payload !== "object" || payload === null || Array.isArray(payload))
       return { ok: false, error: "payload must be a JSON object" };
 
     if (payload.query === "last_edit") {
       if (!currentCtx) return { ok: false, error: "no session context" };
       const filePath = lastEditedFile(currentCtx);
+
       return filePath
         ? { ok: true, path: filePath }
         : { ok: false, error: "no file edited in this session" };
@@ -172,22 +182,25 @@ export default function (pi: ExtensionAPI) {
       payload.mode && ["steer", "followUp", "nextTurn"].includes(payload.mode)
         ? payload.mode
         : undefined;
+
     const idle = currentCtx?.isIdle() ?? true;
 
     try {
       const f = payload.file;
+
       if (f && typeof f.content === "string" && typeof f.path === "string") {
         const content = formatFileSnapshot(f);
         const where = displayPath(f.path);
+
         if (!requested) {
           if (!currentCtx) return { ok: false, error: "no session context" };
-          if (!currentCtx.hasUI)
-            return { ok: false, error: "this pi has no editor to paste into" };
-          currentCtx.ui.pasteToEditor(
-            `${content}${tabFidelityNote(f.content)}\n`,
-          );
+
+          if (!currentCtx.hasUI) return { ok: false, error: "this pi has no editor to paste into" };
+          currentCtx.ui.pasteToEditor(`${content}${tabFidelityNote(f.content)}\n`);
+
           return { ok: true, delivered: `${where} pasted into the editor` };
         }
+
         pi.sendMessage<SnapshotDetails>(
           {
             customType: SNAPSHOT_MESSAGE_TYPE,
@@ -197,6 +210,7 @@ export default function (pi: ExtensionAPI) {
           },
           { deliverAs: requested },
         );
+
         return {
           ok: true,
           delivered:
@@ -205,43 +219,48 @@ export default function (pi: ExtensionAPI) {
               : `${where} ${requested === "steer" ? "steering the running turn" : "queued as follow-up"}`,
         };
       }
+
       const paste = payload.paste;
+
       if (typeof paste === "string") {
-        if (!currentCtx?.hasUI)
-          return { ok: false, error: "this pi has no editor to paste into" };
+        if (!currentCtx?.hasUI) return { ok: false, error: "this pi has no editor to paste into" };
         currentCtx.ui.pasteToEditor(`${paste}\n`);
+
         return { ok: true, delivered: "pasted into the editor" };
       }
+
       const text = payload.text;
+
       if (!text || typeof text !== "string")
         return { ok: false, error: "no text, paste, or file in payload" };
+
       if (idle) {
         pi.sendUserMessage(text);
+
         return { ok: true, delivered: "sent, turn started" };
       }
-      const deliverAs =
-        requested === "followUp" || requested === "nextTurn"
-          ? "followUp"
-          : "steer";
+
+      const deliverAs = requested === "followUp" || requested === "nextTurn" ? "followUp" : "steer";
       pi.sendUserMessage(text, { deliverAs });
+
       return {
         ok: true,
-        delivered:
-          deliverAs === "followUp"
-            ? "queued as follow-up"
-            : "steering the running turn",
+        delivered: deliverAs === "followUp" ? "queued as follow-up" : "steering the running turn",
       };
     } catch (e) {
       const msg = errorMessage(e);
       currentCtx?.ui.notify(`rex-bridge: ${msg}`, "error");
+
       return { ok: false, error: msg };
     }
   };
 
   const sockets = new Set<net.Socket>();
+
   const start = (ctx: ExtensionContext) => {
     sessionCwd = ctx.cwd;
     currentCtx = ctx;
+
     if (server || !ctx.hasUI) return;
     fs.rmSync(sockPath, { force: true });
     server = net.createServer((socket) => {
@@ -251,25 +270,29 @@ export default function (pi: ExtensionAPI) {
       socket.setEncoding("utf8");
       socket.on("data", (chunk) => {
         buf += chunk;
+
         if (buf.length > 2 * 1024 * 1024) {
           currentCtx?.ui.notify("rex-bridge: oversize line dropped", "warning");
           buf = "";
-          socket.write(
-            `${JSON.stringify({ ok: false, error: "payload too large" })}\n`,
-          );
+          socket.write(`${JSON.stringify({ ok: false, error: "payload too large" })}\n`);
           socket.end();
+
           return;
         }
+
         let idx = buf.indexOf("\n");
+
         while (idx !== -1) {
           const line = buf.slice(0, idx);
           buf = buf.slice(idx + 1);
           let reply: ReturnType<typeof handleLine>;
+
           try {
             reply = handleLine(line);
           } catch (e) {
             reply = { ok: false, error: errorMessage(e) };
           }
+
           socket.write(`${JSON.stringify(reply)}\n`);
           idx = buf.indexOf("\n");
         }
@@ -288,11 +311,14 @@ export default function (pi: ExtensionAPI) {
 
   const stop = () => {
     currentCtx = undefined;
+
     if (!server) return;
+
     for (const socket of sockets) socket.destroy();
     sockets.clear();
     server.close();
     server = undefined;
+
     try {
       fs.unlinkSync(sockPath);
     } catch {}

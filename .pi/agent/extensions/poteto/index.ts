@@ -1,9 +1,6 @@
-import {
-  parseFrontmatter,
-  type ExtensionAPI,
-} from "@earendil-works/pi-coding-agent";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { parseFrontmatter, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { registerSkillToggle } from "../shared/skill-toggle.ts";
 
 export default function (pi: ExtensionAPI) {
@@ -20,6 +17,7 @@ export default function (pi: ExtensionAPI) {
     ],
     sparsePaths: ["pstack", "cursor-team-kit/skills"],
   });
+
   const skillFile = join(pstack.cloneDir, "pstack/skills/poteto-mode/SKILL.md");
   const adapterFile = join(import.meta.dirname, "pi.md");
 

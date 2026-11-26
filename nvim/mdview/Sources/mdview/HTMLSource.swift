@@ -16,10 +16,14 @@ enum HTMLSource {
         var copied = 0
 
         mutating func step() {
-            guard bytes[index] == lessThan, index + 1 < bytes.count else { return move(to: index + 1) }
+            guard bytes[index] == lessThan, index + 1 < bytes.count else {
+                return move(to: index + 1)
+            }
             let next = bytes[index + 1]
             if bytes[index...].starts(with: commentStart) {
-                move(to: (find(commentEnd, from: index + commentStart.count) ?? bytes.count) + commentEnd.count)
+                move(
+                    to: (find(commentEnd, from: index + commentStart.count) ?? bytes.count)
+                        + commentEnd.count)
             } else if isLetter(next) {
                 startTag()
             } else if next == bang || next == question || next == slash {
@@ -53,7 +57,9 @@ enum HTMLSource {
             let selfClosing = tagEnd < bytes.count && bytes[tagEnd - 1] == slash
             move(to: tagEnd + 1)
             if !selfClosing, rawTextElements.contains(name) {
-                move(to: find(Array("</".utf8) + name, from: index, ignoringCase: true) ?? bytes.count)
+                move(
+                    to: find(Array("</".utf8) + name, from: index, ignoringCase: true)
+                        ?? bytes.count)
             }
         }
 
@@ -67,7 +73,10 @@ enum HTMLSource {
             var position = start
             while position + marker.count <= bytes.count {
                 let candidate = bytes[position..<position + marker.count]
-                if ignoringCase ? candidate.map(lowercased).elementsEqual(marker) : candidate.elementsEqual(marker) {
+                if ignoringCase
+                    ? candidate.map(lowercased).elementsEqual(marker)
+                    : candidate.elementsEqual(marker)
+                {
                     return position
                 }
                 position += 1
@@ -77,7 +86,9 @@ enum HTMLSource {
     }
 
     private static let rawTextElements: Set<[UInt8]> = Set(
-        ["script", "style", "textarea", "title", "xmp", "iframe", "noembed", "noframes"].map { Array($0.utf8) }
+        ["script", "style", "textarea", "title", "xmp", "iframe", "noembed", "noframes"].map {
+            Array($0.utf8)
+        }
     )
     private static let commentStart = Array("<!--".utf8)
     private static let commentEnd = Array("-->".utf8)
@@ -95,7 +106,8 @@ enum HTMLSource {
     }
 
     private static func isNameCharacter(_ byte: UInt8) -> Bool {
-        isLetter(byte) || (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(byte) || byte == UInt8(ascii: "-")
+        isLetter(byte) || (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(byte)
+            || byte == UInt8(ascii: "-")
             || byte == UInt8(ascii: ":") || byte == UInt8(ascii: "_")
     }
 

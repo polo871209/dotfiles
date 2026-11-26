@@ -1,9 +1,9 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { errorMessage } from "../../shared/error";
 import { callLua, type Lane, loadLuaFile } from "../nvim";
 import type { Diag } from "../utils";
-import { errorMessage } from "../../shared/error";
 
 interface DriverResult {
   formatted: string[];
@@ -22,12 +22,12 @@ const logDriver = (msg: string) => {
   } catch {}
 };
 
-export const ensureFeedbackLoaded = (
-  cwd: string,
-  lane: Lane = "main",
-): Promise<void> => loadLuaFile(cwd, "feedback", FEEDBACK_LUA, lane);
+export const ensureFeedbackLoaded = (cwd: string, lane: Lane = "main"): Promise<void> =>
+  loadLuaFile(cwd, "feedback", FEEDBACK_LUA, lane);
+
 const nvimCallTimeoutMs = (fileCount: number): number =>
   Math.min(3_000 + Math.max(1, fileCount) * 5_500, 30_000);
+
 export const MAX_FILE_BYTES = 64 * 1024;
 
 export const runDriver = async (
@@ -38,6 +38,7 @@ export const runDriver = async (
   try {
     await ensureFeedbackLoaded(cwd);
     const timeoutSignal = AbortSignal.timeout(nvimCallTimeoutMs(files.length));
+
     return await callLua<DriverResult>(
       cwd,
       "return PiFeedback.run(...)",
@@ -46,16 +47,15 @@ export const runDriver = async (
     );
   } catch (e) {
     logDriver(`run failed: ${errorMessage(e)}`);
+
     return null;
   }
 };
 
 const INLINE_TIMEOUT_MS = 1_500;
 const INLINE_MARGIN_MS = 100;
-export const formatFile = async (
-  file: string,
-  cwd: string,
-): Promise<boolean> => {
+
+export const formatFile = async (file: string, cwd: string): Promise<boolean> => {
   try {
     const start = Date.now();
     const deadline = AbortSignal.timeout(INLINE_TIMEOUT_MS);
@@ -70,7 +70,9 @@ export const formatFile = async (
       ),
     ]);
     const remaining = INLINE_TIMEOUT_MS - (Date.now() - start);
+
     if (remaining <= INLINE_MARGIN_MS) return false;
+
     const res = await callLua<{ formatted: string[] }>(
       cwd,
       "return PiFeedback.format(...)",
@@ -79,9 +81,11 @@ export const formatFile = async (
       undefined,
       "inline",
     );
+
     return !!res && res.formatted.length > 0;
   } catch (e) {
     logDriver(`format failed: ${errorMessage(e)}`);
+
     return false;
   }
 };

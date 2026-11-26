@@ -1,5 +1,5 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { spawn, type ChildProcess } from "node:child_process";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 const ASSERTION_TTL_MS = 60_000;
 
@@ -33,20 +33,24 @@ export default function (pi: ExtensionAPI) {
   // pi's whole process group. So every hold expires unless a live pi renews it.
   const renew = (): void => {
     const seconds = Math.floor((holdDeadline() - Date.now()) / 1000);
+
     if (seconds < 1) {
       release();
+
       return;
     }
+
     const previous = assertion;
-    const child = spawn(
-      "caffeinate",
-      ["-i", "-t", String(seconds), "-w", String(process.pid)],
-      { stdio: "ignore" },
-    );
+
+    const child = spawn("caffeinate", ["-i", "-t", String(seconds), "-w", String(process.pid)], {
+      stdio: "ignore",
+    });
+
     child.on("error", () => {});
     child.unref();
     assertion = child;
     previous?.kill("SIGKILL");
+
     if (!renewal) {
       renewal = setInterval(renew, ASSERTION_TTL_MS / 3);
       renewal.unref();
@@ -55,6 +59,7 @@ export default function (pi: ExtensionAPI) {
 
   const onActivity = (): void => {
     lastActivityAt = Date.now();
+
     if (!assertion) renew();
   };
 

@@ -1,4 +1,4 @@
-import { defineHexConfig } from "@hex/commands"
+import { defineHexConfig } from "@hex/commands";
 
 export default defineHexConfig({
   transformations: {
@@ -8,4 +8,4 @@ export default defineHexConfig({
       transform: (text) => text.trim(),
     },
   },
-})
+});

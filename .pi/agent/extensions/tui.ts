@@ -22,12 +22,7 @@ import {
   truncateToWidth,
   visibleWidth,
 } from "@earendil-works/pi-tui";
-import {
-  diagramKind,
-  type MermaidArt,
-  render,
-  type Span,
-} from "lovely-mermaid";
+import { diagramKind, type MermaidArt, render, type Span } from "lovely-mermaid";
 import { LINK_OPEN, LINK_READY } from "./shared/link";
 import { HIDE_REST_OF_RUN } from "./shared/transcript";
 import { WORKING_FRAME_MS, workingFrames } from "./shared/working-indicator";
@@ -35,13 +30,9 @@ import { WORKING_FRAME_MS, workingFrames } from "./shared/working-indicator";
 const SGR_RESET = "\x1b[0m";
 
 const colorInputLine = (line: string, theme: PiTheme) => {
-  if (
-    /^(?:\x1b\[[0-9;]*m)*(?:─+|[↑↓]\s*\d+\s*more)(?:\x1b\[[0-9;]*m)*$/.test(
-      line,
-    )
-  )
-    return line;
+  if (/^(?:\x1b\[[0-9;]*m)*(?:─+|[↑↓]\s*\d+\s*more)(?:\x1b\[[0-9;]*m)*$/.test(line)) return line;
   const input = theme.getFgAnsi("text");
+
   return `${input}${line.replaceAll(SGR_RESET, `${SGR_RESET}${input}`)}${SGR_RESET}`;
 };
 
@@ -58,6 +49,7 @@ interface SelectItemLike {
   label: string;
   description?: string;
 }
+
 interface SelectListLike {
   render(width: number): string[];
   filteredItems?: SelectItemLike[];
@@ -100,8 +92,7 @@ const isAutocompleteOpen = (
 ): editor is EditorWithOverlay & { autocompleteList: SelectListLike } =>
   editor.capturesViewportInput && Boolean(editor.autocompleteList);
 
-const normalizeToSingleLine = (text: string) =>
-  text.replace(/[\r\n]+/g, " ").trim();
+const normalizeToSingleLine = (text: string) => text.replace(/[\r\n]+/g, " ").trim();
 
 class DropdownOverlay implements Component {
   private viewport: { list: SelectListLike; top: number } | null = null;
@@ -110,12 +101,12 @@ class DropdownOverlay implements Component {
 
   render(width: number): string[] {
     if (!isAutocompleteOpen(this.editor)) return [];
+
     return this.renderList(this.editor.autocompleteList, width).map((line) =>
       wrapWithBg(
         line,
         width,
-        this.editor.getTheme?.().getBgAnsi("userMessageBg") ??
-          "\x1b[48;2;60;56;54m",
+        this.editor.getTheme?.().getBgAnsi("userMessageBg") ?? "\x1b[48;2;60;56;54m",
       ),
     );
   }
@@ -124,6 +115,7 @@ class DropdownOverlay implements Component {
     const items = list.filteredItems;
     const selected = list.selectedIndex;
     const maxVisible = list.maxVisible;
+
     if (
       !items ||
       selected === undefined ||
@@ -134,53 +126,61 @@ class DropdownOverlay implements Component {
     ) {
       return list.render(width);
     }
+
     const count = items.length;
+
     if (count === 0) return [list.theme.noMatch("  No matching commands")];
 
     if (this.viewport?.list !== list) this.viewport = { list, top: 0 };
     let top = this.viewport.top;
+
     if (selected < top) top = selected;
     else if (selected >= top + maxVisible) top = selected - maxVisible + 1;
     top = Math.max(0, Math.min(top, count - maxVisible));
     this.viewport.top = top;
     const lines: string[] = [];
+
     for (let i = top; i < Math.min(top + maxVisible, count); i++) {
       const item = items[i];
+
       if (!item) continue;
       lines.push(
         list.renderItem(
           item,
           i === selected,
           width,
-          item.description
-            ? normalizeToSingleLine(item.description)
-            : undefined,
+          item.description ? normalizeToSingleLine(item.description) : undefined,
           list.getPrimaryColumnWidth(),
         ),
       );
     }
+
     if (count > maxVisible) {
       lines.push(
-        list.theme.scrollInfo(
-          truncateToWidth(`  (${selected + 1}/${count})`, width - 2, ""),
-        ),
+        list.theme.scrollInfo(truncateToWidth(`  (${selected + 1}/${count})`, width - 2, "")),
       );
     }
+
     return lines;
   }
 
   handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
     if (!isAutocompleteOpen(this.editor)) return undefined;
     const list = this.editor.autocompleteList;
+
     if (event.type === "wheel") return list.handleMouse?.(event);
+
     if (event.button !== "left") return undefined;
+
     if (event.type !== "press" && event.type !== "click") return undefined;
-    const index =
-      (this.viewport?.list === list ? this.viewport.top : 0) + event.y;
+    const index = (this.viewport?.list === list ? this.viewport.top : 0) + event.y;
     const item = list.filteredItems?.[index];
+
     if (!item || event.y >= (list.maxVisible ?? 0)) return { handled: true };
     list.setSelectedIndex?.(index);
+
     if (event.type === "click") list.onSelect?.(item);
+
     return { handled: true };
   }
 
@@ -189,6 +189,7 @@ class DropdownOverlay implements Component {
 
 const syncOverlay = (editor: EditorWithOverlay, editorHeight: number) => {
   let s = editor.__overlay;
+
   if (!s) {
     s = {
       handle: null,
@@ -234,6 +235,7 @@ const STATUS_BADGES = [
 
 const editorTint = (statuses: ReadonlyMap<string, string>, theme: PiTheme) => {
   const badge = STATUS_BADGES.find((b) => b.tintsEditor && statuses.get(b.key));
+
   return badge && paintWith(badge.color, theme);
 };
 
@@ -249,8 +251,7 @@ class ThemedEditor extends CustomEditor {
     let base = this.borderColor;
     // pi-tui declares borderColor as an instance field, and pi reassigns it on each thinking-level or bash-mode change.
     Object.defineProperty(this, "borderColor", {
-      get: () =>
-        this.getText().trimStart().startsWith("!") ? base : (tint() ?? base),
+      get: () => (this.getText().trimStart().startsWith("!") ? base : (tint() ?? base)),
       set: (paint: Paint) => {
         base = paint;
       },
@@ -263,8 +264,10 @@ class ThemedEditor extends CustomEditor {
     const self = this as unknown as EditorWithOverlay;
     const state = self.autocompleteState;
     let lines: string[];
+
     if (state && self.autocompleteList) {
       self.autocompleteState = null;
+
       try {
         lines = super.render(width);
       } finally {
@@ -273,7 +276,9 @@ class ThemedEditor extends CustomEditor {
     } else {
       lines = super.render(width);
     }
+
     syncOverlay(self, lines.length);
+
     return lines.map((line) => colorInputLine(line, this.getTheme()));
   }
 }
@@ -292,17 +297,19 @@ interface LinkRouterHost {
 const installLinkRouter = (tui: TUI, pi: ExtensionAPI) => {
   const host = tui as unknown as LinkRouterHost;
   const openUrl = host.openUrl;
+
   if (typeof openUrl !== "function") return;
   const emit = (url: string) => pi.events.emit(LINK_OPEN, url);
   const router = host[LINK_ROUTER];
+
   if (router) {
     router.emit = emit;
   } else {
     const created = { emit };
     host[LINK_ROUTER] = created;
-    host.openUrl = (url) =>
-      url.startsWith("pi-") ? created.emit(url) : openUrl(url);
+    host.openUrl = (url) => (url.startsWith("pi-") ? created.emit(url) : openUrl(url));
   }
+
   pi.events.emit(LINK_READY, undefined);
 };
 
@@ -316,18 +323,14 @@ const rendersNothing = (component: Component, width: number) =>
 
 // Pi's fullscreen dock keeps 3 rows for the editor (`minSize: 3` in createChatViewport) and has no API to drop them.
 const collapseBlankDockRows = (tui: TUI, editor: Component) => {
-  const root = (tui as unknown as { layoutRoot?: StackEntryLike["component"] })
-    .layoutRoot;
+  const root = (tui as unknown as { layoutRoot?: StackEntryLike["component"] }).layoutRoot;
+
   const dock = root?.entries
     ?.map((entry) => entry.component)
-    .find((stack) =>
-      stack.entries?.some((entry) =>
-        entry.component.children?.includes(editor),
-      ),
-    );
+    .find((stack) => stack.entries?.some((entry) => entry.component.children?.includes(editor)));
+
   for (const entry of dock?.entries ?? [])
-    entry.visible = (viewport) =>
-      !rendersNothing(entry.component, viewport.width);
+    entry.visible = (viewport) => !rendersNothing(entry.component, viewport.width);
 };
 
 const installEditor = (pi: ExtensionAPI, statuses: StatusSource) => {
@@ -336,6 +339,7 @@ const installEditor = (pi: ExtensionAPI, statuses: StatusSource) => {
     if (ctx.mode !== "tui") return;
     ctx.ui.setEditorComponent((tui, editorTheme, keybindings) => {
       installLinkRouter(tui, pi);
+
       const editor = new ThemedEditor(
         tui,
         editorTheme,
@@ -343,12 +347,16 @@ const installEditor = (pi: ExtensionAPI, statuses: StatusSource) => {
         () => ctx.ui.theme,
         () => editorTint(statuses.read(), ctx.ui.theme),
       );
+
       mounted = { tui, editor };
+
       return editor;
     });
+
     if (mounted && process.env.PI_IS_SUBAGENT === "1")
       collapseBlankDockRows(mounted.tui, mounted.editor);
   });
+
   return () => mounted?.tui;
 };
 
@@ -364,16 +372,20 @@ const findTranscript = (tui: TUI) =>
 
 const installRunHiding = (pi: ExtensionAPI, getTui: () => TUI | undefined) => {
   let restore: (() => void) | undefined;
+
   const show = () => {
     restore?.();
     restore = undefined;
   };
+
   pi.events.on(HIDE_REST_OF_RUN, () => {
     const tui = getTui();
     const transcript = tui && findTranscript(tui);
+
     if (restore || !transcript) return;
     const addChild = transcript.addChild;
     transcript.addChild = () => {};
+
     restore = () => {
       transcript.addChild = addChild;
     };
@@ -385,6 +397,7 @@ const installRunHiding = (pi: ExtensionAPI, getTui: () => TUI | undefined) => {
 
 const installWorking = (pi: ExtensionAPI) => {
   let timer: ReturnType<typeof setInterval> | null = null;
+
   const stop = () => {
     if (timer) {
       clearInterval(timer);
@@ -401,6 +414,7 @@ const installWorking = (pi: ExtensionAPI) => {
 
   pi.on("session_start", async (_event, ctx) => {
     stop();
+
     if (ctx.mode === "tui") applyIndicator(ctx);
   });
 
@@ -408,16 +422,16 @@ const installWorking = (pi: ExtensionAPI) => {
     if (ctx.mode !== "tui" || timer) return;
     applyIndicator(ctx);
     const started = Date.now();
+
     const tick = () => {
       const s = Math.round((Date.now() - started) / 1000);
       ctx.ui.setWorkingMessage(
         `working · ${
-          s < 60
-            ? `${s}s`
-            : `${Math.floor(s / 60)}m${(s % 60).toString().padStart(2, "0")}s`
+          s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${(s % 60).toString().padStart(2, "0")}s`
         }`,
       );
     };
+
     tick();
     timer = setInterval(tick, 1000);
     timer.unref();
@@ -440,7 +454,9 @@ const installCollapsedTools = (pi: ExtensionAPI) => {
 
 const formatTokenCount = (n: number): string => {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+
   return `${n}`;
 };
 
@@ -453,32 +469,37 @@ const installFooter = (pi: ExtensionAPI, statuses: StatusSource) => {
     if (ctx.mode !== "tui") return;
     ctx.ui.setFooter((_tui, theme, footerData) => {
       statuses.read = () => footerData.getExtensionStatuses();
+
       return {
         invalidate() {},
         render(width: number): string[] {
           const modelName = ctx.model?.id ?? "no-model";
           const lvl = pi.getThinkingLevel();
           const thinkingText = lvl === "off" ? "thinking off" : lvl;
+
           const model = ctx.model?.reasoning
             ? {
                 plain: `${modelName} • ${thinkingText}`,
                 colored: `${theme.fg("dim", `${modelName} • `)}${theme.getThinkingBorderColor(lvl)(thinkingText)}`,
               }
             : { plain: modelName, colored: theme.fg("dim", modelName) };
+
           const dim = (text: string) => ({
             plain: text,
             colored: theme.fg("dim", text),
           });
 
           let segments: { plain: string; colored: string }[];
+
           if (process.env.PI_IS_SUBAGENT === "1") {
             segments = [dim(ctx.sessionManager.getSessionName() ?? ""), model];
           } else {
             let pwd = ctx.cwd;
             const home = process.env.HOME || process.env.USERPROFILE;
-            if (home && pwd.startsWith(home))
-              pwd = `~${pwd.slice(home.length)}`;
+
+            if (home && pwd.startsWith(home)) pwd = `~${pwd.slice(home.length)}`;
             const branch = footerData.getGitBranch();
+
             if (branch) {
               const folder = `/${branch}`;
               const at = pwd.indexOf(folder);
@@ -501,9 +522,8 @@ const installFooter = (pi: ExtensionAPI, statuses: StatusSource) => {
               model,
               ...STATUS_BADGES.flatMap(({ key, color }) => {
                 const text = active.get(key);
-                return text
-                  ? [{ plain: text, colored: paintWith(color, theme)(text) }]
-                  : [];
+
+                return text ? [{ plain: text, colored: paintWith(color, theme)(text) }] : [];
               }),
             ];
           }
@@ -511,6 +531,7 @@ const installFooter = (pi: ExtensionAPI, statuses: StatusSource) => {
           const gap = process.env.PI_IS_SUBAGENT === "1" ? " " : "   ";
           const shown = segments.filter((segment) => segment.plain);
           const plain = shown.map((segment) => segment.plain).join(gap);
+
           return [
             visibleWidth(plain) <= width
               ? shown.map((segment) => segment.colored).join(gap)
@@ -527,6 +548,7 @@ const MIN_LABEL_WIDTH = 6;
 const shortenLabel = (label: string, max: number) => {
   const text = label.replace(/<br\s*\/?>/gi, " ").trim();
   const chars = [...text];
+
   return chars.length <= max ? text : `${chars.slice(0, max - 1).join("")}…`;
 };
 
@@ -535,8 +557,10 @@ const PARTICIPANT = /^(\s*(?:participant|actor)\s+\S+\s+as\s+)(.+)$/;
 const sequenceLabels = (src: string) =>
   src.split("\n").flatMap((line) => {
     const participant = PARTICIPANT.exec(line);
+
     if (participant) return [participant[2]];
     const colon = line.indexOf(":");
+
     return colon === -1 ? [] : [line.slice(colon + 1)];
   });
 
@@ -545,9 +569,10 @@ const shortenSequence = (src: string, max: number) =>
     .split("\n")
     .map((line) => {
       const participant = PARTICIPANT.exec(line);
-      if (participant)
-        return `${participant[1]}${shortenLabel(participant[2], max)}`;
+
+      if (participant) return `${participant[1]}${shortenLabel(participant[2], max)}`;
       const colon = line.indexOf(":");
+
       return colon === -1
         ? line
         : `${line.slice(0, colon)}: ${shortenLabel(line.slice(colon + 1), max)}`;
@@ -557,23 +582,27 @@ const shortenSequence = (src: string, max: number) =>
 const fitMermaid = (src: string, width: number): MermaidArt | undefined => {
   const fitting = (candidate: string) => {
     const art = render(candidate);
+
     return art && art.width <= width ? art : undefined;
   };
+
   const kind = diagramKind(src);
+
   if (kind === "flowchart") {
-    const vertical = src.replace(
-      /^(\s*(?:flowchart|graph)\s+)(?:LR|RL)\b/m,
-      "$1TD",
-    );
+    const vertical = src.replace(/^(\s*(?:flowchart|graph)\s+)(?:LR|RL)\b/m, "$1TD");
+
     return vertical === src ? undefined : fitting(vertical);
   }
+
   if (kind !== "sequence") return undefined;
   let best: MermaidArt | undefined;
   let low = MIN_LABEL_WIDTH;
   let high = Math.max(...sequenceLabels(src).map((l) => [...l].length));
+
   while (low <= high) {
     const max = Math.floor((low + high) / 2);
     const art = fitting(shortenSequence(src, max));
+
     if (art) {
       best = art;
       low = max + 1;
@@ -581,15 +610,19 @@ const fitMermaid = (src: string, width: number): MermaidArt | undefined => {
       high = max - 1;
     }
   }
+
   return best;
 };
 
 const codeSpan = (line: string) => {
   const content = line || "\u00a0";
+
   const fence = "`".repeat(
     Math.max(0, ...Array.from(content.matchAll(/`+/g), (m) => m[0].length)) + 1,
   );
+
   const pad = content.startsWith("`") || content.endsWith("`") ? " " : "";
+
   return `${fence}${pad}${content}${pad}${fence}`;
 };
 
@@ -624,13 +657,10 @@ const installWideMermaid = (pi: ExtensionAPI) => {
 
   pi.registerMarkdownTransformer(
     (markdown, context) => {
-      if (
-        !theme ||
-        mode === "off" ||
-        (context.isStreaming && mode !== "streaming")
-      )
+      if (!theme || mode === "off" || (context.isStreaming && mode !== "streaming"))
         return markdown;
       const activeTheme = theme;
+
       return parser
         .lexer(markdown)
         .map((token) => {
@@ -640,6 +670,7 @@ const installWideMermaid = (pi: ExtensionAPI) => {
           )
             return token.raw;
           const art = render(token.text);
+
           if (
             !art ||
             art.width <= context.availableWidth ||
@@ -647,13 +678,11 @@ const installWideMermaid = (pi: ExtensionAPI) => {
           )
             return token.raw;
           const fitted = fitMermaid(token.text, context.availableWidth);
+
           if (!fitted) return token.raw;
+
           return `${fitted.styled
-            .map((row) =>
-              codeSpan(
-                row.map((span) => styleSpan(span, activeTheme)).join(""),
-              ),
-            )
+            .map((row) => codeSpan(row.map((span) => styleSpan(span, activeTheme)).join("")))
             .join("  \n")}\n`;
         })
         .join("");

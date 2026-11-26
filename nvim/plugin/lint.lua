@@ -78,11 +78,13 @@ local swiftlint_sev = {
 -- Replaces nvim-lint's swiftlint, which caches the first .swiftlint.yml it finds for the whole session.
 -- SwiftLint reads the configuration from its working directory when linting stdin.
 lint.linters.swiftlint = function()
+    local dir = vim.fs.dirname(vim.api.nvim_buf_get_name(0))
+    dir = vim.uv.fs_realpath(dir) or dir
     return {
         cmd = 'swiftlint',
         stdin = true,
         args = { 'lint', '--use-stdin', '--quiet', '--reporter', 'json' },
-        cwd = vim.fs.root(0, '.swiftlint.yml') or vim.fs.dirname(vim.api.nvim_buf_get_name(0)),
+        cwd = vim.fs.root(dir, '.swiftlint.yml') or dir,
         stream = 'stdout',
         ignore_exitcode = true,
         parser = function(output, _)

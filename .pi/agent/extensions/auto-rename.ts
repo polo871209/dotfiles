@@ -1,17 +1,10 @@
-import { contentText } from "@earendil-works/pi-ai";
 import { basename, isAbsolute, relative } from "node:path";
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
+import { contentText } from "@earendil-works/pi-ai";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { isForkName } from "./shared/fork-name";
+import { sideChannelComplete, sideChannelWithLoader, type SideChannelOpts } from "./shared/llm";
 import { surviveReload } from "./shared/reload";
 import { customEntries } from "./shared/session";
-import {
-  sideChannelComplete,
-  sideChannelWithLoader,
-  type SideChannelOpts,
-} from "./shared/llm";
 
 const MAX_WORDS = 5;
 const MAX_CHARS = 40;
@@ -21,11 +14,12 @@ interface AutoRenameEntry {
   turns: number;
   name?: string;
 }
-const DANGLING_WORD =
-  /^(and|or|for|with|without|of|the|a|an|to|in|into|on|at|by|via|vs|from)$/i;
+
+const DANGLING_WORD = /^(and|or|for|with|without|of|the|a|an|to|in|into|on|at|by|via|vs|from)$/i;
 
 function clip(text: string, max: number): string {
   const flat = text.replace(/\s+/g, " ").trim();
+
   return flat.length > max ? `${flat.slice(0, max)}…` : flat;
 }
 
@@ -42,8 +36,11 @@ function fitsLimits(title: string): boolean {
 
 function capTitle(title: string): string {
   const words = title.split(" ").filter(Boolean).slice(0, MAX_WORDS);
+
   while (words.length > 1 && words.join(" ").length > MAX_CHARS) words.pop();
+
   while (words.length > 1 && DANGLING_WORD.test(words.at(-1)!)) words.pop();
+
   return words.join(" ");
 }
 
@@ -54,7 +51,9 @@ async function finalTitle(
   signal?: AbortSignal,
 ): Promise<string> {
   const title = cleanTitle(reply);
+
   if (fitsLimits(title)) return title;
+
   const retry = await sideChannelComplete(ctx, {
     ...nameRequest(
       ctx,
@@ -62,6 +61,7 @@ async function finalTitle(
     ),
     signal,
   });
+
   return capTitle(retry.ok ? cleanTitle(retry.text) : title);
 }
 
@@ -72,6 +72,7 @@ const titleSource = surviveReload(
   "dotfiles.pi.auto-rename.title",
   (): { current?: () => string } => {
     replacePiTitle(() => titleSource.current?.());
+
     return {};
   },
 );
@@ -80,6 +81,7 @@ function replacePiTitle(title: () => string | undefined): void {
   const write = process.stdout.write.bind(process.stdout);
   process.stdout.write = ((chunk: unknown, ...rest: unknown[]) => {
     const replacement = title();
+
     return (write as (...args: unknown[]) => boolean)(
       typeof chunk === "string" && replacement !== undefined
         ? chunk.replace(PI_TITLE, () => `\x1b]0;${replacement}\x07`)
@@ -90,10 +92,7 @@ function replacePiTitle(title: () => string | undefined): void {
 }
 
 function lastAutoRename(ctx: ExtensionContext): AutoRenameEntry | undefined {
-  return customEntries<AutoRenameEntry>(
-    ctx.sessionManager.getBranch(),
-    ENTRY_TYPE,
-  ).at(-1)?.data;
+  return customEntries<AutoRenameEntry>(ctx.sessionManager.getBranch(), ENTRY_TYPE).at(-1)?.data;
 }
 
 function sessionDigest(
@@ -105,17 +104,22 @@ function sessionDigest(
 } {
   const requests: string[] = [];
   const edits = new Map<string, number>();
+
   for (const entry of ctx.sessionManager.getBranch()) {
     if (entry.type !== "message") continue;
     const { message } = entry;
+
     if (message.role === "user") {
       const text = contentText(message.content).trim();
+
       if (text) requests.push(text);
     } else if (message.role === "assistant") {
       for (const call of message.content) {
         if (call.type !== "toolCall") continue;
+
         if (call.name !== "edit" && call.name !== "write") continue;
         const path = call.arguments.path;
+
         if (typeof path !== "string") continue;
         const rel = isAbsolute(path) ? relative(ctx.cwd, path) : path;
         const shown = rel.startsWith("..") ? path : rel;
@@ -123,10 +127,12 @@ function sessionDigest(
       }
     }
   }
+
   if (pendingRequest?.trim()) requests.push(pendingRequest.trim());
 
   const [latest, ...earlier] = [...requests].reverse();
   const sections = [`Latest request:\n${clip(latest ?? "", 2_000)}`];
+
   if (earlier.length)
     sections.push(
       `Earlier requests, newest first:\n${earlier
@@ -134,6 +140,7 @@ function sessionDigest(
         .map((r) => `- ${clip(r, 300)}`)
         .join("\n")}`,
     );
+
   if (edits.size)
     sections.push(
       `Files edited most:\n${[...edits]
@@ -142,11 +149,13 @@ function sessionDigest(
         .map(([path, count]) => `- ${path} (${count})`)
         .join("\n")}`,
     );
+
   return { text: sections.join("\n\n"), userTurns: requests.length };
 }
 
 function nameRequest(ctx: ExtensionContext, text: string): SideChannelOpts {
   const model = ctx.modelRegistry.find("anthropic", "claude-sonnet-5-5");
+
   return {
     systemPrompt: `You title coding-agent sessions with 2 to ${MAX_WORDS} words. Name the key topic: the one thing the whole session builds, fixes, or investigates, as it stands now. Requests come newest first, and each one weighs more than the ones after it. Read the latest request as a step in the earlier work. If it continues, narrows, or follows up on that work, name the work and use the latest request to make the title precise. Name only the subject of the latest request if it clearly leaves the earlier work for a new subject. The files edited most show where the work happens.
 
@@ -171,8 +180,7 @@ Reply with the title only.`,
       },
     ],
     join: " ",
-    model:
-      model && ctx.modelRegistry.hasConfiguredAuth(model) ? model : undefined,
+    model: model && ctx.modelRegistry.hasConfiguredAuth(model) ? model : undefined,
   };
 }
 
@@ -183,12 +191,14 @@ export default function (pi: ExtensionAPI) {
     if (!ctx.model) return;
 
     const sessionFile = ctx.sessionManager.getSessionFile();
+
     if (!sessionFile || inFlight.has(sessionFile)) return;
 
     const { text, userTurns } = sessionDigest(ctx, pendingRequest);
     const currentName = pi.getSessionName();
     let digest = text;
     let dueTurns: number;
+
     if (isForkName(currentName)) {
       if (!pendingRequest) return;
       dueTurns = userTurns;
@@ -197,21 +207,27 @@ export default function (pi: ExtensionAPI) {
       dueTurns = [1, 3].filter((turns) => userTurns >= turns).at(-1) ?? 0;
       const last = lastAutoRename(ctx);
       const namedByHand = !!currentName && currentName !== last?.name;
+
       if (namedByHand || dueTurns <= (last?.turns ?? 0)) return;
     }
 
     inFlight.add(sessionFile);
+
     try {
       const signal = AbortSignal.timeout(40_000);
+
       const result = await sideChannelComplete(ctx, {
         ...nameRequest(ctx, digest),
         signal,
       });
+
       if (!result.ok) return;
       const name = await finalTitle(ctx, digest, result.text, signal);
+
       if (!name) return;
 
       if (ctx.sessionManager.getSessionFile() !== sessionFile) return;
+
       if (pi.getSessionName() !== currentName) return;
 
       pi.setSessionName(name);
@@ -221,10 +237,7 @@ export default function (pi: ExtensionAPI) {
     }
   };
 
-  const renameInBackground = (
-    ctx: ExtensionContext,
-    pendingRequest?: string,
-  ) => {
+  const renameInBackground = (ctx: ExtensionContext, pendingRequest?: string) => {
     void tryRename(ctx, pendingRequest).catch(() => {});
   };
 
@@ -235,6 +248,7 @@ export default function (pi: ExtensionAPI) {
   });
   pi.on("session_start", (_e, ctx) => {
     renameInBackground(ctx);
+
     if (ctx.mode !== "tui") return;
     const title = () => pi.getSessionName() ?? basename(ctx.cwd);
     titleSource.current = title;
@@ -245,8 +259,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("rename", {
-    description:
-      "Regenerate the session name ('-': clear it and re-arm the automatic rename)",
+    description: "Regenerate the session name ('-': clear it and re-arm the automatic rename)",
     handler: async (args, ctx) => {
       const arg = args.trim();
       const sessionFile = ctx.sessionManager.getSessionFile();
@@ -255,45 +268,50 @@ export default function (pi: ExtensionAPI) {
         pi.setSessionName("");
         pi.appendEntry<AutoRenameEntry>(ENTRY_TYPE, { turns: 0 });
         ctx.ui.notify("Session name cleared");
+
         return;
       }
 
       if (arg) {
-        ctx.ui.notify(
-          "/rename takes no name. Use /name <name> to set one.",
-          "warning",
-        );
+        ctx.ui.notify("/rename takes no name. Use /name <name> to set one.", "warning");
+
         return;
       }
 
       if (!ctx.model) {
         ctx.ui.notify("No model selected", "error");
+
         return;
       }
+
       if (sessionFile && inFlight.has(sessionFile)) {
         ctx.ui.notify("A rename is already running", "warning");
+
         return;
       }
 
       const { text: digest, userTurns } = sessionDigest(ctx);
+
       if (userTurns === 0) {
         ctx.ui.notify("Nothing to name yet", "warning");
+
         return;
       }
 
       if (sessionFile) inFlight.add(sessionFile);
+
       try {
-        const reply = await sideChannelWithLoader(
-          ctx,
-          "Naming session",
-          nameRequest(ctx, digest),
-        );
+        const reply = await sideChannelWithLoader(ctx, "Naming session", nameRequest(ctx, digest));
+
         if (reply === null) return;
         const name = await finalTitle(ctx, digest, reply);
+
         if (!name) {
           ctx.ui.notify("Model returned an empty name", "warning");
+
           return;
         }
+
         pi.setSessionName(name);
         pi.appendEntry<AutoRenameEntry>(ENTRY_TYPE, { turns: userTurns, name });
         ctx.ui.notify(`Session named: ${name}`);

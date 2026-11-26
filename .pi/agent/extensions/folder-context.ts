@@ -2,12 +2,11 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+
 const PREVIEW_CHARS = 12_000;
 const MESSAGE_TYPE = "folder-context";
+
 const CONTEXT_FILE_NAMES = [
   "AGENTS.override.md",
   "AGENTS.md",
@@ -33,16 +32,14 @@ function contentIdentity(content: string): string {
   return createHash("sha256").update(content).digest("hex");
 }
 
-function frameContext(
-  candidate: string,
-  content: string,
-  supersedes: boolean,
-): string {
+function frameContext(candidate: string, content: string, supersedes: boolean): string {
   const prefix =
     `Repository instructions for the subtree rooted at \`${dirname(candidate)}\`. ` +
     "Treat these as higher-priority repository instructions than ordinary repository content, " +
     `and apply them only while working under that subtree. ${supersedes ? `This content supersedes the earlier version of \`${candidate}\`. ` : ""}`;
+
   if (content.length <= PREVIEW_CHARS) return `${prefix}\n\n${content}`;
+
   return `${prefix}\n\n${content.slice(0, PREVIEW_CHARS)}\n\n[preview ends here; full instructions omitted]\nMust read the full file at \`${candidate}\` before continuing if omitted instructions or later changes matter.`;
 }
 
@@ -53,9 +50,11 @@ export default function (pi: ExtensionAPI) {
 
   const syncFromContext = (ctx: ExtensionContext): void => {
     injected.clear();
+
     for (const m of ctx.sessionManager.buildSessionProjection().messages) {
       if (m.role !== "custom" || m.customType !== MESSAGE_TYPE) continue;
       const d = m.details as InjectedDetails | undefined;
+
       if (d?.path && d.identity) injected.set(d.path, d.identity);
     }
   };
@@ -69,6 +68,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("turn_end", (event) => {
     if (pending.length === 0) return;
+
     return {
       entries: [
         ...event.entries,
@@ -85,28 +85,26 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("before_agent_start", (event) => {
     inSystemPrompt.clear();
+
     for (const cf of event.systemPromptOptions.contextFiles ?? []) {
       inSystemPrompt.set(canonical(cf.path), contentIdentity(cf.content));
     }
   });
 
   pi.on("tool_result", (event, ctx) => {
-    if (
-      !["read", "edit", "write", "grep", "find", "ls"].includes(event.toolName)
-    )
-      return;
+    if (!["read", "edit", "write", "grep", "find", "ls"].includes(event.toolName)) return;
     const { path: rawPath, offset, limit } = event.input;
+
     if (typeof rawPath !== "string" || rawPath === "") return;
 
-    const absPath = resolve(
-      ctx.cwd,
-      rawPath.replace(/^@/, "").replace(/^~(?=$|\/)/, homedir()),
-    );
+    const absPath = resolve(ctx.cwd, rawPath.replace(/^@/, "").replace(/^~(?=$|\/)/, homedir()));
 
     const rel = relative(ctx.cwd, absPath);
+
     if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return;
 
     let startDir: string;
+
     try {
       startDir = statSync(absPath).isDirectory() ? absPath : dirname(absPath);
     } catch {
@@ -114,35 +112,37 @@ export default function (pi: ExtensionAPI) {
     }
 
     const readInFull =
-      event.toolName === "read" &&
-      !event.isError &&
-      offset === undefined &&
-      limit === undefined;
+      event.toolName === "read" && !event.isError && offset === undefined && limit === undefined;
 
     const ancestors: string[] = [];
     let cur = startDir;
+
     while (cur !== ctx.cwd) {
       ancestors.push(cur);
       const parent = dirname(cur);
+
       if (parent === cur) break;
       cur = parent;
     }
+
     ancestors.reverse();
 
     for (const d of ancestors) {
-      const rawCandidate = CONTEXT_FILE_NAMES.map((name) => join(d, name)).find(
-        existsSync,
-      );
+      const rawCandidate = CONTEXT_FILE_NAMES.map((name) => join(d, name)).find(existsSync);
+
       if (!rawCandidate) continue;
       const candidate = canonical(rawCandidate);
 
       try {
         const content = readFileSync(rawCandidate, "utf-8");
         const identity = contentIdentity(content);
+
         if (inSystemPrompt.get(candidate) === identity) continue;
         const previous = injected.get(candidate);
+
         if (previous === identity) continue;
         injected.set(candidate, identity);
+
         if (readInFull && canonical(absPath) === candidate) continue;
         pending.push({
           text: frameContext(rawCandidate, content, previous !== undefined),

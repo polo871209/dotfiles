@@ -1,8 +1,5 @@
 import { contentText } from "@earendil-works/pi-ai";
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { errorMessage } from "./shared/error";
 import { sideChannelComplete } from "./shared/llm";
 import { resultCard, stepsWidget } from "./shared/progress";
@@ -10,6 +7,7 @@ import { resultCard, stepsWidget } from "./shared/progress";
 const HEX = "/Applications/Hex.app/Contents/MacOS/hex";
 
 type Dictation = { final_text: string; raw_text: string | null };
+
 type Fix = { term: string; misheard: string[] };
 
 const SYSTEM_PROMPT = `
@@ -27,11 +25,9 @@ Reply with JSON only, no prose and no code fence:
 Each "misheard" string must appear verbatim in a dictation's raw or final text. If nothing qualifies, return {"fixes": []}.
 `.trim();
 
-const escapeRegExp = (text: string) =>
-  text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-const phrasePattern = (phrase: string) =>
-  new RegExp(`(?<!\\w)${escapeRegExp(phrase)}(?!\\w)`, "i");
+const phrasePattern = (phrase: string) => new RegExp(`(?<!\\w)${escapeRegExp(phrase)}(?!\\w)`, "i");
 
 const isHexCommand = (text: string) => /^\s*\/?hex\b/i.test(text);
 
@@ -41,8 +37,10 @@ const recentTurns = (ctx: ExtensionContext) =>
     .flatMap((entry) => {
       if (entry.type !== "message") return [];
       const { message } = entry;
+
       if (message.role !== "user" && message.role !== "assistant") return [];
       const text = contentText(message.content).trim();
+
       return text ? [`${message.role}: ${text.slice(0, 2000)}`] : [];
     })
     .slice(-4)
@@ -54,11 +52,7 @@ const parseFixes = (reply: string): Fix[] =>
 type Result = { ok: boolean; text: string };
 
 const MODEL_ID = "claude-sonnet-5-5";
-const STEPS = [
-  "read dictations",
-  `find misheard names (${MODEL_ID})`,
-  "teach Hex",
-];
+const STEPS = ["read dictations", `find misheard names (${MODEL_ID})`, "teach Hex"];
 
 export default function (pi: ExtensionAPI) {
   let running: AbortController | undefined;
@@ -76,11 +70,11 @@ export default function (pi: ExtensionAPI) {
 
   const hex = async (signal: AbortSignal, ...args: string[]) => {
     const result = await pi.exec(HEX, args, { signal, timeout: 60_000 });
+
     if (result.code !== 0) {
-      throw new Error(
-        `hex ${args[0]}: ${(result.stderr || result.stdout).trim()}`,
-      );
+      throw new Error(`hex ${args[0]}: ${(result.stderr || result.stdout).trim()}`);
     }
+
     return result.stdout;
   };
 
@@ -91,22 +85,25 @@ export default function (pi: ExtensionAPI) {
     step: (active: number) => void,
   ): Promise<Result | undefined> {
     const model = ctx.modelRegistry.find("anthropic", MODEL_ID);
+
     if (!model || !ctx.modelRegistry.hasConfiguredAuth(model)) {
       return { ok: false, text: `${MODEL_ID} is not configured` };
     }
 
     step(0);
+
     const { entries } = JSON.parse(
       await hex(signal, "history", "--raw", "--json", "--limit", "10"),
     ) as { entries: Dictation[] };
-    const dictations = entries
-      .filter((e) => !isHexCommand(e.final_text))
-      .slice(0, 5);
+
+    const dictations = entries.filter((e) => !isHexCommand(e.final_text)).slice(0, 5);
+
     if (dictations.length === 0) {
       return { ok: false, text: "no recent dictation" };
     }
 
     step(1);
+
     const reply = await sideChannelComplete(ctx, {
       model,
       signal,
@@ -119,28 +116,27 @@ export default function (pi: ExtensionAPI) {
             `Hint: ${hint || "(none)"}`,
             `Latest conversation turns:\n${recentTurns(ctx) || "(none)"}`,
             "Dictations, newest first:",
-            ...dictations.map(
-              (d) =>
-                `raw: ${d.raw_text ?? d.final_text}\nfinal: ${d.final_text}`,
-            ),
+            ...dictations.map((d) => `raw: ${d.raw_text ?? d.final_text}\nfinal: ${d.final_text}`),
           ].join("\n\n"),
         },
       ],
     });
+
     if (!reply.ok) {
       if (reply.reason === "aborted") return undefined;
+
       return { ok: false, text: reply.error ?? reply.reason };
     }
 
-    const heard = dictations
-      .map((d) => `${d.raw_text ?? ""}\n${d.final_text}`)
-      .join("\n");
+    const heard = dictations.map((d) => `${d.raw_text ?? ""}\n${d.final_text}`).join("\n");
+
     const fixes = parseFixes(reply.text)
       .map((f) => ({
         term: f.term.trim(),
         misheard: f.misheard.filter((m) => phrasePattern(m).test(heard)),
       }))
       .filter((f) => f.term && f.misheard.length > 0);
+
     if (fixes.length === 0) {
       return {
         ok: false,
@@ -150,16 +146,11 @@ export default function (pi: ExtensionAPI) {
 
     step(2);
     await hex(signal, "start");
+
     for (const { term, misheard } of fixes) {
-      await hex(
-        signal,
-        "vocabulary",
-        "add",
-        term,
-        "--sounds-like",
-        misheard.join(","),
-      );
+      await hex(signal, "vocabulary", "add", term, "--sounds-like", misheard.join(","));
     }
+
     return {
       ok: true,
       text: fixes
@@ -172,10 +163,11 @@ export default function (pi: ExtensionAPI) {
     running?.abort();
     const controller = new AbortController();
     running = controller;
-    const step = (active: number) =>
-      ctx.ui.setWidget("hex", stepsWidget("hex", STEPS, active));
+    const step = (active: number) => ctx.ui.setWidget("hex", stepsWidget("hex", STEPS, active));
+
     try {
       const result = await learn(hint, ctx, controller.signal, step);
+
       if (result && !controller.signal.aborted) {
         pi.appendEntry<Result>("hex", result);
       }

@@ -36,19 +36,25 @@ function cleanBody(body: string, maxBytes: number): string {
       "",
     ),
   );
+
   const r = truncateHead(b, { maxBytes, maxLines: NO_LINE_CAP });
+
   return r.truncated ? `${r.content}\n…[body truncated]` : r.content;
 }
 
 function parsePr(pr: string): { number: number; repo?: string } | null {
   const m = pr.match(/github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/);
+
   if (m) return { repo: m[1], number: Number(m[2]) };
   const n = pr.trim().replace(/^#/, "");
+
   if (/^\d+$/.test(n)) return { number: Number(n) };
+
   return null;
 }
 
 type Author = { login: string } | null;
+
 type ThreadComment = {
   id: string;
   isMinimized: boolean;
@@ -56,6 +62,7 @@ type ThreadComment = {
   body: string;
   pullRequestReview: { id: string } | null;
 };
+
 type Thread = {
   id: string;
   isResolved: boolean;
@@ -64,6 +71,7 @@ type Thread = {
   line: number | null;
   comments: { totalCount: number; nodes: ThreadComment[] };
 };
+
 type IssueComment = {
   id: string;
   isMinimized: boolean;
@@ -71,6 +79,7 @@ type IssueComment = {
   body: string;
   createdAt: string;
 };
+
 type Review = {
   id: string;
   isMinimized: boolean;
@@ -80,6 +89,7 @@ type Review = {
   submittedAt: string | null;
   comments: { totalCount: number };
 };
+
 type PrData = {
   comments: { totalCount: number; nodes: IssueComment[] };
   reviews: { totalCount: number; nodes: Review[] };
@@ -104,13 +114,7 @@ query($owner:String!,$repo:String!,$number:Int!){
   }
 }`;
 
-function queryPr(
-  owner: string,
-  repo: string,
-  num: number,
-  signal?: AbortSignal,
-  cwd?: string,
-) {
+function queryPr(owner: string, repo: string, num: number, signal?: AbortSignal, cwd?: string) {
   return run(
     "gh",
     [
@@ -131,9 +135,8 @@ function queryPr(
 }
 
 function parsePrData(stdout: string): PrData {
-  return (
-    JSON.parse(stdout) as { data: { repository: { pullRequest: PrData } } }
-  ).data.repository.pullRequest;
+  return (JSON.parse(stdout) as { data: { repository: { pullRequest: PrData } } }).data.repository
+    .pullRequest;
 }
 
 function hasText(body: string): boolean {
@@ -157,19 +160,21 @@ async function mutateEach<T>(
 }> {
   const ok: T[] = [];
   const failed: { item: T; error: string }[] = [];
+
   for (let i = 0; i < items.length; i += MUTATION_CONCURRENCY) {
     if (signal?.aborted) break;
     const batch = items.slice(i, i + MUTATION_CONCURRENCY);
+
     const results = await Promise.all(
-      batch.map((item) =>
-        run("gh", ["api", "graphql", ...graphqlArgs(item)], signal),
-      ),
+      batch.map((item) => run("gh", ["api", "graphql", ...graphqlArgs(item)], signal)),
     );
+
     results.forEach((r, j) => {
       if (r.code === 0) ok.push(batch[j]);
       else failed.push({ item: batch[j], error: firstLine(r.stderr) });
     });
   }
+
   return { ok, failed, skipped: items.length - ok.length - failed.length };
 }
 
@@ -188,7 +193,9 @@ function fail(msg: string): ToolResult {
 }
 
 type Kind = "thread" | "review" | "comment";
+
 type Seen = { kind: Kind; id: string; lastCommentId?: string };
+
 type PrHandles = {
   byHandle: Map<string, Seen>;
   byId: Map<string, string>;
@@ -209,18 +216,16 @@ function newHandles(): PrHandles {
   };
 }
 
-function markSeen(
-  h: PrHandles,
-  kind: Kind,
-  id: string,
-  lastCommentId?: string,
-): string {
+function markSeen(h: PrHandles, kind: Kind, id: string, lastCommentId?: string): string {
   let handle = h.byId.get(id);
+
   if (!handle) {
     handle = `${HANDLE_PREFIX[kind]}${++h.next[kind]}`;
     h.byId.set(id, handle);
   }
+
   h.byHandle.set(handle, { kind, id, lastCommentId });
+
   return handle;
 }
 
@@ -234,6 +239,7 @@ function lastVisibleId(t: Thread): string | undefined {
 
 function commentsAfter(t: Thread, seenId?: string): ThreadComment[] {
   const at = t.comments.nodes.findIndex((c) => c.id === seenId);
+
   return t.comments.nodes.slice(at + 1).filter((c) => !c.isMinimized);
 }
 
@@ -255,27 +261,23 @@ function postsOf(pr: PrData): Post[] {
   return [
     ...pr.reviews.nodes
       .filter((r) => r.state !== "PENDING")
-      .map(
-        (r): Post => ({
-          kind: "review",
-          id: r.id,
-          isMinimized: r.isMinimized,
-          author: r.author,
-          at: r.submittedAt,
-          body: r.body,
-          state: r.state,
-        }),
-      ),
-    ...pr.comments.nodes.map(
-      (c): Post => ({
-        kind: "comment",
-        id: c.id,
-        isMinimized: c.isMinimized,
-        author: c.author,
-        at: c.createdAt,
-        body: c.body,
-      }),
-    ),
+      .map((r): Post => ({
+        kind: "review",
+        id: r.id,
+        isMinimized: r.isMinimized,
+        author: r.author,
+        at: r.submittedAt,
+        body: r.body,
+        state: r.state,
+      })),
+    ...pr.comments.nodes.map((c): Post => ({
+      kind: "comment",
+      id: c.id,
+      isMinimized: c.isMinimized,
+      author: c.author,
+      at: c.createdAt,
+      body: c.body,
+    })),
   ].sort((a, b) => (a.at ?? "").localeCompare(b.at ?? ""));
 }
 
@@ -284,7 +286,9 @@ function postLabel(p: Post): string {
 }
 
 type Classifier = "RESOLVED" | "OUTDATED";
+
 type Group = "named" | "jev" | "cleanup";
+
 type HideTarget = {
   id: string;
   label: string;
@@ -309,7 +313,9 @@ async function judge(
   signal?: AbortSignal,
 ): Promise<Verdict> {
   const verdict: Verdict = { hidePosts: new Map(), settledThreads: new Set() };
+
   if (!posts.length && !outdatedThreads.length) return verdict;
+
   const keepAll = (note: string, usage?: Usage): Verdict => ({
     ...verdict,
     usage,
@@ -317,16 +323,19 @@ async function judge(
   });
 
   let jev: ClassifierModel<ClassifierApi> | undefined;
+
   try {
-    jev = (
-      await ctx.modelRegistry.getAvailableOfType("classifier", "typesafe")
-    ).find((model) => model.id === "jev-latest");
+    jev = (await ctx.modelRegistry.getAvailableOfType("classifier", "typesafe")).find(
+      (model) => model.id === "jev-latest",
+    );
   } catch {
     jev = undefined;
   }
+
   if (!jev) return keepAll("No review classifier is available");
 
   const questions: Record<string, ClassifierBoolQuestion> = {};
+
   for (const p of posts) {
     const i = timeline.indexOf(p);
     questions[`own${i}`] = {
@@ -338,9 +347,8 @@ async function judge(
           "The body only approves, summarizes or counts inline comments, or reports tool status.",
       },
     };
-    if (
-      timeline.slice(i + 1).some((l) => l.author?.login === p.author?.login)
-    ) {
+
+    if (timeline.slice(i + 1).some((l) => l.author?.login === p.author?.login)) {
       questions[`replaced${i}`] = {
         type: "bool",
         instructions: `Does a later post by \`posts[${i}].author\` replace everything that \`posts[${i}].body\` says?`,
@@ -352,6 +360,7 @@ async function judge(
       };
     }
   }
+
   outdatedThreads.forEach((_, k) => {
     questions[`settled${k}`] = {
       type: "bool",
@@ -366,6 +375,7 @@ async function judge(
 
   const timeout = AbortSignal.timeout(15_000);
   let result: Awaited<ReturnType<typeof ctx.modelRegistry.classify>>;
+
   try {
     result = await ctx.modelRegistry.classify(
       jev,
@@ -395,6 +405,7 @@ async function judge(
   } catch (err) {
     return keepAll(`The review classifier failed (${String(err)})`);
   }
+
   if (result.stopReason !== "stop") {
     return keepAll(
       `The review classifier failed (${result.errorMessage ?? result.stopReason})`,
@@ -404,24 +415,30 @@ async function judge(
 
   const probability = (key: string) => {
     const answer = result.answers[key];
+
     return answer?.type === "bool" ? answer.probability : undefined;
   };
+
   verdict.usage = result.usage;
+
   for (const p of posts) {
     const i = timeline.indexOf(p);
+
     if ((probability(`replaced${i}`) ?? 0) >= HIDE_CONFIDENCE)
       verdict.hidePosts.set(p.id, "OUTDATED");
     else if ((probability(`own${i}`) ?? 1) <= 1 - HIDE_CONFIDENCE)
       verdict.hidePosts.set(p.id, "RESOLVED");
   }
+
   outdatedThreads.forEach((t, k) => {
-    if ((probability(`settled${k}`) ?? 0) >= HIDE_CONFIDENCE)
-      verdict.settledThreads.add(t.id);
+    if ((probability(`settled${k}`) ?? 0) >= HIDE_CONFIDENCE) verdict.settledThreads.add(t.id);
   });
+
   return verdict;
 }
 
 type AttentionReason = "changed" | "new" | "outdated";
+
 type Attention = {
   handle: string;
   reason: AttentionReason;
@@ -464,18 +481,21 @@ async function resolveHandled(
   if (!owner || !repo) {
     return fail("github_pr: resolve needs owner/repo — pass `repo`.");
   }
+
   if (!handles) {
     return fail(
       `github_pr: no report for PR #${num} in this session. Call github_pr with action "report" first.`,
     );
   }
+
   const gql = await queryPr(owner, repo, num, signal);
+
   if (gql.code !== 0) {
-    return fail(
-      `github_pr: could not read PR #${num}: ${firstLine(gql.stderr)}`,
-    );
+    return fail(`github_pr: could not read PR #${num}: ${firstLine(gql.stderr)}`);
   }
+
   let pr: PrData;
+
   try {
     pr = parsePrData(gql.stdout);
   } catch {
@@ -496,20 +516,26 @@ async function resolveHandled(
 
   for (const handle of new Set(ids)) {
     const seen = handles.byHandle.get(handle);
+
     if (!seen) {
       errors.push(`${handle}: unknown handle`);
       continue;
     }
+
     named.add(seen.id);
+
     if (seen.kind === "thread") {
       const t = threadById.get(seen.id);
+
       if (!t) errors.push(`${handle}: not among the last 100 threads`);
       else if (t.isResolved) alreadyClosed.push(handle);
       else if (!commentsAfter(t, seen.lastCommentId).length)
         namedThreads.push({ handle, thread: t });
       continue;
     }
+
     const p = postById.get(seen.id);
+
     if (!p) errors.push(`${handle}: not among the last 100 ${seen.kind}s`);
     else if (p.isMinimized) alreadyClosed.push(handle);
     else
@@ -522,51 +548,58 @@ async function resolveHandled(
   }
 
   const stillOpen: string[] = [];
+
   for (const [handle, seen] of handles.byHandle) {
     if (seen.kind === "thread") {
       const t = threadById.get(seen.id);
+
       if (!t || t.isResolved) continue;
       const fresh = commentsAfter(t, seen.lastCommentId);
+
       if (fresh.length) {
         attention.push(threadAttention(handle, "changed", t, fresh));
         markSeen(handles, "thread", t.id, lastVisibleId(t));
       } else if (!named.has(seen.id)) stillOpen.push(handle);
     } else {
       const p = postById.get(seen.id);
+
       if (p && !p.isMinimized && !named.has(seen.id)) stillOpen.push(handle);
     }
   }
 
   const unseenThreads = threads.filter(
-    (t) =>
-      !t.isResolved && !handles.byId.has(t.id) && visibleComments(t).length > 0,
+    (t) => !t.isResolved && !handles.byId.has(t.id) && visibleComments(t).length > 0,
   );
+
   const outdatedUnseen = unseenThreads.filter((t) => t.isOutdated);
+
   const unseenPosts = posts.filter(
     (p) => !p.isMinimized && hasText(p.body) && !handles.byId.has(p.id),
   );
 
   const reviewsSettledBy = (closed: Thread[]) => {
     const settledPerReview = new Map<string, number>();
+
     for (const c of closed.flatMap((t) => t.comments.nodes)) {
       const id = c.pullRequestReview?.id;
+
       if (id) settledPerReview.set(id, (settledPerReview.get(id) ?? 0) + 1);
     }
+
     return new Set(
       pr.reviews.nodes
-        .filter(
-          (r) => (settledPerReview.get(r.id) ?? 0) === r.comments.totalCount,
-        )
+        .filter((r) => (settledPerReview.get(r.id) ?? 0) === r.comments.totalCount)
         .map((r) => r.id),
     );
   };
+
   const mayClose = new Set([
     ...namedThreads.map((n) => n.thread.id),
     ...outdatedUnseen.map((t) => t.id),
   ]);
-  const maySettle = reviewsSettledBy(
-    threads.filter((t) => t.isResolved || mayClose.has(t.id)),
-  );
+
+  const maySettle = reviewsSettledBy(threads.filter((t) => t.isResolved || mayClose.has(t.id)));
+
   const verdict = await judge(
     ctx,
     unseenPosts.filter((p) => p.kind === "comment" || maySettle.has(p.id)),
@@ -581,6 +614,7 @@ async function resolveHandled(
       .filter((t) => verdict.settledThreads.has(t.id))
       .map((thread) => ({ thread, group: "jev" as const })),
   ];
+
   const resolved = await mutateEach(
     resolveList,
     ({ thread }) => [
@@ -591,6 +625,7 @@ async function resolveHandled(
     ],
     signal,
   );
+
   const resolvedNow = new Set(resolved.ok.map((r) => r.thread.id));
   const closed = threads.filter((t) => t.isResolved || resolvedNow.has(t.id));
   const settled = reviewsSettledBy(closed);
@@ -605,13 +640,9 @@ async function resolveHandled(
       });
     }
   }
+
   for (const r of pr.reviews.nodes) {
-    if (
-      !r.isMinimized &&
-      r.state !== "PENDING" &&
-      !hasText(r.body) &&
-      settled.has(r.id)
-    )
+    if (!r.isMinimized && r.state !== "PENDING" && !hasText(r.body) && settled.has(r.id))
       targets.set(r.id, {
         id: r.id,
         label: `review by @${r.author?.login ?? "?"}`,
@@ -619,9 +650,12 @@ async function resolveHandled(
         group: "cleanup",
       });
   }
+
   const newPosts: Post[] = [];
+
   for (const p of unseenPosts) {
     const classifier = verdict.hidePosts.get(p.id);
+
     if (classifier && (p.kind === "comment" || settled.has(p.id)))
       targets.set(p.id, {
         id: p.id,
@@ -649,14 +683,10 @@ async function resolveHandled(
     if (t.isOutdated && verdict.settledThreads.has(t.id)) continue;
     const handle = markSeen(handles, "thread", t.id, lastVisibleId(t));
     attention.push(
-      threadAttention(
-        handle,
-        t.isOutdated ? "outdated" : "new",
-        t,
-        visibleComments(t),
-      ),
+      threadAttention(handle, t.isOutdated ? "outdated" : "new", t, visibleComments(t)),
     );
   }
+
   for (const p of newPosts) {
     const handle = markSeen(handles, p.kind, p.id);
     attention.push({
@@ -678,8 +708,8 @@ async function resolveHandled(
       .map((r) => `${r.handle} \`${threadLoc(r.thread)}\``),
     ...hidden.ok.filter((t) => t.group === "named").map((t) => t.label),
   ];
-  const count = (group: Group) =>
-    hidden.ok.filter((t) => t.group === group).length;
+
+  const count = (group: Group) => hidden.ok.filter((t) => t.group === group).length;
   const jevResolved = resolved.ok.filter((r) => r.group === "jev").length;
   const skipped = resolved.skipped + hidden.skipped;
   const failures = resolved.failed.length + hidden.failed.length;
@@ -687,44 +717,49 @@ async function resolveHandled(
   const out = [
     `# PR #${num}: resolved ${resolved.ok.length} thread(s), hid ${hidden.ok.length} item(s)`,
   ];
+
   for (const line of closedByAgent) out.push(`- ✅ ${line}`);
+
   if (jevResolved || count("jev"))
     out.push(
       `Jev resolved ${jevResolved} outdated thread(s) and hid ${count("jev")} summary item(s).`,
     );
-  if (count("cleanup"))
-    out.push(`Cleanup hid ${count("cleanup")} resolved item(s).`);
+
+  if (count("cleanup")) out.push(`Cleanup hid ${count("cleanup")} resolved item(s).`);
+
   if (verdict.note) out.push(verdict.note);
-  if (alreadyClosed.length)
-    out.push(`Already closed: ${alreadyClosed.join(", ")}`);
-  if (stillOpen.length)
-    out.push(`Still open (you skipped): ${stillOpen.join(", ")}`);
+
+  if (alreadyClosed.length) out.push(`Already closed: ${alreadyClosed.join(", ")}`);
+
+  if (stillOpen.length) out.push(`Still open (you skipped): ${stillOpen.join(", ")}`);
+
   for (const e of errors) out.push(`- ⚠️ ${e}`);
+
   for (const f of resolved.failed)
-    out.push(
-      `- ⚠️ resolve ${f.item.handle ?? ""} \`${threadLoc(f.item.thread)}\`: ${f.error}`,
-    );
-  for (const f of hidden.failed)
-    out.push(`- ⚠️ hide ${f.item.label}: ${f.error}`);
+    out.push(`- ⚠️ resolve ${f.item.handle ?? ""} \`${threadLoc(f.item.thread)}\`: ${f.error}`);
+
+  for (const f of hidden.failed) out.push(`- ⚠️ hide ${f.item.label}: ${f.error}`);
+
   if (skipped) out.push(`- ⏹ ${skipped} not attempted: aborted`);
   const unfetched = pr.reviewThreads.totalCount - threads.length;
+
   if (unfetched > 0)
-    out.push(
-      `${unfetched} older thread(s) were not checked. Resolve them on GitHub.`,
-    );
+    out.push(`${unfetched} older thread(s) were not checked. Resolve them on GitHub.`);
 
   for (const reason of ["changed", "new", "outdated"] as const) {
     const items = attention.filter((a) => a.reason === reason);
+
     if (!items.length) continue;
     out.push(`\n## ${ATTENTION_HEADINGS[reason]}`);
+
     for (const a of items) {
       out.push(`\n\`${a.handle}\` ${a.location}`);
+
       for (const c of a.comments) out.push(`- **@${c.author}**: ${c.body}`);
     }
   }
 
-  const open =
-    stillOpen.length + attention.length + errors.length + failures + skipped;
+  const open = stillOpen.length + attention.length + errors.length + failures + skipped;
   out.push(
     open
       ? `\nHandle the items above, then call resolve again with their handles in \`ids\`.`
@@ -771,8 +806,7 @@ const params = Type.Object({
   ),
   select: Type.Optional(
     Type.Enum(["files", "checks", "comments", "diff"], {
-      description:
-        "Return only this section, which is cheaper than the full report.",
+      description: "Return only this section, which is cheaper than the full report.",
     }),
   ),
   action: Type.Optional(
@@ -790,6 +824,7 @@ const params = Type.Object({
 });
 
 const Author = Type.String({ description: "GitHub login" });
+
 const outputSchema = Type.Object({
   pr: Type.Number(),
   url: Type.Optional(Type.String()),
@@ -831,9 +866,7 @@ const outputSchema = Type.Object({
         handle: Type.String(),
         path: Type.String(),
         line: Type.Union([Type.Number(), Type.Null()]),
-        comments: Type.Array(
-          Type.Object({ author: Author, body: Type.String() }),
-        ),
+        comments: Type.Array(Type.Object({ author: Author, body: Type.String() })),
       }),
     ),
   ),
@@ -848,14 +881,14 @@ const outputSchema = Type.Object({
         handle: Type.String(),
         reason: Type.Enum(["changed", "new", "outdated"]),
         location: Type.String(),
-        comments: Type.Array(
-          Type.Object({ author: Author, body: Type.String() }),
-        ),
+        comments: Type.Array(Type.Object({ author: Author, body: Type.String() })),
       }),
     ),
   ),
 });
+
 type PrValue = Static<typeof outputSchema>;
+
 const prValue = (v: PrValue): JsonValue => v as JsonValue;
 
 export default function (pi: ExtensionAPI) {
@@ -864,13 +897,13 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("input", (event) => {
     const active = pi.getActiveTools();
+
     if (
       !active.includes("github_pr") &&
-      /\b(prs?|pull requests?|pulls?\/\d+|reviews?|ci|checks?)\b/i.test(
-        event.text,
-      )
+      /\b(prs?|pull requests?|pulls?\/\d+|reviews?|ci|checks?)\b/i.test(event.text)
     )
       pi.setActiveTools([...active, "github_pr"]);
+
     return { action: "continue" };
   });
 
@@ -885,11 +918,7 @@ export default function (pi: ExtensionAPI) {
       openWorldHint: true,
     },
     renderResult(result, _options, theme: Theme) {
-      return new Text(
-        theme.fg("dim", `  ${result.details?.summary ?? "github_pr"}`),
-        0,
-        0,
-      );
+      return new Text(theme.fg("dim", `  ${result.details?.summary ?? "github_pr"}`), 0, 0);
     },
     description:
       "Fetch a GitHub PR (URL or number) as markdown: metadata, description, changed files, failing checks, and unresolved review threads, including bot reviewers. Use instead of `gh pr view`. Pass `select` to fetch just one section, or `action: resolve` with the handles of the items you handled to close them on GitHub.",
@@ -897,10 +926,8 @@ export default function (pi: ExtensionAPI) {
     outputSchema,
     async execute(_id, a, signal, _onUpdate, ctx) {
       const parsed = parsePr(a.pr);
-      if (!parsed)
-        return fail(
-          `github_pr: could not parse "${a.pr}" as a PR URL or number`,
-        );
+
+      if (!parsed) return fail(`github_pr: could not parse "${a.pr}" as a PR URL or number`);
       const repo = a.repo ?? parsed.repo;
       const num = parsed.number;
       const wantDiff = a.diff === true || a.select === "diff";
@@ -910,28 +937,24 @@ export default function (pi: ExtensionAPI) {
 
       let glOwner = "";
       let glRepo = "";
+
       if (repo?.includes("/")) {
         [glOwner, glRepo] = repo.split("/");
       } else {
         const r = await run(
           "gh",
-          [
-            "repo",
-            "view",
-            "--json",
-            "owner,name",
-            "-q",
-            '.owner.login+"/"+.name',
-          ],
+          ["repo", "view", "--json", "owner,name", "-q", '.owner.login+"/"+.name'],
           signal,
           ctx.cwd,
         );
+
         if (r.code === 0 && r.stdout.includes("/")) {
           [glOwner, glRepo] = r.stdout.trim().split("/");
         }
       }
 
       const prKey = `${glOwner}/${glRepo}#${num}`;
+
       if (a.action === "resolve") {
         return resolveHandled(
           ctx,
@@ -945,6 +968,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       const wantComments = !select || select === "comments";
+
       const [meta, diff, gql] = await Promise.all([
         run(
           "gh",
@@ -968,13 +992,11 @@ export default function (pi: ExtensionAPI) {
       ]);
 
       if (meta.code !== 0)
-        return fail(
-          `github_pr: gh pr view failed: ${meta.stderr.trim() || meta.stdout.trim()}`,
-        );
+        return fail(`github_pr: gh pr view failed: ${meta.stderr.trim() || meta.stdout.trim()}`);
+
       if (select === "diff" && diff.code !== 0)
-        return fail(
-          `github_pr: gh pr diff failed: ${diff.stderr.trim() || diff.stdout.trim()}`,
-        );
+        return fail(`github_pr: gh pr diff failed: ${diff.stderr.trim() || diff.stdout.trim()}`);
+
       if (select === "comments" && gql?.code !== 0)
         return fail(
           gql
@@ -1025,27 +1047,28 @@ export default function (pi: ExtensionAPI) {
         );
         out.push(
           `+${fmt(m.additions)} / −${fmt(m.deletions)} across ${m.changedFiles} file(s)` +
-            (m.labels.length
-              ? ` · labels: ${m.labels.map((l) => l.name).join(", ")}`
-              : ""),
+            (m.labels.length ? ` · labels: ${m.labels.map((l) => l.name).join(", ")}` : ""),
         );
 
         const body = cleanBody(m.body || "", 6 * 1024);
+
         if (body) out.push(`\n## Description\n${body}`);
       }
 
-      const rollup =
-        !select || select === "checks" ? (m.statusCheckRollup ?? []) : [];
+      const rollup = !select || select === "checks" ? (m.statusCheckRollup ?? []) : [];
+
       if (rollup.length) {
         const norm = rollup.map((c) => ({
           name: c.name || c.context || "check",
           status: (c.conclusion || c.state || "").toUpperCase(),
         }));
+
         const bad = norm.filter(
-          (c) =>
-            !["SUCCESS", "NEUTRAL", "SKIPPED", "SKIPPING"].includes(c.status),
+          (c) => !["SUCCESS", "NEUTRAL", "SKIPPED", "SKIPPING"].includes(c.status),
         );
+
         const counts: Record<string, number> = {};
+
         for (const c of norm) counts[c.status] = (counts[c.status] || 0) + 1;
         value.failingChecks = bad;
         out.push(
@@ -1053,16 +1076,14 @@ export default function (pi: ExtensionAPI) {
             .map(([k, v]) => `${v} ${k.toLowerCase()}`)
             .join(", ")})`,
         );
+
         if (bad.length) {
           for (const c of bad) out.push(`- ⚠️ ${c.name}: ${c.status}`);
         } else {
           out.push(
             `- all ${
-              norm.filter((c) =>
-                ["SUCCESS", "NEUTRAL", "SKIPPED", "SKIPPING"].includes(
-                  c.status,
-                ),
-              ).length
+              norm.filter((c) => ["SUCCESS", "NEUTRAL", "SKIPPED", "SKIPPING"].includes(c.status))
+                .length
             } passing/skipped`,
           );
         }
@@ -1075,11 +1096,13 @@ export default function (pi: ExtensionAPI) {
           deletions,
         }));
         out.push(`\n## Files`);
+
         for (const f of m.files.slice(0, MAX_LISTED_FILES)) {
           out.push(
             `- \`${f.path}\` +${f.additions}/−${f.deletions} (${f.changeType.toLowerCase()})`,
           );
         }
+
         if (m.files.length > MAX_LISTED_FILES)
           out.push(`- _(+${m.files.length - MAX_LISTED_FILES} more files)_`);
       }
@@ -1087,6 +1110,7 @@ export default function (pi: ExtensionAPI) {
       let nComments = 0;
       let nReviews = 0;
       let nThreads = 0;
+
       if (gql?.code === 0 && gql.stdout) {
         try {
           const pr = parsePrData(gql.stdout);
@@ -1100,45 +1124,45 @@ export default function (pi: ExtensionAPI) {
               author: c.author?.login ?? "?",
               body: cleanBody(c.body, 2 * 1024),
             }));
+
           nComments = comments.length;
           value.comments = comments;
+
           if (comments.length) {
             out.push(`\n## Comments`);
-            for (const c of comments)
-              out.push(`\`${c.handle}\` **@${c.author}**: ${c.body}`);
+
+            for (const c of comments) out.push(`\`${c.handle}\` **@${c.author}**: ${c.body}`);
           }
+
           const unfetchedC = pr.comments.totalCount - pr.comments.nodes.length;
-          if (unfetchedC > 0)
-            out.push(`\n_(+${unfetchedC} earlier comment(s) not fetched)_`);
+
+          if (unfetchedC > 0) out.push(`\n_(+${unfetchedC} earlier comment(s) not fetched)_`);
 
           const reviews = pr.reviews.nodes
-            .filter(
-              (r) => !r.isMinimized && r.state !== "PENDING" && hasText(r.body),
-            )
+            .filter((r) => !r.isMinimized && r.state !== "PENDING" && hasText(r.body))
             .map((r) => ({
               handle: markSeen(handles, "review", r.id),
               author: r.author?.login ?? "?",
               state: r.state,
               body: cleanBody(r.body, 2 * 1024),
             }));
+
           nReviews = reviews.length;
           value.reviews = reviews;
+
           if (reviews.length) {
             out.push(`\n## Review bodies`);
+
             for (const r of reviews)
-              out.push(
-                `\`${r.handle}\` **@${r.author}** (${r.state}): ${r.body}`,
-              );
+              out.push(`\`${r.handle}\` **@${r.author}** (${r.state}): ${r.body}`);
           }
+
           const unfetchedR = pr.reviews.totalCount - pr.reviews.nodes.length;
-          if (unfetchedR > 0)
-            out.push(`\n_(+${unfetchedR} earlier review(s) not fetched)_`);
+
+          if (unfetchedR > 0) out.push(`\n_(+${unfetchedR} earlier review(s) not fetched)_`);
 
           const threads = pr.reviewThreads.nodes
-            .filter(
-              (t) =>
-                !t.isResolved && !t.isOutdated && visibleComments(t).length,
-            )
+            .filter((t) => !t.isResolved && !t.isOutdated && visibleComments(t).length)
             .map((t) => ({
               thread: t,
               handle: markSeen(handles, "thread", t.id, lastVisibleId(t)),
@@ -1149,31 +1173,33 @@ export default function (pi: ExtensionAPI) {
                 body: cleanBody(c.body, 2 * 1024),
               })),
             }));
+
           nThreads = threads.length;
           value.threads = threads.map(({ thread: _, ...t }) => t);
+
           if (threads.length) {
             out.push(`\n## Review comments (unresolved)`);
+
             for (const t of threads) {
               out.push(`\n\`${t.handle}\` \`${threadLoc(t.thread)}\``);
-              for (const c of t.comments)
-                out.push(`- **@${c.author}**: ${c.body}`);
-              const unfetched =
-                t.thread.comments.totalCount - t.thread.comments.nodes.length;
-              if (unfetched > 0)
-                out.push(`- _(+${unfetched} later comment(s) not fetched)_`);
+
+              for (const c of t.comments) out.push(`- **@${c.author}**: ${c.body}`);
+              const unfetched = t.thread.comments.totalCount - t.thread.comments.nodes.length;
+
+              if (unfetched > 0) out.push(`- _(+${unfetched} later comment(s) not fetched)_`);
             }
           }
+
           if (comments.length || reviews.length || threads.length) {
             out.push(
               `\n**Next:** handle every item, then call \`github_pr\` with \`pr: "${m.url}"\`, \`action: "resolve"\`, and \`ids\` set to the handles of the items you fixed, answered, or found to need no action.`,
             );
           }
-          const unfetchedT =
-            pr.reviewThreads.totalCount - pr.reviewThreads.nodes.length;
+
+          const unfetchedT = pr.reviewThreads.totalCount - pr.reviewThreads.nodes.length;
+
           if (unfetchedT > 0)
-            out.push(
-              `\n_(+${unfetchedT} earlier review thread(s) not fetched — view on GitHub)_`,
-            );
+            out.push(`\n_(+${unfetchedT} earlier review thread(s) not fetched — view on GitHub)_`);
         } catch {
           out.push(`\n_(could not parse comments/review threads)_`);
         }
@@ -1190,6 +1216,7 @@ export default function (pi: ExtensionAPI) {
           maxBytes: MAX_DIFF_BYTES,
           maxLines: NO_LINE_CAP,
         });
+
         value.diff = cut.content;
         out.push(
           `\n## Diff\n\`\`\`diff\n${cut.content}\n\`\`\`${
@@ -1199,11 +1226,14 @@ export default function (pi: ExtensionAPI) {
           }`,
         );
       }
+
       if (out.length === 0) out.push(`No ${select} for PR #${m.number}.`);
+
       const report = truncateHead(out.join("\n"), {
         maxBytes: MAX_REPORT_BYTES,
         maxLines: NO_LINE_CAP,
       });
+
       return {
         content: [
           {

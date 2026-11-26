@@ -1,8 +1,4 @@
-import {
-  execFile,
-  spawn,
-  type ChildProcessWithoutNullStreams,
-} from "node:child_process";
+import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -40,6 +36,7 @@ export class BrowserUse {
   private constructor(private readonly child: ChildProcessWithoutNullStreams) {
     createInterface({ input: child.stdout }).on("line", (line) => {
       const event = JSON.parse(line) as Event;
+
       if (event.type === "step") this.waiter?.onStep(event.text);
       else {
         const { type: _, ...outcome } = event;
@@ -48,43 +45,31 @@ export class BrowserUse {
     });
     createInterface({ input: child.stderr }).on("line", (line) => {
       this.stderr.push(line);
+
       if (this.stderr.length > 20) this.stderr.shift();
     });
+
     const fail = (reason: string) => {
       this.exited = true;
       this.settle((waiter) =>
-        waiter.reject(
-          new Error(`browser-use ${reason}.\n${this.stderr.join("\n")}`),
-        ),
+        waiter.reject(new Error(`browser-use ${reason}.\n${this.stderr.join("\n")}`)),
       );
     };
-    child.once("exit", (code, signal) =>
-      fail(`exited with ${signal ?? `code ${code}`}`),
-    );
+
+    child.once("exit", (code, signal) => fail(`exited with ${signal ?? `code ${code}`}`));
     child.once("error", (error) => fail(`did not start: ${error.message}`));
   }
 
   /** `background` keeps the agent's tab out of sight, for the user's open Helium. */
-  static async start(
-    endpoint: string,
-    background: boolean,
-  ): Promise<BrowserUse> {
-    const install = await promisify(execFile)("mise", [
-      "where",
-      "pipx:browser-use",
-    ]).catch(() => {
-      throw new Error(
-        "browser-use is not installed. Run `mise install pipx:browser-use`.",
-      );
+  static async start(endpoint: string, background: boolean): Promise<BrowserUse> {
+    const install = await promisify(execFile)("mise", ["where", "pipx:browser-use"]).catch(() => {
+      throw new Error("browser-use is not installed. Run `mise install pipx:browser-use`.");
     });
+
     return new BrowserUse(
       spawn(
         join(install.stdout.trim(), "browser-use/bin/python"),
-        [
-          join(import.meta.dirname, "agent.py"),
-          endpoint,
-          background ? "background" : "visible",
-        ],
+        [join(import.meta.dirname, "agent.py"), endpoint, background ? "background" : "visible"],
         { env: { ...process.env, ANONYMIZED_TELEMETRY: "false" } },
       ),
     );
@@ -97,6 +82,7 @@ export class BrowserUse {
   private settle(finish: (waiter: Waiter) => void) {
     const waiter = this.waiter;
     this.waiter = undefined;
+
     if (waiter) finish(waiter);
   }
 
@@ -107,12 +93,15 @@ export class BrowserUse {
     signal?: AbortSignal,
   ): Promise<Outcome> {
     if (this.exited) throw new Error("browser-use is not running.");
+
     if (this.waiter) throw new Error("browser-use is busy.");
+
     return new Promise<Outcome>((resolve, reject) => {
       const abort = () => {
         this.settle((waiter) => waiter.reject(new Error("Cancelled.")));
         void this.close("SIGINT");
       };
+
       signal?.addEventListener("abort", abort, { once: true });
       const done = () => signal?.removeEventListener("abort", abort);
       this.waiter = {
@@ -135,7 +124,9 @@ export class BrowserUse {
     if (this.exited) return;
     const exited = once(this.child, "exit");
     this.child.stdin.end();
+
     if (signal) this.child.kill(signal);
+
     if (await Promise.race([exited.then(() => true), sleep(15_000)])) return;
     this.child.kill("SIGKILL");
   }

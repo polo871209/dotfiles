@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import mdview
 
 @Suite struct MarkdownTests {
@@ -26,24 +27,26 @@ import Testing
 @Suite struct HTMLSourceTests {
     @Test func tagsStartTagsWithTheirSourceLine() {
         let html = "<!doctype html>\n<p class=\"a>b\"\n  id=x>text</p>\n<br/><IMG src=y>\n"
-        #expect(HTMLSource.annotatingLines(html) == """
-            <!doctype html>
-            <p data-mdview-line="2" class="a>b"
-              id=x>text</p>
-            <br data-mdview-line="4"/><IMG data-mdview-line="4" src=y>
+        #expect(
+            HTMLSource.annotatingLines(html) == """
+                <!doctype html>
+                <p data-mdview-line="2" class="a>b"
+                  id=x>text</p>
+                <br data-mdview-line="4"/><IMG data-mdview-line="4" src=y>
 
-            """)
+                """)
     }
 
     @Test func skipsCommentsAndRawText() {
         let html = "<!-- <p>\n -->\n<script>if (a<b) x = '<div>'\n</SCRIPT><i>\n"
-        #expect(HTMLSource.annotatingLines(html) == """
-            <!-- <p>
-             -->
-            <script data-mdview-line="3">if (a<b) x = '<div>'
-            </SCRIPT><i data-mdview-line="4">
+        #expect(
+            HTMLSource.annotatingLines(html) == """
+                <!-- <p>
+                 -->
+                <script data-mdview-line="3">if (a<b) x = '<div>'
+                </SCRIPT><i data-mdview-line="4">
 
-            """)
+                """)
     }
 }
 
@@ -85,14 +88,22 @@ import Testing
 
     @Test func servesAnHTMLDocumentOnlyTheFilesUnderItsDirectory() {
         let site = URL(filePath: "/tmp/site")
-        #expect(Assets.resolve(URL(string: "mdview://file/tmp/site/css/style.css")!, under: site) != nil)
+        #expect(
+            Assets.resolve(URL(string: "mdview://file/tmp/site/css/style.css")!, under: site) != nil
+        )
         #expect(Assets.resolve(URL(string: "mdview://file/tmp/style.css")!, under: site) == nil)
-        #expect(Assets.resolve(URL(string: "mdview://file/tmp/site/../secret.txt")!, under: site) == nil)
+        #expect(
+            Assets.resolve(URL(string: "mdview://file/tmp/site/../secret.txt")!, under: site) == nil
+        )
     }
 
     @Test func blocksScriptsFromRawHTML() throws {
-        let page = try String(contentsOf: #require(Assets.resolve(URL(string: "mdview://app/index.html")!)), encoding: .utf8)
-        let policy = try #require(page.firstMatch(of: /http-equiv="Content-Security-Policy" content="([^"]*)"/)).1
+        let page = try String(
+            contentsOf: #require(Assets.resolve(URL(string: "mdview://app/index.html")!)),
+            encoding: .utf8)
+        let policy = try #require(
+            page.firstMatch(of: /http-equiv="Content-Security-Policy" content="([^"]*)"/)
+        ).1
         var directives: [Substring: [Substring]] = [:]
         for directive in policy.split(separator: ";") {
             let words = directive.split(separator: " ")

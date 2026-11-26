@@ -65,6 +65,6 @@ Before you change pi-native behavior, read the relevant docs in the installed `@
 
 ## Layout
 
-Single-file extensions sit at the top level. Each directory is one extension, except `shared/`, which holds utilities used by several. `node_modules` links to `../npm/node_modules`.
+Single-file extensions sit at the top level. Each directory is one extension, except `shared/`, which holds utilities used by several, and `tools/`, which holds the vendored anti-slop Oxlint plugin (provenance and update notes in its `UPSTREAM.md`). Pi loads every top-level `*.ts` and `*/index.ts` as an extension, so code that is not an extension sits two levels down and tool configs stay JSON. `node_modules` links to `../npm/node_modules`.
 
 An on-off feature registers through `shared/toggle.ts`, which gives it `/<name>` for the session and `/<name> repo` for a repository default that covers every worktree.

@@ -1,32 +1,38 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 function resumeFileForBlock(blockId: string): string {
-  const stateHome =
-    process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state");
+  const stateHome = process.env.XDG_STATE_HOME || path.join(os.homedir(), ".local", "state");
+
   return path.join(stateHome, "rex", "resume", blockId.replace(/^block:/, ""));
 }
 
 export default function (pi: ExtensionAPI) {
   const blockId = process.env.REX_BLOCK;
+
   if (!blockId || process.env.PI_IS_SUBAGENT === "1") return;
   const resumeFile = resumeFileForBlock(blockId);
   let killedBySignal = false;
+
   const markKilled = () => {
     killedBySignal = true;
   };
+
   process.on("SIGTERM", markKilled);
   process.on("SIGHUP", markKilled);
 
   pi.on("session_start", (_event, ctx) => {
     if (!ctx.hasUI) return;
     const sessionFile = ctx.sessionManager.getSessionFile();
+
     if (!sessionFile) {
       fs.rmSync(resumeFile, { force: true });
+
       return;
     }
+
     fs.mkdirSync(path.dirname(resumeFile), { recursive: true });
     fs.writeFileSync(resumeFile, ["pi", "--session", sessionFile].join("\0"));
   });
@@ -34,6 +40,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_shutdown", (event) => {
     process.off("SIGTERM", markKilled);
     process.off("SIGHUP", markKilled);
+
     if (event.reason === "quit" && !killedBySignal) {
       fs.rmSync(resumeFile, { force: true });
     }

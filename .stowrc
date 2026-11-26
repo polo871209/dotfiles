@@ -14,4 +14,7 @@
 --ignore=^dot_zshenv
 --ignore=^prek\.toml
 --ignore=^skills-lock\.json
+--ignore=^\.oxfmtrc\.json
+--ignore=^\.swiftlint\.yml
+--ignore=^\.swift-format
 --adopt

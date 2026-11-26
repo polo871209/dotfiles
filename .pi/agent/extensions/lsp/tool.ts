@@ -1,3 +1,4 @@
+import * as fs from "node:fs";
 import {
   defineTool,
   withFileMutationQueue,
@@ -5,7 +6,6 @@ import {
   type AgentToolUpdateCallback,
   type ExtensionToolContext,
 } from "@earendil-works/pi-coding-agent";
-import * as fs from "node:fs";
 import { Type, type Static } from "typebox";
 import { run } from "../shared/exec";
 import { restartDaemons } from "./nvim";
@@ -28,17 +28,13 @@ async function listWorkspaceFiles(
   signal: AbortSignal | undefined,
 ): Promise<{ files: string[]; totalCandidates: number }> {
   const candidates = (
-    await run(
-      "git",
-      ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
-      signal,
-      cwd,
-    )
+    await run("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], signal, cwd)
   ).stdout
     .split("\0")
     .filter(Boolean)
     .filter((rel) => {
       const base = rel.split("/").pop() ?? rel;
+
       if (
         [
           "package-lock.json",
@@ -51,6 +47,7 @@ async function listWorkspaceFiles(
         ].includes(base)
       )
         return false;
+
       if (
         [
           "png",
@@ -82,34 +79,41 @@ async function listWorkspaceFiles(
           "webm",
           "lock",
           "log",
-        ].includes(
-          base.includes(".") ? base.split(".").pop()!.toLowerCase() : "",
-        )
+        ].includes(base.includes(".") ? base.split(".").pop()!.toLowerCase() : "")
       )
         return false;
+
       return true;
     });
+
   const files: string[] = [];
+
   for (const rel of candidates) {
     if (files.length >= 300) break;
     const abs = toAbs(rel, cwd);
+
     try {
       const st = fs.statSync(abs);
+
       if (!st.isFile() || st.size > 1_500_000) continue;
     } catch {
       continue;
     }
+
     files.push(abs);
   }
+
   return { files, totalCandidates: candidates.length };
 }
 
 interface DriverHoverResult extends DriverErr {
   text?: string;
 }
+
 interface DiagResult extends DriverErr {
   diagnostics?: Diag[];
 }
+
 interface DocSymbol {
   name: string;
   kind: string;
@@ -118,13 +122,16 @@ interface DocSymbol {
   depth: number;
   detail?: string;
 }
+
 interface DocResult extends DriverErr {
   symbols?: DocSymbol[];
 }
+
 interface RenameFileEdit {
   file: string;
   edits: number;
 }
+
 interface RenameResult extends DriverErr {
   files?: RenameFileEdit[];
   edit_count?: number;
@@ -137,8 +144,10 @@ async function runHover(
   onUpdate: AgentToolUpdateCallback | undefined,
 ): Promise<AgentToolResult<unknown>> {
   if (!params.file) return toolError('LSP error: action "hover" requires file');
+
   if (!params.line) return toolError('LSP error: action "hover" requires line');
   const file = toAbs(normalizeAtPath(params.file), ctx.cwd);
+
   return withDriver<DriverHoverResult>(
     ctx,
     "hover",
@@ -147,6 +156,7 @@ async function runHover(
     onUpdate,
     (res) => {
       const t = capText(res.text?.trim() || "No hover information");
+
       return {
         text: t.text,
         details: { line: params.line, truncated: t.truncated },
@@ -161,32 +171,29 @@ async function runDocumentSymbols(
   signal: AbortSignal | undefined,
   onUpdate: AgentToolUpdateCallback | undefined,
 ): Promise<AgentToolResult<unknown>> {
-  if (!params.file)
-    return toolError('LSP error: action "document_symbols" requires file');
+  if (!params.file) return toolError('LSP error: action "document_symbols" requires file');
   const file = toAbs(normalizeAtPath(params.file), ctx.cwd);
-  return withDriver<DocResult>(
-    ctx,
-    "document_symbols",
-    [file],
-    signal,
-    onUpdate,
-    (res, cwd) => {
-      const syms = res.symbols ?? [];
-      if (syms.length === 0) {
-        return { text: "No symbols found", details: { count: 0 } };
-      }
-      const lines = [`${syms.length} symbol(s) in ${displayPath(file, cwd)}:`];
-      for (const s of syms) {
-        lines.push(
-          `${"  ".repeat(s.depth + 1)}${s.kind} ${s.name}${s.detail ? `  ${s.detail}` : ""}  :${s.line}`,
-        );
-      }
-      return {
-        text: capText(lines.join("\n")).text,
-        details: { count: syms.length },
-      };
-    },
-  );
+
+  return withDriver<DocResult>(ctx, "document_symbols", [file], signal, onUpdate, (res, cwd) => {
+    const syms = res.symbols ?? [];
+
+    if (syms.length === 0) {
+      return { text: "No symbols found", details: { count: 0 } };
+    }
+
+    const lines = [`${syms.length} symbol(s) in ${displayPath(file, cwd)}:`];
+
+    for (const s of syms) {
+      lines.push(
+        `${"  ".repeat(s.depth + 1)}${s.kind} ${s.name}${s.detail ? `  ${s.detail}` : ""}  :${s.line}`,
+      );
+    }
+
+    return {
+      text: capText(lines.join("\n")).text,
+      details: { count: syms.length },
+    };
+  });
 }
 
 async function runRename(
@@ -195,13 +202,13 @@ async function runRename(
   signal: AbortSignal | undefined,
   onUpdate: AgentToolUpdateCallback | undefined,
 ): Promise<AgentToolResult<unknown>> {
-  if (!params.file)
-    return toolError('LSP error: action "rename" requires file');
-  if (!params.line)
-    return toolError('LSP error: action "rename" requires line');
-  if (!params.new_name)
-    return toolError('LSP error: action "rename" requires new_name');
+  if (!params.file) return toolError('LSP error: action "rename" requires file');
+
+  if (!params.line) return toolError('LSP error: action "rename" requires line');
+
+  if (!params.new_name) return toolError('LSP error: action "rename" requires new_name');
   const file = toAbs(normalizeAtPath(params.file), ctx.cwd);
+
   return withFileMutationQueue(file, () =>
     withDriver<RenameResult>(
       ctx,
@@ -211,12 +218,12 @@ async function runRename(
       onUpdate,
       (res, cwd) => {
         const files = res.files ?? [];
-        const lines = [
-          `Renamed ${res.edit_count ?? 0} edit(s) across ${files.length} file(s):`,
-        ];
+        const lines = [`Renamed ${res.edit_count ?? 0} edit(s) across ${files.length} file(s):`];
+
         for (const f of files) {
           lines.push(`  ${displayPath(f.file, cwd)}  (${f.edits} edit(s))`);
         }
+
         return {
           text: capText(lines.join("\n")).text,
           details: { count: res.edit_count ?? 0, files: files.length },
@@ -232,6 +239,7 @@ async function runRestart(
   onUpdate: AgentToolUpdateCallback | undefined,
 ): Promise<AgentToolResult<unknown>> {
   const was = await restartDaemons();
+
   return withDriver<StatusResult>(
     ctx,
     "status",
@@ -240,6 +248,7 @@ async function runRestart(
     onUpdate,
     (res) => {
       const files = res.files ?? [];
+
       return {
         text: `LSP restarted (${was ? "killed previous daemon" : "no daemon was running"}); fresh nvim ready with ${files.length} buffer(s).`,
         details: { restarted: was, buffers: files.length },
@@ -258,18 +267,14 @@ async function runDiagnostics(
   let files: string[];
   let workspaceNote = "";
 
-  if (
-    (!params.files || params.files.length === 0) &&
-    (!params.file || params.file === "*")
-  ) {
-    const { files: wsFiles, totalCandidates } = await listWorkspaceFiles(
-      ctx.cwd,
-      signal,
-    );
+  if ((!params.files || params.files.length === 0) && (!params.file || params.file === "*")) {
+    const { files: wsFiles, totalCandidates } = await listWorkspaceFiles(ctx.cwd, signal);
     files = wsFiles;
+
     if (files.length === 0) {
       return toolError("LSP error: no workspace files found (not a git repo?)");
     }
+
     if (totalCandidates > files.length) {
       workspaceNote = `[workspace: showing ${files.length}/${totalCandidates} files]\n\n`;
     }
@@ -279,44 +284,31 @@ async function runDiagnostics(
     files = [toAbs(normalizeAtPath(params.file!), ctx.cwd)];
   }
 
-  return withDriver<DiagResult>(
-    ctx,
-    "diagnostics",
-    [files],
-    signal,
-    onUpdate,
-    (res, cwd) => {
-      const diags = sortDiagnostics(res.diagnostics ?? []);
-      const errors = diags.filter((d) => d.severity === "error").length;
-      const warns = diags.filter((d) => d.severity === "warn").length;
+  return withDriver<DiagResult>(ctx, "diagnostics", [files], signal, onUpdate, (res, cwd) => {
+    const diags = sortDiagnostics(res.diagnostics ?? []);
+    const errors = diags.filter((d) => d.severity === "error").length;
+    const warns = diags.filter((d) => d.severity === "warn").length;
 
-      if (diags.length === 0) {
-        return {
-          text: `${workspaceNote}No diagnostics ✓`,
-          details: { count: 0, errors: 0, warns: 0 },
-        };
-      }
-
-      const lines = [
-        `${diags.length} diagnostic(s) (${errors} error, ${warns} warn):`,
-      ];
-      for (const d of diags) lines.push(formatDiagLine(d, cwd));
+    if (diags.length === 0) {
       return {
-        text: capText(`${workspaceNote}${lines.join("\n")}`).text,
-        details: { count: diags.length, errors, warns },
+        text: `${workspaceNote}No diagnostics ✓`,
+        details: { count: 0, errors: 0, warns: 0 },
       };
-    },
-  );
+    }
+
+    const lines = [`${diags.length} diagnostic(s) (${errors} error, ${warns} warn):`];
+
+    for (const d of diags) lines.push(formatDiagLine(d, cwd));
+
+    return {
+      text: capText(`${workspaceNote}${lines.join("\n")}`).text,
+      details: { count: diags.length, errors, warns },
+    };
+  });
 }
 
 const parameters = Type.Object({
-  action: Type.Enum([
-    "hover",
-    "document_symbols",
-    "diagnostics",
-    "rename",
-    "restart",
-  ]),
+  action: Type.Enum(["hover", "document_symbols", "diagnostics", "rename", "restart"]),
   file: Type.Optional(
     Type.String({
       description:
@@ -368,17 +360,15 @@ export const lspTool = defineTool({
     ),
     errors: Type.Optional(Type.Number()),
     warns: Type.Optional(Type.Number()),
-    files: Type.Optional(
-      Type.Number({ description: "Files a rename touched" }),
-    ),
+    files: Type.Optional(Type.Number({ description: "Files a rename touched" })),
     truncated: Type.Optional(Type.Boolean()),
   }),
   async execute(_id, params, signal, onUpdate, ctx) {
     const result = await dispatch(params, ctx, signal, onUpdate);
     const details = (result.details ?? {}) as Record<string, unknown>;
-    const pick = (key: string) =>
-      details[key] === undefined ? {} : { [key]: details[key] };
+    const pick = (key: string) => (details[key] === undefined ? {} : { [key]: details[key] });
     const first = result.content[0];
+
     return {
       ...result,
       structuredContent: {

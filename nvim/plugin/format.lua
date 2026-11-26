@@ -18,12 +18,38 @@ vim.keymap.set('n', '<leader>m', function()
     vim.cmd 'TSJToggle'
 end, { desc = 'Toggle split/join' })
 
-local biome_configs = { 'biome.json', 'biome.jsonc', '.biome.json', '.biome.jsonc' }
-local function biome_or_prettier(bufnr)
-    local path = vim.api.nvim_buf_get_name(bufnr)
-    if vim.fs.find(biome_configs, { upward = true, path = path })[1] then return { 'biome' } end
-    if require('conform.formatters.prettierd').cwd(nil, { dirname = vim.fs.dirname(path) }) then return { 'prettier' } end
-    return { 'biome' }
+local BIOME_CONFIGS = { 'biome.json', 'biome.jsonc', '.biome.json', '.biome.jsonc' }
+local OXFMT_CONFIGS = { '.oxfmtrc.json', '.oxfmtrc.jsonc', 'oxfmt.config.ts' }
+
+---@param dir string
+---@return string
+local function real(dir) return vim.uv.fs_realpath(dir) or dir end
+
+---@param bufnr integer
+---@return string
+local function real_dir(bufnr) return real(vim.fs.dirname(vim.api.nvim_buf_get_name(bufnr))) end
+
+---@param dir string
+---@return string?
+local function prettier_root(dir) return require('conform.formatters.prettierd').cwd(nil, { dirname = dir }) end
+
+---@param bufnr integer
+---@return string[]
+local function code_formatter(bufnr)
+    local dir = real_dir(bufnr)
+    if not vim.fs.root(dir, OXFMT_CONFIGS) then
+        if vim.fs.root(dir, BIOME_CONFIGS) then return { 'biome' } end
+        if prettier_root(dir) then return { 'prettier' } end
+    end
+    return { 'oxfmt' }
+end
+
+---@param bufnr integer
+---@return string[]
+local function markup_formatter(bufnr)
+    local dir = real_dir(bufnr)
+    if not vim.fs.root(dir, OXFMT_CONFIGS) and prettier_root(dir) then return { 'prettier' } end
+    return { 'oxfmt' }
 end
 
 local autoformat = require 'autoformat'
@@ -43,39 +69,40 @@ require('conform').setup {
         bzl = { 'buildifier' },
         c = { 'clang-format' },
         cpp = { 'clang-format' },
-        css = biome_or_prettier,
+        css = code_formatter,
         cue = { 'cue_fmt' },
         go = { 'goimports' },
-        html = biome_or_prettier,
-        javascript = biome_or_prettier,
-        javascriptreact = biome_or_prettier,
-        json = biome_or_prettier,
+        html = code_formatter,
+        javascript = code_formatter,
+        javascriptreact = code_formatter,
+        json = code_formatter,
+        jsonc = code_formatter,
         jsonnet = { 'jsonnetfmt' },
         lua = { 'stylua' },
-        markdown = { 'prettier' },
+        markdown = markup_formatter,
         proto = { 'buf' },
         python = { 'ruff_fix', 'ruff_format', 'ruff_organize_imports' },
         rust = { 'rustfmt' },
         sql = { 'sqlfluff' },
-        swift = { 'swiftlint', lsp_format = 'last' },
+        swift = { 'swiftlint', 'swift' },
         tf = { 'terraform_fmt' },
-        typescript = biome_or_prettier,
-        typescriptreact = biome_or_prettier,
-        yaml = { 'prettier' },
-        ['yaml.docker-compose'] = { 'prettier' },
-        ['yaml.github'] = { 'prettier' },
-        ['yaml.gitlab'] = { 'prettier' },
+        toml = { 'taplo' },
+        typescript = code_formatter,
+        typescriptreact = code_formatter,
+        yaml = markup_formatter,
+        ['yaml.docker-compose'] = markup_formatter,
+        ['yaml.github'] = markup_formatter,
+        ['yaml.gitlab'] = markup_formatter,
         zig = { 'zigfmt' },
     },
     formatters = {
-        -- conform's biome runs in nvim's cwd when the file has no biome config, and biome then reads that cwd's biome.json.
+        -- Biome reads its configuration from the working directory, not from the formatted file's path.
         biome = {
-            cwd = function(_, ctx) return vim.fs.root(ctx.dirname, biome_configs) or ctx.dirname end,
-            args = function(_, ctx)
-                if vim.fs.root(ctx.dirname, biome_configs) then return { 'format', '--stdin-file-path', '$FILENAME' } end
-                local indent_style = vim.bo[ctx.buf].expandtab and 'space' or 'tab'
-                return { 'format', '--stdin-file-path', '$FILENAME', '--indent-style', indent_style, '--indent-width', tostring(ctx.shiftwidth) }
-            end,
+            cwd = function(_, ctx) return vim.fs.root(real(ctx.dirname), BIOME_CONFIGS) end,
+        },
+        -- oxfmt reads .editorconfig only from its working directory, and conform defaults that to nvim's cwd.
+        oxfmt = {
+            cwd = function(_, ctx) return real(ctx.dirname) end,
         },
         prettier = {
             prepend_args = { '--prose-wrap', 'preserve' },
@@ -87,7 +114,7 @@ require('conform').setup {
         swiftlint = {
             stdin = false,
             args = { 'lint', '--fix', '--quiet', '--no-cache', '$FILENAME' },
-            cwd = function(_, ctx) return vim.fs.root(ctx.buf, '.swiftlint.yml') or ctx.dirname end,
+            cwd = function(_, ctx) return vim.fs.root(real(ctx.dirname), '.swiftlint.yml') or real(ctx.dirname) end,
         },
     },
 }

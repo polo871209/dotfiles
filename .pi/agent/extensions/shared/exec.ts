@@ -14,12 +14,14 @@ export function run(
   timeoutMs: number = 120_000,
 ): Promise<ExecResult> {
   const timeout = AbortSignal.timeout(timeoutMs);
+
   return new Promise((resolve) => {
     const child = spawn(cmd, args, {
       cwd,
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       stdio: ["ignore", "pipe", "pipe"],
     });
+
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8").on("data", (d: string) => (stdout += d));

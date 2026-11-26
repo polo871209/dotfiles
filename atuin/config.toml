@@ -2,16 +2,16 @@ search_mode = "daemon-fuzzy"
 enter_accept = true
 
 history_filter = [
-	"^cls$",
-	"^clear$",
-	"^ls$",
-	"^ls -la?$",
-	"^cd$",
-	"^cd \\.\\.$",
-	"^cd -$",
-	"^pwd$",
-	"^z$",
-	"^.{1,3}$",
+  "^cls$",
+  "^clear$",
+  "^ls$",
+  "^ls -la?$",
+  "^cd$",
+  "^cd \\.\\.$",
+  "^cd -$",
+  "^pwd$",
+  "^z$",
+  "^.{1,3}$",
 ]
 
 [daemon]
@@ -29,6 +29,6 @@ enabled = false
 
 [keymap.emacs]
 "left" = [
-	{ when = "cursor-at-start", action = "copy" },
-	{ action = "cursor-left" },
+  { when = "cursor-at-start", action = "copy" },
+  { action = "cursor-left" },
 ]

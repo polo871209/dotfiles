@@ -1,5 +1,5 @@
-import { contentText } from "@earendil-works/pi-ai";
 import { createHash } from "node:crypto";
+import { contentText } from "@earendil-works/pi-ai";
 import {
   copyToClipboard,
   type ExtensionAPI,
@@ -27,29 +27,31 @@ const COPY_LINK = /^pi-copy:(\w+)$/;
 const parseFences = (lines: string[]): Fence[] => {
   const fences: Fence[] = [];
   let i = 0;
+
   while (i < lines.length) {
     const open = lines[i].match(/^( *)(`{3,}|~{3,})(.*)$/);
+
     if (!open) {
       i++;
       continue;
     }
+
     const [, indent, marker, info] = open;
     const close = new RegExp(`^ *${marker[0]}{${marker.length},}\\s*$`);
     const codeLines: string[] = [];
     let j = i + 1;
+
     while (j < lines.length && !close.test(lines[j])) {
       const line = lines[j];
-      codeLines.push(
-        line.slice(
-          Math.min(indent.length, line.length - line.trimStart().length),
-        ),
-      );
+      codeLines.push(line.slice(Math.min(indent.length, line.length - line.trimStart().length)));
       j++;
     }
+
     const lang = info
       .trim()
       .split(/\s+/)[0]
       .replace(/[^\w+.-]/g, "");
+
     fences.push({
       indent,
       marker,
@@ -61,6 +63,7 @@ const parseFences = (lines: string[]): Fence[] => {
     });
     i = j + 1;
   }
+
   return fences;
 };
 
@@ -71,8 +74,10 @@ const textMessages = (ctx: ExtensionContext): TextMessage[] =>
   ctx.sessionManager.getBranch().flatMap((entry): TextMessage[] => {
     if (entry.type !== "message") return [];
     const { role } = entry.message;
+
     if (role !== "user" && role !== "assistant") return [];
     const text = contentText(entry.message.content).trim();
+
     return text ? [{ role, text }] : [];
   });
 
@@ -93,19 +98,26 @@ const copyBlocks = async (ctx: ExtensionContext): Promise<void> => {
   const text = textMessages(ctx)
     .filter((m) => m.role === "assistant")
     .at(-1)?.text;
+
   if (!text) {
     ctx.ui.notify("No assistant messages yet", "warning");
+
     return;
   }
+
   const blocks = parseFences(text.split("\n"));
+
   if (blocks.length === 0) return copyWithNotify(ctx, text, "response");
-  if (blocks.length === 1)
-    return copyWithNotify(ctx, blocks[0].code, "code block");
+
+  if (blocks.length === 1) return copyWithNotify(ctx, blocks[0].code, "code block");
+
   const labels = blocks.map(
     (b, i) =>
       `Block ${i + 1} [${b.lang ?? "txt"}] — ${b.code.split("\n").length}L — ${preview(b.code)}`,
   );
+
   const selected = await ctx.ui.select("Select a code block to copy", labels);
+
   if (selected === undefined) return;
   const index = labels.indexOf(selected);
   await copyWithNotify(ctx, blocks[index].code, `code block ${index + 1}`);
@@ -125,22 +137,23 @@ export default function (pi: ExtensionAPI) {
     description: "Copy entire session history (user + assistant) as markdown",
     handler: async (_args, ctx) => {
       const messages = textMessages(ctx);
+
       if (messages.length === 0) {
         ctx.ui.notify("Session is empty", "warning");
+
         return;
       }
+
       const name = ctx.sessionManager.getSessionName();
+
       const text = [
         ...(name ? [`# ${name}`, ""] : []),
         ...messages.flatMap((m) => [`## ${m.role}`, "", m.text, ""]),
       ]
         .join("\n")
         .trimEnd();
-      await copyWithNotify(
-        ctx,
-        `${text}\n`,
-        `session (${messages.length} messages)`,
-      );
+
+      await copyWithNotify(ctx, `${text}\n`, `session (${messages.length} messages)`);
     },
   });
 
@@ -155,8 +168,10 @@ export default function (pi: ExtensionAPI) {
   });
   pi.events.on(LINK_OPEN, (url) => {
     const key = typeof url === "string" && COPY_LINK.exec(url)?.[1];
+
     if (!key || !currentCtx) return;
     const code = blocks.get(key);
+
     if (code === undefined)
       currentCtx.ui.notify("That code block is no longer on screen", "warning");
     else void copyWithNotify(currentCtx, code, "code block");
@@ -166,12 +181,15 @@ export default function (pi: ExtensionAPI) {
     (markdown, context) => {
       if (!linksReady || context.isStreaming) return markdown;
       const lines = markdown.split("\n");
+
       const fences = parseFences(lines).filter(
         (f) => f.closed && f.lang?.toLowerCase() !== "mermaid",
       );
+
       if (fences.length === 0) return markdown;
       const out: string[] = [];
       let cursor = 0;
+
       for (const fence of fences) {
         const key = hashKey(fence.code);
         blocks.set(key, fence.code);
@@ -180,9 +198,12 @@ export default function (pi: ExtensionAPI) {
           `${fence.indent}[${icon.contentCopy} copy](pi-copy:${key})`,
         );
         cursor = fence.end + 1;
+
         if (lines[cursor]?.trim()) out.push("");
       }
+
       out.push(...lines.slice(cursor));
+
       return out.join("\n");
     },
     { messageTypes: ["assistant"] },

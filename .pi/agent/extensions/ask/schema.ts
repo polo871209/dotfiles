@@ -6,6 +6,7 @@ export const MAX_HEADER_LENGTH = 16;
 export const MAX_LABEL_LENGTH = 60;
 
 type RowKind = "option" | "other" | "next";
+
 type SentinelKind = Exclude<RowKind, "option">;
 
 interface RowIntentMeta {
@@ -56,14 +57,17 @@ const RESERVED_LABELS: readonly string[] = [
 
 export function sentinelsToAppend(question: QuestionData): SentinelKind[] {
   const out: SentinelKind[] = [];
+
   for (const k of ["other", "next"] satisfies readonly SentinelKind[]) {
     const meta = ROW_INTENT_META[k];
+
     if (question.multiSelect === true) {
       if (meta.autoAppendOnMultiSelect) out.push(k);
     } else if (meta.autoAppendOnSingleSelect) {
       out.push(k);
     }
   }
+
   return out;
 }
 
@@ -80,8 +84,7 @@ const QuestionSchema = Type.Object({
         description: `Option text, 1 to 5 words, at most ${MAX_LABEL_LENGTH} characters. Put a recommended option first and end its label with "(Recommended)". "Other", "Type something.", and "Next" are reserved.`,
       }),
       description: Type.String({
-        description:
-          "What choosing this option means, including its trade-off.",
+        description: "What choosing this option means, including its trade-off.",
       }),
     }),
     {
@@ -102,6 +105,7 @@ export const QuestionParamsSchema = Type.Object({
 });
 
 export type QuestionData = Static<typeof QuestionSchema>;
+
 export type QuestionParams = Static<typeof QuestionParamsSchema>;
 
 const QuestionnaireErrorSchema = Type.Union([
@@ -116,11 +120,7 @@ const QuestionnaireErrorSchema = Type.Union([
 const QuestionAnswerSchema = Type.Object({
   questionIndex: Type.Number(),
   question: Type.String(),
-  kind: Type.Union([
-    Type.Literal("option"),
-    Type.Literal("custom"),
-    Type.Literal("multi"),
-  ]),
+  kind: Type.Union([Type.Literal("option"), Type.Literal("custom"), Type.Literal("multi")]),
   answer: Type.Union([Type.String(), Type.Null()]),
   selected: Type.Optional(Type.Array(Type.String())),
   custom: Type.Optional(Type.String()),
@@ -133,11 +133,12 @@ export const QuestionnaireResultSchema = Type.Object({
 });
 
 export type QuestionAnswer = Static<typeof QuestionAnswerSchema>;
+
 export type QuestionnaireResult = Static<typeof QuestionnaireResultSchema>;
+
 type QuestionnaireError = Static<typeof QuestionnaireErrorSchema>;
 
-type ValidationResult =
-  { ok: true } | { ok: false; error: QuestionnaireError; message: string };
+type ValidationResult = { ok: true } | { ok: false; error: QuestionnaireError; message: string };
 
 export function validateQuestionnaire(typed: QuestionParams): ValidationResult {
   if (typed.questions.length === 0) {
@@ -149,6 +150,7 @@ export function validateQuestionnaire(typed: QuestionParams): ValidationResult {
   }
 
   const seenQuestions = new Set<string>();
+
   for (const q of typed.questions) {
     if (seenQuestions.has(q.question)) {
       return {
@@ -157,6 +159,7 @@ export function validateQuestionnaire(typed: QuestionParams): ValidationResult {
         message: "Error: Question text must be unique within an invocation",
       };
     }
+
     seenQuestions.add(q.question);
   }
 
@@ -168,7 +171,9 @@ export function validateQuestionnaire(typed: QuestionParams): ValidationResult {
         message: "Error: Each question requires at least one option",
       };
     }
+
     const seenLabels = new Set<string>();
+
     for (const o of q.options) {
       if (RESERVED_LABELS.includes(o.label)) {
         return {
@@ -177,6 +182,7 @@ export function validateQuestionnaire(typed: QuestionParams): ValidationResult {
           message: `Error: Option label is reserved (${RESERVED_LABELS.join(", ")})`,
         };
       }
+
       if (seenLabels.has(o.label)) {
         return {
           ok: false,
@@ -184,6 +190,7 @@ export function validateQuestionnaire(typed: QuestionParams): ValidationResult {
           message: "Error: Option labels must be unique within a question",
         };
       }
+
       seenLabels.add(o.label);
     }
   }
@@ -198,8 +205,10 @@ export function formatAnswerScalar(a: QuestionAnswer): string {
   switch (a.kind) {
     case "multi": {
       const parts = [...(a.selected ?? []), ...(a.custom ? [a.custom] : [])];
+
       return parts.length > 0 ? parts.join(", ") : NO_INPUT_PLACEHOLDER;
     }
+
     case "custom":
       return a.answer && a.answer.length > 0 ? a.answer : NO_INPUT_PLACEHOLDER;
     case "option":
@@ -209,6 +218,7 @@ export function formatAnswerScalar(a: QuestionAnswer): string {
 
 function buildAnswerSegment(a: QuestionAnswer, echoQuestion: boolean): string {
   const answer = formatAnswerScalar(a);
+
   return echoQuestion ? `"${a.question}"="${answer}"` : answer;
 }
 
@@ -220,26 +230,28 @@ export function buildToolResult(text: string, details: QuestionnaireResult) {
   };
 }
 
-export function buildQuestionnaireResponse(
-  result: QuestionnaireResult,
-  params: QuestionParams,
-) {
+export function buildQuestionnaireResponse(result: QuestionnaireResult, params: QuestionParams) {
   if (result.cancelled) {
     return buildToolResult(DECLINE_MESSAGE, {
       answers: result.answers,
       cancelled: true,
     });
   }
+
   const segments: string[] = [];
+
   for (let i = 0; i < params.questions.length; i++) {
     const a = result.answers.find((x) => x.questionIndex === i);
+
     if (a) segments.push(buildAnswerSegment(a, params.questions.length > 1));
   }
+
   if (segments.length === 0) {
     return buildToolResult(DECLINE_MESSAGE, {
       answers: result.answers,
       cancelled: true,
     });
   }
+
   return buildToolResult(`User answered: ${segments.join(" ")}`, result);
 }

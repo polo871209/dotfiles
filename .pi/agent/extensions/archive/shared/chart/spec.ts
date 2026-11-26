@@ -53,19 +53,19 @@ export const chartSpecSchema = Type.Object({
 });
 
 export type ChartSpec = Static<typeof chartSpecSchema>;
+
 export type ChartSeries = ChartSpec["series"][number];
+
 export type ChartKind = (typeof CHART_KINDS)[number];
 
 export const pointCount = (x: ChartSpec["x"]): number | undefined =>
-  "values" in x
-    ? x.values.length
-    : "categories" in x
-      ? x.categories.length
-      : undefined;
+  "values" in x ? x.values.length : "categories" in x ? x.categories.length : undefined;
 
 export function xAt(x: ChartSpec["x"], index: number): number {
   if ("values" in x) return x.values[index]!;
+
   if ("start" in x) return x.start + index * x.step;
+
   return index;
 }
 
@@ -73,20 +73,21 @@ export function xAt(x: ChartSpec["x"], index: number): number {
 export function checkSpec(spec: ChartSpec): void {
   const expected = pointCount(spec.x);
   const kind = spec.kind ?? "line";
+
   if (spec.x.type === "category" && kind !== "bar")
     throw new Error(`A category x axis needs kind "bar", not "${kind}".`);
+
   for (const s of spec.series) {
     if (expected !== undefined && s.values.length !== expected)
       throw new Error(
         `Series "${s.name}" has ${s.values.length} values for ${expected} x positions.`,
       );
+
     if (s.values.some((v) => v !== null && !Number.isFinite(v)))
       throw new Error(`Series "${s.name}" holds a value that is not finite.`);
   }
-  if (
-    "values" in spec.x &&
-    spec.x.values.some((v, i, all) => i > 0 && v < all[i - 1]!)
-  )
+
+  if ("values" in spec.x && spec.x.values.some((v, i, all) => i > 0 && v < all[i - 1]!))
     throw new Error("x values must be in ascending order.");
 }
 
@@ -105,6 +106,7 @@ export function seriesStats(series: ChartSeries): SeriesStats | undefined {
   let sum = 0;
   let points = 0;
   let last = NaN;
+
   for (const v of series.values) {
     if (v === null) continue;
     min = Math.min(min, v);
@@ -113,7 +115,9 @@ export function seriesStats(series: ChartSeries): SeriesStats | undefined {
     points++;
     last = v;
   }
+
   if (points === 0) return undefined;
+
   return { name: series.name, points, last, min, max, mean: sum / points };
 }
 

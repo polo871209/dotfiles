@@ -1,23 +1,18 @@
-import {
-  type ExtensionAPI,
-  withFileMutationQueue,
-} from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { displayPath, formatDiagLine, sortDiagnostics, toAbs } from "../utils";
-import {
-  ensureFeedbackLoaded,
-  formatFile,
-  MAX_FILE_BYTES,
-  runDriver,
-} from "./driver";
-import { changeNote } from "./diff";
+import { type ExtensionAPI, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import { HIDE_REST_OF_RUN } from "../../shared/transcript";
+import { displayPath, formatDiagLine, sortDiagnostics, toAbs } from "../utils";
+import { changeNote } from "./diff";
+import { ensureFeedbackLoaded, formatFile, MAX_FILE_BYTES, runDriver } from "./driver";
+
 const isRebasing = (cwd: string): boolean => {
   let dir = cwd;
+
   for (let i = 0; i < 8; i++) {
     const dotGit = path.join(dir, ".git");
+
     if (fs.existsSync(dotGit)) {
       const gitDir = fs.statSync(dotGit).isFile()
         ? path.resolve(
@@ -28,6 +23,7 @@ const isRebasing = (cwd: string): boolean => {
               .trim(),
           )
         : dotGit;
+
       return (
         fs.existsSync(path.join(gitDir, "rebase-merge")) ||
         fs.existsSync(path.join(gitDir, "rebase-apply")) ||
@@ -35,10 +31,13 @@ const isRebasing = (cwd: string): boolean => {
         fs.existsSync(path.join(gitDir, "CHERRY_PICK_HEAD"))
       );
     }
+
     const parent = path.dirname(dir);
+
     if (parent === dir) break;
     dir = parent;
   }
+
   return false;
 };
 
@@ -49,6 +48,7 @@ const SKIP_PREFIXES = [
   "/private/var/folders/",
   `${os.tmpdir()}${path.sep}`,
 ];
+
 const isScratchPath = (abs: string): boolean => {
   const real = (() => {
     try {
@@ -57,11 +57,15 @@ const isScratchPath = (abs: string): boolean => {
       return abs;
     }
   })();
+
   return SKIP_PREFIXES.some((p) => abs.startsWith(p) || real.startsWith(p));
 };
+
 const isIgnoredPath = (abs: string, cwd: string): boolean => {
   const rel = path.relative(cwd, abs);
+
   if (!rel || rel.startsWith("..")) return false;
+
   return rel
     .split(path.sep)
     .some((seg) =>
@@ -87,8 +91,10 @@ const isIgnoredPath = (abs: string, cwd: string): boolean => {
 
 const extractPath = (input: unknown): string | undefined => {
   if (!input || typeof input !== "object") return;
+
   for (const k of ["path", "file_path", "filePath", "filename", "file"]) {
     const v = (input as Record<string, unknown>)[k];
+
     if (typeof v === "string" && v) return v;
   }
 };
@@ -113,27 +119,32 @@ export function registerFeedback(pi: ExtensionAPI): void {
 
   pi.on("before_agent_start", async (event) => {
     if (event.messageType !== "user") return;
+
     if (allEditsChecked) touched.clear();
     repairFollowups = 0;
   });
 
-  const processFile = async (
-    abs: string,
-    cwd: string,
-  ): Promise<string | undefined> => {
+  const processFile = async (abs: string, cwd: string): Promise<string | undefined> => {
     if (!fs.existsSync(abs)) return;
+
     if (isScratchPath(abs)) return;
+
     if (!isIgnoredPath(abs, cwd)) {
       touched.add(abs);
       allEditsChecked = false;
     }
+
     return withFileMutationQueue(abs, async () => {
       try {
         const before = fs.readFileSync(abs, "utf8");
+
         if (Buffer.byteLength(before) > MAX_FILE_BYTES) return;
+
         if (!(await formatFile(abs, cwd))) return;
         const after = fs.readFileSync(abs, "utf8");
+
         if (after === before) return;
+
         return changeNote(before, after, displayPath(abs, cwd));
       } catch {
         return;
@@ -146,38 +157,47 @@ export function registerFeedback(pi: ExtensionAPI): void {
 
     if (!["edit", "write"].includes(event.toolName)) return;
     const p = extractPath(event.input);
+
     if (!p) return;
     const note = await processFile(toAbs(p, ctx.cwd), ctx.cwd);
-    if (note)
-      return { content: [...event.content, { type: "text", text: note }] };
+
+    if (note) return { content: [...event.content, { type: "text", text: note }] };
   });
 
   pi.on("agent_before_settle", async (event, ctx) => {
     if (event.outcome !== "completed") return;
+
     if (touched.size === 0 || repairFollowups >= 2) return;
     const projectCwd = ctx.cwd;
+
     if (isRebasing(projectCwd)) return;
     const result = await runDriver(Array.from(touched), projectCwd, ctx.signal);
+
     if (!result) {
       if (++consecutiveMissedPasses >= 2) {
         allEditsChecked = true;
         consecutiveMissedPasses = 0;
       }
+
       return;
     }
+
     consecutiveMissedPasses = 0;
     allEditsChecked = true;
+
     const changed = result.formatted.length
       ? `[lsp-feedback] auto-fixed and saved ${result.formatted.map((f) => `\`${displayPath(f, projectCwd)}\``).join(", ")}. Re-read before the next edit to them.`
       : "";
+
     const diagnostics = sortDiagnostics(
-      result.diagnostics.filter(
-        (d) => d.severity === "error" || d.severity === "warn",
-      ),
+      result.diagnostics.filter((d) => d.severity === "error" || d.severity === "warn"),
     );
+
     if (diagnostics.length === 0) {
       touched.clear();
+
       if (!changed) return;
+
       return {
         entries: [
           ...event.entries,
@@ -190,8 +210,10 @@ export function registerFeedback(pi: ExtensionAPI): void {
         ],
       };
     }
+
     repairFollowups++;
     pi.events.emit(HIDE_REST_OF_RUN, undefined);
+
     return {
       entries: [
         ...event.entries,

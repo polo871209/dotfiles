@@ -62,7 +62,8 @@ final class Viewer: NSObject, NSWindowDelegate {
         for name in ["comment", "editing"] {
             htmlConfig.userContentController.add(bridge, contentWorld: Self.htmlWorld, name: name)
         }
-        htmlPage = WebPage(configuration: htmlConfig, navigationDecider: Links(allowsPageNavigation: true))
+        htmlPage = WebPage(
+            configuration: htmlConfig, navigationDecider: Links(allowsPageNavigation: true))
         htmlPage.isInspectable = true
         self.page = page
         screen = Screen(page: page)
@@ -102,11 +103,14 @@ final class Viewer: NSObject, NSWindowDelegate {
 
     private static let htmlWorld = WKContentWorld.world(name: "mdview")
 
-    private static func addScripts(to controller: WKUserContentController, in world: WKContentWorld) {
+    private static func addScripts(to controller: WKUserContentController, in world: WKContentWorld)
+    {
         controller.add(Clipboard(), contentWorld: world, name: "copy")
         for name in ["copy.js", "comment.js"] {
             controller.addUserScript(
-                WKUserScript(source: resource(name), injectionTime: .atDocumentEnd, forMainFrameOnly: true, in: world)
+                WKUserScript(
+                    source: resource(name), injectionTime: .atDocumentEnd, forMainFrameOnly: true,
+                    in: world)
             )
         }
     }
@@ -127,7 +131,8 @@ final class Viewer: NSObject, NSWindowDelegate {
 
     private static let restyle: WKUserScript = {
         let css = resource("theme.css") + "\n" + resource("html.css")
-        let literal = (try? JSONEncoder().encode(css)).flatMap { String(bytes: $0, encoding: .utf8) } ?? "''"
+        let literal =
+            (try? JSONEncoder().encode(css)).flatMap { String(bytes: $0, encoding: .utf8) } ?? "''"
         let source = """
             document.documentElement.append(Object.assign(document.createElement("style"), { textContent: \(literal) }))
             """
@@ -137,7 +142,9 @@ final class Viewer: NSObject, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) { NSApp.terminate(nil) }
 
     func go(_ delta: Int) {
-        Task { _ = try? await page.callJavaScript("history.go(delta)", arguments: ["delta": delta]) }
+        Task {
+            _ = try? await page.callJavaScript("history.go(delta)", arguments: ["delta": delta])
+        }
     }
 
     func show(_ message: Message) {
@@ -160,7 +167,9 @@ final class Viewer: NSObject, NSWindowDelegate {
     }
 
     func choose(_ request: Choose) {
-        let listeners = request.choose.map { ["sock": $0.sock, "window": $0.window, "label": $0.label] }
+        let listeners = request.choose.map {
+            ["sock": $0.sock, "window": $0.window, "label": $0.label]
+        }
         callComment("choose(listeners)", arguments: ["listeners": listeners])
     }
 
@@ -231,7 +240,10 @@ final class Viewer: NSObject, NSWindowDelegate {
         do {
             _ = try await page.callJavaScript(
                 "mdview.update(html, base, path, top)",
-                arguments: ["html": Markdown.html(message.text), "base": base, "path": message.path, "top": message.top]
+                arguments: [
+                    "html": Markdown.html(message.text), "base": base, "path": message.path,
+                    "top": message.top,
+                ]
             )
         } catch {
             report(error)
@@ -261,7 +273,9 @@ private final class Panel: NSPanel {
 }
 
 private final class Clipboard: NSObject, WKScriptMessageHandler {
-    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+    func userContentController(
+        _ controller: WKUserContentController, didReceive message: WKScriptMessage
+    ) {
         guard let text = message.body as? String else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
@@ -272,11 +286,15 @@ private final class Bridge: NSObject, WKScriptMessageHandler {
     var scrolled: (Scroll) -> Void = { _ in }
     var editing: (Bool) -> Void = { _ in }
 
-    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+    func userContentController(
+        _ controller: WKUserContentController, didReceive message: WKScriptMessage
+    ) {
         if message.name == "editing" {
             return editing(message.body as? Bool ?? false)
         }
-        guard let body = message.body as? [String: Any], let path = body["path"] as? String else { return }
+        guard let body = message.body as? [String: Any], let path = body["path"] as? String else {
+            return
+        }
         switch message.name {
         case "scroll":
             guard let top = body["top"] as? Int else { return }
@@ -285,10 +303,13 @@ private final class Bridge: NSObject, WKScriptMessageHandler {
             toNvim(scroll)
         case "comment":
             guard let comment = body["comment"] as? String,
-                  let sline = body["sline"] as? Int,
-                  let eline = body["eline"] as? Int
+                let sline = body["sline"] as? Int,
+                let eline = body["eline"] as? Int
             else { return }
-            toNvim(Comment(comment: comment, path: path, sline: sline, eline: eline, target: body["target"] as? String))
+            toNvim(
+                Comment(
+                    comment: comment, path: path, sline: sline, eline: eline,
+                    target: body["target"] as? String))
         default:
             toNvim(Open(open: path, anchor: nil))
         }
@@ -303,16 +324,23 @@ private struct Links: WebPage.NavigationDeciding {
     ) async -> WKNavigationActionPolicy {
         guard let url = action.request.url else { return .cancel }
         if url == index { return .allow }
-        guard action.navigationType == .linkActivated else { return allowsPageNavigation ? .allow : .cancel }
+        guard action.navigationType == .linkActivated else {
+            return allowsPageNavigation ? .allow : .cancel
+        }
         let document = { (url: URL?) in url?.absoluteString.prefix { $0 != "#" } }
-        if allowsPageNavigation, url.fragment != nil, document(url) == document(action.source.request.url) {
+        if allowsPageNavigation, url.fragment != nil,
+            document(url) == document(action.source.request.url)
+        {
             return .allow
         }
         switch url.scheme {
         case "http", "https", "mailto":
             NSWorkspace.shared.open(url)
         case "mdview" where url.host() == "file", "file":
-            toNvim(Open(open: url.path(percentEncoded: false), anchor: url.fragment(percentEncoded: false)))
+            toNvim(
+                Open(
+                    open: url.path(percentEncoded: false),
+                    anchor: url.fragment(percentEncoded: false)))
         default:
             break
         }

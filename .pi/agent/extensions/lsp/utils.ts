@@ -1,3 +1,4 @@
+import * as path from "node:path";
 import {
   DEFAULT_MAX_BYTES,
   DEFAULT_MAX_LINES,
@@ -5,7 +6,6 @@ import {
   type AgentToolResult,
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
-import * as path from "node:path";
 import { errorMessage } from "../shared/error";
 import { callDriver } from "./nvim";
 
@@ -14,10 +14,13 @@ export const capText = (full: string): { text: string; truncated: boolean } => {
     maxLines: DEFAULT_MAX_LINES,
     maxBytes: DEFAULT_MAX_BYTES,
   });
+
   let text = t.content;
+
   if (t.truncated) {
     text += `\n\n[truncated: shown ${t.outputLines}/${t.totalLines} lines]`;
   }
+
   return { text, truncated: t.truncated };
 };
 
@@ -43,13 +46,11 @@ export async function withDriver<R extends DriverErr>(
   args: unknown[],
   signal: AbortSignal | undefined,
   onUpdate: ((r: AgentToolResult<unknown>) => void) | undefined,
-  render: (
-    res: R,
-    cwd: string,
-  ) => { text: string; details?: Record<string, unknown> },
+  render: (res: R, cwd: string) => { text: string; details?: Record<string, unknown> },
   errorPrefix = "LSP error",
 ): Promise<AgentToolResult<unknown>> {
   let res: R;
+
   try {
     res = await callDriver<R>(ctx.cwd, driverFn, args, signal, (text: string) =>
       onUpdate?.({ content: [{ type: "text", text }], details: {} }),
@@ -57,8 +58,10 @@ export async function withDriver<R extends DriverErr>(
   } catch (e) {
     return toolError(`${errorPrefix}: ${errorMessage(e)}`);
   }
+
   if (!res.ok) return toolError(`${errorPrefix}: ${res.error ?? "unknown"}`);
   const out = render(res, ctx.cwd);
+
   return {
     content: [{ type: "text", text: out.text }],
     details: { success: true, ...(out.details ?? {}) },
@@ -68,15 +71,16 @@ export async function withDriver<R extends DriverErr>(
 export const displayPath = (abs: string, cwd: string): string => {
   if (!abs) return abs;
   const rel = path.relative(cwd, abs);
+
   if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return abs;
+
   return rel;
 };
 
 export const toAbs = (p: string, cwd: string): string =>
   path.isAbsolute(p) ? p : path.resolve(cwd, p);
 
-export const normalizeAtPath = (p: string): string =>
-  p.startsWith("@") ? p.slice(1) : p;
+export const normalizeAtPath = (p: string): string => (p.startsWith("@") ? p.slice(1) : p);
 
 type Severity = "error" | "warn" | "info" | "hint";
 
@@ -100,16 +104,18 @@ const SEV_RANK: Record<Severity, number> = {
 export const sortDiagnostics = <D extends Diag>(diags: D[]): D[] =>
   [...diags].sort((a, b) => {
     const s = SEV_RANK[a.severity] - SEV_RANK[b.severity];
+
     if (s !== 0) return s;
     const f = a.file.localeCompare(b.file);
+
     if (f !== 0) return f;
+
     return a.line - b.line;
   });
 
 export const formatDiagLine = (d: Diag, cwd: string): string => {
-  const src = d.source
-    ? `${d.source}${d.code ? `(${d.code})` : ""}`
-    : (d.code ?? "");
+  const src = d.source ? `${d.source}${d.code ? `(${d.code})` : ""}` : (d.code ?? "");
+
   return `  ${displayPath(d.file, cwd)}:${d.line}:${d.col}  ${
     (
       {

@@ -16,6 +16,7 @@ import { Type } from "typebox";
 import { errorMessage } from "../shared/error";
 import { preview } from "../shared/format";
 import { customEntries, isCustom } from "../shared/session";
+import { Blocks, type Exited, inFolder, type SettledStatus } from "./blocks";
 import {
   type Action,
   describeStatus,
@@ -25,7 +26,6 @@ import {
   SELECTED_LINK,
   StepsCard,
 } from "./card";
-import { Blocks, type Exited, inFolder, type SettledStatus } from "./blocks";
 import { terminalBytes } from "./keys";
 import { type RunbookStep, runbookSteps, type Step } from "./steps";
 
@@ -50,29 +50,31 @@ const ATTACH_ENTRY = "runbook-attach";
 const REPORT_MESSAGE = "runbook-results";
 
 type StepResult = { key: string; status: SettledStatus };
+
 type LogAttach = { key: string; attach: boolean };
+
 type ReportItem = {
   key: string;
   status: SettledStatus;
   withStatus: boolean;
   withLog: boolean;
 };
+
 type ReportDetails = {
   reported: string[];
   items: (ReportItem & { label: string })[];
 };
 
-const pendingReport = (
-  ctx: ExtensionContext,
-): { items: ReportItem[]; reported: string[] } => {
+const pendingReport = (ctx: ExtensionContext): { items: ReportItem[]; reported: string[] } => {
   const results = new Map<string, { id: string; status: SettledStatus }>();
   const attaches = new Map<string, { id: string; attach: boolean }>();
   const handedBack = new Set<string>();
   const reported = new Set<string>();
+
   for (const entry of ctx.sessionManager.getBranch()) {
     if (entry.type === "custom_message" && entry.customType === REPORT_MESSAGE)
-      for (const id of (entry.details as ReportDetails).reported)
-        reported.add(id);
+      for (const id of (entry.details as ReportDetails).reported) reported.add(id);
+
     if (isCustom<StepResult>(entry, RESULT_ENTRY)) {
       const { key, status } = entry.data!;
       results.set(key, { id: entry.id, status });
@@ -81,17 +83,21 @@ const pendingReport = (
     } else if (isCustom<LogAttach>(entry, ATTACH_ENTRY)) {
       const { key, attach } = entry.data!;
       attaches.set(key, { id: entry.id, attach });
-    } else if (isCustom<{ key: string }>(entry, FAILED_ENTRY))
-      handedBack.add(entry.data!.key);
+    } else if (isCustom<{ key: string }>(entry, FAILED_ENTRY)) handedBack.add(entry.data!.key);
   }
+
   const items: ReportItem[] = [];
   const ids: string[] = [];
+
   for (const [key, result] of results) {
     const attach = attaches.get(key);
     const wantsLog = attach?.attach === true && !reported.has(attach.id);
+
     if (wantsLog) ids.push(attach.id);
     const withStatus = !reported.has(result.id) && !handedBack.has(key);
+
     if (!reported.has(result.id)) ids.push(result.id);
+
     if (!withStatus && !wantsLog) continue;
     items.push({
       key,
@@ -100,22 +106,29 @@ const pendingReport = (
       withLog: wantsLog || (withStatus && failed(result.status)),
     });
   }
+
   return { items, reported: ids };
 };
 
 const outcome = (status: SettledStatus): string => {
   const took = duration(status.took);
+
   if (status.state === "finished")
     return status.stopped
       ? `sent to a block and stopped by the user after ${took}`
       : `sent to a block and finished after ${took}, exit code unknown`;
+
   if (status.code === undefined) return `ended after ${took} with no exit code`;
+
   if (status.code === INTERRUPTED) return `stopped by the user after ${took}`;
+
   return `exit ${status.code} in ${took}`;
 };
 
 type Card = { id?: string; steps: Step[] };
+
 type Turn = { role?: string; cards: Card[] };
+
 type Failure = {
   entryId: string;
   key: string;
@@ -123,10 +136,12 @@ type Failure = {
   answered: boolean;
   fixId?: string;
 };
+
 type History = { turns: Turn[]; failure?: Failure };
 
 const splice = (base: Step[], key: string, own: Step[]): Step[] => {
   const i = base.findIndex((step) => step.key === key);
+
   return i === -1 ? own : [...base.slice(0, i), ...own, ...base.slice(i + 1)];
 };
 
@@ -139,36 +154,47 @@ const waitingForFix = (failure: Failure | undefined): failure is Failure =>
 const history = (ctx: ExtensionContext): History => {
   const turns: Turn[] = [];
   let failure: Failure | undefined;
+
   const cardWith = (key: string): Step[] | undefined => {
     for (let t = turns.length - 1; t >= 0; t--)
       for (const card of turns[t].cards)
         if (card.steps.some((step) => step.key === key)) return card.steps;
   };
+
   for (const entry of ctx.sessionManager.getBranch()) {
     if (isCustom<{ key: string }>(entry, FAILED_ENTRY)) {
       const { key } = entry.data!;
       failure = { entryId: entry.id, key, prompts: 0, answered: false };
       continue;
     }
+
     const message = entry.type === "message" ? entry.message : undefined;
+
     if (!message) continue;
-    if (message.role === "user" && failure && ++failure.prompts > 1)
-      failure = undefined;
+
+    if (message.role === "user" && failure && ++failure.prompts > 1) failure = undefined;
+
     if (message.role !== "assistant") {
       turns.push({ role: message.role, cards: [] });
       continue;
     }
+
     if (failure) failure.answered = true;
+
     const cards = message.content.flatMap((part): Card[] => {
       if (part.type !== "toolCall" || part.name !== TOOL) return [];
       const own = ownSteps(part.id, part.arguments);
       const base = waitingForFix(failure) ? cardWith(failure.key) : undefined;
+
       if (!base || !failure) return [{ id: part.id, steps: own }];
       failure.fixId = part.id;
+
       return [{ id: part.id, steps: splice(base, failure.key, own) }];
     });
+
     turns.push({ role: "assistant", cards });
   }
+
   return { turns: turns.reverse(), failure };
 };
 
@@ -176,12 +202,14 @@ const latestCard = (ctx: ExtensionContext): Card => {
   for (const turn of history(ctx).turns) {
     if (turn.role === "user") break;
     const steps = turn.cards.flatMap((card) => card.steps);
+
     if (steps.length > 0)
       return {
         id: turn.cards.filter((card) => card.id).at(-1)?.id,
         steps,
       };
   }
+
   return { steps: [] };
 };
 
@@ -194,10 +222,13 @@ export default function (pi: ExtensionAPI) {
   const session = process.env.REX_SESSION;
   const self = process.env.REX_BLOCK;
   const invalidators = new Map<string, () => void>();
+
   const refresh = () => {
     for (const invalidate of invalidators.values()) invalidate();
   };
+
   let onSettled: ((key: string) => void) | undefined;
+
   const blocks =
     session && self && process.env.PI_IS_SUBAGENT !== "1"
       ? new Blocks(session, self, refresh, (key, status) => {
@@ -205,6 +236,7 @@ export default function (pi: ExtensionAPI) {
           onSettled?.(key);
         })
       : undefined;
+
   let currentCtx: ExtensionContext | undefined;
   let selectedKey: string | undefined;
   let selectedCard: string | undefined;
@@ -214,15 +246,15 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     currentCtx = ctx;
+
     for (const item of pendingReport(ctx).items)
       if (item.withLog && !failed(item.status)) attached.add(item.key);
-    for (const entry of customEntries<StepResult>(
-      ctx.sessionManager.getBranch(),
-      RESULT_ENTRY,
-    )) {
+
+    for (const entry of customEntries<StepResult>(ctx.sessionManager.getBranch(), RESULT_ENTRY)) {
       const { key, status } = entry.data!;
       blocks?.restore(key, status);
     }
+
     refresh();
   });
   pi.on("session_shutdown", async () => blocks?.dispose());
@@ -231,33 +263,38 @@ export default function (pi: ExtensionAPI) {
     const steps = cardWithKey(ctx, key)?.steps ?? [];
     const index = steps.findIndex((step) => step.key === key);
     const step = steps[index];
+
     if (!step) return "A runbook step";
+
     return `Step ${index + 1} "${step.title ?? preview(step.code)}"`;
   };
 
   pi.on("before_agent_start", async (_event, ctx) => {
     const { items, reported } = pendingReport(ctx);
+
     if (items.length === 0) return;
+
     const labelled = items.map((item) => ({
       ...item,
       label: stepLabel(ctx, item.key),
     }));
+
     const lines = ["Runbook results since your last turn:"];
+
     for (const item of labelled) {
       lines.push(
         item.withStatus
           ? `- ${item.label}: ${outcome(item.status)}.`
           : `- ${item.label}: output the user attached.`,
       );
+
       if (item.withLog && item.status.state === "exited")
-        lines.push(
-          "```",
-          stripTerminalSequences(item.status.transcript) || "(no output)",
-          "```",
-        );
+        lines.push("```", stripTerminalSequences(item.status.transcript) || "(no output)", "```");
     }
+
     attached.clear();
     refresh();
+
     return {
       message: {
         customType: REPORT_MESSAGE,
@@ -268,64 +305,60 @@ export default function (pi: ExtensionAPI) {
     };
   });
 
-  pi.registerMessageRenderer<ReportDetails>(
-    REPORT_MESSAGE,
-    (message, options, theme) => {
-      const items = message.details?.items ?? [];
-      const rows = items.map((item) => {
-        const chip = describeStatus(item.status);
-        const status =
-          item.withStatus && chip ? theme.fg(chip.color, chip.text) : "";
-        const log = item.withLog ? theme.fg("dim", "· log sent") : "";
-        return `  ${item.label}  ${[status, log].filter(Boolean).join(" ")}`;
-      });
-      return new Text(
-        [
-          theme.fg("accent", theme.bold("▍Runbook results sent to the agent")),
-          ...rows,
-        ].join("\n"),
-        options.outputPad,
-        0,
-      );
-    },
-  );
+  pi.registerMessageRenderer<ReportDetails>(REPORT_MESSAGE, (message, options, theme) => {
+    const items = message.details?.items ?? [];
+
+    const rows = items.map((item) => {
+      const chip = describeStatus(item.status);
+      const status = item.withStatus && chip ? theme.fg(chip.color, chip.text) : "";
+      const log = item.withLog ? theme.fg("dim", "· log sent") : "";
+
+      return `  ${item.label}  ${[status, log].filter(Boolean).join(" ")}`;
+    });
+
+    return new Text(
+      [theme.fg("accent", theme.bold("▍Runbook results sent to the agent")), ...rows].join("\n"),
+      options.outputPad,
+      0,
+    );
+  });
 
   const cardSteps = (toolCallId: string, own: Step[]): Step[] => {
     const cached = merged.get(toolCallId);
+
     if (cached || !currentCtx) return cached ?? own;
     const { turns, failure } = history(currentCtx);
-    const done = turns
-      .flatMap((turn) => turn.cards)
-      .find((card) => card.id === toolCallId);
+    const done = turns.flatMap((turn) => turn.cards).find((card) => card.id === toolCallId);
+
     if (done) {
       merged.set(toolCallId, done.steps);
+
       return done.steps;
     }
-    const base = waitingForFix(failure)
-      ? cardWithKey(currentCtx, failure.key)
-      : undefined;
+
+    const base = waitingForFix(failure) ? cardWithKey(currentCtx, failure.key) : undefined;
+
     return base && failure ? splice(base.steps, failure.key, own) : own;
   };
 
   pi.on("agent_settled", async (event, ctx) => {
     const { failure } = history(ctx);
-    if (
-      event.aborted ||
-      !failure?.answered ||
-      failure.prompts !== 1 ||
-      ctx.mode !== "tui"
-    )
-      return;
+
+    if (event.aborted || !failure?.answered || failure.prompts !== 1 || ctx.mode !== "tui") return;
+
     if (resumed.has(failure.entryId)) return;
     resumed.add(failure.entryId);
     const key = failure.fixId ? `${failure.fixId}:0` : failure.key;
     const card = cardWithKey(ctx, key);
+
     if (card) void browse(ctx, card, key);
   });
 
   const runInline = async (step: Step): Promise<Exited | undefined> => {
     const ctx = currentCtx;
+
     if (!ctx || !blocks || blocks.status(step.key)?.state === "inline") return;
+
     try {
       return await blocks.run(
         ctx.cwd,
@@ -340,7 +373,9 @@ export default function (pi: ExtensionAPI) {
 
   const askAgent = (ctx: ExtensionContext, step: Step) => {
     const status = blocks?.status(step.key);
+
     if (status?.state !== "exited") return;
+
     const message = [
       `The runbook step "${step.title ?? preview(step.code)}" failed with exit ${status.code}. Find the cause and fix it. If the command itself is wrong, show only the fixed step with ${TOOL}, and it takes the place of the failed step.`,
       "",
@@ -354,16 +389,16 @@ export default function (pi: ExtensionAPI) {
       stripTerminalSequences(status.transcript) || "(no output)",
       "```",
     ].join("\n");
+
     pi.appendEntry(FAILED_ENTRY, { key: step.key });
-    void pi.sendUserMessage(
-      message,
-      ctx.isIdle() ? undefined : { deliverAs: "followUp" },
-    );
+    void pi.sendUserMessage(message, ctx.isIdle() ? undefined : { deliverAs: "followUp" });
   };
 
   const act = async (step: Step, action: Action): Promise<boolean> => {
     const ctx = currentCtx;
+
     if (!ctx) return false;
+
     try {
       switch (action) {
         case "copy":
@@ -374,8 +409,8 @@ export default function (pi: ExtensionAPI) {
           break;
         case "run":
           void runInline(step);
-          if (selectedKey === undefined)
-            void browse(ctx, cardWithKey(ctx, step.key), step.key);
+
+          if (selectedKey === undefined) void browse(ctx, cardWithKey(ctx, step.key), step.key);
           break;
         case "stop":
           await blocks?.interrupt(step.key);
@@ -392,15 +427,18 @@ export default function (pi: ExtensionAPI) {
         case "log": {
           const attach = !attached.has(step.key);
           pi.appendEntry<LogAttach>(ATTACH_ENTRY, { key: step.key, attach });
+
           if (attach) attached.add(step.key);
           else attached.delete(step.key);
           refresh();
           break;
         }
       }
+
       return true;
     } catch (e) {
       ctx.ui.notify(errorMessage(e), "error");
+
       return false;
     }
   };
@@ -433,6 +471,7 @@ export default function (pi: ExtensionAPI) {
         };
       const steps = cardSteps(id, ownSteps(id, params));
       const fixed = steps.some((step) => !step.key.startsWith(`${id}:`));
+
       return {
         content: [
           {
@@ -454,19 +493,18 @@ export default function (pi: ExtensionAPI) {
               status: (key) => blocks?.status(key),
               canSend: blocks !== undefined,
               logAttached: (key) => attached.has(key),
-              selected: () =>
-                selectedCard === context.toolCallId ? selectedKey : undefined,
+              selected: () => (selectedCard === context.toolCallId ? selectedKey : undefined),
               act,
             });
+
       invalidators.set(context.toolCallId, context.invalidate);
       card.update(
         cardSteps(context.toolCallId, ownSteps(context.toolCallId, args)),
-        context.argsComplete ||
-          context.executionStarted ||
-          merged.has(context.toolCallId),
+        context.argsComplete || context.executionStarted || merged.has(context.toolCallId),
         theme,
         context.invalidate,
       );
+
       return card;
     },
     renderResult: () => new Container(),
@@ -478,23 +516,28 @@ export default function (pi: ExtensionAPI) {
     const editorAndFooterRows = 8;
     const height = step.code.split("\n").length + editorAndFooterRows;
     let tries = 0;
+
     const check = () => {
       if (selectedKey !== step.key) return;
       const lines = tui.getScreenLines();
       const row = lines.findIndex((line) => line.includes(marker));
+
       if (row === -1) {
         if (++tries > 100) return;
         tui.scrollBy(direction * 4);
       } else {
         const overflow = row + height - lines.length;
+
         if (row < 1) tui.scrollBy(row - 1);
         else if (overflow > 0) tui.scrollBy(Math.min(overflow, row - 1));
         else return;
         tries = 100;
       }
+
       tui.requestRender();
       setTimeout(check, 20);
     };
+
     setTimeout(check, 20);
   };
 
@@ -504,17 +547,21 @@ export default function (pi: ExtensionAPI) {
     startKey?: string,
   ): Promise<void> => {
     const { steps } = card;
+
     if (steps.length === 0) {
       ctx.ui.notify("The last response has no runbook steps", "warning");
+
       return;
     }
+
     if (ctx.mode !== "tui") {
       ctx.ui.notify("/run needs the interactive UI", "warning");
+
       return;
     }
-    const running = steps.findIndex(
-      (s) => blocks?.status(s.key)?.state === "inline",
-    );
+
+    const running = steps.findIndex((s) => blocks?.status(s.key)?.state === "inline");
+
     let index = Math.max(
       0,
       startKey
@@ -523,7 +570,9 @@ export default function (pi: ExtensionAPI) {
           ? running
           : steps.findIndex((s) => !blocks?.status(s.key)),
     );
+
     let note: { text: string; color: "success" | "warning" } | undefined;
+
     const select = (tui: TUI, next: number, direction: 1 | -1) => {
       index = next;
       note = undefined;
@@ -533,54 +582,65 @@ export default function (pi: ExtensionAPI) {
       tui.requestRender();
       reveal(tui, steps[index], direction);
     };
+
     let screen: TUI | undefined;
     await ctx.ui.custom<void>((tui, theme, keybindings, done) => {
       screen = tui;
       select(tui, index, -1);
+
       const close = () => {
         onSettled = undefined;
         done();
       };
+
       const passed = (step: Step): boolean => {
         const status = blocks?.status(step.key);
-        return (
-          status !== undefined && status.state !== "inline" && !failed(status)
-        );
+
+        return status !== undefined && status.state !== "inline" && !failed(status);
       };
+
       const selectNextUnrun = () => {
         const unrun = steps
           .map((candidate, i) => ({ candidate, i }))
           .filter(({ candidate }) => !blocks?.status(candidate.key));
+
         const target = unrun.find(({ i }) => i > index) ?? unrun.at(0);
+
         if (target) select(tui, target.i, target.i > index ? 1 : -1);
       };
+
       onSettled = (key) => {
         if (steps.every(passed)) close();
-        else if (steps[index].key === key && passed(steps[index]))
-          selectNextUnrun();
+        else if (steps[index].key === key && passed(steps[index])) selectNextUnrun();
       };
+
       const hints = (step: Step): string => {
         const status = blocks?.status(step.key);
+
         if (status?.state === "inline")
           return {
             detached:
               "type to answer in a floating block · ctrl+c stop · ctrl+o place block · esc close",
-            floating:
-              "type in the floating block · ctrl+c stop · ctrl+o place block · esc close",
+            floating: "type in the floating block · ctrl+c stop · ctrl+o place block · esc close",
             placed: "type in the placed block · ctrl+c stop · esc close",
           }[status.placement];
+
         if (!blocks) return "⏎ copy · ↑↓ move · esc close";
         const run = status ? "R run again" : "i run inline";
+
         const fix = failed(status)
           ? "d ask agent to fix · "
           : status?.state === "exited"
             ? `l ${attached.has(step.key) ? "detach" : "attach"} log · `
             : "";
+
         return `${fix}${run} · s send to block · ⏎ copy · ↑↓ move · esc close`;
       };
+
       return {
         render(width: number): string[] {
           const step = steps[index];
+
           return [
             ` ${theme.fg("accent", theme.bold(`Step ${index + 1}/${steps.length}`))}  ${preview(step.title ?? step.code)}${note ? `  ${theme.fg(note.color, note.text)}` : ""}`,
             theme.fg("dim", ` ${hints(step)}`),
@@ -589,23 +649,20 @@ export default function (pi: ExtensionAPI) {
         handleInput(data: string): void {
           const step = steps[index];
           const status = blocks?.status(step.key);
+
           if (status?.state === "inline") {
             if (matchesKey(data, "ctrl+c")) void act(step, "stop");
             else if (matchesKey(data, "ctrl+o")) void act(step, "place");
             else if (matchesKey(data, "escape")) close();
             else {
               const bytes = terminalBytes(data);
+
               if (!bytes) return;
-              blocks
-                ?.write(step.key, bytes)
-                .catch((e) => ctx.ui.notify(errorMessage(e), "error"));
+              blocks?.write(step.key, bytes).catch((e) => ctx.ui.notify(errorMessage(e), "error"));
+
               if (status.placement === "detached") void act(step, "float");
             }
-          } else if (
-            keybindings.matches(data, "tui.select.cancel") ||
-            data === "q"
-          )
-            close();
+          } else if (keybindings.matches(data, "tui.select.cancel") || data === "q") close();
           else if (keybindings.matches(data, "tui.select.up") || data === "k")
             select(tui, Math.max(0, index - 1), -1);
           else if (keybindings.matches(data, "tui.select.down") || data === "j")
@@ -626,17 +683,9 @@ export default function (pi: ExtensionAPI) {
           else if (data === "i" && status) {
             note = { text: "already ran · R runs it again", color: "warning" };
             tui.requestRender();
-          } else if (
-            data === "i" ||
-            data === "R" ||
-            matchesKey(data, "shift+r")
-          )
+          } else if (data === "i" || data === "R" || matchesKey(data, "shift+r"))
             void runInline(step);
-          else if (
-            data === "l" &&
-            status?.state === "exited" &&
-            !failed(status)
-          )
+          else if (data === "l" && status?.state === "exited" && !failed(status))
             void act(step, "log").then(() => tui.requestRender());
           else if (data === "d" && failed(status)) {
             close();
@@ -653,8 +702,7 @@ export default function (pi: ExtensionAPI) {
   };
 
   pi.registerCommand("run", {
-    description:
-      "Walk the runbook steps of the last response to run, send, or copy them",
+    description: "Walk the runbook steps of the last response to run, send, or copy them",
     handler: async (_args, ctx) => browse(ctx),
   });
 
@@ -672,19 +720,24 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerShortcut("ctrl+alt+s", {
-    description:
-      "Send the next runbook step of the last response to a Rex block",
+    description: "Send the next runbook step of the last response to a Rex block",
     handler: async (ctx) => {
       const { steps } = latestCard(ctx);
+
       if (steps.length === 0) {
         ctx.ui.notify("The last response has no runbook steps", "warning");
+
         return;
       }
+
       const next = steps.find((s) => blocks.status(s.key) === undefined);
+
       if (!next) {
         ctx.ui.notify(`All ${steps.length} steps already ran or were sent`);
+
         return;
       }
+
       await act(next, "send");
     },
   });

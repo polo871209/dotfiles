@@ -40,33 +40,33 @@ export type ChartSource<P extends TSchema> = {
     ctx: ExtensionContext,
   ): Promise<ChartLoad>;
   /** Data for another x window, so zoom and pan in the chart can reach past the loaded points. */
-  reload?(
-    params: Static<P>,
-    window: [number, number],
-    signal: AbortSignal,
-  ): Promise<ChartSpec>;
+  reload?(params: Static<P>, window: [number, number], signal: AbortSignal): Promise<ChartSpec>;
 };
 
 const describeX = (spec: ChartSpec): string => {
   const x = spec.x;
+
   if (x.type === "category") return `${x.categories.length} categories`;
   const count = "values" in x ? x.values.length : spec.series[0]!.values.length;
+
   const at = (i: number) =>
-    x.type === "time"
-      ? new Date(xAt(x, i) * 1000).toISOString()
-      : String(xAt(x, i));
+    x.type === "time" ? new Date(xAt(x, i) * 1000).toISOString() : String(xAt(x, i));
+
   return `${count} points from ${at(0)} to ${at(count - 1)}`;
 };
 
 function summarize(spec: ChartSpec, stats: SeriesStats[]): string[] {
   const unit = spec.unit ? `, unit ${spec.unit}` : "";
+
   const lines = [
     `${spec.kind ?? "line"} chart of ${spec.series.length} series, ${describeX(spec)}${unit}. The user sees the chart.`,
   ];
+
   for (const s of stats)
     lines.push(
       `- ${s.name}: last ${formatValue(s.last, spec.unit)}, min ${formatValue(s.min, spec.unit)}, max ${formatValue(s.max, spec.unit)}, mean ${formatValue(s.mean, spec.unit)}`,
     );
+
   return lines;
 }
 
@@ -77,9 +77,7 @@ export function registerChartTool<P extends TSchema>(
   pi.on("session_start", (_event, ctx) => {
     if (ctx.mode !== "tui") return;
     stopPointerTracking?.();
-    stopPointerTracking = trackPointerLeave((handler) =>
-      ctx.ui.onTerminalInput(handler),
-    );
+    stopPointerTracking = trackPointerLeave((handler) => ctx.ui.onTerminalInput(handler));
   });
 
   pi.registerTool<P, ChartSpec | undefined>({
@@ -103,6 +101,7 @@ export function registerChartTool<P extends TSchema>(
       const { spec, notes = [] } = await source.load(params, signal, ctx);
       checkSpec(spec);
       const stats = spec.series.flatMap((s) => seriesStats(s) ?? []);
+
       return {
         content: [
           {
@@ -117,37 +116,40 @@ export function registerChartTool<P extends TSchema>(
 
     renderCall(args, theme, context) {
       const text =
-        context.lastComponent instanceof Text
-          ? context.lastComponent
-          : new Text("", 0, 0);
+        context.lastComponent instanceof Text ? context.lastComponent : new Text("", 0, 0);
+
       text.setText(
         `${theme.fg("toolTitle", theme.bold(`${source.label} `))}${theme.fg("accent", source.headline(args))}`,
       );
+
       return text;
     },
 
     renderResult(result, { expanded, isPartial }, theme: Theme, context) {
       if (isPartial) return new Text(theme.fg("dim", "loading…"), 0, 0);
       const spec = result.details;
+
       if (context.isError || !spec) {
         const first = result.content.find((c) => c.type === "text");
-        return new Text(
-          theme.fg("error", first?.type === "text" ? first.text : "failed"),
-          0,
-          0,
-        );
+
+        return new Text(theme.fg("error", first?.type === "text" ? first.text : "failed"), 0, 0);
       }
+
       const { reload } = source;
+
       const options: ChartViewOptions = {
         expanded,
         showImages: context.showImages,
         requestRender: context.invalidate,
         reload: reload && ((window, signal) => reload(context.args, window, signal)),
       };
+
       if (context.lastComponent instanceof ChartView) {
         context.lastComponent.update(spec, theme, options);
+
         return context.lastComponent;
       }
+
       return new ChartView(spec, theme, options);
     },
   });

@@ -1,3 +1,7 @@
+import { randomUUID } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { userInfo } from "node:os";
+import { basename, dirname, join } from "node:path";
 import type { ImageContent, TextContent, Usage } from "@earendil-works/pi-ai";
 import {
   getAgentDir,
@@ -5,10 +9,6 @@ import {
   type ExtensionContext,
   type ToolInfo,
 } from "@earendil-works/pi-coding-agent";
-import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
-import { userInfo } from "node:os";
-import { basename, dirname, join } from "node:path";
 import { errorMessage } from "./shared/error";
 
 interface CapturedEvent {
@@ -20,17 +20,22 @@ interface CapturedEvent {
 
 function readToken(): string | undefined {
   const path = join(getAgentDir(), "posthog.json");
+
   if (!existsSync(path)) return undefined;
+
   const { token } = JSON.parse(readFileSync(path, "utf8")) as {
     token?: unknown;
   };
+
   if (typeof token !== "string" || !token.startsWith("phc_"))
     throw new Error(`${path}: "token" must be a phc_ project token`);
+
   return token;
 }
 
 function usageProperties(usage: Usage): Record<string, unknown> {
   const { cost } = usage;
+
   return {
     // PostHog assumes cache-inclusive input for non-Anthropic providers, but pi-ai reports input without cache tokens for all of them.
     $ai_cache_reporting_exclusive: true,
@@ -42,8 +47,7 @@ function usageProperties(usage: Usage): Record<string, unknown> {
       ? {}
       : {
           $ai_cache_creation_1h_input_tokens: usage.cacheWrite1h,
-          $ai_cache_creation_5m_input_tokens:
-            usage.cacheWrite - usage.cacheWrite1h,
+          $ai_cache_creation_5m_input_tokens: usage.cacheWrite - usage.cacheWrite1h,
         }),
     reasoning_tokens: usage.reasoning,
     ...(cost.total > 0
@@ -58,6 +62,7 @@ function usageProperties(usage: Usage): Record<string, unknown> {
 
 function extensionName({ path }: ToolInfo["sourceInfo"]): string {
   const file = basename(path);
+
   return /^index\.[cm]?[jt]s$/.test(file)
     ? basename(dirname(path))
     : file.replace(/\.[cm]?[jt]s$/, "");
@@ -74,49 +79,43 @@ function definitionChars(tool: ToolInfo): number {
 function isFixedChoice(schema: unknown): boolean {
   if (typeof schema !== "object" || schema === null) return false;
   const field = schema as Record<string, unknown>;
-  if (field.type === "boolean" || "enum" in field || "const" in field)
-    return true;
+
+  if (field.type === "boolean" || "enum" in field || "const" in field) return true;
+
   return (
     Array.isArray(field.anyOf) &&
     field.anyOf.every(
       (member: unknown) =>
-        isFixedChoice(member) ||
-        (member as { type?: unknown } | null)?.type === "null",
+        isFixedChoice(member) || (member as { type?: unknown } | null)?.type === "null",
     )
   );
 }
 
-function argProperties(
-  args: unknown,
-  tool: ToolInfo | undefined,
-): Record<string, unknown> {
+function argProperties(args: unknown, tool: ToolInfo | undefined): Record<string, unknown> {
   if (typeof args !== "object" || args === null) return {};
+
   const fields =
-    (tool?.parameters as { properties?: Record<string, unknown> } | undefined)
-      ?.properties ?? {};
+    (tool?.parameters as { properties?: Record<string, unknown> } | undefined)?.properties ?? {};
+
   return Object.fromEntries(
     Object.entries(args)
       .filter(([, value]) => value !== undefined && value !== null)
-      .map(([key, value]) => [
-        `arg_${key}`,
-        isFixedChoice(fields[key]) ? value : true,
-      ]),
+      .map(([key, value]) => [`arg_${key}`, isFixedChoice(fields[key]) ? value : true]),
   );
 }
 
 function commandPrograms(command: string): string[] {
-  const bare = command
-    .split("<<")[0]
-    .replace(/'[^']*'|"(?:\\.|[^"\\])*"/g, "\0");
+  const bare = command.split("<<")[0].replace(/'[^']*'|"(?:\\.|[^"\\])*"/g, "\0");
+
   const programs = bare.split(/[;&|\n()`]+/).flatMap((segment) => {
     const program = segment
       .trim()
       .split(/\s+/)
       .find((word) => !/^\w+=/.test(word));
-    return program && /^[a-z_./][\w./+-]*$/i.test(program)
-      ? [basename(program)]
-      : [];
+
+    return program && /^[a-z_./][\w./+-]*$/i.test(program) ? [basename(program)] : [];
   });
+
   return [...new Set(programs)];
 }
 
@@ -125,15 +124,14 @@ function usageDetails(
   args: Record<string, unknown> | undefined,
 ): Record<string, unknown> {
   const command = args?.command;
+
   if (toolName === "bash" && typeof command === "string")
     return { programs: commandPrograms(command) };
   const path = args?.path;
-  if (
-    toolName === "read" &&
-    typeof path === "string" &&
-    basename(path) === "SKILL.md"
-  )
+
+  if (toolName === "read" && typeof path === "string" && basename(path) === "SKILL.md")
     return { skill: basename(dirname(path)) };
+
   return {};
 }
 
@@ -145,6 +143,7 @@ function resultSize(
     | undefined,
 ): Record<string, number> {
   const content = result?.content ?? [];
+
   return {
     result_chars: content.reduce(
       (chars, block) => chars + (block.type === "text" ? block.text.length : 0),
@@ -156,6 +155,7 @@ function resultSize(
 
 export default function (pi: ExtensionAPI) {
   const token = readToken();
+
   if (!token) return;
 
   const distinctId = userInfo().username;
@@ -166,6 +166,7 @@ export default function (pi: ExtensionAPI) {
   let reportedFailure = false;
   let tools = new Map<string, ToolInfo>();
   let offeredKey: string | undefined;
+
   const startedCalls = new Map<
     string,
     { toolName: string; args: Record<string, unknown> | undefined }
@@ -175,22 +176,25 @@ export default function (pi: ExtensionAPI) {
     if (!queue.length) return;
     const batch = queue;
     queue = [];
+
     const requeue = () => {
       queue = [...batch, ...queue].slice(-500);
     };
+
     const res = await fetch("https://us.i.posthog.com/batch/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ api_key: token, batch }),
       signal: AbortSignal.timeout(3000),
     }).catch((e: unknown) => new Error(errorMessage(e)));
+
     if (!(res instanceof Error) && res.ok) return;
-    if (res instanceof Error || res.status === 429 || res.status >= 500)
-      requeue();
+
+    if (res instanceof Error || res.status === 429 || res.status >= 500) requeue();
+
     const failure =
-      res instanceof Error
-        ? res.message
-        : `HTTP ${res.status} ${await res.text().catch(() => "")}`;
+      res instanceof Error ? res.message : `HTTP ${res.status} ${await res.text().catch(() => "")}`;
+
     if (reportedFailure || !ctx.hasUI) return;
     reportedFailure = true;
     ctx.ui.notify(`posthog: upload failed: ${failure}`, "warning");
@@ -217,14 +221,11 @@ export default function (pi: ExtensionAPI) {
         ...properties,
       },
     });
+
     if (queue.length >= 50) void flush(ctx);
   };
 
-  const captureSummary = (
-    ctx: ExtensionContext,
-    spanName: string,
-    usage: Usage | undefined,
-  ) => {
+  const captureSummary = (ctx: ExtensionContext, spanName: string, usage: Usage | undefined) => {
     if (!usage) return;
     capture(ctx, "$ai_generation", Date.now(), {
       $ai_span_name: spanName,
@@ -235,16 +236,14 @@ export default function (pi: ExtensionAPI) {
   };
 
   const captureOffered = (ctx: ExtensionContext) => {
-    const allTools = pi
-      .getAllTools()
-      .filter((tool) => tool.exposure !== "hidden");
+    const allTools = pi.getAllTools().filter((tool) => tool.exposure !== "hidden");
     tools = new Map(allTools.map((tool) => [tool.name, tool]));
     const active = new Set(pi.getActiveTools());
-    const key = JSON.stringify(
-      allTools.map((tool) => [tool.name, active.has(tool.name)]),
-    );
+    const key = JSON.stringify(allTools.map((tool) => [tool.name, active.has(tool.name)]));
+
     if (key === offeredKey) return;
     offeredKey = key;
+
     for (const tool of allTools)
       capture(ctx, "pi tool offered", Date.now(), {
         tool: tool.name,
@@ -262,34 +261,27 @@ export default function (pi: ExtensionAPI) {
   pi.on("before_agent_start", async (_event, ctx) => {
     traceId = randomUUID();
     captureOffered(ctx);
+
     const git = await pi.exec(
       "git",
-      [
-        "rev-parse",
-        "--path-format=absolute",
-        "--git-common-dir",
-        "--abbrev-ref",
-        "HEAD",
-      ],
+      ["rev-parse", "--path-format=absolute", "--git-common-dir", "--abbrev-ref", "HEAD"],
       { cwd: ctx.cwd, timeout: 1000 },
     );
+
     const [commonDir, head] = git.stdout.trim().split("\n");
-    repo =
-      git.code === 0 && commonDir ? basename(dirname(commonDir)) : undefined;
+    repo = git.code === 0 && commonDir ? basename(dirname(commonDir)) : undefined;
     branch = git.code === 0 ? head : undefined;
   });
 
   pi.on("message_end", (event, ctx) => {
     const message = event.message;
+
     if (message.role !== "assistant") return;
     capture(ctx, "$ai_generation", message.timestamp, {
       $ai_span_name: "turn",
       $ai_model: message.responseModel ?? message.model,
       $ai_provider: message.provider,
-      $ai_latency:
-        message.durationMs === undefined
-          ? undefined
-          : message.durationMs / 1000,
+      $ai_latency: message.durationMs === undefined ? undefined : message.durationMs / 1000,
       $ai_stop_reason: message.stopReason,
       $ai_is_error: message.stopReason === "error",
       $ai_error: message.errorMessage,
@@ -336,6 +328,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on("agent_settled", (_event, ctx) => {
     traceId = undefined;
+
     return flush(ctx);
   });
 

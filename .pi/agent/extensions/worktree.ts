@@ -1,14 +1,14 @@
 import { existsSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { fuzzyFilter, Loader } from "@earendil-works/pi-tui";
 import {
   SessionManager,
   type ExtensionAPI,
   type ExtensionCommandContext,
 } from "@earendil-works/pi-coding-agent";
+import { fuzzyFilter, Loader } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { run } from "./shared/exec";
 import { errorMessage } from "./shared/error";
+import { run } from "./shared/exec";
 
 const BARE_DIR = ".bare";
 const TOOL_NAME = "worktree";
@@ -72,30 +72,27 @@ interface Tab {
   block_id: string;
 }
 
-async function git(
-  cwd: string,
-  args: string[],
-  signal?: AbortSignal,
-): Promise<string> {
+async function git(cwd: string, args: string[], signal?: AbortSignal): Promise<string> {
   const r = await run("git", args, signal, cwd, 60_000);
-  if (r.code !== 0)
-    throw new Error(`git ${args.join(" ")}: ${(r.stderr || r.stdout).trim()}`);
+
+  if (r.code !== 0) throw new Error(`git ${args.join(" ")}: ${(r.stderr || r.stdout).trim()}`);
+
   return r.stdout.trim();
 }
 
 function bareRoot(cwd: string): string | undefined {
   if (!existsSync(cwd)) return undefined;
+
   for (let dir = realpathSync(cwd); ; dir = dirname(dir)) {
     if (existsSync(join(dir, BARE_DIR))) return dir;
+
     if (dir === dirname(dir)) return undefined;
   }
 }
 
-async function listWorktrees(
-  root: string,
-  signal?: AbortSignal,
-): Promise<Worktree[]> {
+async function listWorktrees(root: string, signal?: AbortSignal): Promise<Worktree[]> {
   const out = await git(root, ["worktree", "list", "--porcelain"], signal);
+
   return out
     .split("\n\n")
     .map((block) => block.split("\n"))
@@ -103,16 +100,19 @@ async function listWorktrees(
     .map((lines) => {
       const path = lines.find((l) => l.startsWith("worktree "))!.slice(9);
       const ref = lines.find((l) => l.startsWith("branch "))?.slice(7);
+
       return { path, branch: ref?.replace(/^refs\/heads\//, "") };
     });
 }
 
 async function openRepo(cwd: string, signal?: AbortSignal): Promise<Repo> {
   const root = bareRoot(cwd);
+
   if (!root)
     throw new Error(
       `${cwd} is not in a repo with one folder per branch. Clone the repo with \`clone <url>\` first.`,
     );
+
   const head = await git(
     root,
     ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
@@ -122,6 +122,7 @@ async function openRepo(cwd: string, signal?: AbortSignal): Promise<Repo> {
       `origin/HEAD is not set. Run \`git remote set-head origin --auto\` in ${root}.`,
     );
   });
+
   return {
     root,
     defaultBranch: head.replace(/^origin\//, ""),
@@ -136,8 +137,9 @@ async function gitWt(
 ): Promise<{ out: string; report: string }> {
   const r = await run("git", ["wt", ...args], signal, cwd, 60_000);
   const report = r.stderr.trim().replace(/\n/g, " ");
-  if (r.code !== 0)
-    throw new Error(report || `git wt ${args.join(" ")} failed`);
+
+  if (r.code !== 0) throw new Error(report || `git wt ${args.join(" ")} failed`);
+
   return { out: r.stdout.trim(), report };
 }
 
@@ -147,49 +149,38 @@ async function ensureWorktree(
   base?: string,
   signal?: AbortSignal,
 ): Promise<EnsuredWorktree> {
-  if (branch === "done")
-    throw new Error("A branch named done conflicts with `git wt done`.");
-  const { out, report } = await gitWt(
-    cwd,
-    [branch, ...(base ? [base] : [])],
-    signal,
-  );
+  if (branch === "done") throw new Error("A branch named done conflicts with `git wt done`.");
+  const { out, report } = await gitWt(cwd, [branch, ...(base ? [base] : [])], signal);
+
   return { path: out, branch, report };
 }
 
 const reportOf = (wt: EnsuredWorktree) =>
   wt.report || `Found worktree ${wt.path} on branch ${wt.branch}.`;
 
-async function currentWorktree(
-  cwd: string,
-  signal?: AbortSignal,
-): Promise<string | undefined> {
+async function currentWorktree(cwd: string, signal?: AbortSignal): Promise<string | undefined> {
   const r = await run("git", ["rev-parse", "--show-toplevel"], signal, cwd);
+
   return r.code === 0 ? r.stdout.trim() : undefined;
 }
 
-async function finishableWorktree(
-  cwd: string,
-  signal?: AbortSignal,
-): Promise<LinkedWorktree> {
+async function finishableWorktree(cwd: string, signal?: AbortSignal): Promise<LinkedWorktree> {
   const repo = await openRepo(cwd, signal);
   const path = await currentWorktree(cwd, signal);
-  if (!path)
-    throw new Error(`This session is in ${cwd}, which is not a branch folder.`);
+
+  if (!path) throw new Error(`This session is in ${cwd}, which is not a branch folder.`);
   const branch = repo.worktrees.find((w) => w.path === path)?.branch;
+
   if (branch === repo.defaultBranch)
     throw new Error(
       `This session is in the worktree of the default branch ${repo.defaultBranch}, which stays.`,
     );
   const home = await ensureWorktree(cwd, repo.defaultBranch, undefined, signal);
+
   return { home: home.path, path, branch };
 }
 
-async function removeWorktree(
-  cwd: string,
-  target: string,
-  signal?: AbortSignal,
-): Promise<string> {
+async function removeWorktree(cwd: string, target: string, signal?: AbortSignal): Promise<string> {
   return (await gitWt(cwd, ["done", target], signal)).report;
 }
 
@@ -201,23 +192,28 @@ async function removeOtherWorktree(
   const repo = await openRepo(cwd, signal);
   const here = await currentWorktree(cwd, signal);
   const asPath = resolve(cwd, target);
+
   const folder =
     repo.worktrees.find((w) => w.branch === target)?.path ??
     (existsSync(asPath) ? realpathSync(asPath) : undefined);
+
   if (here && folder === here)
-    throw new Error(
-      "This session is in that folder. Use `done` without a branch.",
-    );
+    throw new Error("This session is in that folder. Use `done` without a branch.");
+
   return removeWorktree(cwd, target, signal);
 }
 
 async function closeTab(branch: string, signal?: AbortSignal): Promise<string> {
   const session = process.env.REX_SESSION;
+
   if (!session) return "";
+
   try {
     const tab = tabOf(await rexWindows(session, signal), branch);
+
     if (!tab) return "";
     await rex(["window", "close", "-s", session, tab.window_id], signal);
+
     return " Closed its Rex tab.";
   } catch {
     return " Could not close its Rex tab.";
@@ -226,26 +222,22 @@ async function closeTab(branch: string, signal?: AbortSignal): Promise<string> {
 
 async function rex(args: string[], signal?: AbortSignal): Promise<string> {
   const r = await run("rex", args, signal, undefined, 15_000);
+
   if (r.code !== 0)
-    throw new Error(
-      `rex ${args.slice(0, 2).join(" ")}: ${(r.stderr || r.stdout).trim()}`,
-    );
+    throw new Error(`rex ${args.slice(0, 2).join(" ")}: ${(r.stderr || r.stdout).trim()}`);
+
   return r.stdout;
 }
 
-async function rexWindows(
-  session: string,
-  signal?: AbortSignal,
-): Promise<RexWindow[]> {
+async function rexWindows(session: string, signal?: AbortSignal): Promise<RexWindow[]> {
   const out = await rex(["window", "ls", "--json", "-s", session], signal);
+
   return (JSON.parse(out) as { windows: RexWindow[] }).windows;
 }
 
-const tabOf = (windows: RexWindow[], branch: string) =>
-  windows.find((w) => w.label === branch);
+const tabOf = (windows: RexWindow[], branch: string) => windows.find((w) => w.label === branch);
 
-const firstBlock = (window: RexWindow) =>
-  window.layers[0]?.blocks[0]?.block_id ?? "";
+const firstBlock = (window: RexWindow) => window.layers[0]?.blocks[0]?.block_id ?? "";
 
 async function openTab(
   session: string,
@@ -270,62 +262,52 @@ async function openTab(
     ],
     signal,
   );
+
   const created = JSON.parse(out) as { window_id: string; block_ids: string[] };
+
   return { window_id: created.window_id, block_id: created.block_ids[0]! };
 }
 
 async function clearTabLabel(branch: string): Promise<void> {
   const { REX_SESSION, REX_BLOCK } = process.env;
+
   if (!REX_SESSION || !REX_BLOCK) return;
+
   const window = (await rexWindows(REX_SESSION)).find((w) =>
     w.layers.some((l) => l.blocks.some((b) => b.block_id === REX_BLOCK)),
   );
+
   if (window?.label === branch)
     await rex(["window", "rename", "-s", REX_SESSION, window.window_id, ""]);
 }
 
-async function describeWorktrees(
-  repo: Repo,
-  signal?: AbortSignal,
-): Promise<WorktreeInfo[]> {
+async function describeWorktrees(repo: Repo, signal?: AbortSignal): Promise<WorktreeInfo[]> {
   const session = process.env.REX_SESSION;
-  const windows = session
-    ? await rexWindows(session, signal).catch(() => [])
-    : [];
+  const windows = session ? await rexWindows(session, signal).catch(() => []) : [];
+
   return Promise.all(
     repo.worktrees.map(async (w) => {
-      const status = await run(
-        "git",
-        ["status", "--porcelain"],
-        signal,
-        w.path,
-      );
+      const status = await run("git", ["status", "--porcelain"], signal, w.path);
+
       const counts = w.branch
         ? await run(
             "git",
-            [
-              "rev-list",
-              "--left-right",
-              "--count",
-              `origin/${repo.defaultBranch}...${w.branch}`,
-            ],
+            ["rev-list", "--left-right", "--count", `origin/${repo.defaultBranch}...${w.branch}`],
             signal,
             repo.root,
           )
         : undefined;
+
       const [behind, ahead] =
-        counts?.code === 0
-          ? counts.stdout.trim().split(/\s+/).map(Number)
-          : [null, null];
+        counts?.code === 0 ? counts.stdout.trim().split(/\s+/).map(Number) : [null, null];
+
       const tab = w.branch ? tabOf(windows, w.branch) : undefined;
+
       return {
         branch: w.branch ?? null,
         path: w.path,
         home: w.branch === repo.defaultBranch,
-        changes:
-          status.code === 0
-            ? status.stdout.split("\n").filter(Boolean).length
-            : null,
+        changes: status.code === 0 ? status.stdout.split("\n").filter(Boolean).length : null,
         ahead: ahead ?? null,
         behind: behind ?? null,
         tab: tab?.window_id ?? null,
@@ -334,11 +316,9 @@ async function describeWorktrees(
   );
 }
 
-function folderNote(
-  root: string,
-  w: { path: string; branch?: string | null },
-): string | undefined {
+function folderNote(root: string, w: { path: string; branch?: string | null }): string | undefined {
   const folder = relative(root, w.path);
+
   return folder === w.branch ? undefined : `(folder ${folder}/)`;
 }
 
@@ -362,26 +342,29 @@ function formatWorktrees(root: string, worktrees: WorktreeInfo[]): string {
 function writeEmptySession(cwd: string): string {
   const session = SessionManager.create(cwd);
   const file = session.getSessionFile();
+
   if (!file) throw new Error("pi created no session file");
   writeFileSync(file, `${JSON.stringify(session.getHeader())}\n`, {
     flag: "wx",
   });
+
   return file;
 }
 
 function cloneSession(ctx: ExtensionCommandContext, target: string): string {
   const source = ctx.sessionManager.getSessionFile();
-  if (!source)
-    throw new Error(
-      "This session is not saved to disk, so it cannot be cloned.",
-    );
+
+  if (!source) throw new Error("This session is not saved to disk, so it cannot be cloned.");
   const leaf = ctx.sessionManager.getLeafId();
+
   if (!existsSync(source) || !leaf) return writeEmptySession(target);
+
   const clone = SessionManager.open(
     source,
     SessionManager.create(target).getSessionDir(),
     target,
   ).createBranchedSession(leaf);
+
   // pi writes a branched session only when its active path has an assistant message.
   return clone && existsSync(clone) ? clone : writeEmptySession(target);
 }
@@ -399,15 +382,13 @@ function runningWidget(ctx: ExtensionCommandContext): ShowRunning {
               (s) => theme.fg("muted", s),
               `/wt: ${step}`,
             );
+
             return Object.assign(loader, { dispose: () => loader.stop() });
           },
     );
 }
 
-async function waitForAgent(
-  ctx: ExtensionCommandContext,
-  showRunning: ShowRunning,
-): Promise<void> {
+async function waitForAgent(ctx: ExtensionCommandContext, showRunning: ShowRunning): Promise<void> {
   if (ctx.isIdle()) return;
   showRunning("waiting for the agent to finish its turn");
   await ctx.waitForIdle();
@@ -422,6 +403,7 @@ async function switchToSession(
   const { cancelled } = await ctx.switchSession(sessionFile, {
     withSession: async (next) => {
       next.ui.notify(notice);
+
       if (continuation)
         await next.sendMessage(
           { customType: "worktree", content: continuation, display: true },
@@ -429,6 +411,7 @@ async function switchToSession(
         );
     },
   });
+
   return !cancelled;
 }
 
@@ -442,12 +425,12 @@ async function finishWorktree(
   const linked = await finishableWorktree(ctx.cwd);
   showRunning(`copying the session to ${linked.home}`);
   const sessionFile = cloneSession(ctx, linked.home);
-  showRunning(
-    `removing ${linked.path}${linked.branch ? ` and branch ${linked.branch}` : ""}`,
-  );
+  showRunning(`removing ${linked.path}${linked.branch ? ` and branch ${linked.branch}` : ""}`);
   const removed = await removeWorktree(linked.home, linked.path);
+
   if (linked.branch) await clearTabLabel(linked.branch).catch(() => {});
   showRunning(`moving the session to ${linked.home}`);
+
   return switchToSession(
     ctx,
     sessionFile,
@@ -456,34 +439,25 @@ async function finishWorktree(
   );
 }
 
-async function pickWorktree(
-  ctx: ExtensionCommandContext,
-): Promise<Worktree | undefined> {
+async function pickWorktree(ctx: ExtensionCommandContext): Promise<Worktree | undefined> {
   const { root, worktrees } = await openRepo(ctx.cwd);
   const here = await currentWorktree(ctx.cwd);
+
   const choices = new Map(
     worktrees.map((w) => [
-      [
-        w.path === here ? "●" : " ",
-        w.branch ?? "(detached)",
-        folderNote(root, w),
-      ]
+      [w.path === here ? "●" : " ", w.branch ?? "(detached)", folderNote(root, w)]
         .filter(Boolean)
         .join(" "),
       w,
     ]),
   );
-  const label = await ctx.ui.select("Move session to worktree", [
-    ...choices.keys(),
-  ]);
+
+  const label = await ctx.ui.select("Move session to worktree", [...choices.keys()]);
+
   return label === undefined ? undefined : choices.get(label);
 }
 
-const reply = (
-  text: string,
-  structuredContent: ToolData,
-  terminate = false,
-) => ({
+const reply = (text: string, structuredContent: ToolData, terminate = false) => ({
   content: [{ type: "text" as const, text }],
   details: undefined,
   structuredContent,
@@ -492,39 +466,42 @@ const reply = (
 
 export default function (pi: ExtensionAPI) {
   const { PI_CWD_FILE, PI_CWD_SHELL } = process.env;
+
   const shellCwdFile =
-    PI_CWD_FILE && Number(PI_CWD_SHELL) === process.ppid
-      ? PI_CWD_FILE
-      : undefined;
+    PI_CWD_FILE && Number(PI_CWD_SHELL) === process.ppid ? PI_CWD_FILE : undefined;
+
   let pendingMove: PendingMove | undefined;
 
   const offerTool = (offered: boolean) => {
     const active = pi.getActiveTools();
+
     if (active.includes(TOOL_NAME) === offered) return;
     pi.setActiveTools(
-      offered
-        ? [...active, TOOL_NAME]
-        : active.filter((name) => name !== TOOL_NAME),
+      offered ? [...active, TOOL_NAME] : active.filter((name) => name !== TOOL_NAME),
     );
   };
 
   pi.on("session_start", async (_event, ctx) => {
     // Pi keeps its launch directory when a session moves, and Rex reads the process directory for new panes.
     if (existsSync(ctx.cwd)) process.chdir(ctx.cwd);
+
     if (shellCwdFile) writeFileSync(shellCwdFile, ctx.cwd);
     offerTool(bareRoot(ctx.cwd) !== undefined);
   });
 
   pi.on("agent_settled", (event, ctx) => {
     if (!pendingMove) return;
+
     if (event.aborted) {
       ctx.ui.notify(
         `Worktree move cancelled. Run /wt ${pendingMove.commandArgs} to move.`,
         "warning",
       );
       pendingMove = undefined;
+
       return;
     }
+
     pi.sendUserMessage(`/wt ${pendingMove.commandArgs}`, {
       expandPromptTemplates: true,
     });
@@ -536,32 +513,30 @@ export default function (pi: ExtensionAPI) {
     getArgumentCompletions: async (prefix) => {
       const r = await run(
         "git",
-        [
-          "for-each-ref",
-          "--format=%(refname)",
-          "refs/heads",
-          "refs/remotes/origin",
-        ],
+        ["for-each-ref", "--format=%(refname)", "refs/heads", "refs/remotes/origin"],
         undefined,
         process.cwd(),
         5_000,
       );
+
       if (r.code !== 0) return null;
       const refs = r.stdout.split("\n");
-      const local = refs.flatMap((ref) =>
-        ref.startsWith("refs/heads/") ? [ref.slice(11)] : [],
-      );
+      const local = refs.flatMap((ref) => (ref.startsWith("refs/heads/") ? [ref.slice(11)] : []));
       const doneArg = prefix.match(/^done\s+(.*)$/)?.[1];
+
       if (doneArg !== undefined)
         return fuzzyFilter(
           local.map((b) => ({ value: `done ${b}`, label: b })),
           doneArg,
           (item) => item.label,
         );
+
       const remote = refs.flatMap((ref) => {
         const b = ref.startsWith("refs/remotes/origin/") ? ref.slice(20) : "";
+
         return b && b !== "HEAD" && !local.includes(b) ? [b] : [];
       });
+
       return fuzzyFilter(
         [
           {
@@ -583,45 +558,56 @@ export default function (pi: ExtensionAPI) {
     },
     handler: async (args, ctx) => {
       const commandArgs = args.trim();
+
       const continuation =
-        pendingMove?.commandArgs === commandArgs
-          ? pendingMove.continuation
-          : undefined;
+        pendingMove?.commandArgs === commandArgs ? pendingMove.continuation : undefined;
+
       pendingMove = undefined;
+
       if (!commandArgs && !ctx.hasUI) {
-        ctx.ui.notify(
-          "Usage: /wt <branch> [base] or /wt done [branch]",
-          "error",
-        );
+        ctx.ui.notify("Usage: /wt <branch> [base] or /wt done [branch]", "error");
+
         return;
       }
+
       const showRunning = runningWidget(ctx);
       let moved = false;
+
       try {
         const [first, second] = commandArgs.split(/\s+/);
+
         if (first === "done" && !second) {
           moved = await finishWorktree(ctx, showRunning, continuation);
+
           return;
         }
+
         if (first === "done") {
           showRunning(`removing branch ${second} and its folder`);
           const removed = await removeOtherWorktree(ctx.cwd, second);
           ctx.ui.notify(`${removed}${await closeTab(second)}`);
+
           return;
         }
+
         let report = "";
         let target: Worktree | undefined;
+
         if (first) {
           showRunning(`preparing the worktree of ${first}`);
           const wt = await ensureWorktree(ctx.cwd, first, second);
           report = wt.report && `${wt.report} `;
           target = wt;
         } else target = await pickWorktree(ctx);
+
         if (!target) return;
+
         if (target.path === (await currentWorktree(ctx.cwd))) {
           ctx.ui.notify(`Session is already in ${target.path}`);
+
           return;
         }
+
         await waitForAgent(ctx, showRunning);
         showRunning(`moving the session to ${target.path}`);
         moved = await switchToSession(
@@ -656,8 +642,7 @@ export default function (pi: ExtensionAPI) {
       branch: Type.Optional(Type.String({ description: "e.g. feat/login" })),
       base: Type.Optional(
         Type.String({
-          description:
-            "Start point of a new branch. Default: the default branch",
+          description: "Start point of a new branch. Default: the default branch",
         }),
       ),
       task: Type.Optional(
@@ -697,6 +682,7 @@ export default function (pi: ExtensionAPI) {
       if (action === "list") {
         const repo = await openRepo(ctx.cwd, signal);
         const worktrees = await describeWorktrees(repo, signal);
+
         return reply(formatWorktrees(repo.root, worktrees), { worktrees });
       }
 
@@ -706,6 +692,7 @@ export default function (pi: ExtensionAPI) {
           commandArgs: "done",
           continuation: `This session deleted the folder ${wt.path}${wt.branch ? ` and branch \`${wt.branch}\`` : ""}, and moved to the default-branch worktree at \`${wt.home}\`. Continue the task there.`,
         };
+
         return reply(
           `When this turn ends, ${wt.path}${wt.branch ? ` and branch ${wt.branch} are` : " is"} deleted, and the session moves to ${wt.home}.`,
           { path: wt.home, branch: wt.branch },
@@ -717,26 +704,28 @@ export default function (pi: ExtensionAPI) {
 
       if (action === "remove") {
         const removed = await removeOtherWorktree(ctx.cwd, branch, signal);
+
         return reply(`${removed}${await closeTab(branch, signal)}`, {
           branch,
         });
       }
 
       if (action === "spawn") {
-        if (!session)
-          throw new Error("spawn needs Rex. This pi does not run inside Rex.");
+        if (!session) throw new Error("spawn needs Rex. This pi does not run inside Rex.");
+
         if (!task) throw new Error("Pass `task` to spawn.");
         const open = tabOf(await rexWindows(session, signal), branch);
+
         if (open)
           throw new Error(
             `Branch ${branch} already has a Rex tab, block ${firstBlock(open)}. Send the task to that agent instead.`,
           );
         const repo = await openRepo(ctx.cwd, signal);
+
         if (branch === repo.defaultBranch)
-          throw new Error(
-            `Branch ${branch} is the default branch. Spawn on another branch.`,
-          );
+          throw new Error(`Branch ${branch} is the default branch. Spawn on another branch.`);
         const wt = await ensureWorktree(ctx.cwd, branch, base, signal);
+
         const tab = await openTab(
           session,
           branch,
@@ -744,6 +733,7 @@ export default function (pi: ExtensionAPI) {
           ["pi", "--", task.startsWith("@") ? ` ${task}` : task],
           signal,
         );
+
         return reply(
           `${reportOf(wt)} An agent started on the task in background Rex tab ${branch}, block ${tab.block_id}.`,
           { path: wt.path, branch, ...tab },
@@ -751,6 +741,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       const wt = await ensureWorktree(ctx.cwd, branch, base, signal);
+
       if (wt.path === (await currentWorktree(ctx.cwd, signal)))
         return reply(`Session is already in ${wt.path}.`, {
           path: wt.path,
@@ -760,6 +751,7 @@ export default function (pi: ExtensionAPI) {
         commandArgs: branch,
         continuation: `This session moved to the worktree at \`${wt.path}\` on branch \`${branch}\`. Continue the task there.`,
       };
+
       return reply(
         `${reportOf(wt)} When this turn ends, the session moves there.`,
         { path: wt.path, branch },

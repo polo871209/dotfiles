@@ -17,4 +17,3 @@ user_pref("zen.theme.content-element-separation", 5);
 
 user_pref("browser.tabs.loadBookmarksInTabs", true);
 user_pref("browser.tabs.insertAfterCurrent", true);
-

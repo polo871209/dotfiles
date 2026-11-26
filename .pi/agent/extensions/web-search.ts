@@ -1,24 +1,5 @@
-import type {
-  ClassifierApi,
-  ClassifierBoolQuestion,
-  ClassifierModel,
-  Usage,
-} from "@earendil-works/pi-ai";
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-  Theme,
-} from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
-import { Type } from "typebox";
-import { Readability } from "@mozilla/readability";
-import { parseHTML } from "linkedom";
-import TurndownService from "turndown";
-import { extractText, getDocumentProxy, getMeta } from "unpdf";
-import { lookup as dnsLookup } from "node:dns/promises";
-import net from "node:net";
 import { execFile } from "node:child_process";
-import { tmpdir } from "node:os";
+import { lookup as dnsLookup } from "node:dns/promises";
 import {
   existsSync,
   readFileSync,
@@ -32,14 +13,23 @@ import {
   closeSync,
   realpathSync,
 } from "node:fs";
-import {
-  join,
-  dirname,
-  extname,
-  resolve as resolvePath,
-  sep as pathSep,
-} from "node:path";
+import net from "node:net";
+import { tmpdir } from "node:os";
+import { join, dirname, extname, resolve as resolvePath, sep as pathSep } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import type {
+  ClassifierApi,
+  ClassifierBoolQuestion,
+  ClassifierModel,
+  Usage,
+} from "@earendil-works/pi-ai";
+import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
+import { Text } from "@earendil-works/pi-tui";
+import { Readability } from "@mozilla/readability";
+import { parseHTML } from "linkedom";
+import TurndownService from "turndown";
+import { Type } from "typebox";
+import { extractText, getDocumentProxy, getMeta } from "unpdf";
 import { errorMessage } from "./shared/error";
 
 const EXA_MCP_URL = "https://mcp.exa.ai/mcp";
@@ -47,8 +37,10 @@ const EXA_TEXT_CHARS = 1_500;
 const RERANK_MAX_CANDIDATES = 10;
 const MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
 const MAX_REDIRECTS = 5;
+
 const USER_AGENT =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+
 const ACCEPT_HTML = "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8";
 
 const DUCKDUCKGO_URL = "https://html.duckduckgo.com/html/";
@@ -65,6 +57,7 @@ const turndown = new TurndownService({
   headingStyle: "atx",
   codeBlockStyle: "fenced",
 });
+
 turndown.escape = (text: string) => text;
 
 async function mapLimit<T, R>(
@@ -74,90 +67,117 @@ async function mapLimit<T, R>(
 ): Promise<R[]> {
   const results: R[] = new Array(items.length);
   let next = 0;
+
   async function worker() {
     while (next < items.length) {
       const i = next++;
       results[i] = await fn(items[i], i);
     }
   }
-  await Promise.all(
-    Array.from({ length: Math.min(limit, items.length) }, worker),
-  );
+
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+
   return results;
 }
 
 function withTimeout(signal: AbortSignal | undefined): AbortSignal {
   const timeout = AbortSignal.timeout(20_000);
+
   return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
 // Node rewrites ::ffff:127.0.0.1 as ::ffff:7f00:1, so a textual prefix test cannot see through normalization.
 function parseIPv6Groups(addr: string): number[] | null {
   const halves = addr.split("%")[0].split("::");
+
   if (halves.length > 2) return null;
 
   const parseHalf = (part: string): number[] | null => {
     if (!part) return [];
     const groups: number[] = [];
+
     for (const piece of part.split(":")) {
       if (net.isIPv4(piece)) {
         const [a, b, c, d] = piece.split(".").map(Number);
         groups.push((a << 8) | b, (c << 8) | d);
         continue;
       }
+
       if (!/^[0-9a-f]{1,4}$/i.test(piece)) return null;
       groups.push(parseInt(piece, 16));
     }
+
     return groups;
   };
 
   const head = parseHalf(halves[0]);
   const tail = halves.length === 2 ? parseHalf(halves[1]) : [];
+
   if (!head || !tail) return null;
+
   if (halves.length === 1) return head.length === 8 ? head : null;
   const fill = 8 - head.length - tail.length;
+
   if (fill < 1) return null;
+
   return [...head, ...Array<number>(fill).fill(0), ...tail];
 }
 
 function isPrivateAddress(addr: string): boolean {
   if (net.isIPv4(addr)) {
     const [a, b] = addr.split(".").map(Number);
+
     if (a === 127 || a === 10 || a === 0) return true;
+
     if (a === 169 && b === 254) return true;
+
     if (a === 172 && b >= 16 && b <= 31) return true;
+
     if (a === 192 && b === 168) return true;
+
     if (a === 100 && b >= 64 && b <= 127) return true;
+
     return false;
   }
 
   const groups = parseIPv6Groups(addr.toLowerCase());
+
   if (!groups) return false;
+
   if (groups.slice(0, 5).every((g) => g === 0) && groups[5] === 0xffff) {
     const [g6, g7] = groups.slice(6);
+
     return isPrivateAddress(`${g6 >> 8}.${g6 & 0xff}.${g7 >> 8}.${g7 & 0xff}`);
   }
+
   if (groups.every((g, i) => (i === 7 ? g <= 1 : g === 0))) return true;
+
   if ((groups[0] & 0xfe00) === 0xfc00) return true;
+
   if ((groups[0] & 0xffc0) === 0xfe80) return true;
+
   return false;
 }
 
 async function assertSafeUrl(rawUrl: string): Promise<URL> {
   const url = new URL(rawUrl);
+
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("Only http/https URLs are allowed");
   }
+
   const hostname = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+
   if (hostname === "localhost" || hostname.endsWith(".localhost")) {
     throw new Error(`Blocked internal hostname: ${hostname}`);
   }
+
   for (const addr of net.isIP(hostname)
     ? [hostname]
     : (await dnsLookup(hostname, { all: true })).map((a) => a.address)) {
-    if (isPrivateAddress(addr))
-      throw new Error(`Blocked internal address: ${addr}`);
+    if (isPrivateAddress(addr)) throw new Error(`Blocked internal address: ${addr}`);
   }
+
   return url;
 }
 
@@ -167,21 +187,26 @@ async function fetchSafely(
   accept: string = ACCEPT_HTML,
 ): Promise<{ res: Response; finalUrl: string }> {
   let current = await assertSafeUrl(rawUrl);
+
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects++) {
     const res = await fetch(current, {
       headers: { "User-Agent": USER_AGENT, Accept: accept },
       redirect: "manual",
       signal: withTimeout(signal),
     });
+
     if (![301, 302, 303, 307, 308].includes(res.status))
       return { res, finalUrl: current.toString() };
     const location = res.headers.get("location");
+
     if (!location) return { res, finalUrl: current.toString() };
     await res.body?.cancel();
+
     if (redirects === MAX_REDIRECTS)
       throw new Error(`Too many redirects fetching ${current.toString()}`);
     current = await assertSafeUrl(new URL(location, current).toString());
   }
+
   throw new Error("Too many redirects");
 }
 
@@ -193,6 +218,7 @@ type SearchResult = {
 };
 
 const RECENCY_DAYS = { day: 1, week: 7, month: 31, year: 366 } as const;
+
 type Recency = keyof typeof RECENCY_DAYS;
 
 interface SearchFilters {
@@ -204,10 +230,12 @@ interface SearchFilters {
 
 function normalizeDomain(raw: string): string {
   const trimmed = raw.trim().toLowerCase();
+
   try {
-    return new URL(
-      trimmed.includes("://") ? trimmed : `https://${trimmed}`,
-    ).hostname.replace(/^www\./, "");
+    return new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`).hostname.replace(
+      /^www\./,
+      "",
+    );
   } catch {
     return trimmed;
   }
@@ -216,19 +244,18 @@ function normalizeDomain(raw: string): string {
 function buildFilters(domains: string[], recency?: Recency): SearchFilters {
   const include: string[] = [];
   const exclude: string[] = [];
+
   for (const entry of domains) {
-    if (entry.trim().startsWith("-"))
-      exclude.push(normalizeDomain(entry.trim().slice(1)));
+    if (entry.trim().startsWith("-")) exclude.push(normalizeDomain(entry.trim().slice(1)));
     else include.push(normalizeDomain(entry));
   }
+
   return {
     include: include.filter(Boolean),
     exclude: exclude.filter(Boolean),
     recency,
     since: recency
-      ? new Date(Date.now() - RECENCY_DAYS[recency] * 86_400_000)
-          .toISOString()
-          .slice(0, 10)
+      ? new Date(Date.now() - RECENCY_DAYS[recency] * 86_400_000).toISOString().slice(0, 10)
       : undefined,
   };
 }
@@ -246,6 +273,7 @@ function withSiteOperators(query: string, filters: SearchFilters): string {
 function hostMatches(url: string, domains: string[]): boolean {
   try {
     const host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+
     return domains.some((d) => host === d || host.endsWith(`.${d}`));
   } catch {
     return false;
@@ -253,18 +281,15 @@ function hostMatches(url: string, domains: string[]): boolean {
 }
 
 function matchesFilters(result: SearchResult, filters: SearchFilters): boolean {
-  if (filters.include.length && !hostMatches(result.url, filters.include))
-    return false;
+  if (filters.include.length && !hostMatches(result.url, filters.include)) return false;
+
   if (hostMatches(result.url, filters.exclude)) return false;
-  return (
-    !filters.since || !result.published || result.published >= filters.since
-  );
+
+  return !filters.since || !result.published || result.published >= filters.since;
 }
 
 function isoDate(raw: string | undefined): string | undefined {
-  return /^\d{4}-\d{2}-\d{2}/.test(raw?.trim() ?? "")
-    ? raw!.trim().slice(0, 10)
-    : undefined;
+  return /^\d{4}-\d{2}-\d{2}/.test(raw?.trim() ?? "") ? raw!.trim().slice(0, 10) : undefined;
 }
 
 class RetryableSearchError extends Error {}
@@ -292,6 +317,7 @@ async function callMcpTool(
     }),
     signal: withTimeout(signal),
   });
+
   if (!res.ok) {
     const detail = `${label} search error ${res.status}: ${(await res.text()).slice(0, 300)}`;
     throw res.status === 429 || res.status >= 500
@@ -300,6 +326,7 @@ async function callMcpTool(
   }
 
   const body = await res.text();
+
   let payload: {
     result?: {
       content?: Array<{ type?: string; text?: string }>;
@@ -307,45 +334,45 @@ async function callMcpTool(
     };
     error?: { message?: string };
   } | null = null;
+
   for (const line of body.split("\n")) {
     if (!line.startsWith("data:")) continue;
+
     try {
       const candidate = JSON.parse(line.slice(5).trim());
+
       if (candidate?.result || candidate?.error) {
         payload = candidate;
         break;
       }
     } catch {}
   }
+
   if (!payload) {
     try {
       payload = JSON.parse(body);
     } catch {}
   }
+
   if (!payload) throw new Error(`${label} search returned an empty response`);
+
   if (payload.error)
-    throw new Error(
-      `${label} search error: ${payload.error.message ?? "unknown"}`,
-    );
-  const text = payload.result?.content?.find(
-    (c) => c.type === "text" && c.text,
-  )?.text;
+    throw new Error(`${label} search error: ${payload.error.message ?? "unknown"}`);
+  const text = payload.result?.content?.find((c) => c.type === "text" && c.text)?.text;
+
   if (payload.result?.isError) {
     const detail = `${label} search error: ${(text ?? "unknown").slice(0, 300)}`;
-    throw /rate|limit|429/i.test(detail)
-      ? new RetryableSearchError(detail)
-      : new Error(detail);
+    throw /rate|limit|429/i.test(detail) ? new RetryableSearchError(detail) : new Error(detail);
   }
+
   if (!text) throw new Error(`${label} search returned no content`);
+
   return text;
 }
 
-function requireResults(
-  results: SearchResult[],
-  label: string,
-): SearchResult[] {
-  if (results.length === 0)
-    throw new Error(`${label} returned no parseable results`);
+function requireResults(results: SearchResult[], label: string): SearchResult[] {
+  if (results.length === 0) throw new Error(`${label} returned no parseable results`);
+
   return results;
 }
 
@@ -370,12 +397,8 @@ async function exaAdvancedSearch(
             textMaxCharacters: EXA_TEXT_CHARS,
             enableHighlights: true,
             highlightsMaxCharacters: 500,
-            ...(filters.include.length
-              ? { includeDomains: filters.include }
-              : {}),
-            ...(filters.exclude.length
-              ? { excludeDomains: filters.exclude }
-              : {}),
+            ...(filters.include.length ? { includeDomains: filters.include } : {}),
+            ...(filters.exclude.length ? { excludeDomains: filters.exclude } : {}),
             ...(filters.since ? { startPublishedDate: filters.since } : {}),
           },
           signal,
@@ -391,20 +414,16 @@ async function exaAdvancedSearch(
       }
     ).results ?? []
   )
-    .map(
-      (r): SearchResult => ({
-        title: r.title?.trim() ?? "",
-        url: r.url?.trim() ?? "",
-        published: isoDate(r.publishedDate),
-        content: (
-          (Array.isArray(r.highlights) ? r.highlights.join(" … ") : "") ||
-          (r.text ?? "")
-        )
-          .trim()
-          .slice(0, EXA_TEXT_CHARS),
-      }),
-    )
+    .map((r): SearchResult => ({
+      title: r.title?.trim() ?? "",
+      url: r.url?.trim() ?? "",
+      published: isoDate(r.publishedDate),
+      content: ((Array.isArray(r.highlights) ? r.highlights.join(" … ") : "") || (r.text ?? ""))
+        .trim()
+        .slice(0, EXA_TEXT_CHARS),
+    }))
     .filter((r) => r.url);
+
   return requireResults(results, "Exa search");
 }
 
@@ -428,17 +447,20 @@ async function exaBasicSearch(
     .map((block): SearchResult => {
       const textStart = block.indexOf("\nText: ");
       let content = "";
+
       if (textStart >= 0) {
         content = block.slice(textStart + 7);
       } else {
         const hlMatch = block.match(/\nHighlights:\s*\n/);
-        if (hlMatch?.index != null)
-          content = block.slice(hlMatch.index + hlMatch[0].length);
+
+        if (hlMatch?.index != null) content = block.slice(hlMatch.index + hlMatch[0].length);
       }
+
       content = content
         .replace(/\n---\s*$/, "")
         .trim()
         .slice(0, EXA_TEXT_CHARS);
+
       return {
         title: block.match(/^Title: (.+)/m)?.[1]?.trim() ?? "",
         url: block.match(/^URL: (.+)/m)?.[1]?.trim() ?? "",
@@ -447,6 +469,7 @@ async function exaBasicSearch(
       };
     })
     .filter((r) => r.url);
+
   return requireResults(results, "Exa search");
 }
 
@@ -479,19 +502,18 @@ async function parallelSearch(
       }
     ).results ?? []
   )
-    .map(
-      (r): SearchResult => ({
-        title: r.title?.trim() ?? "",
-        url: r.url?.trim() ?? "",
-        published: isoDate(r.publish_date),
-        content: (Array.isArray(r.excerpts) ? r.excerpts : [])
-          .join("\n")
-          .trim()
-          .slice(0, EXA_TEXT_CHARS),
-      }),
-    )
+    .map((r): SearchResult => ({
+      title: r.title?.trim() ?? "",
+      url: r.url?.trim() ?? "",
+      published: isoDate(r.publish_date),
+      content: (Array.isArray(r.excerpts) ? r.excerpts : [])
+        .join("\n")
+        .trim()
+        .slice(0, EXA_TEXT_CHARS),
+    }))
     .filter((r) => r.url)
     .slice(0, numResults);
+
   return requireResults(results, "Parallel search");
 }
 
@@ -504,10 +526,9 @@ function duckDuckGoSearch(
   filters: SearchFilters,
   signal?: AbortSignal,
 ): Promise<SearchResult[]> {
-  const run = duckDuckGoQueue.then(() =>
-    duckDuckGoRequest(query, numResults, filters, signal),
-  );
+  const run = duckDuckGoQueue.then(() => duckDuckGoRequest(query, numResults, filters, signal));
   duckDuckGoQueue = run.catch(() => {}).then(() => sleep(2_000));
+
   return run;
 }
 
@@ -518,69 +539,74 @@ async function duckDuckGoRequest(
   signal?: AbortSignal,
 ): Promise<SearchResult[]> {
   signal?.throwIfAborted();
+
   if (Date.now() < duckDuckGoBlockedUntil)
     throw new Error(
       `DuckDuckGo bot check, paused for ${Math.ceil((duckDuckGoBlockedUntil - Date.now()) / 60_000)} min`,
     );
   const url = new URL(DUCKDUCKGO_URL);
   url.searchParams.set("q", withSiteOperators(query, filters));
+
   if (filters.recency) url.searchParams.set("df", filters.recency[0]);
+
   const res = await fetch(url, {
     headers: { "User-Agent": USER_AGENT, Accept: "text/html" },
     signal: withTimeout(signal),
   });
-  if (!res.ok)
-    throw new Error(
-      `DuckDuckGo search error ${res.status}: ${(await res.text()).slice(0, 200)}`,
-    );
 
-  const { document } = parseHTML(
-    await readBoundedText(res, MAX_RESPONSE_BYTES),
-  );
-  if (
-    res.status === 202 ||
-    document.querySelector(".anomaly-modal__box, #challenge-form")
-  ) {
+  if (!res.ok)
+    throw new Error(`DuckDuckGo search error ${res.status}: ${(await res.text()).slice(0, 200)}`);
+
+  const { document } = parseHTML(await readBoundedText(res, MAX_RESPONSE_BYTES));
+
+  if (res.status === 202 || document.querySelector(".anomaly-modal__box, #challenge-form")) {
     duckDuckGoBlockedUntil = Date.now() + 5 * 60_000;
     throw new Error("DuckDuckGo bot check, paused for 5 min");
   }
+
   const results: SearchResult[] = [];
+
   for (const container of document.querySelectorAll(".result")) {
     if (container.classList.contains("result--ad")) continue;
     const anchor = container.querySelector(".result__a");
     const title = anchor?.textContent?.trim() ?? "";
     const href = anchor?.getAttribute("href")?.trim();
+
     if (!title || !href) continue;
     let target: string;
+
     try {
       const link = new URL(href, DUCKDUCKGO_URL);
       const destination = new URL(link.searchParams.get("uddg") ?? link.href);
-      if (destination.protocol !== "http:" && destination.protocol !== "https:")
-        continue;
+
+      if (destination.protocol !== "http:" && destination.protocol !== "https:") continue;
       target = destination.href;
     } catch {
       continue;
     }
+
     results.push({
       title,
       url: target,
-      content:
-        container.querySelector(".result__snippet")?.textContent?.trim() ?? "",
+      content: container.querySelector(".result__snippet")?.textContent?.trim() ?? "",
     });
+
     if (results.length >= numResults) break;
   }
-  if (results.length === 0)
-    throw new Error("DuckDuckGo returned no parseable results");
+
+  if (results.length === 0) throw new Error("DuckDuckGo returned no parseable results");
+
   return results;
 }
 
 function dedupKey(raw: string): { page: string; query: string } {
   try {
     const url = new URL(raw);
+
     for (const key of [...url.searchParams.keys()]) {
-      if (/^(utm_|gclid|fbclid|mc_|ref$|source$)/i.test(key))
-        url.searchParams.delete(key);
+      if (/^(utm_|gclid|fbclid|mc_|ref$|source$)/i.test(key)) url.searchParams.delete(key);
     }
+
     return {
       page: `${url.hostname.replace(/^www\./i, "").toLowerCase()}${url.pathname.replace(/\/+$/, "")}`,
       query: url.search,
@@ -592,16 +618,22 @@ function dedupKey(raw: string): { page: string; query: string } {
 
 function dedupResults(results: SearchResult[]): SearchResult[] {
   const seen = new Map<string, Set<string>>();
+
   return results.filter((r) => {
     const { page, query } = dedupKey(r.url);
     const queries = seen.get(page);
+
     if (!queries) {
       seen.set(page, new Set([query]));
+
       return true;
     }
+
     if (queries.has(query)) return false;
+
     if (query === "" || queries.has("")) return false;
     queries.add(query);
+
     return true;
   });
 }
@@ -609,6 +641,7 @@ function dedupResults(results: SearchResult[]): SearchResult[] {
 function isTransient(err: unknown): boolean {
   if (err instanceof RetryableSearchError) return true;
   const message = errorMessage(err).toLowerCase();
+
   return (
     message.includes("fetch failed") ||
     message.includes("terminated") ||
@@ -624,6 +657,7 @@ async function runSearch(
   signal?: AbortSignal,
 ): Promise<{ results: SearchResult[]; provider: string }> {
   const failures: string[] = [];
+
   for (const [index, provider] of [
     { name: "exa", run: exaAdvancedSearch },
     { name: "exa-basic", run: exaBasicSearch },
@@ -632,23 +666,27 @@ async function runSearch(
   ].entries()) {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const results = (
-          await provider.run(query, numResults, filters, signal)
-        ).filter((r) => matchesFilters(r, filters));
-        if (results.length === 0)
-          throw new Error("no results match the domain or recency filter");
+        const results = (await provider.run(query, numResults, filters, signal)).filter((r) =>
+          matchesFilters(r, filters),
+        );
+
+        if (results.length === 0) throw new Error("no results match the domain or recency filter");
+
         return { results, provider: provider.name };
       } catch (err) {
         if (signal?.aborted) throw err;
+
         if (index === 0 && attempt === 0 && isTransient(err)) {
           await sleep(500 + Math.floor(Math.random() * 250));
           continue;
         }
+
         failures.push(`${provider.name}: ${errorMessage(err)}`);
         break;
       }
     }
   }
+
   throw new Error(failures.join("; "));
 }
 
@@ -656,9 +694,9 @@ async function findRanker(
   ctx: ExtensionContext,
 ): Promise<ClassifierModel<ClassifierApi> | undefined> {
   try {
-    return (
-      await ctx.modelRegistry.getAvailableOfType("classifier", "typesafe")
-    ).find((model) => model.id === "jev-latest");
+    return (await ctx.modelRegistry.getAvailableOfType("classifier", "typesafe")).find(
+      (model) => model.id === "jev-latest",
+    );
   } catch {
     return undefined;
   }
@@ -708,6 +746,7 @@ async function scoreCandidates(
   });
 
   const timeout = AbortSignal.timeout(8_000);
+
   const result = await ctx.modelRegistry.classify(
     ranker,
     {
@@ -723,12 +762,15 @@ async function scoreCandidates(
     },
     { signal: signal ? AbortSignal.any([signal, timeout]) : timeout },
   );
-  if (result.stopReason !== "stop")
-    return { scores: null, usage: result.usage };
+
+  if (result.stopReason !== "stop") return { scores: null, usage: result.usage };
+
   const scores = candidates.map((_, i) => {
     const answer = result.answers[`c${i}`];
+
     return answer?.type === "bool" ? answer.probability : null;
   });
+
   return {
     scores: scores.some((s) => s !== null) ? scores : null,
     usage: result.usage,
@@ -744,19 +786,16 @@ async function rerankResults(
 ): Promise<{ results: SearchResult[]; dropped: number; usage?: Usage }> {
   if (!ranker || results.length < 2) return { results, dropped: 0 };
   const candidates = results.slice(0, RERANK_MAX_CANDIDATES);
-  const { scores, usage } = await scoreCandidates(
-    ctx,
-    ranker,
-    query,
-    candidates,
-    signal,
-  );
+  const { scores, usage } = await scoreCandidates(ctx, ranker, query, candidates, signal);
+
   if (!scores) return { results, dropped: 0, usage };
+
   const kept = candidates
     .map((result, i) => ({ result, i, score: scores[i] }))
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0) || a.i - b.i)
     .filter((s, rank) => rank < 3 || (s.score ?? 0) >= 0.35)
     .map((s) => s.result);
+
   return {
     results: kept,
     dropped: candidates.length - kept.length,
@@ -764,37 +803,34 @@ async function rerankResults(
   };
 }
 
-async function readBounded(
-  res: Response,
-  maxBytes: number,
-): Promise<Uint8Array> {
+async function readBounded(res: Response, maxBytes: number): Promise<Uint8Array> {
   if (!res.body) return new Uint8Array(await res.arrayBuffer());
   const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];
   let received = 0;
+
   try {
     while (true) {
       const { done, value } = await reader.read();
+
       if (done) break;
       received += value.byteLength;
+
       if (received > maxBytes) {
-        throw new Error(
-          `Response too large (>${Math.round(maxBytes / 1024 / 1024)}MB)`,
-        );
+        throw new Error(`Response too large (>${Math.round(maxBytes / 1024 / 1024)}MB)`);
       }
+
       chunks.push(value);
     }
   } finally {
     reader.cancel().catch(() => {});
   }
+
   // pdf.js rejects a Node Buffer, so copy into a plain Uint8Array.
   return new Uint8Array(Buffer.concat(chunks));
 }
 
-async function readBoundedText(
-  res: Response,
-  maxBytes: number,
-): Promise<string> {
+async function readBoundedText(res: Response, maxBytes: number): Promise<string> {
   return new TextDecoder().decode(await readBounded(res, maxBytes));
 }
 
@@ -803,20 +839,19 @@ async function pdfToMarkdown(
   url: string,
 ): Promise<{ title: string; content: string }> {
   const pdf = await getDocumentProxy(bytes);
+
   try {
-    const [{ text }, { info }] = await Promise.all([
-      extractText(pdf),
-      getMeta(pdf),
-    ]);
+    const [{ text }, { info }] = await Promise.all([extractText(pdf), getMeta(pdf)]);
+
     if (!text.some((page) => page.trim()))
       throw new Error("PDF has no text layer (scanned images only)");
-    const content = text
-      .map((page, i) => `## Page ${i + 1}\n\n${page.trim()}`)
-      .join("\n\n");
+    const content = text.map((page, i) => `## Page ${i + 1}\n\n${page.trim()}`).join("\n\n");
+
     const title =
       typeof info?.Title === "string" && info.Title.trim()
         ? info.Title.trim()
         : decodeURIComponent(new URL(url).pathname.split("/").pop() || url);
+
     return { title, content };
   } finally {
     await pdf.loadingTask.destroy();
@@ -835,13 +870,16 @@ function sliceWithContinuation(
   const totalChars = content.length;
   const start = Math.min(Math.max(offset, 0), totalChars);
   let end = Math.min(start + 15_000, totalChars);
+
   if (end < totalChars) {
     const minBreak = start + Math.floor((end - start) * 0.9);
     const lastNewline = content.lastIndexOf("\n", end);
     const lastSpace = content.lastIndexOf(" ", end);
+
     if (lastNewline > minBreak) end = lastNewline;
     else if (lastSpace > minBreak) end = lastSpace;
   }
+
   return {
     text: content.slice(start, end),
     truncated: end < totalChars,
@@ -856,11 +894,8 @@ function findPassages(content: string, needles: string[]): string {
   const hits: Array<{ start: number; end: number; term: number }> = [];
   terms.forEach((term, t) => {
     const needle = term.toLowerCase();
-    for (
-      let i = lower.indexOf(needle);
-      i >= 0;
-      i = lower.indexOf(needle, i + needle.length)
-    ) {
+
+    for (let i = lower.indexOf(needle); i >= 0; i = lower.indexOf(needle, i + needle.length)) {
       hits.push({
         start: Math.max(0, i - 400),
         end: Math.min(content.length, i + needle.length + 400),
@@ -870,15 +905,12 @@ function findPassages(content: string, needles: string[]): string {
   });
   hits.sort((a, b) => a.start - b.start);
 
-  const passages: Array<{ start: number; end: number; terms: Set<number> }> =
-    [];
+  const passages: Array<{ start: number; end: number; terms: Set<number> }> = [];
+
   for (const hit of hits) {
     const last = passages.at(-1);
-    if (
-      last &&
-      hit.start <= last.end &&
-      (hit.end <= last.end || hit.end - last.start <= 2_000)
-    ) {
+
+    if (last && hit.start <= last.end && (hit.end <= last.end || hit.end - last.start <= 2_000)) {
       last.end = Math.max(last.end, hit.end);
       last.terms.add(hit.term);
     } else {
@@ -891,17 +923,15 @@ function findPassages(content: string, needles: string[]): string {
   }
 
   const missing = terms.filter((_, t) => !passages.some((p) => p.terms.has(t)));
-  const missingLine = missing.length
-    ? `No match: ${missing.map((m) => `"${m}"`).join(", ")}`
-    : "";
+  const missingLine = missing.length ? `No match: ${missing.map((m) => `"${m}"`).join(", ")}` : "";
+
   if (passages.length === 0)
     return `${missingLine}. The page has ${content.length} chars. Retry with a shorter term, or fetch without find.`;
 
-  const firstPerTerm = terms.flatMap((_, t) =>
-    passages.filter((p) => p.terms.has(t)).slice(0, 1),
-  );
+  const firstPerTerm = terms.flatMap((_, t) => passages.filter((p) => p.terms.has(t)).slice(0, 1));
   const shown = new Set<(typeof passages)[number]>();
   let used = 0;
+
   for (const passage of new Set([...firstPerTerm, ...passages])) {
     if (used + passage.end - passage.start > 20_000) continue;
     shown.add(passage);
@@ -922,18 +952,14 @@ function findPassages(content: string, needles: string[]): string {
     .join("\n\n");
 }
 
-function withContinuationFooter(
-  content: string,
-  offset: number,
-  url: string,
-): string {
-  const { text, truncated, nextOffset, totalChars } = sliceWithContinuation(
-    content,
-    offset,
-  );
+function withContinuationFooter(content: string, offset: number, url: string): string {
+  const { text, truncated, nextOffset, totalChars } = sliceWithContinuation(content, offset);
+
   if (offset >= totalChars && totalChars > 0)
     return `[offset ${offset} is past the end: the page has ${totalChars} chars]`;
+
   if (!truncated) return text;
+
   return `${text}\n\n[chars ${offset}-${nextOffset} of ${totalChars}. To continue: fetch_content({ url: "${url}", offset: ${nextOffset} })]`;
 }
 
@@ -941,12 +967,15 @@ function absolutizeUrls(document: Document, baseUrl: string): void {
   const rewrite = (selector: string, attribute: string) => {
     for (const element of document.querySelectorAll(selector)) {
       const value = element.getAttribute(attribute);
+
       if (!value || /^(data|javascript|mailto|tel):/i.test(value)) continue;
+
       try {
         element.setAttribute(attribute, new URL(value, baseUrl).toString());
       } catch {}
     }
   };
+
   rewrite("a[href]", "href");
   rewrite("img[src]", "src");
 }
@@ -957,8 +986,11 @@ function extractFallbackContent(document: Document): string {
   )) {
     element.remove();
   }
+
   const body = document.querySelector("main") ?? document.body;
+
   if (!body) return "";
+
   return turndown
     .turndown(body.innerHTML ?? "")
     .replace(/\n{3,}/g, "\n\n")
@@ -973,29 +1005,30 @@ async function fetchReadable(
   const { res, finalUrl } = await fetchSafely(
     url,
     signal,
-    mode === "raw"
-      ? "application/json,text/plain;q=0.9,*/*;q=0.8"
-      : ACCEPT_HTML,
+    mode === "raw" ? "application/json,text/plain;q=0.9,*/*;q=0.8" : ACCEPT_HTML,
   );
+
   const reject = async (message: string): Promise<never> => {
     await res.body?.cancel();
     throw new Error(message);
   };
+
   if (!res.ok) await reject(`HTTP ${res.status}: ${res.statusText}`);
 
   const contentType = res.headers.get("content-type") ?? "";
   const baseType = contentType.split(";")[0].trim().toLowerCase();
+
   const isPdf =
     baseType === "application/pdf" ||
-    (baseType === "application/octet-stream" &&
-      /\.pdf$/i.test(new URL(finalUrl).pathname));
+    (baseType === "application/octet-stream" && /\.pdf$/i.test(new URL(finalUrl).pathname));
+
   const maxBytes = isPdf ? 25 * 1024 * 1024 : MAX_RESPONSE_BYTES;
   const contentLength = res.headers.get("content-length");
+
   if (contentLength && Number(contentLength) > maxBytes) {
-    await reject(
-      `Response too large (${Math.round(Number(contentLength) / 1024 / 1024)}MB)`,
-    );
+    await reject(`Response too large (${Math.round(Number(contentLength) / 1024 / 1024)}MB)`);
   }
+
   if (isPdf) return pdfToMarkdown(await readBounded(res, maxBytes), finalUrl);
 
   if (
@@ -1012,18 +1045,19 @@ async function fetchReadable(
   }
 
   const text = await readBoundedText(res, MAX_RESPONSE_BYTES);
+
   if (mode === "raw" || !contentType.includes("html")) {
     return { title: url, content: text };
   }
 
   const { document } = parseHTML(text);
   absolutizeUrls(document as unknown as Document, finalUrl);
-  const documentTitle =
-    document.querySelector("title")?.textContent?.trim() ?? "";
+  const documentTitle = document.querySelector("title")?.textContent?.trim() ?? "";
   // Readability mutates the document it parses, so the fallback works on a
   // second parse of the original HTML.
   const article = new Readability(document as unknown as Document).parse();
   const markdown = article ? turndown.turndown(article.content ?? "") : "";
+
   if (markdown.trim()) {
     return { title: article?.title || documentTitle || url, content: markdown };
   }
@@ -1031,18 +1065,21 @@ async function fetchReadable(
   const { document: raw } = parseHTML(text);
   absolutizeUrls(raw as unknown as Document, finalUrl);
   const fallback = extractFallbackContent(raw as unknown as Document);
-  if (!fallback)
-    throw new Error("Could not extract readable content from page");
+
+  if (!fallback) throw new Error("Could not extract readable content from page");
+
   return { title: documentTitle || url, content: fallback };
 }
 
 function parseYouTubeVideoId(rawUrl: string): string | null {
   let url: URL;
+
   try {
     url = new URL(rawUrl);
   } catch {
     return null;
   }
+
   if (
     ![
       "youtube.com",
@@ -1056,20 +1093,17 @@ function parseYouTubeVideoId(rawUrl: string): string | null {
     return null;
 
   const segments = url.pathname.split("/").filter(Boolean);
-  const candidates: Array<string | undefined> = [
-    url.searchParams.get("v") ?? undefined,
-  ];
-  if (url.hostname.toLowerCase().endsWith("youtu.be"))
-    candidates.push(segments[0]);
-  if (
-    segments.length >= 2 &&
-    ["shorts", "embed", "live", "v"].includes(segments[0])
-  )
+  const candidates: Array<string | undefined> = [url.searchParams.get("v") ?? undefined];
+
+  if (url.hostname.toLowerCase().endsWith("youtu.be")) candidates.push(segments[0]);
+
+  if (segments.length >= 2 && ["shorts", "embed", "live", "v"].includes(segments[0]))
     candidates.push(segments[1]);
 
   for (const candidate of candidates) {
     if (candidate && /^[A-Za-z0-9_-]{11}$/.test(candidate)) return candidate;
   }
+
   return null;
 }
 
@@ -1091,13 +1125,17 @@ function execCapture(
             .map((l) => l.replace(/^ERROR:\s*/, "").trim())
             .filter(Boolean)
             .pop();
+
           const failure = new Error(
             detail ? `${file}: ${detail}` : `${file} failed: ${err.message}`,
           ) as NodeJS.ErrnoException;
+
           failure.code = (err as NodeJS.ErrnoException).code;
           reject(failure);
+
           return;
         }
+
         resolve({ stdout, stderr });
       },
     );
@@ -1107,18 +1145,25 @@ function execCapture(
 function vttToText(raw: string): string {
   const out: string[] = [];
   let previous = "";
+
   for (const rawLine of raw.split(/\r?\n/)) {
     if (/^(WEBVTT|NOTE|STYLE|REGION)\b/.test(rawLine)) continue;
+
     if (/^(Kind|Language):/.test(rawLine)) continue;
+
     if (rawLine.includes("-->")) continue;
+
     if (/^\d+$/.test(rawLine.trim())) continue;
+
     const line = decodeEntities(rawLine.replace(/<[^>]*>/g, ""))
       .replace(/\s+/g, " ")
       .trim();
+
     if (!line || line === previous) continue;
     out.push(line);
     previous = line;
   }
+
   return out.join(" ").replace(/\s+/g, " ").trim();
 }
 
@@ -1129,9 +1174,7 @@ function decodeEntities(text: string): string {
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, code) =>
-      String.fromCodePoint(parseInt(code, 16)),
-    )
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCodePoint(parseInt(code, 16)))
     .replace(/&amp;/g, "&");
 }
 
@@ -1162,17 +1205,16 @@ async function downloadSubtitleFile(
     YT_DLP_TIMEOUT_MS,
     signal,
   );
+
   const best = readdirSync(dir)
     .filter((f) => f.endsWith(".vtt"))
     .sort()
     .sort((a, b) => a.length - b.length)[0];
+
   return best ? join(dir, best) : null;
 }
 
-async function fallbackSubLang(
-  videoId: string,
-  signal?: AbortSignal,
-): Promise<string | null> {
+async function fallbackSubLang(videoId: string, signal?: AbortSignal): Promise<string | null> {
   const { stdout } = await execCapture(
     "yt-dlp",
     [
@@ -1185,27 +1227,33 @@ async function fallbackSubLang(
     YT_DLP_TIMEOUT_MS,
     signal,
   );
+
   const manual: string[] = [];
   const automatic: string[] = [];
   let bucket: string[] | null = null;
+
   for (const line of stdout.split(/\r?\n/)) {
     if (/^\[info\] Available automatic captions/.test(line)) {
       bucket = automatic;
       continue;
     }
+
     if (/^\[info\] Available subtitles/.test(line)) {
       bucket = manual;
       continue;
     }
+
     if (/^\[/.test(line)) {
       bucket = null;
       continue;
     }
+
     const code = line.match(/^([A-Za-z0-9_-]{2,})\s+\S/)?.[1];
-    if (!bucket || !code || code === "Language" || code === "live_chat")
-      continue;
+
+    if (!bucket || !code || code === "Language" || code === "live_chat") continue;
     bucket.push(code);
   }
+
   return (
     manual.find((c) => c.endsWith("-orig")) ??
     automatic.find((c) => c.endsWith("-orig")) ??
@@ -1217,7 +1265,9 @@ async function fallbackSubLang(
 
 function readVideoMetadata(dir: string): Record<string, unknown> {
   const infoFile = readdirSync(dir).find((f) => f.endsWith(".info.json"));
+
   if (!infoFile) return {};
+
   try {
     return JSON.parse(readFileSync(join(dir, infoFile), "utf-8"));
   } catch {
@@ -1230,27 +1280,21 @@ async function fetchYouTubeTranscript(
   signal?: AbortSignal,
 ): Promise<{ title: string; content: string }> {
   const dir = mkdtempSync(join(tmpdir(), "pi-youtube-"));
+
   try {
-    let subtitleFile = await downloadSubtitleFile(
-      dir,
-      videoId,
-      "en-orig,en,en-US,en-GB",
-      signal,
-    );
+    let subtitleFile = await downloadSubtitleFile(dir, videoId, "en-orig,en,en-US,en-GB", signal);
+
     if (!subtitleFile) {
       const fallbackLang = await fallbackSubLang(videoId, signal);
+
       if (fallbackLang)
-        subtitleFile = await downloadSubtitleFile(
-          dir,
-          videoId,
-          fallbackLang,
-          signal,
-        );
+        subtitleFile = await downloadSubtitleFile(dir, videoId, fallbackLang, signal);
     }
-    if (!subtitleFile)
-      throw new Error("no subtitles or auto-captions available for this video");
+
+    if (!subtitleFile) throw new Error("no subtitles or auto-captions available for this video");
 
     const transcript = vttToText(readFileSync(subtitleFile, "utf-8"));
+
     if (!transcript) throw new Error("subtitle track was empty");
 
     const info = readVideoMetadata(dir);
@@ -1259,9 +1303,7 @@ async function fetchYouTubeTranscript(
       title: typeof info.title === "string" ? info.title : `YouTube ${videoId}`,
       content: `${[
         typeof info.channel === "string" ? `Channel: ${info.channel}` : null,
-        typeof info.duration_string === "string"
-          ? `Duration: ${info.duration_string}`
-          : null,
+        typeof info.duration_string === "string" ? `Duration: ${info.duration_string}` : null,
         `Transcript language: ${subtitleFile.match(/\.([A-Za-z0-9_-]+)\.vtt$/)?.[1] ?? "unknown"}`,
         "Timestamps removed.",
       ]
@@ -1284,17 +1326,21 @@ interface GitHubUrlInfo {
 
 function parseGitHubUrl(rawUrl: string): GitHubUrlInfo | null {
   let url: URL;
+
   try {
     url = new URL(rawUrl);
   } catch {
     return null;
   }
+
   if (url.hostname.toLowerCase() !== "github.com") return null;
 
   const segments = url.pathname.split("/").filter(Boolean);
+
   if (segments.length < 2) return null;
   const owner = segments[0];
   const repo = segments[1].replace(/\.git$/, "");
+
   if (
     [
       "issues",
@@ -1317,13 +1363,13 @@ function parseGitHubUrl(rawUrl: string): GitHubUrlInfo | null {
   )
     return null;
 
-  if (segments.length === 2)
-    return { owner, repo, refIsFullSha: false, type: "root" };
+  if (segments.length === 2) return { owner, repo, refIsFullSha: false, type: "root" };
 
   const action = segments[2];
-  if ((action !== "blob" && action !== "tree") || segments.length < 4)
-    return null;
+
+  if ((action !== "blob" && action !== "tree") || segments.length < 4) return null;
   const ref = segments[3];
+
   return {
     owner,
     repo,
@@ -1336,13 +1382,16 @@ function parseGitHubUrl(rawUrl: string): GitHubUrlInfo | null {
 
 function sweepDeadClones(): void {
   let names: string[];
+
   try {
     names = readdirSync(tmpdir());
   } catch {
     return;
   }
+
   for (const name of names) {
     const pid = Number(/^pi-github-repos-(\d+)$/.exec(name)?.[1]);
+
     if (!pid || pid === process.pid || pidAlive(pid)) continue;
     rmSync(join(tmpdir(), name), { recursive: true, force: true });
   }
@@ -1351,6 +1400,7 @@ function sweepDeadClones(): void {
 function pidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
+
     return true;
   } catch (err) {
     // EPERM: the pid exists but belongs to another user.
@@ -1383,18 +1433,18 @@ async function cloneGitHubRepo(
 ): Promise<string> {
   const key = ref ? `${owner}/${repo}@${ref}` : `${owner}/${repo}`;
   const cached = cloneCache.get(key);
+
   if (cached) return cached;
 
-  const localPath = join(
-    GITHUB_CLONE_DIR,
-    owner,
-    ref ? `${repo}@${ref}` : repo,
-  );
+  const localPath = join(GITHUB_CLONE_DIR, owner, ref ? `${repo}@${ref}` : repo);
+
   const promise = (async () => {
     if (existsSync(join(localPath, ".git"))) return localPath;
     const args = ["clone", "--depth", "1", "--single-branch"];
+
     if (ref) args.push("--branch", ref);
     args.push(`https://github.com/${owner}/${repo}.git`, localPath);
+
     try {
       rmSync(localPath, { recursive: true, force: true });
       mkdirSync(dirname(localPath), { recursive: true });
@@ -1404,9 +1454,12 @@ async function cloneGitHubRepo(
       cloneCache.delete(key);
       throw new Error(`git clone failed: ${errorMessage(err)}`);
     }
+
     return localPath;
   })();
+
   cloneCache.set(key, promise);
+
   return promise;
 }
 
@@ -1414,15 +1467,15 @@ function resolveWithinRepo(root: string, rel: string): string | null {
   const normalizedRoot = realpathSync(root);
   const joined = resolvePath(normalizedRoot, rel);
   const candidate = existsSync(joined) ? realpathSync(joined) : joined;
+
   if (
     candidate !== normalizedRoot &&
     !candidate.startsWith(
-      normalizedRoot.endsWith(pathSep)
-        ? normalizedRoot
-        : normalizedRoot + pathSep,
+      normalizedRoot.endsWith(pathSep) ? normalizedRoot : normalizedRoot + pathSep,
     )
   )
     return null;
+
   return candidate;
 }
 
@@ -1451,39 +1504,48 @@ function isBinaryFile(path: string): boolean {
     ].includes(extname(path).toLowerCase())
   )
     return true;
+
   try {
     const fd = openSync(path, "r");
     const buf = Buffer.alloc(512);
     const n = readSync(fd, buf, 0, 512, 0);
     closeSync(fd);
+
     for (let i = 0; i < n; i++) if (buf[i] === 0) return true;
   } catch {
     return false;
   }
+
   return false;
 }
 
 function buildRepoTree(root: string): string {
   const entries: string[] = [];
+
   function walk(dir: string, rel: string): void {
     if (entries.length >= MAX_TREE_ENTRIES) return;
     let items: string[];
+
     try {
       items = readdirSync(dir).sort();
     } catch {
       return;
     }
+
     for (const item of items) {
       if (entries.length >= MAX_TREE_ENTRIES) return;
+
       if (item === ".git") continue;
       const relPath = rel ? `${rel}/${item}` : item;
       const full = join(dir, item);
       let stat;
+
       try {
         stat = statSync(full);
       } catch {
         continue;
       }
+
       if (stat.isDirectory()) {
         if (
           [
@@ -1501,6 +1563,7 @@ function buildRepoTree(root: string): string {
           entries.push(`${relPath}/ [skipped]`);
           continue;
         }
+
         entries.push(`${relPath}/`);
         walk(full, relPath);
       } else {
@@ -1508,22 +1571,26 @@ function buildRepoTree(root: string): string {
       }
     }
   }
+
   walk(root, "");
+
   if (entries.length >= MAX_TREE_ENTRIES)
     entries.push(`... (truncated at ${MAX_TREE_ENTRIES} entries)`);
+
   return entries.join("\n");
 }
 
 function readRepoReadme(root: string): string | null {
   for (const name of ["README.md", "readme.md", "README", "README.txt"]) {
     const p = resolveWithinRepo(root, name);
+
     if (p && existsSync(p)) {
       const content = readFileSync(p, "utf-8");
-      return content.length > 8000
-        ? content.slice(0, 8000) + "\n\n[README truncated]"
-        : content;
+
+      return content.length > 8000 ? content.slice(0, 8000) + "\n\n[README truncated]" : content;
     }
   }
+
   return null;
 }
 
@@ -1533,13 +1600,16 @@ function describeGithubPath(root: string, info: GitHubUrlInfo): string {
   if (info.type === "root") {
     lines.push("## Structure", buildRepoTree(root), "");
     const readme = readRepoReadme(root);
+
     if (readme) lines.push("## README.md", readme, "");
     lines.push(`Explore further at local path: ${root}`);
+
     return lines.join("\n");
   }
 
   const path = info.path ?? "";
   const target = resolveWithinRepo(root, path);
+
   if (!target || !existsSync(target)) {
     lines.push(
       `Path \`${path}\` not found in clone. Showing repo root instead.`,
@@ -1549,10 +1619,12 @@ function describeGithubPath(root: string, info: GitHubUrlInfo): string {
       "",
       `Explore further at local path: ${root}`,
     );
+
     return lines.join("\n");
   }
 
   const stat = statSync(target);
+
   if (stat.isDirectory()) {
     lines.push(`## ${path || "/"}`);
     lines.push(
@@ -1561,19 +1633,19 @@ function describeGithubPath(root: string, info: GitHubUrlInfo): string {
         .filter((i) => i !== ".git")
         .map((i) => {
           const s = statSync(join(target, i));
+
           return s.isDirectory() ? `  ${i}/` : `  ${i} (${s.size}B)`;
         })
         .join("\n") || "(empty)",
     );
     lines.push("", `Explore further at local path: ${target}`);
+
     return lines.join("\n");
   }
 
   if (isBinaryFile(target)) {
-    lines.push(
-      `## ${path}`,
-      `Binary file (${stat.size}B). Full local path: ${target}`,
-    );
+    lines.push(`## ${path}`, `Binary file (${stat.size}B). Full local path: ${target}`);
+
     return lines.join("\n");
   }
 
@@ -1585,6 +1657,7 @@ function describeGithubPath(root: string, info: GitHubUrlInfo): string {
           `\n\n[truncated at ${MAX_FILE_CHARS} chars — full file at ${target}]`
       : content,
   );
+
   return lines.join("\n");
 }
 
@@ -1596,17 +1669,23 @@ interface GitHubIssueRef {
 
 function parseGitHubIssueUrl(rawUrl: string): GitHubIssueRef | null {
   let url: URL;
+
   try {
     url = new URL(rawUrl);
   } catch {
     return null;
   }
+
   if (url.hostname.toLowerCase() !== "github.com") return null;
   const segments = url.pathname.split("/").filter(Boolean);
+
   if (segments.length < 4) return null;
   const [owner, repo, kind, number] = segments;
+
   if (kind !== "issues" && kind !== "pull") return null;
+
   if (!/^\d+$/.test(number)) return null;
+
   return { owner, repo: repo.replace(/\.git$/, ""), number };
 }
 
@@ -1615,12 +1694,8 @@ async function fetchGitHubIssue(
   signal?: AbortSignal,
 ): Promise<{ title: string; content: string }> {
   const base = `repos/${ref.owner}/${ref.repo}/issues/${ref.number}`;
-  const { stdout } = await execCapture(
-    "gh",
-    ["api", base],
-    GH_TIMEOUT_MS,
-    signal,
-  );
+  const { stdout } = await execCapture("gh", ["api", base], GH_TIMEOUT_MS, signal);
+
   const issue = JSON.parse(stdout) as {
     number: number;
     title: string;
@@ -1633,10 +1708,12 @@ async function fetchGitHubIssue(
     body?: string | null;
     pull_request?: unknown;
   };
+
   const labels = (issue.labels ?? [])
     .map((l) => l.name)
     .filter(Boolean)
     .join(", ");
+
   const lines = [
     `${issue.pull_request ? "Pull request" : "Issue"} ${ref.owner}/${ref.repo}#${issue.number}: ${issue.title}`,
     `State: ${issue.state}${issue.state_reason ? ` (${issue.state_reason})` : ""}`,
@@ -1654,11 +1731,13 @@ async function fetchGitHubIssue(
       GH_TIMEOUT_MS,
       signal,
     );
+
     const comments = JSON.parse(commentsJson) as Array<{
       user?: { login?: string };
       created_at?: string;
       body?: string | null;
     }>;
+
     for (const comment of comments) {
       const body = (comment.body ?? "").trim();
       lines.push(
@@ -1669,11 +1748,9 @@ async function fetchGitHubIssue(
           : body || "(empty)",
       );
     }
+
     if ((issue.comments ?? 0) > comments.length) {
-      lines.push(
-        "",
-        `[${issue.comments} comments total, showing first ${comments.length}]`,
-      );
+      lines.push("", `[${issue.comments} comments total, showing first ${comments.length}]`);
     }
   }
 
@@ -1683,6 +1760,7 @@ async function fetchGitHubIssue(
       `[Use github_pr for diffs, checks, and review threads: { pr: ${issue.number}, repo: "${ref.owner}/${ref.repo}" }]`,
     );
   }
+
   return {
     title: `${ref.owner}/${ref.repo}#${issue.number}: ${issue.title}`,
     content: lines.join("\n"),
@@ -1695,6 +1773,7 @@ async function fetchOne(
   mode: FetchMode = "readable",
 ): Promise<{ title: string; content: string }> {
   const videoId = parseYouTubeVideoId(url);
+
   if (videoId) {
     try {
       return await fetchYouTubeTranscript(videoId, signal);
@@ -1705,6 +1784,7 @@ async function fetchOne(
   }
 
   const issueRef = mode === "raw" ? null : parseGitHubIssueUrl(url);
+
   if (issueRef) {
     try {
       return await fetchGitHubIssue(issueRef, signal);
@@ -1712,19 +1792,16 @@ async function fetchOne(
   }
 
   const gh = mode === "raw" ? null : parseGitHubUrl(url);
+
   if (gh && !gh.refIsFullSha) {
     try {
       return {
-        title: gh.path
-          ? `${gh.owner}/${gh.repo} - ${gh.path}`
-          : `${gh.owner}/${gh.repo}`,
-        content: describeGithubPath(
-          await cloneGitHubRepo(gh.owner, gh.repo, gh.ref, signal),
-          gh,
-        ),
+        title: gh.path ? `${gh.owner}/${gh.repo} - ${gh.path}` : `${gh.owner}/${gh.repo}`,
+        content: describeGithubPath(await cloneGitHubRepo(gh.owner, gh.repo, gh.ref, signal), gh),
       };
     } catch {}
   }
+
   return fetchReadable(url, signal, mode);
 }
 
@@ -1743,22 +1820,29 @@ async function fetchOneCached(
 ): Promise<{ title: string; content: string }> {
   const key = `${mode}:${url}`;
   const hit = extractCache.get(key);
+
   if (hit && Date.now() - hit.storedAt < 5 * 60_000) {
     extractCache.delete(key);
     extractCache.set(key, hit);
+
     return { title: hit.title, content: hit.content };
   }
+
   extractCache.delete(key);
 
   const extracted = await fetchOne(url, signal, mode);
+
   if (extracted.content.length <= 2_000_000) {
     extractCache.set(key, { ...extracted, storedAt: Date.now() });
+
     while (extractCache.size > 16) {
       const oldest = extractCache.keys().next().value;
+
       if (oldest === undefined) break;
       extractCache.delete(oldest);
     }
   }
+
   return extracted;
 }
 
@@ -1781,9 +1865,7 @@ function missingInput(one: string, many: string) {
   };
 }
 
-function resultText(result: {
-  content: Array<{ type: string; text?: string }>;
-}): string {
+function resultText(result: { content: Array<{ type: string; text?: string }> }): string {
   return result.content.find((c) => c.type === "text")?.text ?? "";
 }
 
@@ -1793,6 +1875,7 @@ function errorLine(
   theme: Theme,
 ): Text {
   const text = resultText(result);
+
   return new Text(
     theme.fg(
       "error",
@@ -1828,14 +1911,13 @@ const searchParams = Type.Object({
   ),
   domains: Type.Optional(
     Type.Array(nonEmptyText, {
-      description:
-        'Only these domains, or "-domain" to exclude one. Applies to every query.',
+      description: 'Only these domains, or "-domain" to exclude one. Applies to every query.',
     }),
   ),
   recency: Type.Optional(
-    Type.Enum(["day", "week", "month", "year"],
-      { description: "Only pages published in this period." },
-    ),
+    Type.Enum(["day", "week", "month", "year"], {
+      description: "Only pages published in this period.",
+    }),
   ),
 });
 
@@ -1861,8 +1943,7 @@ const fetchParams = Type.Object({
   offset: Type.Optional(
     Type.Number({
       minimum: 0,
-      description:
-        "Character position to continue from. Ignored when find is set.",
+      description: "Character position to continue from. Ignored when find is set.",
     }),
   ),
   find: Type.Optional(
@@ -1894,8 +1975,10 @@ export default function (pi: ExtensionAPI) {
     annotations: { readOnlyHint: true, openWorldHint: true },
     renderResult(result, options, theme: Theme, context) {
       if (context.isError) return errorLine("web_search", result, theme);
+
       if (options.expanded) return new Text(resultText(result), 0, 0);
       const d = result.details;
+
       return new Text(
         theme.fg(
           "dim",
@@ -1915,9 +1998,7 @@ export default function (pi: ExtensionAPI) {
               title: Type.String(),
               url: Type.String(),
               content: Type.String(),
-              published: Type.Optional(
-                Type.String({ description: "YYYY-MM-DD" }),
-              ),
+              published: Type.Optional(Type.String({ description: "YYYY-MM-DD" })),
             }),
           ),
           error: Type.Union([Type.String(), Type.Null()]),
@@ -1926,12 +2007,9 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_callId, params, signal, _onUpdate, ctx) {
       const queryList = nonBlank(params.queries, params.query);
-      if (queryList.length === 0)
-        return missingInput("query", "queries");
-      const numResults = Math.min(
-        Math.max(Math.floor(params.numResults ?? 5), 1),
-        10,
-      );
+
+      if (queryList.length === 0) return missingInput("query", "queries");
+      const numResults = Math.min(Math.max(Math.floor(params.numResults ?? 5), 1), 10);
 
       const ranker = await findRanker(ctx);
       const filters = buildFilters(params.domains ?? [], params.recency);
@@ -1940,12 +2018,11 @@ export default function (pi: ExtensionAPI) {
         try {
           const { results, provider } = await runSearch(
             query,
-            ranker
-              ? Math.min(numResults * 2, RERANK_MAX_CANDIDATES)
-              : numResults,
+            ranker ? Math.min(numResults * 2, RERANK_MAX_CANDIDATES) : numResults,
             filters,
             signal,
           );
+
           const ranked = await rerankResults(
             ctx,
             provider === "duckduckgo" ? undefined : ranker,
@@ -1953,7 +2030,9 @@ export default function (pi: ExtensionAPI) {
             dedupResults(results),
             signal,
           );
+
           const shown = ranked.results.slice(0, numResults);
+
           return {
             query,
             results: shown,
@@ -1976,34 +2055,42 @@ export default function (pi: ExtensionAPI) {
 
       let output = "";
       let totalResults = 0;
+
       if (queryResults.some((r) => r.provider === "duckduckgo"))
         output +=
           "Note: fallback search for at least one query. Snippets are shorter than usual, so fetch a result before concluding.\n\n";
+
       const structured: {
         query: string;
         results: SearchResult[];
         error: string | null;
       }[] = [];
+
       for (const { query, results, dropped, error } of queryResults) {
         if (queryList.length > 1) output += `## Query: "${query}"\n\n`;
+
         if (error) {
           structured.push({ query, results: [], error });
           output += `0 results (error: ${error})\n\n`;
           continue;
         }
+
         structured.push({
           query,
           results,
           error: null,
         });
         totalResults += results.length;
+
         const droppedNote = dropped
           ? `${dropped} off-topic result${dropped === 1 ? "" : "s"} dropped. Rephrase the query if these do not answer it.\n\n`
           : "";
+
         if (results.length === 0) {
           output += `0 results.\n\n${droppedNote}`;
           continue;
         }
+
         output +=
           results
             .map(
@@ -2012,6 +2099,7 @@ export default function (pi: ExtensionAPI) {
             )
             .join("\n\n") + `\n\n${droppedNote}`;
       }
+
       const usages = queryResults.flatMap((r) => (r.usage ? [r.usage] : []));
 
       return {
@@ -2048,13 +2136,12 @@ export default function (pi: ExtensionAPI) {
     },
     renderResult(result, options, theme: Theme, context) {
       if (context.isError) return errorLine("fetch_content", result, theme);
+
       if (options.expanded) return new Text(resultText(result), 0, 0);
       const d = result.details;
+
       return new Text(
-        theme.fg(
-          "dim",
-          `  fetch_content — ${d.ok ?? 0}/${d.urls?.length ?? 0} ok`,
-        ),
+        theme.fg("dim", `  fetch_content — ${d.ok ?? 0}/${d.urls?.length ?? 0} ok`),
         0,
         0,
       );
@@ -2072,25 +2159,19 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute(_callId, params, signal) {
       const urlList = nonBlank(params.urls, params.url);
+
       if (urlList.length === 0) return missingInput("url", "urls");
 
       const results = await mapLimit(urlList, 3, async (url) => {
         try {
-          const { title, content } = await fetchOneCached(
-            url,
-            signal,
-            params.mode ?? "readable",
-          );
+          const { title, content } = await fetchOneCached(url, signal, params.mode ?? "readable");
+
           return {
             url,
             title,
             content: params.find?.length
               ? findPassages(content, params.find)
-              : withContinuationFooter(
-                  content,
-                  Math.max(Math.floor(params.offset ?? 0), 0),
-                  url,
-                ),
+              : withContinuationFooter(content, Math.max(Math.floor(params.offset ?? 0), 0), url),
             error: null as string | null,
           };
         } catch (err) {

@@ -1,4 +1,4 @@
 excluded:
-  - .build
+  - "**/.build"
 disabled_rules:
   - trailing_comma # swift-format adds trailing commas to multi-line literals on save

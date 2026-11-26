@@ -1,3 +1,8 @@
+import { execFileSync, spawn } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { createInterface } from "node:readline";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { contentText, type JsonValue } from "@earendil-works/pi-ai";
 import {
@@ -8,19 +13,7 @@ import {
   type SessionEntry,
   type Theme,
 } from "@earendil-works/pi-coding-agent";
-import {
-  Box,
-  Container,
-  Markdown,
-  Spacer,
-  Text,
-  truncateToWidth,
-} from "@earendil-works/pi-tui";
-import { execFileSync, spawn } from "node:child_process";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
-import { createInterface } from "node:readline";
+import { Box, Container, Markdown, Spacer, Text, truncateToWidth } from "@earendil-works/pi-tui";
 import { Type, type Static } from "typebox";
 import { formatDuration } from "../shared/format";
 import { surviveReload } from "../shared/reload";
@@ -119,14 +112,13 @@ const activityFileOf = (resultFile: string) => `${resultFile}.activity`;
 
 const stallText = (activity: Activity): string =>
   `${activity.tool} open for ${formatDuration(Date.now() - activity.since)}${activity.summary ? `: ${activity.summary}` : ""}`;
-const runsStore = surviveReload(
-  "__piSubagentRuns",
-  () => new Map<string, RunRecord>(),
-);
+
+const runsStore = surviveReload("__piSubagentRuns", () => new Map<string, RunRecord>());
 const MAX_TRACKED_RUNS = 50;
 
 function pruneRunsStore(): void {
   if (runsStore.size <= MAX_TRACKED_RUNS) return;
+
   for (const r of [...runsStore.values()]
     .filter((r) => r.progress.status !== "running")
     .sort((a, b) => a.progress.startedAt - b.progress.startedAt)) {
@@ -136,17 +128,16 @@ function pruneRunsStore(): void {
 }
 
 const RESULT_ENTRY_TYPE = "subagent-result";
+
 interface ResultEntry {
   id: string;
   value: unknown;
 }
 
-const resultStore = surviveReload(
-  "__piSubagentResults",
-  () => new Map<string, unknown>(),
-);
+const resultStore = surviveReload("__piSubagentResults", () => new Map<string, unknown>());
 
 const RUN_ENTRY_TYPE = "subagent-run";
+
 interface RunEntry {
   id: string;
   agent: string;
@@ -176,6 +167,7 @@ const doneNoticeText = (record: RunRecord): string =>
 
 function flushNotices(): void {
   delivery.timer = undefined;
+
   const pending = delivery.pending
     .splice(0)
     .filter(
@@ -185,14 +177,17 @@ function flushNotices(): void {
           ? !record.delivered && !isWaitedOn(record.id)
           : record.progress.status === "running"),
     );
+
   if (pending.length === 0) return;
-  for (const { kind, record } of pending)
-    if (kind === "done") record.delivered = true;
+
+  for (const { kind, record } of pending) if (kind === "done") record.delivered = true;
   const finished = pending.filter(({ kind }) => kind === "done").length;
+
   const header =
     finished === pending.length
       ? `${finished} background subagent run${finished === 1 ? "" : "s"} finished.`
       : "Background subagent update.";
+
   try {
     sink.notify?.(
       `${header}\n\n${pending.map(({ record, stall }) => (stall ? stallNoticeText(record, stall) : doneNoticeText(record))).join("\n\n")}`,
@@ -206,12 +201,9 @@ function flushNotices(): void {
   } catch {}
 }
 
-function queueNotice(
-  kind: Notice["kind"],
-  record: RunRecord,
-  stall?: string,
-): void {
+function queueNotice(kind: Notice["kind"], record: RunRecord, stall?: string): void {
   if (!record.progress.background || record.stopped) return;
+
   if (isWaitedOn(record.id) || record.sessionId !== sink.sessionId) return;
   delivery.pending.push({ kind, record, stall });
   delivery.timer ??= setTimeout(flushNotices, NOTICE_BATCH_MS);
@@ -220,13 +212,14 @@ function queueNotice(
 function reportStall(record: RunRecord, activity: Activity): void {
   if (!record.progress.background) return;
   const stall = stallText(activity);
-  for (const listener of delivery.attentionListeners)
-    listener(record.id, stall);
+
+  for (const listener of delivery.attentionListeners) listener(record.id, stall);
   queueNotice("stall", record, stall);
 }
 
 function persist(sessionId: string, type: string, data: unknown): void {
   if (sink.sessionId !== sessionId) return;
+
   try {
     sink.append?.(type, data);
   } catch {}
@@ -238,14 +231,17 @@ function hydrateResultStore(entries: readonly SessionEntry[]): void {
   for (const entry of customEntries<ResultEntry>(entries, RESULT_ENTRY_TYPE)) {
     if (entry.data?.id) resultStore.set(entry.data.id, entry.data.value);
   }
+
   const lastRun = new Map<string, RunEntry>();
+
   for (const entry of customEntries<RunEntry>(entries, RUN_ENTRY_TYPE)) {
     if (entry.data?.id) lastRun.set(entry.data.id, entry.data);
   }
+
   interruptedRuns.clear();
+
   for (const run of lastRun.values()) {
-    if (run.status === "running" && !runsStore.has(run.id))
-      interruptedRuns.set(run.id, run);
+    if (run.status === "running" && !runsStore.has(run.id)) interruptedRuns.set(run.id, run);
   }
 }
 
@@ -264,44 +260,48 @@ function interruptedValue(run: RunEntry): Static<typeof RunValueSchema> {
 
 function capReturnedOutput(text: string, id: string): string {
   const bytes = Buffer.byteLength(text, "utf-8");
+
   if (bytes <= MAX_OUTPUT_BYTES) return text;
-  const head = Buffer.from(text, "utf-8")
-    .subarray(0, MAX_OUTPUT_BYTES)
-    .toString("utf-8");
+  const head = Buffer.from(text, "utf-8").subarray(0, MAX_OUTPUT_BYTES).toString("utf-8");
   const shown = head.slice(0, Math.max(head.lastIndexOf("\n"), 0)) || head;
   const file = path.join(os.tmpdir(), `pi-subagent-output-${id}.md`);
+
   try {
     fs.writeFileSync(file, text, { mode: 0o600 });
   } catch (err) {
     return `${shown}\n\n[output cut at ${MAX_OUTPUT_BYTES / 1024} KB of ${Math.ceil(bytes / 1024)} KB, and the full text could not be saved: ${String(err)}]`;
   }
+
   const shownLines = shown.split("\n").length;
+
   return `${shown}\n\n[output cut at line ${shownLines} of ${text.split("\n").length}. The full ${Math.ceil(bytes / 1024)} KB is at ${file}. Read it with offset ${shownLines + 1} for the rest.]`;
 }
 
-function extractResultBlock(
-  text: string,
-  id: string,
-): { text: string; captured: boolean } {
+function extractResultBlock(text: string, id: string): { text: string; captured: boolean } {
   let hit: { value: unknown; index: number } | undefined;
+
   for (const m of text.matchAll(/```result-json\s*\n([\s\S]*?)\n```/g)) {
     try {
       hit = { value: JSON.parse(m[1]!), index: m.index };
     } catch {}
   }
+
   if (!hit) return { text, captured: false };
   resultStore.set(id, hit.value);
   persistResult?.(id, hit.value);
+
   return { text: text.slice(0, hit.index).trimEnd(), captured: true };
 }
 
 function getByPath(obj: unknown, path: string | undefined): unknown {
   if (!path) return obj;
   let cur = obj;
+
   for (const key of path.split(".").filter(Boolean)) {
     if (cur == null || typeof cur !== "object") return undefined;
     cur = (cur as Record<string, unknown>)[key];
   }
+
   return cur;
 }
 
@@ -310,17 +310,13 @@ const RunValueSchema = Type.Object({
   agent: Type.String(),
   status: Type.Enum(["running", "done", "failed"]),
   output: Type.String(),
-  result: Type.Optional(
-    Type.Unknown({ description: "Parsed result-json block, when present" }),
-  ),
+  result: Type.Optional(Type.Unknown({ description: "Parsed result-json block, when present" })),
   error: Type.Optional(Type.String()),
 });
 
-function runValue(
-  p: Progress,
-  fieldPath?: string,
-): Static<typeof RunValueSchema> & JsonValue {
+function runValue(p: Progress, fieldPath?: string): Static<typeof RunValueSchema> & JsonValue {
   const id = p.id ?? "";
+
   return {
     id,
     agent: p.agent,
@@ -341,8 +337,8 @@ const ManageValueSchema = Type.Object({
   ),
   runs: Type.Array(RunValueSchema),
 });
-const manageValue = (v: Static<typeof ManageValueSchema>): JsonValue =>
-  v as JsonValue;
+
+const manageValue = (v: Static<typeof ManageValueSchema>): JsonValue => v as JsonValue;
 
 const AGENTS_DIR = path.join(getAgentDir(), "agents");
 const MAX_OUTPUT_BYTES = 8 * 1024;
@@ -360,10 +356,12 @@ function rexScript<T>(
       signal: options.signal,
       stdio: ["ignore", "pipe", "pipe"],
     });
+
     let result: unknown;
     let stderr = "";
     createInterface({ input: child.stdout }).on("line", (line) => {
       if (!line.trim()) return;
+
       try {
         result = JSON.parse(line);
       } catch {
@@ -390,13 +388,14 @@ function withPanelLock<T>(fn: () => Promise<T>): Promise<T> {
     () => undefined,
     () => undefined,
   );
+
   return result;
 }
 
 const closePanes = (blockIds: string[], files: string[] = []) =>
-  withPanelLock(() =>
-    rexScript({ op: "close", block_ids: blockIds, files }),
-  ).catch(() => undefined);
+  withPanelLock(() => rexScript({ op: "close", block_ids: blockIds, files })).catch(
+    () => undefined,
+  );
 
 const listField = (value: unknown): string[] =>
   (typeof value === "string" ? value : "")
@@ -407,25 +406,28 @@ const listField = (value: unknown): string[] =>
 function loadAgents(): AgentConfig[] {
   if (!fs.existsSync(AGENTS_DIR)) return [];
   const out: AgentConfig[] = [];
+
   for (const entry of fs.readdirSync(AGENTS_DIR)) {
     if (!entry.endsWith(".md")) continue;
     let content: string;
+
     try {
       content = fs.readFileSync(path.join(AGENTS_DIR, entry), "utf-8");
     } catch {
       continue;
     }
+
     const { frontmatter, body } = parseFrontmatter<
       Record<string, string | boolean | undefined> & { hidden?: boolean }
     >(content);
-    if (
-      typeof frontmatter.name !== "string" ||
-      typeof frontmatter.description !== "string"
-    )
+
+    if (typeof frontmatter.name !== "string" || typeof frontmatter.description !== "string")
       continue;
     const { model, thinking } = frontmatter;
+
     if (model !== undefined && typeof model !== "string")
       throw new Error(`${entry}: model must be a string`);
+
     if (thinking !== undefined && !isThinkingLevel(thinking))
       throw new Error(
         `${entry}: thinking must be one of ${Object.keys(THINKING_LEVELS).join(", ")}`,
@@ -441,12 +443,15 @@ function loadAgents(): AgentConfig[] {
       thinking,
     });
   }
+
   return out;
 }
 
 const headTruncate = (s: string, maxBytes: number): string => {
   const buf = Buffer.from(s, "utf-8");
+
   if (buf.length <= maxBytes) return s;
+
   return buf.subarray(0, maxBytes).toString("utf-8") + "\n…(truncated)";
 };
 
@@ -473,17 +478,19 @@ const SubagentParams = Type.Object({
 
 const statusIcon = (theme: Theme, p: Progress): string => {
   if (p.status === "running" && p.background) return theme.fg("muted", "•");
+
   if (p.status === "running") {
     const frames = workingFrames(theme);
+
     return frames[Math.floor(Date.now() / WORKING_FRAME_MS) % frames.length]!;
   }
+
   if (p.status === "failed") return theme.fg("error", "✗");
+
   return theme.fg("success", "✓");
 };
 
-const pendingProgress = (
-  args: Partial<Static<typeof SubagentParams>>,
-): Progress => ({
+const pendingProgress = (args: Partial<Static<typeof SubagentParams>>): Progress => ({
   agent: args.agent ?? "",
   task: args.task ?? "",
   model: "",
@@ -504,6 +511,7 @@ const renderProgressComponent = (
   const c = new Container();
   const running = p.status === "running";
   const starting = p.startedAt === 0;
+
   const facts = [
     p.model.split("/").at(-1) ?? "",
     starting
@@ -512,10 +520,12 @@ const renderProgressComponent = (
         ? "in background"
         : formatDuration(p.durationMs),
   ].filter(Boolean);
+
   const activity =
     running && p.activity
       ? ` · ${theme.fg(p.stalled ? "warning" : "dim", stallText(p.activity))}`
       : "";
+
   c.addChild(
     new Text(
       fitLine(
@@ -527,12 +537,11 @@ const renderProgressComponent = (
     ),
   );
   const task = p.task.trim().split("\n", 1)[0] ?? "";
-  if (task)
-    c.addChild(new Text(fitLine(theme.fg("dim", `  ${task}`), width), 0, 0));
+
+  if (task) c.addChild(new Text(fitLine(theme.fg("dim", `  ${task}`), width), 0, 0));
+
   if (running && !p.background && !starting)
-    c.addChild(
-      new Text(theme.fg("dim", `  ${DETACH_KEY} to move to background`), 0, 0),
-    );
+    c.addChild(new Text(theme.fg("dim", `  ${DETACH_KEY} to move to background`), 0, 0));
 
   if (p.error) {
     c.addChild(new Spacer(1));
@@ -541,6 +550,7 @@ const renderProgressComponent = (
 
   if (p.status !== "running" && p.output) {
     c.addChild(new Spacer(1));
+
     if (expanded) {
       c.addChild(new Markdown(p.output, 0, 0, getMarkdownTheme()));
     } else {
@@ -565,6 +575,7 @@ const padded = (outputPad: number, build: (width: number) => Container) => ({
   render: (width: number) => {
     const box = new Box(outputPad, 0);
     box.addChild(build(width - 2 * outputPad));
+
     return box.render(width);
   },
   invalidate: () => {},
@@ -611,34 +622,30 @@ const ManageParams = Type.Object({
         'result only: dot path into captured result-json, e.g. "findings.0.path". Omit it for the whole object.',
     }),
   ),
-  message: Type.Optional(
-    Type.String({ description: "steer only: follow-up text." }),
-  ),
+  message: Type.Optional(Type.String({ description: "steer only: follow-up text." })),
 });
 
 const formatRunLine = (r: RunRecord): string => {
   const p = r.progress;
+
   return `${r.id}  [${p.status}]  ${p.agent}  ${formatDuration(
     p.status === "running" ? Date.now() - p.startedAt : p.durationMs,
   )}${p.status === "running" && p.activity ? `  — ${stallText(p.activity)}` : ""}${p.error ? `  — ${p.error}` : ""}`;
 };
 
-const runPayload = (
-  id: string,
-  transcript: string,
-  fieldPath?: string,
-): string => {
+const runPayload = (id: string, transcript: string, fieldPath?: string): string => {
   if (resultStore.has(id)) {
     const value = getByPath(resultStore.get(id), fieldPath);
-    if (value === undefined)
-      return `(no field "${fieldPath}" in the result-json of ${id})`;
+
+    if (value === undefined) return `(no field "${fieldPath}" in the result-json of ${id})`;
+
     return headTruncate(JSON.stringify(value), MAX_OUTPUT_BYTES);
   }
+
   return transcript || "(no output)";
 };
 
-const transcriptOf = (r: RunRecord): string =>
-  r.progress.output || r.progress.error || "";
+const transcriptOf = (r: RunRecord): string => r.progress.output || r.progress.error || "";
 
 type WatchOutcome = {
   state: "done" | "error" | "blocked" | "timeout" | "closed";
@@ -659,8 +666,8 @@ function tick(record: RunRecord, activityFile: string): void {
   progress.durationMs = Date.now() - progress.startedAt;
   progress.activity = readActivity(activityFile);
   progress.stalled =
-    progress.activity !== undefined &&
-    Date.now() - progress.activity.since >= STALL_MS;
+    progress.activity !== undefined && Date.now() - progress.activity.since >= STALL_MS;
+
   if (
     progress.stalled &&
     progress.activity &&
@@ -690,22 +697,19 @@ async function runInRex(
   const resultFile = path.join(os.tmpdir(), `pi-subagent-result-${target}.txt`);
   const activityFile = activityFileOf(resultFile);
   record.resultFile = resultFile;
+
   const command = [
     "env",
     "PI_IS_SUBAGENT=1",
     `PI_SUBAGENT_RESULT_FILE=${resultFile}`,
-    ...(agent.packs.length > 0
-      ? [`PI_SKILL_PACKS=${agent.packs.join(",")}`]
-      : []),
+    ...(agent.packs.length > 0 ? [`PI_SKILL_PACKS=${agent.packs.join(",")}`] : []),
     "pi",
     "--no-session",
     "--name",
     agent.name,
     "--no-mcp",
     "--no-skills",
-    ...(agent.appendPrompt
-      ? ["--append-system-prompt", agent.appendPrompt]
-      : []),
+    ...(agent.appendPrompt ? ["--append-system-prompt", agent.appendPrompt] : []),
     trusted ? "--approve" : "--no-approve",
     ...(agent.tools.length > 0 ? ["--tools", agent.tools.join(",")] : []),
     "--exclude-tools",
@@ -716,9 +720,11 @@ async function runInRex(
     // pi reads a leading @ as a file to attach and a leading / as a command.
     /^[@/]/.test(task) ? ` ${task}` : task,
   ];
+
   const fail = (error: string, text = `subagent '${agent.name}' ${error}`) => {
     progress.status = "failed";
     progress.error = error;
+
     return {
       content: [{ type: "text" as const, text }],
       details: { ...progress },
@@ -727,6 +733,7 @@ async function runInRex(
   };
 
   let blockId: string;
+
   try {
     ({ block_id: blockId } = await withPanelLock(() =>
       rexScript<{ block_id: string }>({
@@ -739,19 +746,23 @@ async function runInRex(
   } catch (err) {
     return fail(`failed — could not open a Rex pane: ${String(err)}`);
   }
+
   record.blockId = blockId;
 
   const ticker = setInterval(() => {
     tick(record, activityFile);
     onTick();
   }, WORKING_FRAME_MS);
+
   const stopTicking = () => {
     clearInterval(ticker);
     progress.activity = undefined;
     progress.stalled = undefined;
   };
+
   const childFiles = [activityFile, `${activityFile}.tmp`];
   let outcome: WatchOutcome;
+
   try {
     outcome = await rexScript<WatchOutcome>(
       {
@@ -765,6 +776,7 @@ async function runInRex(
   } catch (err) {
     progress.durationMs = Date.now() - progress.startedAt;
     await closePanes([blockId], [resultFile, ...childFiles]);
+
     return fail(
       record.stopped
         ? "stopped by subagent_manage"
@@ -775,20 +787,22 @@ async function runInRex(
   } finally {
     stopTicking();
   }
+
   progress.durationMs = Date.now() - progress.startedAt;
 
   if (outcome.state === "timeout") {
     await closePanes([blockId], [resultFile, ...childFiles]);
-    return fail(
-      `timed out after ${formatDuration(DEFAULT_MAX_DURATION_MS)} (wall clock)`,
-    );
+
+    return fail(`timed out after ${formatDuration(DEFAULT_MAX_DURATION_MS)} (wall clock)`);
   }
 
   const extracted = extractResultBlock((outcome.output ?? "").trim(), target);
   let finalText = capReturnedOutput(extracted.text, target);
+
   if (extracted.captured) {
     finalText += `\n\n[result-json cached as ${target}. Read it later with subagent_manage (action: result).]`;
   }
+
   progress.output = finalText;
 
   if (outcome.state === "blocked") {
@@ -799,16 +813,20 @@ async function runInRex(
   }
 
   await closePanes([blockId], childFiles);
+
   if (outcome.state === "error") {
     return fail(
       `failed: ${outcome.msg ?? "the run stopped on an error"}`,
       `subagent '${agent.name}' failed: ${outcome.msg ?? "the run stopped on an error"}\n${finalText}`,
     );
   }
+
   if (outcome.state === "closed" && !finalText) {
     return fail("pane closed before the run finished");
   }
+
   progress.status = "done";
+
   return {
     content: [{ type: "text", text: finalText }],
     details: { ...progress },
@@ -817,32 +835,41 @@ async function runInRex(
 
 const describeCall = (args: unknown): string => {
   if (!args || typeof args !== "object") return "";
+
   for (const key of ["command", "path", "pattern", "query", "url"]) {
     const value = (args as Record<string, unknown>)[key];
+
     if (typeof value === "string" && value.trim())
       return value.trim().split("\n", 1)[0]!.slice(0, 80);
   }
+
   return "";
 };
 
 function registerChildReporter(pi: ExtensionAPI): void {
   const file = process.env.PI_SUBAGENT_RESULT_FILE;
+
   if (!file) return;
   const activityFile = activityFileOf(file);
   const openCalls = new Map<string, Activity>();
+
   const writeActivity = () => {
     const oldest = openCalls.values().next().value;
+
     try {
       if (!oldest) {
         fs.rmSync(activityFile, { force: true });
+
         return;
       }
+
       fs.writeFileSync(`${activityFile}.tmp`, JSON.stringify(oldest), {
         mode: 0o600,
       });
       fs.renameSync(`${activityFile}.tmp`, activityFile);
     } catch {}
   };
+
   pi.on("tool_execution_start", (event) => {
     if (event.parentToolCallId) return;
     openCalls.set(event.toolCallId, {
@@ -859,15 +886,13 @@ function registerChildReporter(pi: ExtensionAPI): void {
   pi.on("agent_settled", async (event, ctx) => {
     try {
       const branch = ctx.sessionManager.getBranch();
+
       const lastReply = branch
-        .flatMap((e) =>
-          e.type === "message" && e.message.role === "assistant"
-            ? [e.message]
-            : [],
-        )
+        .flatMap((e) => (e.type === "message" && e.message.role === "assistant" ? [e.message] : []))
         .at(-1);
-      const output =
-        (lastReply && contentText(lastReply.content).trim()) || undefined;
+
+      const output = (lastReply && contentText(lastReply.content).trim()) || undefined;
+
       const result: Omit<WatchOutcome, "state"> & { state: "done" | "error" } =
         event.aborted || lastReply?.stopReason === "aborted"
           ? { state: "error", msg: "aborted in the pane", output }
@@ -878,6 +903,7 @@ function registerChildReporter(pi: ExtensionAPI): void {
                 output,
               }
             : { state: "done", output };
+
       fs.writeFileSync(`${file}.tmp`, JSON.stringify(result), { mode: 0o600 });
       fs.renameSync(`${file}.tmp`, file);
     } catch {}
@@ -889,10 +915,7 @@ function hideRunStateFromRex(): void {
   process.stdout.write = ((chunk: unknown, ...rest: unknown[]) =>
     (write as (...args: unknown[]) => boolean)(
       typeof chunk === "string"
-        ? chunk.replace(
-            /\x1b\]7501;state=(?:idle|working|done|error)\b/g,
-            "\x1b]7501;state=clear",
-          )
+        ? chunk.replace(/\x1b\]7501;state=(?:idle|working|done|error)\b/g, "\x1b]7501;state=clear")
         : chunk,
       ...rest,
     )) as typeof process.stdout.write;
@@ -902,8 +925,10 @@ export default function (pi: ExtensionAPI) {
   if (process.env.PI_IS_SUBAGENT === "1") {
     hideRunStateFromRex();
     registerChildReporter(pi);
+
     return;
   }
+
   if (!process.env.REX_BLOCK) return;
 
   sink.append = (type, data) => pi.appendEntry(type, data);
@@ -918,78 +943,80 @@ export default function (pi: ExtensionAPI) {
   pi.on("agent_settled", (event) => {
     sink.userAborted = event.aborted;
   });
-  pi.registerMessageRenderer<Notice[]>(
-    NOTICE_TYPE,
-    (message, options, theme) => ({
-      render: (width: number) => {
-        const box = new Box(options.outputPad, 1, (t) =>
-          theme.bg("customMessageBg", t),
+  pi.registerMessageRenderer<Notice[]>(NOTICE_TYPE, (message, options, theme) => ({
+    render: (width: number) => {
+      const box = new Box(options.outputPad, 1, (t) => theme.bg("customMessageBg", t));
+
+      for (const notice of message.details ?? [])
+        box.addChild(
+          notice.stall
+            ? new Text(
+                `${theme.fg("warning", "\u26a0")} ${theme.fg("toolTitle", theme.bold(notice.progress.agent))} ${theme.fg("warning", notice.stall)}`,
+                0,
+                0,
+              )
+            : renderProgressComponent(
+                notice.progress,
+                theme,
+                width - 2 * options.outputPad,
+                options.expanded,
+                options.keyText,
+              ),
         );
-        for (const notice of message.details ?? [])
-          box.addChild(
-            notice.stall
-              ? new Text(
-                  `${theme.fg("warning", "\u26a0")} ${theme.fg("toolTitle", theme.bold(notice.progress.agent))} ${theme.fg("warning", notice.stall)}`,
-                  0,
-                  0,
-                )
-              : renderProgressComponent(
-                  notice.progress,
-                  theme,
-                  width - 2 * options.outputPad,
-                  options.expanded,
-                  options.keyText,
-                ),
-          );
-        return box.render(width);
-      },
-      invalidate: () => {},
-    }),
-  );
+
+      return box.render(width);
+    },
+    invalidate: () => {},
+  }));
   pi.registerShortcut(DETACH_KEY, {
     description: "Move running foreground subagents to the background",
     handler: (ctx) => {
-      const detachable = [...runsStore.values()].filter(
-        (record) => record.detach !== undefined,
-      );
+      const detachable = [...runsStore.values()].filter((record) => record.detach !== undefined);
+
       if (detachable.length === 0) {
         ctx.ui.notify("No foreground subagent is running");
+
         return;
       }
+
       for (const record of detachable) record.detach?.();
     },
   });
   persistResult = (id, value) => {
     const sessionId = runsStore.get(id)?.sessionId;
+
     if (sessionId) persist(sessionId, RESULT_ENTRY_TYPE, { id, value });
   };
+
   const offerManage = () => {
     const active = pi.getActiveTools();
-    if (!active.includes("subagent_manage"))
-      pi.setActiveTools([...active, "subagent_manage"]);
+
+    if (!active.includes("subagent_manage")) pi.setActiveTools([...active, "subagent_manage"]);
   };
+
   pi.on("session_start", async (event, ctx) => {
     sink.sessionId = ctx.sessionManager.getSessionId();
     sink.userAborted = false;
-    if (event.reason !== "startup" && event.reason !== "reload")
-      resultStore.clear();
+
+    if (event.reason !== "startup" && event.reason !== "reload") resultStore.clear();
     const branch = ctx.sessionManager.getBranch();
     hydrateResultStore(branch);
-    if (
-      branch.some(
-        (e) => isCustom(e, RUN_ENTRY_TYPE) || isCustom(e, RESULT_ENTRY_TYPE),
-      )
-    )
+
+    if (branch.some((e) => isCustom(e, RUN_ENTRY_TYPE) || isCustom(e, RESULT_ENTRY_TYPE)))
       offerManage();
   });
   pi.on("session_shutdown", (event) => {
     if (event.reason !== "quit") return;
+
     const running = [...runsStore.values()].filter(
       (record) => record.progress.status === "running",
     );
+
     for (const record of running) record.controller.abort();
     const blockIds = running.flatMap((record) => record.blockId ?? []);
+
     if (blockIds.length === 0) return;
+
     try {
       execFileSync(
         "rex",
@@ -997,9 +1024,7 @@ export default function (pi: ExtensionAPI) {
           op: "close",
           block_ids: blockIds,
           files: running.flatMap((record) =>
-            record.resultFile
-              ? [record.resultFile, activityFileOf(record.resultFile)]
-              : [],
+            record.resultFile ? [record.resultFile, activityFileOf(record.resultFile)] : [],
           ),
         }),
         { timeout: 5_000 },
@@ -1008,6 +1033,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   const agents = loadAgents();
+
   if (agents.length === 0) return;
 
   pi.registerTool<typeof SubagentParams, Progress | undefined>({
@@ -1025,6 +1051,7 @@ export default function (pi: ExtensionAPI) {
         .filter((a) => !a.hidden)
         .map((a) => {
           const summary = a.description.replace(/\s+/g, " ").trim();
+
           return `  ${a.name}: ${summary.length > 140 ? `${summary.slice(0, 137)}…` : summary}`;
         })
         .join("\n")}\n\n` +
@@ -1035,35 +1062,31 @@ export default function (pi: ExtensionAPI) {
     renderShell: "self",
 
     renderCall(args, theme, context) {
-      if (context.executionStarted)
-        return { render: () => [], invalidate() {} };
+      if (context.executionStarted) return { render: () => [], invalidate() {} };
       const p = pendingProgress(args);
+
       return padded(context.outputPad, (width) =>
         renderProgressComponent(p, theme, width, false, context.keyText),
       );
     },
 
     renderResult(result, options, theme, context) {
-      const record = result.details?.id
-        ? runsStore.get(result.details.id)
-        : undefined;
+      const record = result.details?.id ? runsStore.get(result.details.id) : undefined;
+
       if (record?.progress.background) record.redrawRow = context.invalidate;
+
       const p = record?.progress.background
         ? record.progress
         : (result.details ?? pendingProgress(context.args));
+
       return padded(context.outputPad, (width) =>
-        renderProgressComponent(
-          p,
-          theme,
-          width,
-          options.expanded,
-          context.keyText,
-        ),
+        renderProgressComponent(p, theme, width, options.expanded, context.keyText),
       );
     },
 
     async execute(_toolCallId, args, signal, onUpdate, ctx) {
       const agent = agents.find((a) => a.name === args.agent);
+
       if (!agent)
         throw new Error(
           `Unknown agent '${args.agent}'. Routes: ${agents
@@ -1072,6 +1095,7 @@ export default function (pi: ExtensionAPI) {
             .join(", ")}.`,
         );
       const registered = pi.getAllTools().map((tool) => tool.name);
+
       const unknownTools = agent.tools.filter((entry) => {
         const pattern = new RegExp(
           `^${entry
@@ -1079,40 +1103,46 @@ export default function (pi: ExtensionAPI) {
             .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
             .join(".*")}$`,
         );
+
         return !registered.some((name) => pattern.test(name));
       });
+
       if (unknownTools.length > 0)
         throw new Error(
           `agent '${agent.name}' lists tools that no extension registers: ${unknownTools.join(", ")}. Fix the tools line of this agent in ${AGENTS_DIR}.`,
         );
       const commands = new Set(pi.getCommands().map((c) => c.name));
       const unknownPacks = agent.packs.filter((pack) => !commands.has(pack));
+
       if (unknownPacks.length > 0)
         throw new Error(
           `agent '${agent.name}' lists skill packs that no extension registers: ${unknownPacks.join(", ")}. Fix the packs line of this agent in ${AGENTS_DIR}.`,
         );
+
       const model =
         agent.model ??
-        (ctx.model?.provider === "anthropic"
-          ? "anthropic/claude-sonnet-5-5"
-          : undefined) ??
+        (ctx.model?.provider === "anthropic" ? "anthropic/claude-sonnet-5-5" : undefined) ??
         (ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : undefined);
 
       const target = `sub-${agent.name}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+
       const progress = initialProgress(
         agent,
         args.task,
         model ?? "default",
         args.background === true,
       );
+
       progress.id = target;
 
       const controller = new AbortController();
       const abortWithParent = () => controller.abort();
+
       if (signal && !args.background) {
         if (signal.aborted) controller.abort();
         else signal.addEventListener("abort", abortWithParent, { once: true });
       }
+
       const sessionId = ctx.sessionManager.getSessionId();
       const record: RunRecord = { id: target, sessionId, controller, progress };
       runsStore.set(target, record);
@@ -1181,10 +1211,13 @@ export default function (pi: ExtensionAPI) {
           resolve("detached");
         };
       });
+
       const finished = await Promise.race([runPromise, detached]);
       record.detach = undefined;
+
       if (finished === "detached")
         return backgroundReceipt("was moved to the background by the user");
+
       return { ...finished, structuredContent: runValue(progress) };
     },
   });
@@ -1205,11 +1238,7 @@ export default function (pi: ExtensionAPI) {
       "RIGHT: keep working or end the turn. Call wait only when your next step needs a background result before its message arrives.",
     parameters: ManageParams,
     outputSchema: ManageValueSchema,
-    async execute(
-      _toolCallId,
-      { action, id, path: fieldPath, message, timeoutSeconds },
-      signal,
-    ) {
+    async execute(_toolCallId, { action, id, path: fieldPath, message, timeoutSeconds }, signal) {
       const fail = (text: string) => ({
         content: [{ type: "text" as const, text }],
         details: undefined,
@@ -1218,26 +1247,29 @@ export default function (pi: ExtensionAPI) {
 
       if (action === "wait") {
         const wanted = listField(id);
+
         const interrupted = wanted
           .filter((runId) => !runsStore.has(runId))
           .map((runId) => interruptedRuns.get(runId))
           .filter((run): run is RunEntry => run !== undefined);
+
         const unknown = wanted.filter(
           (runId) => !runsStore.has(runId) && !interruptedRuns.has(runId),
         );
+
         if (unknown.length > 0) {
           return fail(
             `subagent_manage: no tracked run with id ${unknown.map((u) => `"${u}"`).join(", ")}`,
           );
         }
+
         const records =
           wanted.length > 0
             ? wanted.flatMap((runId) => runsStore.get(runId) ?? [])
             : [...runsStore.values()].filter(
-                (r) =>
-                  r.progress.status === "running" &&
-                  r.sessionId === sink.sessionId,
+                (r) => r.progress.status === "running" && r.sessionId === sink.sessionId,
               );
+
         if (records.length === 0 && interrupted.length > 0) {
           return {
             content: [
@@ -1257,6 +1289,7 @@ export default function (pi: ExtensionAPI) {
             }),
           };
         }
+
         if (records.length === 0) {
           return {
             content: [{ type: "text", text: "No subagent runs to wait for." }],
@@ -1266,18 +1299,16 @@ export default function (pi: ExtensionAPI) {
         }
 
         const timeoutMs =
-          timeoutSeconds && timeoutSeconds > 0
-            ? timeoutSeconds * 1000
-            : DEFAULT_WAIT_TIMEOUT_MS;
-        const deliveredBefore = new Set(
-          records.filter((r) => r.delivered).map((r) => r.id),
-        );
-        for (const r of records)
-          delivery.waiting.set(r.id, (delivery.waiting.get(r.id) ?? 0) + 1);
+          timeoutSeconds && timeoutSeconds > 0 ? timeoutSeconds * 1000 : DEFAULT_WAIT_TIMEOUT_MS;
+
+        const deliveredBefore = new Set(records.filter((r) => r.delivered).map((r) => r.id));
+
+        for (const r of records) delivery.waiting.set(r.id, (delivery.waiting.get(r.id) ?? 0) + 1);
         let timer: ReturnType<typeof setTimeout> | undefined;
         let onAbort: (() => void) | undefined;
         let onAttention: ((runId: string, stall: string) => void) | undefined;
         let needsAttention: { record: RunRecord; stall: string } | undefined;
+
         const outcome = await Promise.race([
           Promise.all(records.map((r) => r.settled ?? Promise.resolve())).then(
             () => "finished" as const,
@@ -1289,22 +1320,31 @@ export default function (pi: ExtensionAPI) {
             signal?.addEventListener("abort", onAbort, { once: true });
             onAttention = (runId, stall) => {
               const record = records.find((r) => r.id === runId);
+
               if (!record) return;
               needsAttention = { record, stall };
               resolve("attention");
             };
+
             delivery.attentionListeners.add(onAttention);
           }),
         ]);
+
         clearTimeout(timer);
+
         if (onAbort) signal?.removeEventListener("abort", onAbort);
+
         if (onAttention) delivery.attentionListeners.delete(onAttention);
+
         for (const r of records) {
           const count = (delivery.waiting.get(r.id) ?? 1) - 1;
+
           if (count > 0) delivery.waiting.set(r.id, count);
           else delivery.waiting.delete(r.id);
+
           if (r.progress.status !== "running") r.delivered = true;
         }
+
         return {
           content: [
             {
@@ -1315,10 +1355,7 @@ export default function (pi: ExtensionAPI) {
                   : outcome === "aborted"
                     ? "Wait cancelled. The runs below keep going."
                     : outcome === "attention" && needsAttention
-                      ? stallNoticeText(
-                          needsAttention.record,
-                          needsAttention.stall,
-                        )
+                      ? stallNoticeText(needsAttention.record, needsAttention.stall)
                       : `All ${records.length} run${records.length === 1 ? "" : "s"} finished; output below.`
               }\n\n${records
                 .map((r) =>
@@ -1330,8 +1367,7 @@ export default function (pi: ExtensionAPI) {
                 )
                 .concat(
                   interrupted.map(
-                    (r) =>
-                      `${r.id}  [interrupted]  ${r.agent}\n${INTERRUPTED_ERROR}`,
+                    (r) => `${r.id}  [interrupted]  ${r.agent}\n${INTERRUPTED_ERROR}`,
                   ),
                 )
                 .join("\n\n")}`,
@@ -1357,8 +1393,10 @@ export default function (pi: ExtensionAPI) {
       if (action === "result") {
         const blocks: string[] = [];
         const values: Static<typeof RunValueSchema>[] = [];
+
         for (const runId of listField(id)) {
           const run = runsStore.get(runId);
+
           if (!run) {
             if (resultStore.has(runId)) {
               blocks.push(`${runId}\n${runPayload(runId, "", fieldPath)}`);
@@ -1371,26 +1409,28 @@ export default function (pi: ExtensionAPI) {
               });
               continue;
             }
+
             const lost = interruptedRuns.get(runId);
+
             if (lost) {
-              blocks.push(
-                `${runId}  [interrupted]  ${lost.agent}\n${INTERRUPTED_ERROR}`,
-              );
+              blocks.push(`${runId}  [interrupted]  ${lost.agent}\n${INTERRUPTED_ERROR}`);
               values.push(interruptedValue(lost));
               continue;
             }
+
             return fail(`subagent_manage: no tracked run with id "${runId}"`);
           }
+
           if (run.progress.status === "running") {
             return fail(
               `subagent_manage: run "${runId}" is still running. Call action 'wait' instead: it blocks and returns the output.`,
             );
           }
-          blocks.push(
-            `${formatRunLine(run)}\n${runPayload(run.id, transcriptOf(run), fieldPath)}`,
-          );
+
+          blocks.push(`${formatRunLine(run)}\n${runPayload(run.id, transcriptOf(run), fieldPath)}`);
           values.push(runValue(run.progress, fieldPath));
         }
+
         return {
           content: [{ type: "text", text: blocks.join("\n\n") }],
           details: undefined,
@@ -1399,16 +1439,17 @@ export default function (pi: ExtensionAPI) {
       }
 
       const record = runsStore.get(id);
+
       if (!record) {
         return fail(`subagent_manage: no tracked run with id "${id}"`);
       }
+
       if (action === "stop") {
         if (record.progress.status !== "running")
-          return fail(
-            `subagent_manage: run "${id}" is not running, cannot stop.`,
-          );
+          return fail(`subagent_manage: run "${id}" is not running, cannot stop.`);
         record.stopped = true;
         record.controller.abort();
+
         return {
           content: [
             {
@@ -1420,22 +1461,22 @@ export default function (pi: ExtensionAPI) {
           structuredContent: manageValue({ runs: [runValue(record.progress)] }),
         };
       }
+
       if (record.progress.status !== "running" || !record.blockId) {
-        return fail(
-          `subagent_manage: run "${id}" is not running, cannot steer.`,
-        );
+        return fail(`subagent_manage: run "${id}" is not running, cannot steer.`);
       }
+
       if (!message) {
-        return fail(
-          "subagent_manage: 'message' is required for action 'steer'.",
-        );
+        return fail("subagent_manage: 'message' is required for action 'steer'.");
       }
+
       // The child's editor would run a leading / as a command and ! as bash.
       if (/^\s*[/!]/.test(message)) {
         return fail(
           "subagent_manage: a steer message must not start with '/' or '!'. Rephrase it as plain text.",
         );
       }
+
       try {
         await rexScript({
           op: "steer",
@@ -1443,10 +1484,9 @@ export default function (pi: ExtensionAPI) {
           text: message,
         });
       } catch (err) {
-        return fail(
-          `subagent_manage: Rex could not paste into run "${id}": ${String(err)}`,
-        );
+        return fail(`subagent_manage: Rex could not paste into run "${id}": ${String(err)}`);
       }
+
       return {
         content: [
           {

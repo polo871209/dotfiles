@@ -13,11 +13,10 @@ type Btw = { question: string; answer: string };
 
 const card = ({ question, answer }: Btw, theme: Theme) => {
   const box = new Box(1, 1, (t) => theme.bg("customMessageBg", t));
-  box.addChild(
-    new Text(`${theme.fg("accent", theme.bold("btw"))} ${question}`, 0, 0),
-  );
+  box.addChild(new Text(`${theme.fg("accent", theme.bold("btw"))} ${question}`, 0, 0));
   box.addChild(new Spacer(1));
   box.addChild(new Markdown(answer, 0, 0, getMarkdownTheme()));
+
   return box;
 };
 
@@ -34,14 +33,12 @@ async function ask(
   onText: (text: string) => void,
 ): Promise<string> {
   if (!ctx.model) throw new Error("no model selected");
-  const transcript = convertToLlm(
-    ctx.sessionManager.buildSessionProjection().messages,
-  );
+  const transcript = convertToLlm(ctx.sessionManager.buildSessionProjection().messages);
+
   const stream = ctx.modelRegistry.streamSimple(
     ctx.model,
     {
-      systemPrompt:
-        transcript[0]?.role === "system" ? undefined : ctx.getSystemPrompt(),
+      systemPrompt: transcript[0]?.role === "system" ? undefined : ctx.getSystemPrompt(),
       messages: [
         ...transcript,
         {
@@ -58,13 +55,17 @@ async function ask(
       signal,
     },
   );
+
   for await (const event of stream) {
     if (event.type === "text_delta") onText(answerText(event.partial));
   }
+
   const result = await stream.result();
+
   if (result.stopReason === "error" || result.stopReason === "aborted") {
     throw new Error(result.errorMessage ?? result.stopReason);
   }
+
   return answerText(result) || "(no answer)";
 }
 
@@ -85,16 +86,18 @@ export default function (pi: ExtensionAPI) {
     running?.abort();
     const controller = new AbortController();
     running = controller;
+
     const show = (answer: string) => {
       if (controller.signal.aborted) return;
-      ctx.ui.setWidget("btw", (_tui, theme) =>
-        card({ question, answer }, theme),
-      );
+      ctx.ui.setWidget("btw", (_tui, theme) => card({ question, answer }, theme));
     };
+
     show("…");
+
     try {
       const answer = await ask(ctx, question, controller.signal, show);
       pi.appendEntry<Btw>("btw", { question, answer });
+
       if (ctx.mode !== "tui") ctx.ui.notify(answer);
     } catch (error) {
       if (!controller.signal.aborted) {
@@ -109,14 +112,16 @@ export default function (pi: ExtensionAPI) {
   };
 
   pi.registerCommand("btw", {
-    description:
-      "Ask a side question with the session as context; the answer stays out of it",
+    description: "Ask a side question with the session as context; the answer stays out of it",
     handler: async (args, ctx) => {
       const question = args.trim();
+
       if (!question) {
         ctx.ui.notify("Usage: /btw <question>", "warning");
+
         return;
       }
+
       void run(ctx, question);
     },
   });

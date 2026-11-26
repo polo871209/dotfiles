@@ -2,9 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 
-const settings = JSON.parse(
-  readFileSync(new URL("settings.json", import.meta.url), "utf8"),
-);
+const settings = JSON.parse(readFileSync(new URL("settings.json", import.meta.url), "utf8"));
 
 const assertStrings = (values, label) => {
   assert.ok(Array.isArray(values), label);

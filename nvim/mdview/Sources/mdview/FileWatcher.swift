@@ -27,10 +27,13 @@ final class FileWatcher {
         FileManager.default.contents(atPath: path).map { String(decoding: $0, as: UTF8.self) }
     }
 
-    private func watch(_ path: String, _ events: DispatchSource.FileSystemEvent) -> DispatchSourceFileSystemObject? {
+    private func watch(_ path: String, _ events: DispatchSource.FileSystemEvent)
+        -> DispatchSourceFileSystemObject?
+    {
         let fd = open(path, O_EVTONLY)
         guard fd >= 0 else { return nil }
-        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: events, queue: .main)
+        let source = DispatchSource.makeFileSystemObjectSource(
+            fileDescriptor: fd, eventMask: events, queue: .main)
         source.setEventHandler { [weak self] in MainActor.assumeIsolated { self?.fire() } }
         source.setCancelHandler { close(fd) }
         source.resume()

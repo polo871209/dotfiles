@@ -1,0 +1,10 @@
+{
+  "ignorePatterns": [
+    ".pi/agent/extensions/tools/oxlint/anti-slop/**",
+    ".pi/agent/settings.json",
+    "hex/settings.json",
+    "nanocast/settings.json",
+    "zen-browser/customKeys.json"
+  ],
+  "sortImports": { "newlinesBetween": false }
+}

@@ -19,15 +19,16 @@ function wrapInlineInput(
   contentWidth: number,
 ): string[] {
   const offset =
-    cursorOffset !== undefined &&
-    cursorOffset >= 0 &&
-    cursorOffset <= buffer.length
+    cursorOffset !== undefined && cursorOffset >= 0 && cursorOffset <= buffer.length
       ? cursorOffset
       : buffer.length;
+
   const [firstGrapheme] = new Intl.Segmenter(undefined, {
     granularity: "grapheme",
   }).segment(buffer.slice(offset));
+
   const rawAt = firstGrapheme ? firstGrapheme.segment : "";
+
   return wrapTextWithAnsi(
     `${buffer.slice(0, offset)}${CURSOR_MARKER}${renderFakeCursor(rawAt === "" || rawAt === " " ? "\u00a0" : rawAt)}${buffer.slice(offset + rawAt.length)}`,
     contentWidth,
@@ -82,8 +83,10 @@ class WrappingSelect implements Component {
     if (index === undefined) {
       this.confirmedIndex = undefined;
       this.confirmedLabelOverride = undefined;
+
       return;
     }
+
     this.confirmedIndex = Math.max(0, Math.min(index, this.items.length - 1));
     this.confirmedLabelOverride = labelOverride;
   }
@@ -106,24 +109,15 @@ class WrappingSelect implements Component {
 
     for (let i = startIndex; i < endIndex; i++) {
       const item = this.items[i];
+
       if (!item) continue;
-      lines.push(
-        ...this.renderItem(
-          item,
-          i,
-          i === this.selectedIndex && this.focused,
-          width,
-        ),
-      );
+      lines.push(...this.renderItem(item, i, i === this.selectedIndex && this.focused, width));
     }
 
     if (this.hasItemsOutsideWindow(startIndex, endIndex)) {
-      lines.push(
-        this.theme.scrollInfo(
-          `  (${this.selectedIndex + 1}/${this.items.length})`,
-        ),
-      );
+      lines.push(this.theme.scrollInfo(`  (${this.selectedIndex + 1}/${this.items.length})`));
     }
+
     return lines;
   }
 
@@ -131,18 +125,23 @@ class WrappingSelect implements Component {
     if (this.items.length === 0) return [0, 0];
     const { startIndex, endIndex } = this.computeVisibleWindow();
     let row = 0;
+
     for (let i = startIndex; i < endIndex; i++) {
       const item = this.items[i];
+
       if (!item) continue;
+
       const itemRowCount = this.renderItem(
         item,
         i,
         i === this.selectedIndex && this.focused,
         width,
       ).length;
+
       if (i === this.selectedIndex) return [row, row + itemRowCount];
       row += itemRowCount;
     }
+
     return [0, 1];
   }
 
@@ -154,6 +153,7 @@ class WrappingSelect implements Component {
         this.items.length - this.maxVisible,
       ),
     );
+
     return {
       startIndex,
       endIndex: Math.min(startIndex + this.maxVisible, this.items.length),
@@ -170,21 +170,16 @@ class WrappingSelect implements Component {
     isActive: boolean,
     width: number,
   ): string[] {
-    const rowPrefix = isActive
-      ? ACTIVE_POINTER
-      : INACTIVE_POINTER;
+    const rowPrefix = isActive ? ACTIVE_POINTER : INACTIVE_POINTER;
     const continuationPrefix = " ".repeat(visibleWidth(rowPrefix));
+
     const contentWidth = Math.max(
       WrappingSelect.MIN_CONTENT_WIDTH,
       width - visibleWidth(rowPrefix),
     );
 
     if (item.kind === "other" && isActive) {
-      return this.renderInlineInputRow(
-        rowPrefix,
-        continuationPrefix,
-        contentWidth,
-      );
+      return this.renderInlineInputRow(rowPrefix, continuationPrefix, contentWidth);
     }
 
     const isConfirmed = index === this.confirmedIndex;
@@ -199,11 +194,7 @@ class WrappingSelect implements Component {
         contentWidth,
         isActive || isConfirmed,
       ),
-      ...this.renderDescriptionBlock(
-        item.description,
-        continuationPrefix,
-        contentWidth,
-      ),
+      ...this.renderDescriptionBlock(item.description, continuationPrefix, contentWidth),
     ];
   }
 
@@ -212,15 +203,11 @@ class WrappingSelect implements Component {
     continuationPrefix: string,
     contentWidth: number,
   ): string[] {
-    return wrapInlineInput(
-      this.inputBuffer,
-      this.inputCursorOffset,
-      contentWidth,
-    ).map((segment, index) => {
-      return this.theme.selectedText(
-        `${index === 0 ? rowPrefix : continuationPrefix}${segment}`,
-      );
-    });
+    return wrapInlineInput(this.inputBuffer, this.inputCursorOffset, contentWidth).map(
+      (segment, index) => {
+        return this.theme.selectedText(`${index === 0 ? rowPrefix : continuationPrefix}${segment}`);
+      },
+    );
   }
 
   private renderLabelBlock(
@@ -232,6 +219,7 @@ class WrappingSelect implements Component {
   ): string[] {
     return wrapTextWithAnsi(label, contentWidth).map((segment, index) => {
       const line = `${index === 0 ? rowPrefix : continuationPrefix}${segment}`;
+
       return applySelectedStyle ? this.theme.selectedText(line) : line;
     });
   }
@@ -242,6 +230,7 @@ class WrappingSelect implements Component {
     contentWidth: number,
   ): string[] {
     if (!description) return [];
+
     return wrapTextWithAnsi(description, contentWidth).map(
       (segment) => `${continuationPrefix}${this.theme.description(segment)}`,
     );
@@ -259,20 +248,14 @@ export interface OptionListViewProps {
 export class OptionListView {
   private readonly select: WrappingSelect;
 
-  constructor(
-    items: readonly WrappingSelectItem[],
-    theme: WrappingSelectTheme,
-  ) {
+  constructor(items: readonly WrappingSelectItem[], theme: WrappingSelectTheme) {
     this.select = new WrappingSelect(items, Math.min(items.length, 10), theme);
   }
 
   setProps(props: OptionListViewProps): void {
     this.select.setSelectedIndex(props.selectedIndex);
     this.select.setFocused(props.focused);
-    this.select.setConfirmedIndex(
-      props.confirmed?.index,
-      props.confirmed?.labelOverride,
-    );
+    this.select.setConfirmedIndex(props.confirmed?.index, props.confirmed?.labelOverride);
     this.select.setInputBuffer(props.inputBuffer);
     this.select.setInputCursorOffset(props.inputCursorOffset);
   }
@@ -345,17 +328,21 @@ export class MultiSelectView {
   } {
     const lines: string[] = [];
     let focused: [number, number] | undefined;
+
     const push = (active: boolean, rowLines: string[]) => {
       if (active) focused = [lines.length, lines.length + rowLines.length];
       lines.push(...rowLines);
     };
+
     const contentWidth = Math.max(1, width - this.prefixVisibleWidth());
 
     for (let i = 0; i < this.question.options.length; i++) {
       const opt = this.question.options[i];
       const row = this.props.rows[i];
+
       if (!opt || !row) continue;
       const label = truncateToWidth(opt.label, contentWidth, "…");
+
       const rowLines = [
         truncateToWidth(
           `${this.rowPrefix(row.active, row.checked)}${row.active ? this.theme.fg("accent", label) : label}`,
@@ -363,22 +350,20 @@ export class MultiSelectView {
           "",
         ),
       ];
+
       if (opt.description) {
         for (const segment of wrapTextWithAnsi(opt.description, contentWidth)) {
           rowLines.push("  " + this.theme.fg("muted", segment));
         }
       }
+
       push(row.active, rowLines);
     }
 
     push(this.props.other.active, this.renderOtherRow(width, contentWidth));
     push(this.props.nextActive, [
       truncateToWidth(
-        `${
-          this.props.nextActive
-            ? this.theme.fg("accent", ACTIVE_POINTER)
-            : INACTIVE_POINTER
-        }${
+        `${this.props.nextActive ? this.theme.fg("accent", ACTIVE_POINTER) : INACTIVE_POINTER}${
           this.props.nextActive
             ? this.theme.fg("accent", this.props.nextLabel)
             : this.props.nextLabel
@@ -394,6 +379,7 @@ export class MultiSelectView {
   private renderOtherRow(width: number, contentWidth: number): string[] {
     const { active, text, cursorOffset } = this.props.other;
     const prefix = this.rowPrefix(active, text.trim().length > 0);
+
     if (active) {
       return wrapInlineInput(text, cursorOffset, contentWidth).map(
         (segment, index) =>
@@ -401,6 +387,7 @@ export class MultiSelectView {
           this.theme.fg("accent", segment),
       );
     }
+
     return [
       truncateToWidth(
         `${prefix}${
@@ -415,19 +402,13 @@ export class MultiSelectView {
   }
 
   private rowPrefix(active: boolean, checked: boolean): string {
-    return `${
-      active ? this.theme.fg("accent", ACTIVE_POINTER) : INACTIVE_POINTER
-    }${
-      checked
-        ? this.theme.fg("accent", "[✔]")
-        : this.theme.fg("muted", MS_UNCHECKED)
+    return `${active ? this.theme.fg("accent", ACTIVE_POINTER) : INACTIVE_POINTER}${
+      checked ? this.theme.fg("accent", "[✔]") : this.theme.fg("muted", MS_UNCHECKED)
     }${MS_BOX_LABEL_GAP}`;
   }
 
   private prefixVisibleWidth(): number {
-    return visibleWidth(
-      `${INACTIVE_POINTER}${MS_UNCHECKED}${MS_BOX_LABEL_GAP}`,
-    );
+    return visibleWidth(`${INACTIVE_POINTER}${MS_UNCHECKED}${MS_BOX_LABEL_GAP}`);
   }
 }
 
@@ -452,6 +433,7 @@ export class TabBar implements Component {
 
   render(width: number): string[] {
     const pieces: string[] = [" "];
+
     for (const tab of this.props.tabs) {
       const rawSeg = ` ${tab.answered ? "■" : "□"} ${tab.label} `;
       pieces.push(
@@ -461,15 +443,14 @@ export class TabBar implements Component {
       );
       pieces.push(" ");
     }
+
     const submitText = " ✓ Submit ";
     pieces.push(
       this.props.submit.active
         ? this.theme.bg("selectedBg", this.theme.fg("text", submitText))
-        : this.theme.fg(
-            this.props.submit.allAnswered ? "success" : "dim",
-            submitText,
-          ),
+        : this.theme.fg(this.props.submit.allAnswered ? "success" : "dim", submitText),
     );
+
     return [truncateToWidth(pieces.join(""), width, ""), ""];
   }
 }
